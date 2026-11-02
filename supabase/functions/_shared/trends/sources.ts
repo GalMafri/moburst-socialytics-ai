@@ -6,6 +6,7 @@
 // Pinterest and Facebook take one search per run, so they get one small run
 // per search. Actor inputs as each actor's schema read on 1 Nov 2026.
 
+import { hashtagText } from "./hashtag.ts";
 import type { Term, TrendFormat, TrendPlatform, TrendPost } from "./types.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -102,7 +103,12 @@ export const TREND_SOURCES: Record<TrendPlatform, TrendSource> = {
   instagram: {
     actor: { id: "reGe1ST3OBgYZSsZJ", name: "apify/instagram-hashtag-scraper" },
     inputs(searches) {
-      const hashtags = searchesOf(searches).map((h) => h.replace(/^#/, ""));
+      // Each tag as letters, digits and underscores (the one hashtag rule), without its #, once; a tag with nothing left takes no place.
+      const hashtags: string[] = [];
+      for (const tag of searches.map(hashtagText)) {
+        if (tag && !hashtags.some((h) => h.toLowerCase() === tag.toLowerCase())) hashtags.push(tag);
+      }
+      hashtags.splice(MAX_SEARCHES);
       if (!hashtags.length) return [];
       return [{ search: "", input: { hashtags, keywordSearch: false, resultsLimit: POSTS_PER_SEARCH, resultsType: "posts" } }];
     },

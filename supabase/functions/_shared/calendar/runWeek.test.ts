@@ -97,7 +97,7 @@ describe("runWeekPlan", () => {
       calendar_plans: [plan], clients: [CLIENT],
       trend_weeks: [{ id: "w1", week_start: "2026-10-19", status: "done" }],
       trend_themes: [{ id: "th1", week_id: "w1", position: 0, title: "Captain POV skits", post_ids: ["tp1"], dismissed_at: null }],
-      trend_posts: [{ id: "tp1", week_id: "w1", platform: "tiktok", url: "https://t/1", author: "@benchpro", text: "POV: you are the captain", posted_at: "2026-10-14T09:00:00+00:00", format: "short_video", fit: 88, engagement: 5400, kept: true }],
+      trend_posts: [{ id: "tp1", week_id: "w1", platform: "tiktok", url: "https://t/1", author: "@benchpro", text: "POV: you are the captain", posted_at: "2026-10-14T09:00:00+00:00", format: "short_video", fit: 88, engagement: 5400, likes: 4000, comments: 300, shares: 20, saves: 80, views: 90000, kept: true, tripwire: false }],
     });
     const out = await runWeekPlan(db, job(), NOW);
     expect(out.status).toBe("done");
@@ -105,8 +105,10 @@ describe("runWeekPlan", () => {
     const inserted = db.writes.find((w) => w.table === "calendar_posts" && w.op === "insert")?.value as Array<Record<string, unknown>>;
     expect(inserted[0].reasons).toEqual([expect.objectContaining({
       type: "trend", label: 'Inspired by "Captain POV skits": @benchpro\'s TikTok short video from Oct 14. Captains live this every week.',
-      evidence: [expect.objectContaining({ id: "N1", kind: "trend", theme: "Captain POV skits", link: "https://t/1", metric: "engagement", value: 5400 })],
+      // The stored value is what anyone can count on the post (likes, comments and shares), never the team's weighted score.
+      evidence: [expect.objectContaining({ id: "N1", kind: "trend", theme: "Captain POV skits", link: "https://t/1", metric: "engagement", value: 4320 })],
     })]);
+    expect(JSON.stringify(inserted)).not.toContain("5400");
     const ready = db.writes.filter((w) => w.table === "calendar_plans" && w.op === "update").map((w) => w.value as Record<string, unknown>).find((v) => v.status === "ready");
     expect((ready?.evidence as { sources: Record<string, unknown> }).sources.trends).toBe("themes");
   });

@@ -215,3 +215,78 @@ describe("20261108100000_trend_measures.sql", () => {
     expect(measures).toContain("order by c.name, w.client_id, w.week_start desc");
   });
 });
+
+// Read lazily: a missing file fails these tests only, not the ones above.
+const readsFix = () => code("20261108110000_trend_reads_fix.sql");
+const fnIn = (sql: string, name: string) => {
+  const start = sql.indexOf(`create or replace function public.${name}(`);
+  expect(start).toBeGreaterThanOrEqual(0);
+  return sql.slice(start, sql.indexOf("end $$;", start) + "end $$;".length);
+};
+
+describe("20261108110000_trend_reads_fix.sql", () => {
+  describe("trend_themes_in_range", () => {
+    it("leaves out kept posts the tripwire flagged, for everyone", () => {
+      const read = fnIn(readsFix(), "trend_themes_in_range");
+      expect(read).toContain("where p.id = any (th.post_ids) and p.kept and not p.tripwire and p.client_id = p_client");
+      // Not tied to who is asking: staff do not get them either.
+      expect(read).not.toMatch(/case when v_staff[^)]*tripwire/);
+      // The flag itself never leaves the function.
+      expect(read).not.toContain("'tripwire'");
+    });
+
+    it("counts a week when any of its seven days falls in the window", () => {
+      const read = fnIn(readsFix(), "trend_themes_in_range");
+      expect(read).toContain("and w.week_start <= p_to and w.week_start + 6 >= p_from");
+      // A week that starts before the window and ends inside it is no longer left out.
+      expect(read).not.toContain("between p_from and p_to");
+    });
+
+    it("keeps everything else as 20261102100000_trend_access.sql has it, grants included", () => {
+      const before = fnIn(themesRead, "trend_themes_in_range");
+      expect(fnIn(readsFix(), "trend_themes_in_range")).toBe(before
+        .replace("p.kept and p.client_id = p_client", "p.kept and not p.tripwire and p.client_id = p_client")
+        .replace("and w.week_start between p_from and p_to", "and w.week_start <= p_to and w.week_start + 6 >= p_from"));
+      expect(readsFix()).toContain("revoke all on function public.trend_themes_in_range(uuid, date, date) from public, anon");
+      expect(readsFix()).toContain("grant execute on function public.trend_themes_in_range(uuid, date, date) to authenticated");
+    });
+  });
+
+  describe("trend_term_add", () => {
+    it("makes a hashtag # and letters, digits or underscores only, and refuses one with nothing left", () => {
+      const add = fnIn(readsFix(), "trend_term_add");
+      expect(add).toContain("if p_kind = 'hashtag' then v_term := '#' || regexp_replace(v_term, '[^[:alnum:]_]', '', 'g'); if v_term = '#' then raise exception 'A term is required.' using errcode = '22023'; end if; end if;");
+      // The older whitespace-only rule is gone: punctuation inside a tag is taken out too.
+      expect(add).not.toContain("ltrim(regexp_replace(v_term, '\\s', '', 'g'), '#')");
+    });
+
+    it("keeps everything else as 20261102100000_trend_access.sql has it, grants included", () => {
+      const before = fnIn(themesRead, "trend_term_add");
+      expect(fnIn(readsFix(), "trend_term_add")).toBe(before.replace(
+        "v_term := '#' || ltrim(regexp_replace(v_term, '\\s', '', 'g'), '#');",
+        "v_term := '#' || regexp_replace(v_term, '[^[:alnum:]_]', '', 'g');",
+      ));
+      expect(readsFix()).toContain("revoke all on function public.trend_term_add(uuid, text, text, text) from public, anon");
+      expect(readsFix()).toContain("grant execute on function public.trend_term_add(uuid, text, text, text) to authenticated");
+    });
+  });
+
+  describe("trend_search_override_clear", () => {
+    it("lets staff who may reach the client clear one platform's rewritten searches, in one update of that key only", () => {
+      const clear = fnIn(readsFix(), "trend_search_override_clear");
+      expect(clear).toContain("create or replace function public.trend_search_override_clear(p_client uuid, p_platform text) returns void language plpgsql security definer set search_path = public as $$");
+      expect(clear).toContain("if not (public.is_moburst_staff() and public.can_access_client(p_client)) then raise exception 'Only Moburst staff can change what trends track.' using errcode = '42501'; end if;");
+      // Only that platform's key goes; the other platforms' rewrites stay. A platform with none (or no platform) changes nothing.
+      expect(clear).toContain("update public.trend_profiles set search_overrides = search_overrides - p_platform where client_id = p_client and search_overrides ? p_platform;");
+      expect(clear.match(/\bupdate\b/g)).toHaveLength(1);
+      expect(clear).not.toMatch(/\b(insert|delete)\b/);
+      // The check comes before the change.
+      expect(clear.indexOf("can_access_client(p_client)")).toBeLessThan(clear.indexOf("update public.trend_profiles"));
+    });
+
+    it("runs for signed-in users only", () => {
+      expect(readsFix()).toContain("revoke all on function public.trend_search_override_clear(uuid, text) from public, anon");
+      expect(readsFix()).toContain("grant execute on function public.trend_search_override_clear(uuid, text) to authenticated");
+    });
+  });
+});

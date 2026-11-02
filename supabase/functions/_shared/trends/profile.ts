@@ -11,6 +11,7 @@
 import { parseAnswer } from "../pipelines/competitive/analysis.ts";
 import { topCounts } from "../competitive/postSample.ts";
 import { textHash } from "../lifecycle/names.ts";
+import { HASHTAG } from "./hashtag.ts";
 import { MAX_SEARCHES } from "./sources.ts";
 import { clip } from "./text.ts";
 import { HASHTAG_PLATFORMS, TREND_PLATFORMS, type HashtagPlatform, type Term, type TrendPlatform, type TrendProfile } from "./types.ts";
@@ -250,7 +251,7 @@ export function profileProblems(p: TrendProfile, e: ProfileEvidence): string[] {
     const list = p.hashtags[platform] ?? [];
     if (list.length > 10) out.push(`There are more than 10 ${platform} hashtags.`);
     for (const h of list) {
-      if (!/^#[\p{L}0-9_]+$/u.test(h.term) || !str(h.reason)) out.push(`The ${platform} hashtag "${h.term}" needs to be one #tag with a reason.`);
+      if (!HASHTAG.test(h.term) || !str(h.reason)) out.push(`The ${platform} hashtag "${h.term}" needs to be one #tag with a reason.`);
       else if (tagNamesBrand(h.term, brand)) out.push(`The ${platform} hashtag "${h.term}" is the brand's own name.`);
     }
   }
@@ -320,7 +321,7 @@ export function parseHashtags(text: string, e: ProfileEvidence): { value: Record
   for (const p of HASHTAG_PLATFORMS) {
     if (tags[p].length > 10) problems.push(`There are more than 10 ${p} hashtags.`);
     for (const h of tags[p]) {
-      if (!/^#[\p{L}0-9_]+$/u.test(h.term) || !h.reason) problems.push(`The ${p} hashtag "${h.term}" needs to be one #tag with a reason.`);
+      if (!HASHTAG.test(h.term) || !h.reason) problems.push(`The ${p} hashtag "${h.term}" needs to be one #tag with a reason.`);
       else if (tagNamesBrand(h.term, e.client.name)) problems.push(`The ${p} hashtag "${h.term}" is the brand's own name.`);
     }
   }

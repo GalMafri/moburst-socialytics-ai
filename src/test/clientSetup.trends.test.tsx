@@ -14,6 +14,7 @@ import ClientSetup from '@/pages/ClientSetup';
 
 const f = vi.hoisted(() => ({
   profile: true,
+  overrides: {} as Record<string, unknown>,
   terms: [] as any[],
   rpcs: [] as any[],
   reads: [] as any[],
@@ -32,7 +33,7 @@ vi.mock('@/integrations/supabase/client', () => ({ supabase: {
   // (removed or not) becomes the team's own, and a removed term stays as a row with removed_at set.
   rpc: async (name: string, args: any) => {
     f.rpcs.push({ name, ...args });
-    if (f.writeFails && (name === 'trend_term_add' || name === 'trend_term_remove')) {
+    if (f.writeFails && (name === 'trend_term_add' || name === 'trend_term_remove' || name === 'trend_search_override_clear')) {
       return { data: null, error: { code: '42501', message: 'Only Moburst staff can change what trends track.' } };
     }
     if (name === 'trend_term_add') {
@@ -43,6 +44,12 @@ vi.mock('@/integrations/supabase/client', () => ({ supabase: {
       const row = { id: `new-${f.next++}`, client_id: args.p_client, kind: args.p_kind, platform, term, reason: '', source: 'person', removed_at: null, created_at: '2026-11-02T08:00:00Z' };
       f.terms.push(row);
       return { data: row.id, error: null };
+    }
+    if (name === 'trend_search_override_clear') {
+      // Only that platform's key goes.
+      const { [args.p_platform]: _gone, ...rest } = f.overrides;
+      f.overrides = rest;
+      return { data: null, error: null };
     }
     if (name === 'trend_term_remove') {
       const hit = f.terms.find((t) => t.id === args.p_id);
@@ -60,7 +67,7 @@ vi.mock('@/integrations/supabase/client', () => ({ supabase: {
       if (table === 'client_lifecycle_steps') return { data: { status: 'done', attempted_at: '2026-10-19T10:00:00Z', done_at: '2026-10-19T10:00:00Z' }, error: null };
       if (table === 'trend_profiles') {
         f.reads.push({ table, filters: { ...filters } });
-        return f.readFails ? { data: null, error: { code: '08006', message: 'connection failure' } } : { data: f.profile ? { client_id: 'c1' } : null, error: null };
+        return f.readFails ? { data: null, error: { code: '08006', message: 'connection failure' } } : { data: f.profile ? { client_id: 'c1', search_overrides: f.overrides } : null, error: null };
       }
       if (table === 'trend_terms') {
         f.reads.push({ table, filters: { ...filters } });
@@ -109,7 +116,7 @@ const group = async (name: string) => within(await screen.findByRole('group', { 
 const rowOf = (text: string) => screen.getByText(text).closest('li') as HTMLElement;
 
 beforeEach(() => {
-  f.profile = true; f.terms = fixture(); f.rpcs = []; f.reads = []; f.writeFails = false; f.readFails = false; f.next = 100;
+  f.profile = true; f.overrides = {}; f.terms = fixture(); f.rpcs = []; f.reads = []; f.writeFails = false; f.readFails = false; f.next = 100;
   vi.mocked(toast.error).mockClear();
   f.client = {
     id: 'c1', name: 'Bader Law', website_url: 'https://baderlaw.com', timezone: 'America/New_York', geo: 'US', language: 'en',
@@ -224,11 +231,14 @@ describe('Trends we track on the Content strategy tab', () => {
     expect(await exclusions.findByText('lawyer jokes')).toBeInTheDocument();
   });
 
-  it('makes a hashtag one tag before it is sent: no spaces inside, one leading #', async () => {
+  it('makes a hashtag one tag before it is sent: one leading #, then letters, digits and underscores only', async () => {
     mount();
     const instagram = await group('Instagram hashtags');
     const box = await instagram.findByRole('textbox', { name: 'New Instagram hashtag' });
-    for (const [typed, sent] of [['car accident lawyer', '#caraccidentlawyer'], ['##aso', '#aso'], ['  # legal\ttips  ', '#legaltips'], ['#plain', '#plain']] as const) {
+    for (const [typed, sent] of [
+      ['car accident lawyer', '#caraccidentlawyer'], ['##aso', '#aso'], ['  # legal\ttips  ', '#legaltips'], ['#plain', '#plain'],
+      ['#café-life!', '#cafélife'], ['#a#b', '#ab'], ['עורך דין', '#עורךדין'], ['#x.y_z', '#xy_z'],
+    ] as const) {
       f.rpcs = [];
       fireEvent.change(box, { target: { value: typed } });
       fireEvent.keyDown(box, { key: 'Enter' });
@@ -240,11 +250,11 @@ describe('Trends we track on the Content strategy tab', () => {
     expect(instagram.queryByText(/ /, { selector: 'li > div' })).toBeNull();
   });
 
-  it('sends nothing for a hashtag with nothing left once its # and spaces are taken out, and keeps what was typed without a message', async () => {
+  it('sends nothing for a hashtag with nothing left once all but its letters, digits and underscores are taken out, and keeps what was typed without a message', async () => {
     mount();
     const linkedin = await group('LinkedIn hashtags');
     const box = await linkedin.findByRole('textbox', { name: 'New LinkedIn hashtag' });
-    for (const typed of ['#', '###', ' # ', '# #', '## #']) {
+    for (const typed of ['#', '###', ' # ', '# #', '## #', '#-!', '# . #', '🚗']) {
       fireEvent.change(box, { target: { value: typed } });
       fireEvent.keyDown(box, { key: 'Enter' });
       fireEvent.click(linkedin.getByRole('button', { name: 'Add LinkedIn hashtag' }));
@@ -369,12 +379,85 @@ describe('Trends we track on the Content strategy tab', () => {
   });
 
   it('words the section in plain American English, with no dash punctuation and nothing from the database', async () => {
+    f.overrides = { linkedin: ['injury claim tips'], instagram: ['#claimhelp'] };
     mount();
+    await screen.findByRole('button', { name: 'Go back to the hashtags' });
     const heading = await screen.findByRole('heading', { name: 'Trends we track' });
     await screen.findByText('car accident tips');
     const section = heading.closest('section') as HTMLElement;
     expect(section.textContent).not.toMatch(/[—–]| - /);
     expect(section.textContent).not.toMatch(/trend_terms|trend_profiles|trend_term_|lifecycle|dismissal|undefined|null/i);
     expect(within(section).getByText(/The filter never keeps posts about these\./)).toBeInTheDocument();
+  });
+
+  describe('searches a coverage rewrite gave a platform', () => {
+    const tiktokLine = 'Trends on TikTok are searched with these terms this week, because the topics found too little:';
+    const instagramLine = 'Trends on Instagram are searched with these terms this week, because the hashtags found too little:';
+
+    it('shows nothing about rewrites when no platform has one', async () => {
+      f.overrides = { tiktok: [], youtube: [3, ' '] };
+      mount();
+      await screen.findByText('car accident tips');
+      expect(screen.queryByText(/are searched with these terms this week/)).toBeNull();
+      expect(screen.queryByRole('button', { name: /^Go back to the/ })).toBeNull();
+    });
+
+    it('shows each platform\'s searches under a plain line, topic platforms with the topics and Instagram with its hashtags', async () => {
+      f.overrides = { tiktok: ['legal tips', 'injury claim'], instagram: ['#injurylaw', '#claimhelp'], youtube: ['crash explained', 7, ''] };
+      mount();
+      const tiktok = within(await screen.findByRole('group', { name: 'Searches on TikTok' }));
+      expect(tiktok.getByText(tiktokLine)).toBeInTheDocument();
+      expect(tiktok.getByText('legal tips')).toBeInTheDocument();
+      expect(tiktok.getByText('injury claim')).toBeInTheDocument();
+      expect(tiktok.getByRole('button', { name: 'Go back to the topics' })).toBeInTheDocument();
+
+      const instagram = within(screen.getByRole('group', { name: 'Searches on Instagram' }));
+      expect(instagram.getByText(instagramLine)).toBeInTheDocument();
+      expect(instagram.getByText('#injurylaw')).toBeInTheDocument();
+      expect(instagram.getByRole('button', { name: 'Go back to the hashtags' })).toBeInTheDocument();
+
+      // Only the text searches are shown.
+      const youtube = within(screen.getByRole('group', { name: 'Searches on YouTube' }));
+      expect(youtube.getByText('crash explained')).toBeInTheDocument();
+      expect(youtube.queryByText('7')).toBeNull();
+
+      // Each sits in the group whose terms it replaced.
+      expect((await group('Topics')).getByRole('group', { name: 'Searches on TikTok' })).toBeInTheDocument();
+      expect((await group('Instagram hashtags')).getByRole('group', { name: 'Searches on Instagram' })).toBeInTheDocument();
+      expect((await group('Instagram hashtags')).queryByRole('group', { name: 'Searches on TikTok' })).toBeNull();
+    });
+
+    it('goes back to the topics for one platform only, and the line leaves once the profile is read again', async () => {
+      f.overrides = { tiktok: ['legal tips'], linkedin: ['injury claim tips'], instagram: ['#claimhelp'] };
+      mount();
+      const tiktok = within(await screen.findByRole('group', { name: 'Searches on TikTok' }));
+      fireEvent.click(tiktok.getByRole('button', { name: 'Go back to the topics' }));
+      await waitFor(() => expect(f.rpcs).toEqual([{ name: 'trend_search_override_clear', p_client: 'c1', p_platform: 'tiktok' }]));
+      await waitFor(() => expect(screen.queryByRole('group', { name: 'Searches on TikTok' })).toBeNull());
+      expect(screen.getByRole('group', { name: 'Searches on LinkedIn' })).toBeInTheDocument();
+      expect(screen.getByRole('group', { name: 'Searches on Instagram' })).toBeInTheDocument();
+      expect(f.overrides).toEqual({ linkedin: ['injury claim tips'], instagram: ['#claimhelp'] });
+    });
+
+    it('goes back to the hashtags on Instagram', async () => {
+      f.overrides = { instagram: ['#claimhelp'] };
+      mount();
+      fireEvent.click(await screen.findByRole('button', { name: 'Go back to the hashtags' }));
+      await waitFor(() => expect(f.rpcs).toEqual([{ name: 'trend_search_override_clear', p_client: 'c1', p_platform: 'instagram' }]));
+      await waitFor(() => expect(screen.queryByText(instagramLine)).toBeNull());
+    });
+
+    it('keeps the searches on screen and says the change is not saved yet when going back does not get through', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      f.overrides = { tiktok: ['legal tips'] };
+      f.writeFails = true;
+      mount();
+      fireEvent.click(await screen.findByRole('button', { name: 'Go back to the topics' }));
+      expect(await screen.findByText('That change is not saved yet.')).toBeInTheDocument();
+      expect(screen.getByText(tiktokLine)).toBeInTheDocument();
+      expect(toast.error).not.toHaveBeenCalled();
+      expect(screen.queryByText(/Only Moburst staff|42501|try again|failed|error/i)).toBeNull();
+      expect(warn).toHaveBeenCalledWith('[trends we track] not saved yet', expect.objectContaining({ code: '42501' }));
+    });
   });
 });

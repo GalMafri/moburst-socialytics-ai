@@ -41,24 +41,24 @@ export interface TrendThemesAnswer {
 const themesKey = (clientId: string, ...range: string[]) => ["trend-themes", clientId, ...range];
 
 /**
- * The client's weekly themes for weeks starting between `from` and `to`
- * (yyyy-mm-dd, both included), newest week first, each with its kept posts,
- * and whether any week was ever collected for the client.
+ * The client's weekly themes for the weeks with any day between `from` and
+ * `to` (yyyy-mm-dd, both included), newest week first, each with its kept
+ * posts, and whether any week was ever collected for the client.
  * One database function answers it (trend_themes_in_range): a client user
  * cannot read the week rows a range needs, and the function also keeps the
- * team's own columns out of the answer. Dismissed themes are not in it.
+ * team's own columns out of the answer. Dismissed themes and posts the
+ * tripwire flagged are not in it.
  */
 export function useTrendThemes(clientId: string, from: string, to: string) {
   return useQuery({
     queryKey: themesKey(clientId, from, to),
     enabled: !!clientId && !!from && !!to,
     queryFn: async () => {
-      // The function is newer than the generated types.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data, error } = await (supabase.rpc as any)("trend_themes_in_range", { p_client: clientId, p_from: from, p_to: to });
+      const { data, error } = await supabase.rpc("trend_themes_in_range", { p_client: clientId, p_from: from, p_to: to });
       if (error) throw error;
-      const answer = data as { collected?: unknown; themes?: unknown } | null;
-      return { collected: answer?.collected === true, themes: Array.isArray(answer?.themes) ? (answer.themes as TrendTheme[]) : [] } satisfies TrendThemesAnswer;
+      // The function returns one jsonb object, { collected, themes }; its themes have the shape TrendTheme describes.
+      const answer = data && typeof data === "object" && !Array.isArray(data) ? data : null;
+      return { collected: answer?.collected === true, themes: Array.isArray(answer?.themes) ? (answer.themes as unknown as TrendTheme[]) : [] } satisfies TrendThemesAnswer;
     },
   });
 }
@@ -73,8 +73,7 @@ export function useDismissTrendTheme(clientId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (themeId: string) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error } = await sendQuietly(() => (supabase.rpc as any)("trend_theme_dismiss", { p_theme: themeId }), { again: writeResendable });
+      const { error } = await sendQuietly(() => supabase.rpc("trend_theme_dismiss", { p_theme: themeId }), { again: writeResendable });
       if (error) throw error;
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: themesKey(clientId) }),

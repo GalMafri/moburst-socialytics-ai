@@ -6,6 +6,12 @@
 // added stay through every new suggestion, and a removed suggestion is hidden
 // and never suggested again (trend_term_remove keeps the row, marked removed).
 //
+// When a platform keeps too few posts two weeks running, the weekly run
+// rewrites that platform's searches (trend_profiles.search_overrides). Those
+// searches are shown in the group whose terms they replaced, the topics or
+// Instagram's hashtags, and staff can go back to that group's terms
+// (trend_search_override_clear) for one platform at a time.
+//
 // A client with no trend profile has nothing suggested yet. A change that does
 // not get through is sent again quietly (src/lib/quietSend.ts); after that the
 // list shows the true state and a plain line says the change is not saved yet.
@@ -22,7 +28,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { platformName } from "@/lib/display";
 import { sendQuietly, writeResendable } from "@/lib/quietSend";
+import { asHashtag } from "../../../supabase/functions/_shared/trends/hashtag.ts";
+import { TREND_PLATFORMS } from "../../../supabase/functions/_shared/trends/types.ts";
 
 interface TrendTerm {
   id: string;
@@ -31,6 +40,12 @@ interface TrendTerm {
   term: string;
   reason: string;
   source: string;
+}
+
+/** The searches the coverage rewrite gave one platform, in place of the profile's own terms there. */
+interface Rewrite {
+  platform: string;
+  searches: string[];
 }
 
 /** Where a term came from (trend_terms.source), as people read it. */
@@ -62,27 +77,76 @@ const GROUPS: GroupSpec[] = [
 ];
 
 /**
- * What a typed term is sent as. A hashtag is one tag: every leading # is
- * dropped, all whitespace inside is removed, and one # goes in front; a tag
- * with nothing left is no term. (A phrase such as "car accident lawyer" would
- * otherwise be stored as one hashtag with spaces and take one of Instagram's
- * weekly search slots.) Topics and exclusions are sent as typed, trimmed.
+ * The rewrites a group's terms were replaced by: Instagram searches its
+ * hashtags, every other platform searches the topics.
+ */
+function rewritesFor(spec: GroupSpec, rewrites: Rewrite[]): Rewrite[] {
+  if (spec.kind === "topic") return rewrites.filter((r) => r.platform !== "instagram");
+  if (spec.kind === "hashtag" && spec.platform === "instagram") return rewrites.filter((r) => r.platform === "instagram");
+  return [];
+}
+
+/** Each platform's rewritten searches, as stored ({platform: [search]}); a platform with no text search has none. */
+function readRewrites(stored: unknown): Rewrite[] {
+  const byPlatform = stored && typeof stored === "object" && !Array.isArray(stored) ? (stored as Record<string, unknown>) : {};
+  return TREND_PLATFORMS.map((platform) => {
+    const list = byPlatform[platform];
+    const searches = (Array.isArray(list) ? list : []).filter((s): s is string => typeof s === "string" && s.trim() !== "").map((s) => s.trim());
+    return { platform, searches };
+  }).filter((r) => r.searches.length > 0);
+}
+
+/**
+ * What a typed term is sent as. A hashtag is one tag, by the one hashtag rule
+ * every Trends step follows: one # and then letters, digits and underscores
+ * only, everything else taken out; a tag with nothing left is no term. (A
+ * phrase such as "car accident lawyer" would otherwise be stored as one
+ * hashtag with spaces and take one of Instagram's weekly search slots.)
+ * Topics and exclusions are sent as typed, trimmed.
  */
 function termToSend(spec: GroupSpec, typed: string): string {
-  if (spec.kind !== "hashtag") return typed.trim();
-  // Whitespace goes before the leading #s do, so "# #" is a bare # and sends nothing.
-  const tag = typed.replace(/\s+/g, "").replace(/^#+/, "");
-  return tag ? `#${tag}` : "";
+  return spec.kind === "hashtag" ? asHashtag(typed) : typed.trim();
 }
 
 const termsKey = (clientId: string) => ["trend-terms", clientId];
 
-function TermGroup({ spec, terms, onAdd, onRemove }: {
+/** One platform's rewritten searches, and the way back to the group's own terms. */
+function RewrittenSearches({ rewrite, replaced, onRestore }: {
+  rewrite: Rewrite;
+  /** What the rewrite replaced on this platform: "topics" or "hashtags". */
+  replaced: string;
+  onRestore: (platform: string) => Promise<unknown>;
+}) {
+  const [restoring, setRestoring] = useState(false);
+  const name = platformName(rewrite.platform);
+  const restore = async () => {
+    if (restoring) return;
+    setRestoring(true);
+    await onRestore(rewrite.platform);
+    setRestoring(false);
+  };
+  return (
+    <div role="group" aria-label={`Searches on ${name}`} className="space-y-2 rounded-md bg-[rgba(255,255,255,0.03)] p-3.5">
+      <p className="t-secondary">Trends on {name} are searched with these terms this week, because the {replaced} found too little:</p>
+      <ul className="flex flex-wrap gap-1.5">
+        {rewrite.searches.map((s) => (
+          <li key={s}><Badge variant="outline" className="t-body py-1">{s}</Badge></li>
+        ))}
+      </ul>
+      <Button variant="outline" size="sm" disabled={restoring} onClick={() => void restore()}>Go back to the {replaced}</Button>
+    </div>
+  );
+}
+
+function TermGroup({ spec, terms, rewrites, onAdd, onRemove, onRestore }: {
   spec: GroupSpec;
   terms: TrendTerm[];
+  /** The platforms whose searches of this group's terms a coverage rewrite replaced. */
+  rewrites: Rewrite[];
   /** Resolves true when the term was saved. */
   onAdd: (spec: GroupSpec, term: string) => Promise<boolean>;
   onRemove: (id: string) => Promise<unknown>;
+  onRestore: (platform: string) => Promise<unknown>;
 }) {
   const [typed, setTyped] = useState("");
   const [adding, setAdding] = useState(false);
@@ -128,6 +192,9 @@ function TermGroup({ spec, terms, onAdd, onRemove }: {
           <Plus aria-hidden="true" />
         </Button>
       </div>
+      {rewrites.map((r) => (
+        <RewrittenSearches key={r.platform} rewrite={r} replaced={spec.kind === "topic" ? "topics" : "hashtags"} onRestore={onRestore} />
+      ))}
     </div>
   );
 }
@@ -141,16 +208,16 @@ export function TrendsWeTrack({ clientId }: { clientId: string }) {
     queryKey: termsKey(clientId),
     queryFn: async () => {
       const [profile, terms] = await Promise.all([
-        supabase.from("trend_profiles").select("client_id").eq("client_id", clientId).maybeSingle(),
+        supabase.from("trend_profiles").select("client_id, search_overrides").eq("client_id", clientId).maybeSingle(),
         supabase.from("trend_terms").select("id, kind, platform, term, reason, source").eq("client_id", clientId).is("removed_at", null).order("created_at", { ascending: true }),
       ]);
       if (profile.error) throw profile.error;
       if (terms.error) throw terms.error;
-      return { hasProfile: !!profile.data, terms: (terms.data ?? []) as TrendTerm[] };
+      return { hasProfile: !!profile.data, rewrites: readRewrites(profile.data?.search_overrides), terms: (terms.data ?? []) as TrendTerm[] };
     },
   });
 
-  // Both changes can be asked twice with the same result, so a request that does not get through is sent again
+  // Every change can be asked twice with the same result, so a request that does not get through is sent again
   // quietly. The list is read again either way, so it shows what is true.
   const refresh = () => queryClient.invalidateQueries({ queryKey: termsKey(clientId) });
   const addTerm = useMutation({
@@ -164,6 +231,15 @@ export function TrendsWeTrack({ clientId }: { clientId: string }) {
   const removeTerm = useMutation({
     mutationFn: async (id: string) => {
       const { error: failed } = await sendQuietly(() => supabase.rpc("trend_term_remove", { p_id: id }), { again: writeResendable });
+      if (failed) throw failed;
+    },
+    onSettled: refresh,
+  });
+  const clearRewrite = useMutation({
+    mutationFn: async (platform: string) => {
+      // trend_search_override_clear is newer than the generated types.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error: failed } = await sendQuietly(() => (supabase.rpc as any)("trend_search_override_clear", { p_client: clientId, p_platform: platform }), { again: writeResendable });
       if (failed) throw failed;
     },
     onSettled: refresh,
@@ -182,6 +258,7 @@ export function TrendsWeTrack({ clientId }: { clientId: string }) {
   };
   const onAdd = (spec: GroupSpec, term: string) => change(() => addTerm.mutateAsync({ kind: spec.kind, platform: spec.platform, term }));
   const onRemove = (id: string) => change(() => removeTerm.mutateAsync(id));
+  const onRestore = (platform: string) => change(() => clearRewrite.mutateAsync(platform));
 
   const terms = data?.terms ?? [];
   return (
@@ -204,8 +281,10 @@ export function TrendsWeTrack({ clientId }: { clientId: string }) {
             key={`${spec.kind}-${spec.platform ?? ""}`}
             spec={spec}
             terms={terms.filter((t) => t.kind === spec.kind && (t.platform ?? null) === spec.platform)}
+            rewrites={rewritesFor(spec, data.rewrites)}
             onAdd={onAdd}
             onRemove={onRemove}
+            onRestore={onRestore}
           />
         ))
       )}

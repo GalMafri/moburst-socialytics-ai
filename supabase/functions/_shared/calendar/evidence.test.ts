@@ -203,7 +203,11 @@ const week = (id: string, week_start: string, status: string, client_id = "c1") 
 const theme = (id: string, week_id: string, position: number, title: string, post_ids: string[], dismissed_at: string | null = null) =>
   ({ id, week_id, client_id: "c1", position, title, post_ids, dismissed_at });
 const kept = (id: string, week_id: string, platform: string, fit: number, engagement: number, over: Record<string, unknown> = {}) =>
-  ({ id, week_id, client_id: "c1", platform, url: `https://t/${id}`, author: `@${id}`, text: `Post ${id}`, posted_at: "2026-10-14T09:00:00+00:00", format: "short_video", fit, engagement, kept: true, ...over });
+  ({ id, week_id, client_id: "c1", platform, url: `https://t/${id}`, author: `@${id}`, text: `Post ${id}`, posted_at: "2026-10-14T09:00:00+00:00", format: "short_video", fit, engagement,
+    likes: Math.round(engagement / 2), comments: 3, shares: 1, saves: 50, views: 9000, kept: true, tripwire: false, ...over });
+
+/** The planner's clock: a Monday morning a week after the newest fixture week (2026-10-26). */
+const PLANNED_AT = new Date("2026-11-02T07:15:00Z");
 
 describe("latestTrendEvidence", () => {
   const tables = () => ({
@@ -224,7 +228,7 @@ describe("latestTrendEvidence", () => {
   });
 
   it("gives the planner the newest week's themes with platform, format, link and engagement", async () => {
-    const got = await latestTrendEvidence(trendDb(tables()), "c1");
+    const got = await latestTrendEvidence(trendDb(tables()), "c1", PLANNED_AT);
     // The newest finished week is the partial one (a running week and another client's week don't count);
     // each theme gives its two best-fitting kept posts, in theme order.
     expect(got.map((g) => [g.theme, g.link])).toEqual([
@@ -233,48 +237,68 @@ describe("latestTrendEvidence", () => {
     expect(got[0]).toMatchObject({
       theme_id: "th1", theme: "Captain POV skits", platform: "tiktok", format: "short_video", author: "@a", text: "Post a", link: "https://t/a",
       date: "2026-10-14", fit: 90, engagement: 5000,
+      // What a person can count on the post: likes, comments and shares (2500 + 3 + 1), never the weighted score.
+      measured: 2504,
     });
     // A post with no date stays, dated null.
     expect(got[2]).toMatchObject({ platform: "instagram", format: "carousel", date: null });
   });
 
   it("measures each post against its platform's median over every kept post of the week", async () => {
-    const got = await latestTrendEvidence(trendDb(tables()), "c1");
+    const got = await latestTrendEvidence(trendDb(tables()), "c1", PLANNED_AT);
     // Kept TikTok posts: 5000, 100, 300 (the dropped one is not counted).
     expect(got.filter((g) => g.platform === "tiktok").every((g) => g.platform_median === 300)).toBe(true);
     expect(got.find((g) => g.platform === "instagram")?.platform_median).toBe(40);
   });
 
+  it("leaves out a kept post the tripwire flagged, from the items and from its platform's median", async () => {
+    const t = tables();
+    t.trend_posts = t.trend_posts.map((p) => (p.id === "a" ? { ...p, tripwire: true } : p));
+    const got = await latestTrendEvidence(trendDb(t), "c1", PLANNED_AT);
+    expect(got.map((g) => g.link)).toEqual(["https://t/c2", "https://t/b", "https://t/d"]);
+    // The TikTok posts left: 100 and 300.
+    expect(got.filter((g) => g.platform === "tiktok").every((g) => g.platform_median === 200)).toBe(true);
+  });
+
   it("leaves out a dismissed theme", async () => {
     const t = tables();
     t.trend_themes = t.trend_themes.map((x) => (x.id === "th1" ? { ...x, dismissed_at: "2026-10-28T10:00:00Z" } : x));
-    const got = await latestTrendEvidence(trendDb(t), "c1");
+    const got = await latestTrendEvidence(trendDb(t), "c1", PLANNED_AT);
     expect(got.map((g) => g.theme)).toEqual(["Playoff reminders"]);
   });
 
   it("returns nothing when no week has finished, or the week has no themes left", async () => {
-    expect(await latestTrendEvidence(trendDb({ trend_weeks: [week("w", "2026-10-26", "running")] }), "c1")).toEqual([]);
-    expect(await latestTrendEvidence(trendDb({}), "c1")).toEqual([]);
+    expect(await latestTrendEvidence(trendDb({ trend_weeks: [week("w", "2026-10-26", "running")] }), "c1", PLANNED_AT)).toEqual([]);
+    expect(await latestTrendEvidence(trendDb({}), "c1", PLANNED_AT)).toEqual([]);
     const t = tables();
     t.trend_themes = t.trend_themes.map((x) => ({ ...x, dismissed_at: "2026-10-28T10:00:00Z" }));
-    expect(await latestTrendEvidence(trendDb(t), "c1")).toEqual([]);
+    expect(await latestTrendEvidence(trendDb(t), "c1", PLANNED_AT)).toEqual([]);
+  });
+
+  it("uses a week that started within the last 21 days of the planner's clock, and none older", async () => {
+    // The newest finished week started 2026-10-26: through 2026-11-16 (21 days, UTC) it counts, from 2026-11-17 it does not.
+    expect(await latestTrendEvidence(trendDb(tables()), "c1", new Date("2026-11-16T07:15:00Z"))).toHaveLength(3);
+    expect(await latestTrendEvidence(trendDb(tables()), "c1", new Date("2026-11-16T23:59:00Z"))).toHaveLength(3);
+    expect(await latestTrendEvidence(trendDb(tables()), "c1", new Date("2026-11-17T00:01:00Z"))).toEqual([]);
+    // Nor does an older finished week take its place.
+    expect(await latestTrendEvidence(trendDb(tables()), "c1", new Date("2026-12-07T07:15:00Z"))).toEqual([]);
   });
 
   it("does not fall back to an older week when the newest one has nothing usable", async () => {
     const t = tables();
     t.trend_themes = t.trend_themes.filter((x) => x.week_id !== "w-new");
-    expect(await latestTrendEvidence(trendDb(t), "c1")).toEqual([]);
+    expect(await latestTrendEvidence(trendDb(t), "c1", PLANNED_AT)).toEqual([]);
   });
 
   it("names what it could not read, in plain words", async () => {
     const broken = { from: () => ({ select: () => ({ eq: () => ({ in: () => ({ order: () => ({ limit: () => ({ maybeSingle: async () => ({ data: null, error: { message: "boom" } }) }) }) }) }) }) }) };
-    await expect(latestTrendEvidence(broken, "c1")).rejects.toThrow("Could not read the latest trends: boom");
+    await expect(latestTrendEvidence(broken, "c1", PLANNED_AT)).rejects.toThrow("Could not read the latest trends: boom");
   });
 });
 
 const trend = (over: Partial<TrendEvidenceInput> = {}): TrendEvidenceInput => ({
   theme: "Captain POV skits", theme_id: "th1", platform: "tiktok", format: "short_video", author: "@benchpro", text: "POV: you are the captain and nobody RSVPs",
-  link: "https://t/1", date: "2026-10-14", fit: 80, engagement: 1000, ...over,
+  link: "https://t/1", date: "2026-10-14", fit: 80, engagement: 1000, measured: 640, ...over,
 });
 
 describe("scoreTrendItems", () => {
@@ -282,7 +306,7 @@ describe("scoreTrendItems", () => {
     const [item] = scoreTrendItems([trend()]);
     expect(item).toEqual({
       id: "N1", kind: "trend", text: "POV: you are the captain and nobody RSVPs", theme: "Captain POV skits", company: "@benchpro", platform: "TikTok", format: "short_video",
-      date: "2026-10-14", link: "https://t/1", metric: "engagement", value: 1000,
+      date: "2026-10-14", link: "https://t/1", metric: "engagement", value: 640,
     });
     // No date, no author: the fields are left out rather than set empty.
     const [bare] = scoreTrendItems([trend({ date: null, author: "" })]);
@@ -309,6 +333,16 @@ describe("scoreTrendItems", () => {
       trend({ link: "https://t/c", platform: "instagram", fit: 80, engagement: 50, platform_median: 10 }),
     ]);
     expect(ranked[2].link).toBe("https://t/a");
+  });
+
+  it("stores the measured engagement as the value, and ranks on the weighted engagement it never stores", () => {
+    const ranked = scoreTrendItems([
+      trend({ link: "https://t/quiet", fit: 80, engagement: 100, measured: 90000, platform_median: 1000 }),
+      trend({ link: "https://t/loud", fit: 80, engagement: 3000, measured: 10, platform_median: 1000 }),
+    ]);
+    expect(ranked.map((r) => [r.link, r.value])).toEqual([["https://t/loud", 10], ["https://t/quiet", 90000]]);
+    // The weighted score is the team's own: it reaches no field of the item.
+    expect(JSON.stringify(ranked)).not.toContain("3000");
   });
 
   it("keeps at most 8, with no quota per platform or theme", () => {

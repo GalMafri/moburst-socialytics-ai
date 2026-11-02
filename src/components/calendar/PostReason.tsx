@@ -37,12 +37,14 @@ export function PostReason({ reasons }: { reasons: Reason[] | null | undefined }
             // The sentence above words only the first piece of evidence. If that is a theme's example post it already names who posted
             // what and when, so its row shows only the post and its link; a later one names its theme, author, platform and date here.
             const line = e.theme ? (i === 0 ? "" : evidenceSentence(e)) : evidenceLine(e);
+            // A stored link is a stranger's post; only a web address is ever made a link.
+            const link = e.link && /^https?:\/\//i.test(e.link) ? e.link : null;
             return (
               <li key={e.id} className="t-secondary">
                 {line && <span>{line}</span>}
                 {e.text && <span className="block text-muted-foreground line-clamp-2">"{e.text}"</span>}
-                {e.link && (
-                  <a href={e.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-white">
+                {link && (
+                  <a href={link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-white">
                     View the post <ExternalLink className="h-3 w-3" aria-hidden />
                   </a>
                 )}

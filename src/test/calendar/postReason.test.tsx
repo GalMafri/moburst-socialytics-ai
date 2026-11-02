@@ -44,6 +44,24 @@ describe("PostReason", () => {
     expect(screen.getAllByRole("link", { name: /View the post/ }).map((a) => a.getAttribute("href"))).toEqual(["https://c/1", "https://t/1"]);
   });
 
+  it("links only to a web address, and shows the rest of the evidence without a link", () => {
+    const trend = {
+      id: "N1", kind: "trend" as const, text: "POV: you are the captain and nobody RSVPs", theme: "Captain POV skits", company: "@benchpro", platform: "TikTok", format: "short_video",
+      date: "2026-10-14", metric: "engagement", value: 5400,
+    };
+    for (const link of ["javascript:alert(1)", "data:text/html,hi", "//t/1", "www.tiktok.com/@benchpro/video/1", "ftp://t/1", " "]) {
+      render(<PostReason reasons={[{ type: "trend", label: "Old", fit: "Fits.", evidence: [{ ...trend, link }], test: false }]} />);
+      expect(screen.getByText(`"POV: you are the captain and nobody RSVPs"`)).toBeInTheDocument();
+      expect(screen.queryByRole("link"), link).not.toBeInTheDocument();
+      cleanup();
+    }
+    for (const link of ["https://t/1", "http://t/1", "HTTPS://t/1"]) {
+      render(<PostReason reasons={[{ type: "trend", label: "Old", fit: "Fits.", evidence: [{ ...trend, link }], test: false }]} />);
+      expect(screen.getByRole("link", { name: /View the post/ })).toHaveAttribute("href", link);
+      cleanup();
+    }
+  });
+
   it("still shows a trend saved before themes (monthly report wording) as it was", () => {
     render(<PostReason reasons={[{ type: "trend", label: "Old", evidence: [{ id: "N5", kind: "trend", text: "Carousel education can support clicks: Publish 1 carousel weekly." }], test: false }]} />);
     expect(screen.getByText("Trend from the monthly report: Carousel education can support clicks.")).toBeInTheDocument();

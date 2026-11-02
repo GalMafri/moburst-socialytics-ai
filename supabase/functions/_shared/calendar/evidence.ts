@@ -656,13 +656,18 @@ export interface TrendEvidenceInput {
   date: string | null;
   /** How well it fits the brand, 0 to 100 (set by Claude's filter). */
   fit: number;
+  /** The weighted engagement the trends filter ranks by (trend_posts.engagement). The team's own: it ranks items and is never stored with them. */
   engagement: number;
+  /** Likes, comments and shares: what anyone can count on the post, and the value a calendar post stores. */
+  measured: number;
   /** The median engagement of every kept post on this platform that week, the baseline the score measures against. Without it the items' own median stands in. */
   platform_median?: number;
 }
 
 export const TREND_POSTS_PER_THEME = 2;
 export const TREND_ITEMS = 8;
+/** The newest finished week is planned from only while it started at most this many days before the planner's clock. */
+export const TREND_WEEK_MAX_AGE_DAYS = 21;
 /** Fit counts a little more than engagement: every kept post already beat the filter, so fit says how well it suits this client. */
 const TREND_FIT_WEIGHT = 0.6;
 /** Engagement counts up to three times the platform's median, so one viral outlier cannot outrank a better fit. */
@@ -671,22 +676,28 @@ const TREND_LIFT_CAP = 3;
 /**
  * The trends the week is planned from: the client's newest finished weekly
  * Trends run (status done or partial, by its Monday), the themes staff did not
- * dismiss, and for each the two kept posts that fit the brand best. No
- * finished week, or nothing left in it, means no trend evidence, never an
- * older week's. Each post carries its platform's median engagement over every
- * kept post of the week.
+ * dismiss, and for each the two kept posts that fit the brand best. A kept
+ * post the tripwire flagged is left out. No finished week, a newest finished
+ * week that started more than 21 days before `now` (UTC dates), or nothing
+ * left in it, means no trend evidence, never an older week's: the plan goes
+ * on without trends. Each post carries its platform's median engagement over
+ * every kept post of the week the tripwire did not flag.
  */
-export async function latestTrendEvidence(db: Db, clientId: string): Promise<TrendEvidenceInput[]> {
+export async function latestTrendEvidence(db: Db, clientId: string, now: Date): Promise<TrendEvidenceInput[]> {
   const { data: week, error: weekError } = await db.from("trend_weeks").select("id, week_start").eq("client_id", clientId)
     .in("status", ["done", "partial"]).order("week_start", { ascending: false }).limit(1).maybeSingle();
   if (weekError) throw new Error(`Could not read the latest trends: ${weekError.message}`);
   if (!week) return [];
+  // Stale trends are no trends: a client whose weekly runs stopped is planned from its own and competitor evidence only.
+  const oldest = new Date(now.getTime() - TREND_WEEK_MAX_AGE_DAYS * 86_400_000).toISOString().slice(0, 10);
+  if (String(week.week_start).slice(0, 10) < oldest) return [];
   const { data: themes, error: themeError } = await db.from("trend_themes").select("id, title, post_ids").eq("week_id", week.id)
     .is("dismissed_at", null).order("position", { ascending: true });
   if (themeError) throw new Error(`Could not read the latest trends: ${themeError.message}`);
   if (!themes?.length) return [];
+  // A kept post the tripwire flagged (a junk phrase got past the filter) is never cited, and never counts toward a median.
   const { data: posts, error: postError } = await db.from("trend_posts")
-    .select("id, platform, url, author, text, posted_at, format, fit, engagement").eq("week_id", week.id).eq("kept", true);
+    .select("id, platform, url, author, text, posted_at, format, fit, engagement, likes, comments, shares").eq("week_id", week.id).eq("kept", true).eq("tripwire", false);
   if (postError) throw new Error(`Could not read the latest trends: ${postError.message}`);
 
   // deno-lint-ignore no-explicit-any
@@ -709,7 +720,8 @@ export async function latestTrendEvidence(db: Db, clientId: string): Promise<Tre
       out.push({
         theme: String(t.title), theme_id: String(t.id), platform: p.platform as TrendPlatform, format: p.format as TrendFormat, author: String(p.author ?? ""),
         text: String(p.text ?? ""), link: String(p.url), date: validDay(p.posted_at) ? day(p.posted_at) : null, fit: Number(p.fit) || 0,
-        engagement: Number(p.engagement) || 0, platform_median: platformMedian.get(p.platform) ?? 0,
+        engagement: Number(p.engagement) || 0, measured: (Number(p.likes) || 0) + (Number(p.comments) || 0) + (Number(p.shares) || 0),
+        platform_median: platformMedian.get(p.platform) ?? 0,
       });
     }
   }
@@ -722,6 +734,9 @@ export async function latestTrendEvidence(db: Db, clientId: string): Promise<Tre
  * against its platform's kept median (fit 60%, engagement 40%, engagement
  * counted up to three times the median). A post two themes cite is shown
  * once, under the theme it scored best for. The author is kept in company.
+ * The item's value is the measured engagement (likes, comments and shares):
+ * it is stored on calendar posts, which client members read, so the weighted
+ * engagement the score uses never leaves this function.
  */
 export function scoreTrendItems(items: TrendEvidenceInput[]): EvidenceItem[] {
   const own = new Map<string, number[]>();
@@ -740,7 +755,7 @@ export function scoreTrendItems(items: TrendEvidenceInput[]): EvidenceItem[] {
     seen.add(t.link);
     out.push({
       id: `N${out.length + 1}`, kind: "trend", text: excerpt(t.text), theme: t.theme, ...(t.author ? { company: t.author } : {}), platform: platformName(t.platform),
-      format: t.format, ...(t.date ? { date: t.date } : {}), link: t.link, metric: "engagement", value: t.engagement,
+      format: t.format, ...(t.date ? { date: t.date } : {}), link: t.link, metric: "engagement", value: t.measured,
     });
     if (out.length === TREND_ITEMS) break;
   }

@@ -111,6 +111,15 @@ describe("what each source is asked for", () => {
     }
   });
 
+  it("sends Instagram each hashtag as letters, digits and underscores only, once each, and drops one with nothing left", () => {
+    expect(inputs("instagram", ["#ASO", "app marketing", "#café-life!", "#", " # . ", "#a#b", "#aso", "#עורך_דין"])[0].input.hashtags)
+      .toEqual(["ASO", "appmarketing", "cafélife", "ab", "עורך_דין"]);
+    // A tag with nothing left takes no place: eight good tags after it are all sent.
+    expect(inputs("instagram", ["#!!", ...eight])[0].input.hashtags).toEqual(eight);
+    // Nothing left at all: no run.
+    expect(inputs("instagram", ["#", "#-!", "  "])).toEqual([]);
+  });
+
   it("leaves the region out when the client has none", () => {
     expect(TREND_SOURCES.tiktok.inputs(["a"], { ...opts, region: undefined })[0].input).not.toHaveProperty("location");
     expect(TREND_SOURCES.youtube.inputs(["a"], { ...opts, region: undefined })[0].input).not.toHaveProperty("geo");

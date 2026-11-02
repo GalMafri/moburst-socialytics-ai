@@ -14,6 +14,7 @@
 
 import { parseAnswer } from "../pipelines/competitive/analysis.ts";
 import type { FilterProfile } from "./filter.ts";
+import { HASHTAG } from "./hashtag.ts";
 import { namesBrand, tagNamesBrand } from "./profile.ts";
 import { MAX_SEARCHES } from "./sources.ts";
 import { clip } from "./text.ts";
@@ -210,7 +211,7 @@ export function parseRewrite(text: string, o: RewriteRules): { value: string[] }
     seen.add(key);
     const competitor = (o.competitors ?? []).find((c) => names(s, c));
     if (s.length > SEARCH_CHARS) problems.push(`"${clip(s, 40)}" is longer than a search.`);
-    else if (instagram && !/^#[\p{L}0-9_]+$/u.test(s)) problems.push(`The Instagram search "${s}" must be one #tag with no spaces.`);
+    else if (instagram && !HASHTAG.test(s)) problems.push(`The Instagram search "${s}" must be one #tag with no spaces.`);
     else if (o.brand && names(s, o.brand)) problems.push(`"${s}" searches for the brand's own name.`);
     else if (competitor) problems.push(`"${s}" searches for the competitor ${competitor}.`);
     else if (avoid.has(key)) problems.push(`A person on the team removed "${s}"; it is never searched.`);

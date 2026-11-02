@@ -247,7 +247,7 @@ export async function gatherEvidence(admin: Db, client: Record<string, any>, now
   const findings = [...strings(perf.key_insights), ...strings(perf.pillar_alignment?.recommendations), ...strings(ai.competitive_takeaways)];
 
   // Industry trends come from the newest finished weekly Trends run (its themes staff did not dismiss), not from the report.
-  const trends = scoreTrendItems(await latestTrendEvidence(admin, client.id));
+  const trends = scoreTrendItems(await latestTrendEvidence(admin, client.id, now));
 
   const hashtags = await profileHashtags(admin, client.id);
 
