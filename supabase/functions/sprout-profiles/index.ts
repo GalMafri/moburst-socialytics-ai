@@ -1,7 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { staffGate } from "../_shared/auth/requireStaff.ts";
 import { listCustomerGroups, listCustomerProfiles, SproutListError } from "../_shared/sprout/profiles.ts";
-import { groupBrands } from "../_shared/sprout/brands.ts";
+import { declinedProfiles, groupBrands, type BrandDecline } from "../_shared/sprout/brands.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -34,12 +35,15 @@ serve(async (req) => {
 
   try {
     // The same list the client lifecycle matches profiles from (_shared/sprout/profiles.ts).
-    const [listed, groups] = await Promise.all([listCustomerProfiles(), listCustomerGroups()]);
+    const [listed, groups, declines] = await Promise.all([listCustomerProfiles(), listCustomerGroups(), readDeclines()]);
+    // A brand a person chose not to add as a client is marked on each of its profiles.
+    const declined = declinedProfiles(groupBrands(listed, groups), declines);
     const profiles = listed.map((p) => ({
       ...p,
       // The page compares these with assignments as Sprout sends them: numbers.
       id: /^\d+$/.test(p.id) ? Number(p.id) : p.id,
       network_display: networkDisplayMap[(p.network_type || "").toLowerCase()] || p.network_type,
+      declined: declined.has(p.id) ? { brand: declined.get(p.id)!.brand, declined_at: declined.get(p.id)!.declined_at } : null,
     }));
 
     const grouped: Record<string, typeof profiles> = {};
@@ -77,3 +81,22 @@ serve(async (req) => {
     });
   }
 });
+
+/**
+ * The brands a person chose not to add as clients (sprout_brand_declines),
+ * read with the service role once the caller is known to be staff. A read
+ * that does not answer marks nothing: the list still shows every profile.
+ */
+async function readDeclines(): Promise<BrandDecline[]> {
+  const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
+  const { data, error } = await db.from("sprout_brand_declines").select("id, sprout_group_id, profile_ids, brand, declined_at, note");
+  if (error) {
+    console.warn("[sprout-profiles] declined brands not read:", error.message);
+    return [];
+  }
+  return (data ?? []).map((r) => ({
+    id: String(r.id), sprout_group_id: r.sprout_group_id == null ? null : String(r.sprout_group_id),
+    profile_ids: Array.isArray(r.profile_ids) ? r.profile_ids.map(String) : [], brand: String(r.brand ?? ""),
+    declined_at: String(r.declined_at ?? ""), note: r.note ?? null,
+  }));
+}

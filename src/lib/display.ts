@@ -494,6 +494,17 @@ export function noteReadLine(textChars: number | null | undefined, max: number):
   return `About the first ${max.toLocaleString("en-US")} of ${n.toLocaleString("en-US")} characters were read.`;
 }
 
+/**
+ * A Sprout brand a person chose not to add as a client
+ * (sprout_brand_declines), on the staff list of Sprout profiles:
+ * "Declined as a client on Nov 2, 2026". Empty when it was not declined.
+ */
+export function declinedBrandLine(declined: { brand?: string | null; declined_at?: string | null } | null | undefined): string {
+  if (!declined) return "";
+  const on = formatDate(declined.declined_at ?? null);
+  return on ? `Declined as a client on ${on}` : "Declined as a client";
+}
+
 // ── Competitor profiles ────────────────────────────────────────────────────
 
 /** True for a handle that is a provider's id rather than a name: numeric page ids, YouTube channel ids. */

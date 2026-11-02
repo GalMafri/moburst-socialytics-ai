@@ -327,6 +327,16 @@ export function declineFor(brand: Brand, declines: BrandDecline[]): BrandDecline
   return declines.find((d) => (d.profile_ids ?? []).some((id) => ids.has(String(id)))) ?? null;
 }
 
+/** Every profile of a declined brand, with its decline: what the staff list marks as declined. */
+export function declinedProfiles(brands: Brand[], declines: BrandDecline[]): Map<string, BrandDecline> {
+  const out = new Map<string, BrandDecline>();
+  for (const brand of brands) {
+    const d = declineFor(brand, declines);
+    if (d) for (const p of brand.profiles) out.set(String(p.id), d);
+  }
+  return out;
+}
+
 /** Why a declined brand is left alone, with the day of the decision in Israel time. */
 export function declineReason(d: Pick<BrandDecline, "declined_at">): string {
   const at = new Date(d.declined_at);

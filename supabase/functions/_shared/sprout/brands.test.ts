@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { blockedFromCreation, brandName, clientWithSite, declineFor, declineReason, groupBrands, groupConflict, isBrandAccount, joinBrands, matchBrand, matchOutcome, profileBrandName, type ClientIndex, type KnownClient } from "./brands";
+import { blockedFromCreation, brandName, clientWithSite, declinedProfiles, declineFor, declineReason, groupBrands, groupConflict, isBrandAccount, joinBrands, matchBrand, matchOutcome, profileBrandName, type ClientIndex, type KnownClient } from "./brands";
 import type { SproutProfile } from "../lifecycle/accounts";
 
 const p = (id: string, name: string, native: string, network: string, status = "active", groups: string[] = []): SproutProfile => ({ id, name, native_name: native, network_type: network, native_link: "", status, groups });
@@ -233,6 +233,11 @@ describe("a brand a person chose not to add", () => {
     expect(declineFor(byKey("group:23"), DECLINES)).toBeNull();
     expect(declineFor(byKey("9700"), DECLINES)).toBeNull();
     expect(declineFor(byKey("9700"), [{ ...DECLINES[1], profile_ids: ["9700"] }])?.id).toBe("d2");
+  });
+  it("marks every profile of a declined brand, for the staff list", () => {
+    const marked = declinedProfiles(brands, DECLINES);
+    expect([...marked.keys()].sort()).toEqual(["9500", "9501", "9600", "9601"]);
+    expect(marked.get("9600")).toMatchObject({ id: "d2", brand: "Rebbe Meir Baal Hanes Charity" });
   });
   it("says so plainly, with the day in Israel time", () => {
     expect(declineReason(DECLINES[0])).toBe("Left alone for good: a person chose not to add it as a client on Nov 2, 2026.");
