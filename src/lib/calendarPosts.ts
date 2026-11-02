@@ -4,7 +4,9 @@
 // presses "Plan next week" (weekly calendar, Lital 19 Oct 2026).
 
 import type { CalendarPost } from "@/lib/calendarRevision";
-import { wordReason } from "../../supabase/functions/_shared/calendar/reasonText";
+import { evidenceSentence, wordReason } from "../../supabase/functions/_shared/calendar/reasonText";
+
+export { evidenceSentence };
 
 /** The evidence a planned post acts on, with its real numbers (supabase/functions/_shared/calendar/reasonText.ts). */
 export interface PostEvidence {

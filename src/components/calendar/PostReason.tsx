@@ -9,7 +9,7 @@
  */
 
 import { ExternalLink } from "lucide-react";
-import { reasonWords, type PostEvidence, type PostReason as Reason } from "@/lib/calendarPosts";
+import { evidenceSentence, reasonWords, type PostEvidence, type PostReason as Reason } from "@/lib/calendarPosts";
 
 const shortDate = (iso?: string) => (iso ? new Date(`${iso.slice(0, 10)}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : "");
 const times = (m?: number) => (m === undefined ? "" : `${Number.isInteger(m) ? m : m.toFixed(1)}x`);
@@ -33,9 +33,10 @@ export function PostReason({ reasons }: { reasons: Reason[] | null | undefined }
       <p className="t-body text-foreground">{words}</p>
       {evidence.length > 0 && (
         <ul className="space-y-1.5">
-          {evidence.map((e) => {
-            // A trend's sentence above already names who posted what and when, so its list shows only the post and its link.
-            const line = e.theme ? "" : evidenceLine(e);
+          {evidence.map((e, i) => {
+            // The sentence above words only the first piece of evidence. If that is a theme's example post it already names who posted
+            // what and when, so its row shows only the post and its link; a later one names its theme, author, platform and date here.
+            const line = e.theme ? (i === 0 ? "" : evidenceSentence(e)) : evidenceLine(e);
             return (
               <li key={e.id} className="t-secondary">
                 {line && <span>{line}</span>}
