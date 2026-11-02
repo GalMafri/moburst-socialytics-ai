@@ -6,9 +6,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-// The weekly job's migration waits in supabase/pending until Lital reviews the trial.
-const pending = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "pending");
-const code = (name: string) => readFileSync(join(pending, name), "utf8").replace(/--[^\n]*/g, "").replace(/\s+/g, " ").trim();
+const migrations = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "migrations");
+const code = (name: string) => readFileSync(join(migrations, name), "utf8").replace(/--[^\n]*/g, "").replace(/\s+/g, " ").trim();
 const job = code("20261029100100_trend_refresh_job.sql");
 
 describe("20261029100100_trend_refresh_job.sql", () => {
@@ -29,8 +28,7 @@ describe("20261029100100_trend_refresh_job.sql", () => {
   });
 });
 
-const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "migrations");
-const hardening = readFileSync(join(migrationsDir, "20261101120000_trends_hardening.sql"), "utf8").replace(/--[^\n]*/g, "").replace(/\s+/g, " ").trim();
+const hardening = code("20261101120000_trends_hardening.sql");
 
 describe("20261101120000_trends_hardening.sql", () => {
   it("queues Trends steps after real report runs (25) and their shadows (60)", () => {

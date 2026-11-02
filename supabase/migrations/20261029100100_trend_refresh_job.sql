@@ -1,6 +1,7 @@
 -- Trends: the weekly trend_refresh job (spec section 3; plan Task 7).
--- Applied after trends_v1 is deployed and the 9 Nov trial is reviewed, since
--- from then on every active client's week is collected (and paid for).
+-- Applied 2 Nov 2026 after Lital reviewed the 1 Nov trial and live QA ("Yes,
+-- switch it on"), since from then on every active client's week is collected
+-- (and paid for).
 --
 -- A function and a cron line of their own, so the report enqueue
 -- (enqueue_scheduled_report_jobs) is left exactly as it is. One job per
