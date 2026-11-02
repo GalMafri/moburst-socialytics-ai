@@ -62,7 +62,7 @@ function serverFor(req: Request, ctx: SupabaseContext, person: Person, deps: Con
 
 /** The function's whole request path. `env` overrides what withSupabase reads from the runtime (tests only). */
 export function connectorFetch(deps: ConnectorDeps, opts: { env?: WithSupabaseConfig["env"] } = {}): (req: Request) => Promise<Response> {
-  return pipeline([withOAuthProtectedResource(), withSupabase({ auth: "user", env: opts.env })], async (req: Request, ctx: SupabaseContext) => {
+  return pipeline([withOAuthProtectedResource(), withSupabase({ auth: "user", env: opts.env })], async (req, ctx) => {
     let admission;
     try {
       admission = await admit(ctx.jwtClaims as Record<string, unknown> | null, deps.reads(ctx));
