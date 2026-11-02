@@ -1,29 +1,27 @@
 // Reading a note's file into text, with no model call for text (client notes
-// design, section 3). SheetJS and unpdf are imported from the network in
-// parsers.ts and cannot load under Vitest, so they stand behind the Parsers
-// boundary: these tests give read.ts the real fixture files and parsers that
-// answer as those libraries do, and check everything read.ts does around
-// them. TXT, MD and CSV are decoded here for real, and DOCX is read by the
-// real reader (docx.ts, tested on its own in docx.test.ts).
+// design, section 3). unpdf is imported from the network in parsers.ts and
+// cannot load under Vitest, so it stands behind the Parsers boundary: these
+// tests give read.ts the real fixture files and a parser that answers as
+// unpdf does, and check everything read.ts does around it. TXT, MD and CSV
+// are decoded here for real, and DOCX and XLSX are read by the real readers
+// (docx.ts and xlsx.ts, tested on their own in docx.test.ts and xlsx.test.ts).
 
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { base64, decodeText, isScan, noteText, readNoteFile, splitParts, IMAGE_MAX_BYTES, NOTE_READ_MAX_CHARS, PART_CHARS, PDF_MAX_PAGES, type Parsers } from "./read";
 import { docxText } from "./docx";
+import { xlsxSheets } from "./xlsx";
 
 const PDF_TEXT = "Meeting notes, Oct 28: never say cheap. They asked for shorter captions on Instagram and no puns anywhere.";
 const fixture = (name: string) => new Uint8Array(readFileSync(join(__dirname, "fixtures", name)));
 const startsWith = (bytes: Uint8Array, magic: string) => new TextDecoder("latin1").decode(bytes.slice(0, magic.length)) === magic;
 
-/** The real DOCX reader, and parsers that answer as SheetJS and unpdf do and fail the test when handed anything but the file they read. */
+/** The real DOCX and XLSX readers, and a PDF parser that answers as unpdf does and fails the test when handed anything but a PDF. */
 function parsers(over: Partial<Parsers> = {}): Parsers {
   return {
     docxText: vi.fn(async (bytes: Uint8Array) => docxText(bytes)),
-    xlsxSheets: vi.fn(async (bytes: Uint8Array) => {
-      expect(startsWith(bytes, "PK")).toBe(true);
-      return [{ name: "November", csv: "Date,Note\nNov 1,Holiday sale starts" }, { name: "Empty", csv: "" }];
-    }),
+    xlsxSheets: vi.fn(async (bytes: Uint8Array) => xlsxSheets(bytes)),
     pdfText: vi.fn(async (bytes: Uint8Array) => {
       expect(startsWith(bytes, "%PDF")).toBe(true);
       return { pages: 1, text: PDF_TEXT };
