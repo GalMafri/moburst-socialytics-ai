@@ -90,6 +90,13 @@ export interface Gathered {
   examples: ReturnType<typeof bestExamples>;
   /** The hashtags the client's trend profile keeps for each platform, for the planner to suggest. */
   hashtags: Record<HashtagPlatform, string[]>;
+  /**
+   * The rhythm's fallbacks, for a platform the client does not post on (the
+   * content strategy's new platforms): posts per week among its tracked
+   * competitors, and across every tracked company when the rhythm read them
+   * (null otherwise; trackedRates reads them).
+   */
+  fallbackRates: { competitors: Record<string, number>; allTracked: Record<string, number> | null };
   /** trends: "themes" when the newest finished Trends week gave evidence, else "none". */
   sources: { sprout: string; feed_weeks: number; report: string | null; topics: number; trends: "themes" | "none" };
 }
@@ -173,7 +180,7 @@ export async function competitorSet(admin: Db, clientId: string): Promise<Array<
  * when a client's own posting and its competitors leave a platform without a
  * rate, and once per run.
  */
-async function trackedRates(admin: Db): Promise<Record<string, number>> {
+export async function trackedRates(admin: Db): Promise<Record<string, number>> {
   const histories = feedHistories(await feedRows(admin));
   return medianRates([...histories.values()]);
 }
@@ -260,7 +267,10 @@ export async function gatherEvidence(admin: Db, client: Record<string, any>, now
     allTracked: null as Record<string, number> | null,
   };
   let resolved = resolveRhythm(rhythmInput);
-  if (resolved.needsAllTracked) resolved = resolveRhythm({ ...rhythmInput, allTracked: await trackedRates(admin) });
+  if (resolved.needsAllTracked) {
+    rhythmInput.allTracked = await trackedRates(admin);
+    resolved = resolveRhythm(rhythmInput);
+  }
   const thin = [
     ...Object.entries(scored.platforms).filter(([, v]) => v.thin).map(([k, v]) => `${k}: ${v.posts} post${v.posts === 1 ? "" : "s"} in the last 90 days, so its numbers are an early signal.`),
     ...(recent.length && recent.length < 1 + MIN_COMPETITOR_WEEKS ? [`Competitor history: ${recent.length} week${recent.length === 1 ? "" : "s"} so far, so competitor numbers are an early signal.`] : []),
@@ -269,6 +279,7 @@ export async function gatherEvidence(admin: Db, client: Record<string, any>, now
   return {
     own, learnedRhythm: resolved.learned, rhythm: resolved.applied, rhythmSources: resolved.sources, evidence, avoid: scored.low.map(fmt), thin,
     examples: bestExamples(scored.top), hashtags,
+    fallbackRates: { competitors: medianRates([rhythmInput.competitors]), allTracked: rhythmInput.allTracked },
     sources: { sprout, feed_weeks: recent.length, report: report?.id ?? null, topics: (alerts ?? []).length, trends: trends.length ? "themes" : "none" },
   };
 }

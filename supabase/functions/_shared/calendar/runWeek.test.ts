@@ -228,6 +228,30 @@ describe("gatherEvidence hashtags", () => {
   });
 });
 
+describe("gatherEvidence fallback rates", () => {
+  it("hands over the rhythm's fallbacks: the tracked competitors' median per platform, and every tracked company's once read", async () => {
+    m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
+    const tok = (i: number) => ({ postId: `t${i}`, companyId: "9", companyName: "BenchApp", channel: "tiktok", publishedAt: `2026-10-0${i + 5}T12:00:00Z`, message: "A post", engagementTotal: 5 });
+    const posts = [0, 1, 2, 3].map(tok);
+    const snapshot = {
+      client_id: "ptp", fetched_at: "2026-10-18T00:00:00Z",
+      payload: { window: { start: "2026-10-05", end: "2026-10-18" }, socialPosts: posts },
+      feed_window: { start: "2026-10-05", end: "2026-10-18" }, client_company_id: null, posts,
+    };
+    const db = fakeDb({ clients: [CLIENT], rivaliq_snapshots: [snapshot], competitor_sets: [{ id: "s1" }], competitors: [{ name: "BenchApp", rivaliq_company_id: "9" }] });
+    const got = await gatherEvidence(db, CLIENT, NOW, { week: "2026-10-26" });
+    // Four TikTok posts over a two-week feed: two a week. The client posts nowhere, so its primary platforms needed every tracked company's rates too.
+    expect(got.fallbackRates).toEqual({ competitors: { TikTok: 2 }, allTracked: { TikTok: 2 } });
+  });
+
+  it("leaves every tracked company's rates unread when the client's own posting gives each platform a rate", async () => {
+    const weekly = Array.from({ length: 16 }, (_, i) => ({ postId: `p${i}`, channel: "instagram", type: "photo", publishedAt: new Date(NOW.getTime() - (i * 4 + 3) * 86400_000).toISOString(), message: "A post", engagementTotal: 3 }));
+    m.owned.mockResolvedValue({ coverage: "complete", profiles: [{ network: "instagram" }], posts: weekly });
+    const got = await gatherEvidence(fakeDb({ clients: [CLIENT] }), CLIENT, NOW, { week: "2026-10-26" });
+    expect(got.fallbackRates).toEqual({ competitors: {}, allTracked: null });
+  });
+});
+
 describe("runWeekRevise", () => {
   const ready = { ...plan, status: "ready", revisions: [], pending_revision: { note: "Less formal", by: "u1", at: "2026-10-19T07:00:00Z", scope: "untouched" } };
   const post = { id: "p1", post_key: "k1", post_date: "2026-10-27", platform: "Instagram", format: "Reel", pillar: null, copy: "Old copy", hashtags: [], cta: null, visual_direction: null, reasons: [], touched_at: null, plan_id: "plan-1" };
