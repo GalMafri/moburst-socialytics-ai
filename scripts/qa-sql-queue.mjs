@@ -244,5 +244,71 @@ assert.equal((await db.query(`SELECT count(*)::int AS n FROM public.clients WHER
 await assert.rejects(() => onboard('Nameless', null, []), /needs its profiles/);
 await assert.rejects(() => onboard('Bad', null, [{ id: 'x', network_type: 'facebook' }]), /Sprout id/);
 
+// ── Sprout brand declines (20261109130000_sprout_brand_declines.sql) ────────
+// Stand-ins for Supabase's auth schema and the two role helpers, driven by session settings.
+await db.exec(`CREATE SCHEMA IF NOT EXISTS auth;
+CREATE TABLE auth.users(id uuid PRIMARY KEY);
+CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$ select nullif(current_setting('qa.uid', true), '')::uuid $$;
+CREATE FUNCTION auth.role() RETURNS text LANGUAGE sql STABLE AS $$ select nullif(current_setting('qa.role', true), '') $$;
+CREATE FUNCTION auth.jwt() RETURNS jsonb LANGUAGE sql STABLE AS $$ select coalesce(nullif(current_setting('qa.jwt', true), ''), '{}')::jsonb $$;
+CREATE FUNCTION public.is_moburst_staff() RETURNS boolean LANGUAGE sql STABLE AS $$ select coalesce(current_setting('qa.staff', true), '') = 'on' $$;
+CREATE FUNCTION public.is_oauth_session() RETURNS boolean LANGUAGE sql STABLE AS $$ select coalesce(auth.jwt() ->> 'client_id', '') <> '' $$;
+GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role;
+INSERT INTO auth.users VALUES ('${id(500)}'), ('${id(501)}');`);
+const declinesSql = readFileSync(new URL('../supabase/migrations/20261109130000_sprout_brand_declines.sql', import.meta.url), 'utf8');
+await db.exec(declinesSql);
+await db.exec(declinesSql); // applies twice
+
+/** Run as a caller: a Postgres role, and what auth.role(), auth.uid(), auth.jwt() and is_moburst_staff() say. */
+const as = async (who, sql) => {
+  const set = (k, v) => `SET qa.${k} = '${v ?? ''}';`;
+  await db.exec(`RESET ROLE; ${set('role', who.role)} ${set('uid', who.uid)} ${set('jwt', who.jwt)} ${set('staff', who.staff ? 'on' : 'off')} SET ROLE ${who.pg};`);
+  try { return (await db.query(sql)).rows; } finally { await db.exec(`RESET ROLE; ${set('role')} ${set('uid')} ${set('jwt')} ${set('staff')}`); }
+};
+const STAFF = { pg: 'authenticated', role: 'authenticated', uid: id(500), staff: true };
+const PERSON = { pg: 'authenticated', role: 'authenticated', uid: id(501), staff: false };
+const CONNECTOR = { ...STAFF, jwt: '{"client_id":"claude"}' };
+const SERVICE = { pg: 'service_role', role: 'service_role' };
+const decline = (who, group, ids, brand, note) => as(who, `SELECT public.sprout_brand_decline(${group ? `'${group}'` : 'null'}, '{${ids.join(',')}}'::bigint[], '${brand}'${note ? `, '${note}'` : ''}) AS id`).then((r) => r[0].id);
+
+// Staff record a decline; the same group again is the same row, its profiles added and its date kept.
+const ai = await decline(STAFF, '21', [9500, 9501], 'Ai Degree');
+const firstDecline = (await db.query(`SELECT * FROM public.sprout_brand_declines WHERE id = '${ai}'`)).rows[0];
+assert.equal(firstDecline.declined_by, id(500));
+assert.equal(firstDecline.sprout_group_id, '21');
+assert.equal(await decline(STAFF, '21', [9502], 'Ai Degree', 'Team decision'), ai);
+const declineAgain = (await db.query(`SELECT profile_ids::text AS ids, note, declined_at FROM public.sprout_brand_declines WHERE id = '${ai}'`)).rows[0];
+assert.deepEqual([declineAgain.ids, declineAgain.note, declineAgain.declined_at.getTime()], ['{9500,9501,9502}', 'Team decision', firstDecline.declined_at.getTime()]);
+// By profiles alone, once.
+const rmbh = await decline(STAFF, null, [9601, 9600], 'Rebbe Meir Baal Hanes Charity');
+assert.equal(await decline(STAFF, null, [9600, 9601], 'Rebbe Meir Baal Hanes Charity'), rmbh);
+await assert.rejects(() => decline(STAFF, null, [], 'Nothing'), /Sprout group or its profiles/);
+await assert.rejects(() => decline(STAFF, '30', [1], '  '), /needs its name/);
+// One decline per group.
+await assert.rejects(() => as(SERVICE, `INSERT INTO public.sprout_brand_declines(sprout_group_id, brand) VALUES ('21', 'Twice')`), /duplicate key|unique/);
+
+// Who may: never anonymous, never a person outside staff, never a connected app; the service role may.
+await assert.rejects(() => as({ pg: 'anon', role: 'anon' }, `SELECT public.sprout_brand_decline('40', '{1}', 'X')`), /permission denied/);
+await assert.rejects(() => decline(PERSON, '40', [1], 'X'), /Only Moburst staff/);
+await assert.rejects(() => decline(CONNECTOR, '40', [1], 'X'), /Connected apps can read Socialytics but cannot change it/);
+assert.ok(await decline(SERVICE, '41', [4100], 'Server Brand'));
+
+// Staff read the table; a person outside staff sees nothing; nobody but the service role writes it directly.
+assert.equal((await as(STAFF, `SELECT id FROM public.sprout_brand_declines`)).length, 3);
+assert.equal((await as(PERSON, `SELECT id FROM public.sprout_brand_declines`)).length, 0);
+await assert.rejects(() => as({ pg: 'anon', role: 'anon' }, `SELECT id FROM public.sprout_brand_declines`), /permission denied/);
+await assert.rejects(() => as(STAFF, `INSERT INTO public.sprout_brand_declines(sprout_group_id, brand) VALUES ('50', 'Direct')`), /permission denied|row-level security/);
+assert.equal((await as(SERVICE, `SELECT id FROM public.sprout_brand_declines`)).length, 3);
+assert.deepEqual((await db.query(`SELECT policyname FROM pg_policies WHERE tablename = 'sprout_brand_declines' AND policyname LIKE 'OAuth%' ORDER BY 1`)).rows.map((r) => r.policyname),
+  ['OAuth sessions cannot delete', 'OAuth sessions cannot insert', 'OAuth sessions cannot update']);
+
+// A decision can be taken back by staff, once; the person who made it can leave without taking it with them.
+await assert.rejects(() => as(PERSON, `SELECT public.sprout_brand_undecline('${rmbh}')`), /Only Moburst staff/);
+await assert.rejects(() => as(CONNECTOR, `SELECT public.sprout_brand_undecline('${rmbh}')`), /Connected apps/);
+assert.equal((await as(STAFF, `SELECT public.sprout_brand_undecline('${rmbh}') AS gone`))[0].gone, true);
+assert.equal((await as(STAFF, `SELECT public.sprout_brand_undecline('${rmbh}') AS gone`))[0].gone, false);
+await db.exec(`DELETE FROM auth.users WHERE id = '${id(500)}'`);
+assert.equal((await db.query(`SELECT declined_by FROM public.sprout_brand_declines WHERE id = '${ai}'`)).rows[0].declined_by, null);
+
 await db.close();
-console.log('PASS: queue migration applies twice; feeds are queued only for clients whose current set is linked to a landscape; only service_role reaches it; dry run writes nothing; enqueue is idempotent and ordered with the old stagger; lease is exclusive and counts attempts; the sweep releases only social jobs whose competitive report finished; the daily tick rechecks waiting and blocked jobs; overdue schedules with no job are reported; Sprout onboarding: the migration applies twice, marks existing websites as set by a person and changes nothing else, only its job may have no client, enqueue runs Mondays and after 8 idle days at most once a day with a dry run that inserts nothing, and the onboarding function makes one client and refuses an assigned or removed profile.');
+console.log('PASS: queue migration applies twice; feeds are queued only for clients whose current set is linked to a landscape; only service_role reaches it; dry run writes nothing; enqueue is idempotent and ordered with the old stagger; lease is exclusive and counts attempts; the sweep releases only social jobs whose competitive report finished; the daily tick rechecks waiting and blocked jobs; overdue schedules with no job are reported; Sprout onboarding: the migration applies twice, marks existing websites as set by a person and changes nothing else, only its job may have no client, enqueue runs Mondays and after 8 idle days at most once a day with a dry run that inserts nothing, and the onboarding function makes one client and refuses an assigned or removed profile; Sprout brand declines: the migration applies twice, staff (never a connected app, a person outside staff or anyone anonymous) record one decline per group or set of profiles and can take it back, staff read the table and only the service role writes it directly.');
