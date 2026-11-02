@@ -3,12 +3,16 @@
 // A brand's website, found in its own posts (spec: docs/superpowers/specs/
 // 2026-11-02-sprout-auto-onboarding-design.md, section 4). Sprout's profile
 // list has no website, so the search reads the links in the brand's posts
-// of the last 90 days: domains most-linked first, each link followed through
-// its redirects, social and app store links dropped. A domain is accepted
-// only on an exact fact: its homepage links to one of the brand's profiles,
-// its domain name is the brand name without spaces, or its og:site_name is
-// the brand name. Up to three domains are tried. The weekly onboarding job
-// and the lifecycle's website step run this same search.
+// of the last 90 days: each link followed through its redirects, and
+// counted under the registrable domain it lands on (app.olo.com is olo.com,
+// net/domains.ts), most-linked first, and links to a shared platform (a
+// social network, store, podcast host, press-release site, site builder:
+// net/domains.ts SHARED_PLATFORMS) never counted. A domain is accepted only
+// on an exact fact: its homepage links to one of the brand's profiles, its
+// registered name is one of the brand's names (nameLabels), or its
+// og:site_name is the brand name. Up to three domains are tried, each at its
+// registrable domain's homepage. The weekly onboarding job and the
+// lifecycle's website step run this same search.
 //
 // The network is behind SiteReader, so everything else here is pure and can
 // be tested; webReader is the real one. It follows redirects itself, one hop
@@ -17,8 +21,8 @@
 
 import { BROWSER_UA } from "../brand/research.ts";
 import { profileKeyOf, siteProfileLinks, type SproutProfile } from "../lifecycle/accounts.ts";
-import { normName, sameName } from "../lifecycle/names.ts";
-import { clientHost } from "../net/clientHost.ts";
+import { sameName } from "../lifecycle/names.ts";
+import { registrableDomain, sharedPlatformKind, siteKeyOf } from "../net/domains.ts";
 import { isPubliclyFetchable } from "../net/safeUrl.ts";
 import type { Brand } from "./brands.ts";
 
@@ -36,16 +40,7 @@ export const MAX_SITES_TRIED = 3;
 /** At most this many distinct links are followed through their redirects, the most frequent first. */
 export const MAX_LINKS_FOLLOWED = 30;
 
-const HOSTS = (list: string) => list.split(/\s+/).filter(Boolean);
-/** Social networks: a link to one is never the brand's website. */
-const SOCIAL = HOSTS("instagram.com facebook.com fb.com fb.me fb.watch m.me tiktok.com linkedin.com lnkd.in youtube.com youtu.be twitter.com x.com t.co threads.net threads.com pinterest.com pin.it");
-/** App stores: a link to the brand's app, never its website. */
-const APP_STORES = HOSTS("apps.apple.com itunes.apple.com play.google.com");
-/** Link shorteners: followed, and dropped when they cannot be (lnkd.in and t.co wrap every link on LinkedIn and X). */
-const SHORTENERS = HOSTS("bit.ly buff.ly ow.ly spr.ly tinyurl.com t.co lnkd.in goo.gl rebrand.ly is.gd trib.al dlvr.it ift.tt shorturl.at");
-
-const under = (host: string, list: string[]) => list.some((h) => host === h || host.endsWith(`.${h}`));
-const hostOf = (url: string) => clientHost(url) ?? "";
+const hostOf = (url: string) => { try { return new URL(url).hostname.toLowerCase(); } catch { return ""; } };
 
 /** Every link in a post's text: with a scheme, or a bare www. address. */
 export function postLinks(text: string | null | undefined): string[] {
@@ -62,10 +57,18 @@ export interface LinkedDomain {
   links: number;
 }
 
-/** The domains the posts link to, most-linked first (the first linked on a tie), after redirects, without social or app store links. */
+/**
+ * The registrable domains the posts link to, most-linked first (the first
+ * linked on a tie), where each link lands after its redirects. A link to a
+ * shared platform is dropped unread, except a link shortener (lnkd.in and
+ * t.co wrap every link on LinkedIn and X), which is followed and dropped
+ * when it cannot be; a link that lands on a shared platform is dropped too.
+ */
 export async function linkedDomains(posts: Array<{ text?: string | null }>, reader: SiteReader): Promise<LinkedDomain[]> {
-  const occurrences = posts.flatMap((p) => postLinks(p.text))
-    .filter((url) => { const h = hostOf(url); return !!h && !(under(h, SOCIAL) && !under(h, SHORTENERS)) && !under(h, APP_STORES); });
+  const occurrences = posts.flatMap((p) => postLinks(p.text)).filter((url) => {
+    const kind = sharedPlatformKind(url);
+    return !!registrableDomain(url) && (kind === null || kind === "shortener");
+  });
   const freq = new Map<string, number>();
   for (const url of occurrences) freq.set(url, (freq.get(url) ?? 0) + 1);
   const followed = [...freq.entries()].sort((a, b) => b[1] - a[1]).slice(0, MAX_LINKS_FOLLOWED).map(([url]) => url);
@@ -76,11 +79,10 @@ export async function linkedDomains(posts: Array<{ text?: string | null }>, read
   }
   const counts = new Map<string, number>();
   for (const url of occurrences) {
-    if (!landed.has(url)) continue;
-    const at = landed.get(url) ?? (under(hostOf(url), SHORTENERS) ? null : url);
-    const host = at ? hostOf(at) : "";
-    if (!host || under(host, SOCIAL) || under(host, APP_STORES) || under(host, SHORTENERS)) continue;
-    counts.set(host, (counts.get(host) ?? 0) + 1);
+    const shortened = sharedPlatformKind(url) === "shortener";
+    const at = landed.get(url) ?? (shortened ? null : url);
+    const domain = at && !sharedPlatformKind(at) ? registrableDomain(at) : null;
+    if (domain) counts.set(domain, (counts.get(domain) ?? 0) + 1);
   }
   return [...counts.entries()].map(([domain, links]) => ({ domain, links })).sort((a, b) => b.links - a.links);
 }
@@ -99,11 +101,42 @@ export function siteNameOf(html: string | null | undefined): string | null {
   return null;
 }
 
-/** The registered name in a host: "paythepyper" in www.paythepyper.com, "olo" in shop.olo.co.uk. */
+/** The registered name in a host, by its registrable domain: "paythepyper" in www.paythepyper.com, "olo" in app.olo.com and shop.olo.co.uk. */
 export function domainLabel(host: string): string {
-  const labels = String(host || "").toLowerCase().replace(/^www\./, "").split(".").filter(Boolean);
-  if (labels.length >= 3 && /^(co|com|org|net|ac|gov|edu|ltd|plc)$/.test(labels[labels.length - 2]) && labels[labels.length - 1].length === 2) return labels[labels.length - 3];
-  return labels.length >= 2 ? labels[labels.length - 2] : labels[0] ?? "";
+  return (registrableDomain(host) ?? "").split(".")[0] ?? "";
+}
+
+/** Words a name may carry around the brand's own name ("Olo App", "DermaAngel US", "The Official Twos"). */
+export const NAME_EXTRA_WORDS = new Set(["the", "official", "app", "us", "usa", "hq", "inc", "llc", "co", "global"]);
+
+/**
+ * Every way the brand's names can be a domain's registered name: each name
+ * lowercased with spaces and punctuation removed ("&" read either as nothing
+ * or as "and"), and the same for the name before a tagline ("Olo App" in
+ * "Olo App | Food Ordering", "Olo" in "Olo - Skip the Line"); then each with
+ * its leading or trailing words from NAME_EXTRA_WORDS dropped, as long as a
+ * word of the name is left.
+ */
+export function nameLabels(names: string[]): Set<string> {
+  const out = new Set<string>();
+  for (const name of names) {
+    const text = String(name || "").toLowerCase();
+    const head = text.split(/\s+[-\u2013\u2014]\s+|\s*\|\s*|\s*\(|:\s+/)[0];
+    for (const part of new Set([text, head])) {
+      for (const amp of [part.replace(/&/g, " "), part.replace(/&/g, " and ")]) {
+        const words = amp.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+        let first = 0;
+        let last = words.length;
+        const starts = [0];
+        while (first < last - 1 && NAME_EXTRA_WORDS.has(words[first])) starts.push(++first);
+        const ends = [words.length];
+        while (last > 1 && NAME_EXTRA_WORDS.has(words[last - 1])) ends.push(--last);
+        for (const a of starts) for (const b of ends) if (b - a >= 1) out.add(words.slice(a, b).join(""));
+      }
+    }
+  }
+  out.delete("");
+  return out;
 }
 
 type BrandLike = Pick<Brand, "name" | "profiles">;
@@ -115,9 +148,9 @@ export function confirmingFact(brand: BrandLike, domain: string, html: string | 
     const linked = new Set(siteProfileLinks(html));
     if (brand.profiles.some((p: SproutProfile) => { const k = profileKeyOf(p); return !!k && linked.has(k); })) return "profile_link";
   }
-  const compact = namesOf(brand).map((n) => normName(n).replace(/\s+/g, "")).filter(Boolean);
+  const names = nameLabels(namesOf(brand));
   const labels = [domainLabel(domain), finalHost ? domainLabel(finalHost) : ""].filter(Boolean);
-  if (labels.some((l) => compact.includes(l))) return "domain_name";
+  if (labels.some((l) => names.has(l))) return "domain_name";
   const site = html ? siteNameOf(html) : null;
   if (site && namesOf(brand).some((n) => sameName(site, n))) return "site_name";
   return null;
@@ -144,9 +177,10 @@ export async function searchWebsite(brand: BrandLike, posts: Array<{ text?: stri
     const fact = confirmingFact(brand, domain, page?.html ?? null, page ? hostOf(page.url) : null);
     tried.push({ domain, read: !!page, fact });
     if (!fact) continue;
+    // The homepage's address after its redirects, unless they led onto a shared platform (a store, a link page): then the domain itself.
     let website = `https://${domain}`;
     try {
-      if (page) website = new URL(page.url).origin;
+      if (page && !sharedPlatformKind(page.url)) website = new URL(page.url).origin;
     } catch { /* the domain itself */ }
     return { website, confirmed_by: fact, most_linked: domains[0].domain, domains, tried, site_profiles: page ? siteProfileLinks(page.html) : [] };
   }
@@ -165,10 +199,10 @@ export function websiteJoins(found: Array<{ key: string; website: string | null;
     const id = [a, b].sort().join("|");
     if (a !== b && !seen.has(id)) { seen.add(id); pairs.push([a, b]); }
   };
-  const withSite = found.filter((f) => clientHost(f.website));
+  const withSite = found.filter((f) => siteKeyOf(f.website));
   for (let i = 0; i < withSite.length; i++) {
     for (let j = i + 1; j < withSite.length; j++) {
-      if (clientHost(withSite[i].website) === clientHost(withSite[j].website)) add(withSite[i].key, withSite[j].key);
+      if (siteKeyOf(withSite[i].website) === siteKeyOf(withSite[j].website)) add(withSite[i].key, withSite[j].key);
     }
   }
   for (const f of withSite) {
