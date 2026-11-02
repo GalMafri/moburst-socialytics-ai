@@ -49,7 +49,7 @@ grant all on public.design_week_runs to service_role;
 grant select (id, client_id, week_start, status, posts, requested_by, stopped_by, created_at, updated_at, finished_at) on public.design_week_runs to authenticated;
 drop policy if exists "Read design week runs" on public.design_week_runs;
 create policy "Read design week runs" on public.design_week_runs for select to authenticated
-  using (public.is_moburst_staff() or public.is_client_member(client_id));
+  using (public.can_access_client(client_id));
 
 comment on table public.design_week_runs is 'One per press of the week''s design button for a client''s calendar week; its posts start as design_requests carrying its id (batch_id). Written only by the service role.';
 
