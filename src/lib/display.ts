@@ -1,8 +1,8 @@
 /**
  * The one display layer: every stored value that reaches a screen as words
  * goes through here. Platform names, dates and date ranges, run statuses for
- * both report tables, country and language names, usage events and roles, and
- * stored text with escaped characters.
+ * both report tables, country and language names, usage events and roles,
+ * client notes' states and kinds, and stored text with escaped characters.
  *
  * Pure module: no React, no Supabase client, so libraries, edge code and
  * tests can import it. src/test/displayGuard.test.ts fails the build when a
@@ -454,6 +454,30 @@ export function timeZoneName(zone: string | null | undefined): string {
   } catch {
     return city;
   }
+}
+
+// ── Client notes ───────────────────────────────────────────────────────────
+
+const NOTE_POINT_KINDS: Record<string, string> = { avoid: "Avoid", do: "Do", upcoming: "Coming up", fact: "Facts" };
+
+/** A point's kind (client_note_points.kind), as the copy's section heads it. */
+export function notePointKindName(kind: string | null | undefined): string {
+  const k = String(kind ?? "").trim();
+  return k ? NOTE_POINT_KINDS[k] ?? humanize(k) : "";
+}
+
+/** Where a note stands (client_notes.state), with how many of its points count: "Reading", "12 points learned". */
+export function noteStateLine(state: string | null | undefined, points: number): string {
+  if (state === "reading") return "Reading";
+  if (state === "learned" && points > 0) return `${points.toLocaleString("en-US")} point${points === 1 ? "" : "s"} learned`;
+  return "Nothing in this note for the copy";
+}
+
+/** For a file longer than one note reads (client_notes.text_chars), how much of it was read; empty otherwise. */
+export function noteReadLine(textChars: number | null | undefined, max: number): string {
+  const n = Number(textChars);
+  if (!Number.isFinite(n) || n <= max) return "";
+  return `About the first ${max.toLocaleString("en-US")} of ${n.toLocaleString("en-US")} characters were read.`;
 }
 
 // ── Competitor profiles ────────────────────────────────────────────────────

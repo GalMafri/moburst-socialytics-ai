@@ -45,6 +45,7 @@ import { LogoFileField } from "@/components/onboarding/LogoFileField";
 import { DesignSynthesisCard } from "@/components/onboarding/DesignSynthesisCard";
 import { DesignSettingsCard } from "@/components/onboarding/DesignSettingsCard";
 import { TrendsWeTrack } from "@/components/clients/TrendsWeTrack";
+import { ClientNotes } from "@/components/onboarding/ClientNotes";
 
 const PLATFORMS = ["Instagram", "TikTok", "Facebook", "LinkedIn", "Twitter/X", "YouTube"];
 
@@ -676,6 +677,9 @@ export default function ClientSetup() {
                   />
                 </div>
             </Section>
+
+            {/* What the client told the team: every post follows it, before the learned preferences. */}
+            {clientId && <ClientNotes clientId={clientId} clientName={form.name} brandNotes={client?.brand_notes ?? null} timeZone={client?.timezone ?? null} />}
 
             {voiceLearnings && voiceLearnings.length > 0 && (
               <Section
