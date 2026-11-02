@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { blockedFromCreation, brandName, clientWithSite, groupBrands, groupConflict, isBrandAccount, joinBrands, matchBrand, matchOutcome, profileBrandName, type ClientIndex, type KnownClient } from "./brands";
+import { blockedFromCreation, brandName, clientWithSite, declineFor, declineReason, groupBrands, groupConflict, isBrandAccount, joinBrands, matchBrand, matchOutcome, profileBrandName, type ClientIndex, type KnownClient } from "./brands";
 import type { SproutProfile } from "../lifecycle/accounts";
 
 const p = (id: string, name: string, native: string, network: string, status = "active", groups: string[] = []): SproutProfile => ({ id, name, native_name: native, network_type: network, native_link: "", status, groups });
@@ -209,5 +209,33 @@ describe("the name a new client gets", () => {
   it("matches a client by the group's own name too", () => {
     const [ewc] = groupBrands([inGroup(["7"], p("1", "European Wax Center", "waxcenter", "facebook"))], [{ id: "7", name: "EWC" }]);
     expect(matchBrand(ewc, index([client({ id: "c", name: "ewc" })]))).toMatchObject({ by: "name", clients: [{ id: "c" }] });
+  });
+});
+
+// A person's decision not to add a brand as a client is data (sprout_brand_declines), as a profile's removal is.
+describe("a brand a person chose not to add", () => {
+  const GROUPS = [{ id: "21", name: "Global Class (Ai Degree)" }, { id: "22", name: "RMBH" }, { id: "23", name: "Olo" }];
+  const brands = groupBrands([
+    inGroup(["21"], p("9500", "Ai Degree", "aidegree", "facebook")), inGroup(["21"], p("9501", "Ai Degree | AI Education", "aidegree.ai", "fb_instagram_account")),
+    inGroup(["22"], p("9600", "Rebbe Meir Baal Haness US", "rmbh", "facebook")), inGroup(["22"], p("9601", "Rebbe Meir Baal Hanes Charity", "rmbhcharity", "tiktok")),
+    inGroup(["23"], p("7001", "Olo", "olo", "facebook")),
+    p("9700", "Loose Brand", "loose", "facebook"),
+  ], GROUPS);
+  const byKey = (k: string) => brands.find((b) => b.key === k)!;
+  const DECLINES = [
+    { id: "d1", sprout_group_id: "21", profile_ids: ["9500", "9501"], brand: "Ai Degree", declined_at: "2026-11-02T12:30:00Z", note: null },
+    { id: "d2", sprout_group_id: null, profile_ids: ["9601"], brand: "Rebbe Meir Baal Hanes Charity", declined_at: "2026-11-02T12:31:00Z", note: "Team decision" },
+  ];
+
+  it("finds the decline by the brand's Sprout group, or by any one of its profiles", () => {
+    expect(declineFor(byKey("group:21"), DECLINES)?.id).toBe("d1");
+    expect(declineFor(byKey("group:22"), DECLINES)?.id).toBe("d2");
+    expect(declineFor(byKey("group:23"), DECLINES)).toBeNull();
+    expect(declineFor(byKey("9700"), DECLINES)).toBeNull();
+    expect(declineFor(byKey("9700"), [{ ...DECLINES[1], profile_ids: ["9700"] }])?.id).toBe("d2");
+  });
+  it("says so plainly, with the day in Israel time", () => {
+    expect(declineReason(DECLINES[0])).toBe("Left alone for good: a person chose not to add it as a client on Nov 2, 2026.");
+    expect(declineReason({ ...DECLINES[0], declined_at: "2026-11-02T22:30:00Z" })).toBe("Left alone for good: a person chose not to add it as a client on Nov 3, 2026.");
   });
 });

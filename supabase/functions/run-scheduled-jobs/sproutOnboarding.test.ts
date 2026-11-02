@@ -49,6 +49,7 @@ function world() {
       { id: "sp3", client_id: "b", sprout_profile_id: 7480884, is_active: true }, { id: "sp4", client_id: "g", sprout_profile_id: 600, is_active: true },
     ],
     sprout_profile_removals: [],
+    sprout_brand_declines: [],
     client_lifecycle_steps: [{ client_id: "m", step: "brand_read", result: { site_profiles: ["linkedin:moburst", "instagram:moburst.agency"] } }],
     scheduled_jobs: [],
   }, {
@@ -267,5 +268,48 @@ describe("the job with Sprout's groups", () => {
       name_reason: `Named "European Wax Center": the name 2 of its 2 profile names share; the Sprout group is "ewc".`,
     });
     expect(report.results.find((r) => r.key === "group:11")!.name_reason).toMatch(/^Named "Olo": the name 3 of its 3 profile names share/);
+  });
+
+  // The team's 2 Nov decision, recorded as data (sprout_brand_declines), never as a list in code.
+  const declined = (db: FakeDb, rows: Array<Record<string, unknown>>) => {
+    db.tables.sprout_brand_declines = rows.map((r) => ({ note: null, declined_at: "2026-11-02T12:30:00Z", ...r }));
+    let reads = 0;
+    const from = db.from.bind(db);
+    db.from = (t: string) => { if (t === "sprout_brand_declines") reads++; return from(t); };
+    return () => reads;
+  };
+
+  it("leaves a declined brand alone for good, by its Sprout group or by one of its profiles, reading the declines once", async () => {
+    const db = world();
+    const reads = declined(db, [
+      { id: "d1", sprout_group_id: "15", profile_ids: [8800, 8801], brand: "European Wax Center" },
+      { id: "d2", sprout_group_id: null, profile_ids: [7003], brand: "Olo" },
+    ]);
+    const before = db.tables.clients.length;
+    const report = await sproutOnboarding(db, groupedDeps(), { dryRun: false });
+    const byKey = Object.fromEntries(report.results.map((r) => [r.key, r]));
+    expect(byKey["group:15"]).toMatchObject({ decision: "declined", reason: "Left alone for good: a person chose not to add it as a client on Nov 2, 2026.", decline: { id: "d1" } });
+    expect(byKey["group:11"]).toMatchObject({ decision: "declined", decline: { id: "d2" } });
+    expect(db.tables.clients.filter((c) => ["European Wax Center", "Olo"].includes(c.name) && !c.demo_job_id)).toEqual([]);
+    expect(db.tables.clients.length).toBe(before);
+    expect(reads()).toBe(1);
+    // The dry run says the same, and writes nothing.
+    const dry = await sproutOnboarding(db, groupedDeps(), { dryRun: true });
+    expect(dry.results.find((r) => r.key === "group:15")).toMatchObject({ decision: "declined" });
+  });
+
+  it("matches an assigned or removed profile first, and a decline before a name or a homepage link", async () => {
+    const db = world();
+    db.tables.clients.push({ id: "olo-real", name: "Olo", website_url: null, archived_at: null, demo_job_id: null });
+    declined(db, [
+      { id: "d3", sprout_group_id: "14", profile_ids: [], brand: "Bader Law" },
+      { id: "d4", sprout_group_id: "11", profile_ids: [], brand: "Olo" },
+    ]);
+    const report = await sproutOnboarding(db, groupedDeps(), { dryRun: true });
+    const byKey = Object.fromEntries(report.results.map((r) => [r.key, r]));
+    // Bader Law's profile is assigned to its client: matched, whatever was declined.
+    expect(byKey["group:14"]).toMatchObject({ decision: "matched", client_ids: ["b"] });
+    // Olo's group matches the client "Olo" only by name: the decline comes first.
+    expect(byKey["group:11"]).toMatchObject({ decision: "declined", decline: { id: "d4" } });
   });
 });

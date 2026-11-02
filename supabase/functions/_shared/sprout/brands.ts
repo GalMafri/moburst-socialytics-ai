@@ -303,6 +303,37 @@ export function matchOutcome(m: BrandMatch): { decision: MatchDecision; reason: 
   return { decision: "matched", client_ids, reason: `Already a client: ${BY_WORDS[m.by]} ${names}. That client's accounts step adds new profiles within a day.` };
 }
 
+// ── A brand a person chose not to add ──────────────────────────────────────
+
+/**
+ * A person's decision not to add a Sprout brand as a client
+ * (sprout_brand_declines): data, as a profile's removal is, never a list in
+ * code. By the brand's Sprout group, and by its profiles.
+ */
+export interface BrandDecline {
+  id: string;
+  sprout_group_id: string | null;
+  profile_ids: string[];
+  brand: string;
+  declined_at: string;
+  note?: string | null;
+}
+
+/** The decline that covers this brand: its Sprout group's, else one that names any of its profiles. */
+export function declineFor(brand: Brand, declines: BrandDecline[]): BrandDecline | null {
+  const group = brand.group ? declines.find((d) => d.sprout_group_id && String(d.sprout_group_id) === String(brand.group!.id)) : null;
+  if (group) return group;
+  const ids = new Set(brand.profiles.map((p) => String(p.id)));
+  return declines.find((d) => (d.profile_ids ?? []).some((id) => ids.has(String(id)))) ?? null;
+}
+
+/** Why a declined brand is left alone, with the day of the decision in Israel time. */
+export function declineReason(d: Pick<BrandDecline, "declined_at">): string {
+  const at = new Date(d.declined_at);
+  const day = Number.isFinite(at.getTime()) ? ` on ${at.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "Asia/Jerusalem" })}` : "";
+  return `Left alone for good: a person chose not to add it as a client${day}.`;
+}
+
 // ── Section 3: may an unmatched brand become a client? ─────────────────────
 
 /** At least one brand account: Sprout types a personal LinkedIn profile "linkedin" and a company page "linkedin_company". */

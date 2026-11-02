@@ -7,7 +7,9 @@
 // with none). A run lists Sprout's profiles and groups, takes each Sprout
 // group as one brand (_shared/sprout/brands.ts; profiles in no group by the
 // name rule), named as people know it from its profiles' names (the client
-// goes by that name; its origin keeps the group's label), leaves a group with a profile in two groups alone, and leaves every brand that already is a
+// goes by that name; its origin keeps the group's label), leaves a brand a
+// person chose not to add (sprout_brand_declines, data like a profile's
+// removal) alone for good, leaves a group with a profile in two groups alone, and leaves every brand that already is a
 // client to that client: an active one's accounts step adds new profiles
 // within a day; an archived client's brand, a profile a person removed, and a
 // brand matching two clients are left alone for good. An unmatched brand
@@ -23,7 +25,7 @@
 // nothing. Nothing here alerts anyone or makes a model call.
 
 import type { SproutProfile } from "../_shared/lifecycle/accounts.ts";
-import { blockedFromCreation, clientWithSite, groupBrands, groupConflict, isBrandAccount, joinBrands, matchBrand, matchOutcome, type Brand, type ClientIndex, type KnownClient, type MatchDecision } from "../_shared/sprout/brands.ts";
+import { blockedFromCreation, clientWithSite, declineFor, declineReason, groupBrands, groupConflict, isBrandAccount, joinBrands, matchBrand, matchOutcome, type Brand, type BrandDecline, type ClientIndex, type KnownClient, type MatchDecision } from "../_shared/sprout/brands.ts";
 import { listBrandPosts, POSTS_WINDOW_DAYS, type SproutPost } from "../_shared/sprout/posts.ts";
 import { listCustomerGroups, listCustomerProfiles, type CustomerGroup } from "../_shared/sprout/profiles.ts";
 import { searchWebsite, webReader, websiteJoins, type SiteFact, type SiteReader, type WebsiteSearch } from "../_shared/sprout/website.ts";
@@ -65,7 +67,7 @@ export function liveOnboardingDeps(): OnboardingDeps {
 
 export type Decision =
   | MatchDecision
-  | "group_conflict" | "person" | "no_posts" | "client_website"
+  | "declined" | "group_conflict" | "person" | "no_posts" | "client_website"
   | "created" | "would_create" | "taken" | "not_read" | "later" | "no_name";
 
 export interface BrandResult {
@@ -84,6 +86,8 @@ export interface BrandResult {
   reason: string;
   client_id?: string | null;
   client_ids?: string[];
+  /** The decision a person recorded not to add the brand (sprout_brand_declines). */
+  decline?: Pick<BrandDecline, "id" | "brand" | "declined_at" | "note">;
   posts?: number;
   /** The brands the website search tied into this one, by key. */
   joined?: string[];
@@ -164,6 +168,16 @@ async function readIndex(db: Db, profileIds: number[]): Promise<ClientIndex> {
   };
 }
 
+/** Every brand a person chose not to add as a client, read once a run. */
+async function readDeclines(db: Db): Promise<BrandDecline[]> {
+  const rows = await readAll(db, "sprout_brand_declines", "id, sprout_group_id, profile_ids, brand, declined_at, note", "id");
+  return rows.map((r) => ({
+    id: String(r.id), sprout_group_id: r.sprout_group_id == null ? null : String(r.sprout_group_id),
+    profile_ids: Array.isArray(r.profile_ids) ? (r.profile_ids as unknown[]).map(String) : [], brand: String(r.brand ?? ""),
+    declined_at: String(r.declined_at ?? ""), note: (r.note as string | null) ?? null,
+  }));
+}
+
 interface Evaluated {
   brand: Brand;
   posts: number;
@@ -180,6 +194,7 @@ export async function sproutOnboarding(db: Db, deps: OnboardingDeps, o: { dryRun
   const now = deps.now();
   const [listed, groups] = await Promise.all([deps.profiles(), deps.groups()]);
   const index = await readIndex(db, listed.map((p) => Number(p.id)).filter(Number.isFinite));
+  const declines = await readDeclines(db);
   const brands = groupBrands(listed, groups);
   const byKey = new Map(brands.map((b) => [b.key, b]));
   const only = o.only ? new Set(o.only.map(String)) : null;
@@ -189,13 +204,18 @@ export async function sproutOnboarding(db: Db, deps: OnboardingDeps, o: { dryRun
 
   for (const brand of brands) {
     // Every brand is matched, so a brand of this run that its website ties to a client's brand is that client's.
+    // An assigned or removed profile decides first, then a person's decline, then a name or a homepage link.
     const m = matchBrand(brand, index);
-    const r = m ? { ...base(brand), ...matchOutcome(m) } : null;
+    const decline = m && (m.by === "assigned" || m.by === "removed") ? null : declineFor(brand, declines);
+    const r = m && !decline ? { ...base(brand), ...matchOutcome(m) } : null;
     if (r) matched.set(brand.key, r);
     if (only && !only.has(brand.key)) continue;
-    const conflict = r ? null : groupConflict(brand, groups);
+    const conflict = r || decline ? null : groupConflict(brand, groups);
     if (r) {
       results.push(r);
+    } else if (decline) {
+      results.push({ ...base(brand), decision: "declined", reason: declineReason(decline),
+        decline: { id: decline.id, brand: decline.brand, declined_at: decline.declined_at, note: decline.note ?? null } });
     } else if (conflict) {
       results.push({ ...base(brand), decision: "group_conflict", reason: conflict });
     } else if (!brand.name) {
