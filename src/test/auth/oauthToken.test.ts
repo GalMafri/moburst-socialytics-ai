@@ -29,7 +29,8 @@ describe("oauthClientOf", () => {
 
 describe("the guards that let a session act", () => {
   it("refuse an OAuth token before anything else is checked", () => {
-    for (const path of ["_shared/auth/requireStaff.ts", "_shared/auth/requireMember.ts", "post-preview/index.ts"]) {
+    // api/index.ts: the admin session that may manage API keys.
+    for (const path of ["_shared/auth/requireStaff.ts", "_shared/auth/requireMember.ts", "post-preview/index.ts", "api/index.ts"]) {
       const src = fn(path);
       expect(src, path).toContain("oauthClientOf(");
       expect(src.indexOf("oauthClientOf("), path).toBeLessThan(src.indexOf("auth.getUser("));

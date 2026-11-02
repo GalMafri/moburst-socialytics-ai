@@ -14,6 +14,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { handleRequest, type CoreDeps } from "../_shared/api/core.ts";
 import type { KeyRow } from "../_shared/api/keys.ts";
 import { callEnvFromDeno, callFunction } from "../_shared/invoke.ts";
+import { oauthClientOf } from "../_shared/auth/authz.ts";
 import { API_VERSION, TOOL, socialyticsRoutes } from "./openapi.ts";
 import { makeJobStore } from "./jobs-store.ts";
 import { makeKeyStore } from "./keys-store.ts";
@@ -65,6 +66,8 @@ const deps: CoreDeps = {
     return (data ?? []) as Array<{ id: string; company_slug: string | null }>;
   },
   verifyAdminJwt: async (token) => {
+    // A token from Supabase's OAuth server (the Claude connector) only reads; it never manages keys.
+    if (oauthClientOf(token)) return null;
     const { data, error } = await db.auth.getUser(token);
     if (error || !data?.user) return null;
     const { data: roles } = await db.from("user_roles").select("role").eq("user_id", data.user.id);
