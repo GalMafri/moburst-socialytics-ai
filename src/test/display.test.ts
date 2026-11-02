@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import {
   clientOriginLine, cleanText, competitiveRunStatus, countryNames, eventName, firstRunSentence, formatDate, formatDateTime, formatRange,
-  isRawProfileId, languageNames, platformKey, platformName, profileName, roleName, timelineDetail, timelineKindName, usageStateName,
+  isRawProfileId, languageNames, notePointKindName, noteReadLine, noteStateLine, platformKey, platformName, profileName, roleName, timelineDetail, timelineKindName, usageStateName,
 } from "@/lib/display";
 import { isActiveClient } from "@/lib/activeClients";
 
@@ -137,5 +137,24 @@ describe("where a client came from", () => {
     expect(clientOriginLine({ source: "portal", at: "2026-11-09T06:01:00Z" })).toBe("");
     expect(clientOriginLine({ source: "sprout" })).toBe("Added from Sprout Social");
     expect(clientOriginLine("sprout")).toBe("");
+  });
+});
+
+describe("client notes", () => {
+  it("says in one line where each note stands", () => {
+    expect(noteStateLine("reading", 0)).toBe("Reading");
+    expect(noteStateLine("learned", 12)).toBe("12 points learned");
+    expect(noteStateLine("learned", 1)).toBe("1 point learned");
+    expect(noteStateLine("nothing", 0)).toBe("Nothing in this note for the copy");
+    // Every point of a learned note removed: nothing of it reaches the copy.
+    expect(noteStateLine("learned", 0)).toBe("Nothing in this note for the copy");
+  });
+  it("names each kind of point as the copy section heads it", () => {
+    expect(["avoid", "do", "upcoming", "fact", "other"].map(notePointKindName)).toEqual(["Avoid", "Do", "Coming up", "Facts", "Other"]);
+  });
+  it("says how much of a long file was read, and nothing for one read whole", () => {
+    expect(noteReadLine(512345, 400000)).toBe("About the first 400,000 of 512,345 characters were read.");
+    expect(noteReadLine(9000, 400000)).toBe("");
+    expect(noteReadLine(null, 400000)).toBe("");
   });
 });

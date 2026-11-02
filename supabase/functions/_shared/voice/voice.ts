@@ -1,16 +1,24 @@
 // supabase/functions/_shared/voice/voice.ts
 //
 // How a client writes, for every piece of code that writes its copy (weekly
-// calendar, Lital 19 Oct 2026). Three sources, in this order of authority:
-//   1. the team's stated preferences (brand_voice_learnings, active ones),
+// calendar, Lital 19 Oct 2026). Four sources, in this order of authority:
+//   1. what the client told the team (client notes, 2 Nov 2026): the points
+//      in use from its notes and files, and the team's standing notes
+//      (clients.brand_notes); _shared/notes/notes.ts selects them;
+//   2. the team's stated preferences (brand_voice_learnings, active ones),
 //      learned from copy edits and "Revise this week" notes;
-//   2. the client's real social voice per platform (clients.social_voice),
+//   3. the client's real social voice per platform (clients.social_voice),
 //      learned from the posts it actually published;
-//   3. the brief's tone line (clients.brand_identity.tone_of_voice).
+//   4. the brief's tone line (clients.brand_identity.tone_of_voice).
+// Between 1 and 2 the later date wins, so both carry dates. A client with
+// nothing in 1 has the other three, numbered from 1.
 // The memory stays short: a preference confirmed again gets stronger, one a
-// newer signal contradicts is replaced, anything else is added.
+// newer signal contradicts is replaced, anything else is added. Client notes
+// never write to it.
 // Free of Deno and network imports so it can be tested; load.ts reads and
 // writes the database.
+
+import { notesSectionLines, shortDate, type NotesVoice } from "../notes/notes.ts";
 
 export const PATTERN_TYPES = ["tone", "length", "emoji_usage", "cta_style", "hashtag_preference", "vocabulary", "structure", "topics", "format", "other"] as const;
 export type PatternType = typeof PATTERN_TYPES[number];
@@ -58,26 +66,38 @@ export interface ClientVoice {
   preferences: Preference[];
   social: SocialVoice | null;
   briefTone: string | null;
+  /** What the client told the team (loadClientVoice always sets it). */
+  notes?: NotesVoice;
 }
 
 /**
- * The voice section of a copy prompt. `platforms` narrows the social voice
- * and examples to the platforms the copy is for.
+ * The voice section of a copy prompt. `platforms` narrows what the client
+ * told the team, the social voice and the examples to the platforms the copy
+ * is for.
  */
 export function voicePromptBlock(v: ClientVoice, opts: { platforms?: string[]; examples?: Record<string, VoiceExample[]> } = {}): string {
   const wanted = opts.platforms?.length ? new Set(opts.platforms.map((p) => p.toLowerCase())) : null;
   const keep = (platform: string) => !wanted || wanted.has(platform.toLowerCase());
-  const lines: string[] = [`How ${v.brand} writes. When these disagree, the earlier one wins.`];
+  const told = v.notes ? notesSectionLines(v.notes, { platforms: opts.platforms }) : [];
+  const today = v.notes?.today ?? new Date().toISOString().slice(0, 10);
+  const lines: string[] = [told.length
+    ? `How ${v.brand} writes. When these disagree, the earlier one wins, except between 1 and 2, where the later date wins.`
+    : `How ${v.brand} writes. When these disagree, the earlier one wins.`];
+  let n = 0;
 
-  lines.push("1. The team's stated preferences (always follow these):");
+  if (told.length) {
+    lines.push(`${++n}. What ${v.brand} told the team. Follow these; use the facts, but never say they come from notes or meetings.`, ...told);
+  }
+
+  lines.push(`${++n}. The team's stated preferences, each with the date it was last confirmed (always follow these):`);
   if (v.preferences.length) {
-    for (const p of v.preferences) lines.push(`- ${p.pattern_description}${p.times_confirmed > 1 ? ` (confirmed ${p.times_confirmed} times)` : ""}`);
+    for (const p of v.preferences) lines.push(`- ${p.pattern_description} (${shortDate(p.last_confirmed_at, today)}${p.times_confirmed > 1 ? `, confirmed ${p.times_confirmed} times` : ""})`);
   } else {
     lines.push("- None recorded yet.");
   }
 
   const platforms = Object.entries(v.social?.platforms ?? {}).filter(([k]) => keep(k));
-  lines.push(`2. ${v.brand}'s real social voice, learned from its published posts${v.social ? ` (${v.social.post_count} posts, ${v.social.built_at.slice(0, 10)})` : ""}:`);
+  lines.push(`${++n}. ${v.brand}'s real social voice, learned from its published posts${v.social ? ` (${v.social.post_count} posts, ${v.social.built_at.slice(0, 10)})` : ""}:`);
   if (platforms.length) {
     for (const [platform, pv] of platforms) {
       lines.push(`${platform}: ${pv.summary}`);
@@ -89,7 +109,7 @@ export function voicePromptBlock(v: ClientVoice, opts: { platforms?: string[]; e
     lines.push("- Not learned yet (no published posts to learn from).");
   }
 
-  lines.push(`3. The brief's tone: ${v.briefTone?.trim() || "not given"}`);
+  lines.push(`${++n}. The brief's tone: ${v.briefTone?.trim() || "not given"}`);
 
   const examples = Object.entries(opts.examples ?? v.social?.examples ?? {}).filter(([k, xs]) => keep(k) && xs.length);
   if (examples.length) {

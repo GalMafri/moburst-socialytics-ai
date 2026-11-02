@@ -2,12 +2,14 @@
 //
 // Reading and updating how a client writes (voice.ts holds the rules). Every
 // function that writes a client's copy builds its prompt from
-// loadClientVoice, so none of them can skip the team's preferences or the
-// client's real voice (src/test/copyWritersUseVoice.test.ts checks this).
+// loadClientVoice, so none of them can skip what the client told the team,
+// the team's preferences or the client's real voice
+// (src/test/copyWritersUseVoice.test.ts checks this).
 
 import { anthropicMessages } from "../anthropic.ts";
 import { consolidatePrompt, mergePrompt, parseConsolidation, parseMergeOps, parseVoiceProfile, voiceProfilePrompt, type ClientVoice, type MemorySignal, type Preference, type SocialVoice } from "./voice.ts";
 import { bestExamples, rhythmFromPosts, scoreOwnPosts, type OwnPost } from "../calendar/evidence.ts";
+import { pointsInUse, readNoteRows, standingNotes, todayIn } from "../notes/notes.ts";
 
 /** The model every piece of client copy is written with. */
 export const COPY_MODEL = "claude-opus-5-5";
@@ -27,14 +29,25 @@ export async function activePreferences(admin: Db, clientId: string): Promise<Pr
   return (data ?? []) as Preference[];
 }
 
-export async function loadClientVoice(admin: Db, clientId: string): Promise<ClientVoice> {
-  const [{ data: client, error }, preferences] = await Promise.all([
-    admin.from("clients").select("name, brand_identity, social_voice").eq("id", clientId).maybeSingle(),
+/**
+ * How the client writes: what it told the team (its notes' points in use,
+ * worked out against the client's own day, and the brief's brand notes as
+ * the team's standing notes), the team's preferences, its real voice and the
+ * brief's tone. A read that fails throws, so no copy is written without them.
+ */
+export async function loadClientVoice(admin: Db, clientId: string, now = new Date()): Promise<ClientVoice> {
+  const [{ data: client, error }, preferences, rows] = await Promise.all([
+    admin.from("clients").select("name, brand_identity, social_voice, brand_notes, timezone").eq("id", clientId).maybeSingle(),
     activePreferences(admin, clientId),
+    readNoteRows(admin, clientId),
   ]);
   if (error || !client) throw new Error("Could not read the client.");
   const social = client.social_voice && typeof client.social_voice === "object" && client.social_voice.platforms ? client.social_voice as SocialVoice : null;
-  return { brand: String(client.name ?? ""), preferences, social, briefTone: client.brand_identity?.tone_of_voice ? String(client.brand_identity.tone_of_voice) : null };
+  const today = todayIn(String(client.timezone || "UTC"), now);
+  return {
+    brand: String(client.name ?? ""), preferences, social, briefTone: client.brand_identity?.tone_of_voice ? String(client.brand_identity.tone_of_voice) : null,
+    notes: { points: pointsInUse(rows.notes, rows.points, rows.links, today), standing: standingNotes(client.brand_notes), today },
+  };
 }
 
 function apiKey(): string {

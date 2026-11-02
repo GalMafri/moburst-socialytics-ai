@@ -77,7 +77,7 @@ vi.mock('@/integrations/supabase/client', () => ({ supabase: {
       return { data: [], error: null };
     };
     const q: any = {
-      select: () => q, order: () => q, limit: () => q, not: () => q, neq: () => q,
+      select: () => q, order: () => q, limit: () => q, not: () => q, neq: () => q, range: () => q,
       in: (k: string, v: unknown) => { filters[k] = v; return q; },
       eq: (k: string, v: unknown) => { filters[k] = v; return q; },
       is: (k: string, v: unknown) => { filters[k] = v; return q; },

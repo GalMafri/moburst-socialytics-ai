@@ -214,6 +214,11 @@ verify_jwt = false
 [functions.calendar-posts]
 verify_jwt = false
 
+# Client notes: staff with write access to the client; the function checks
+# the caller itself (requireStaff).
+[functions.client-notes]
+verify_jwt = false
+
 [functions.revise-suggestion]
 verify_jwt = false
 

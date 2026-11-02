@@ -496,6 +496,20 @@ export async function workedOn(admin: Db, clientId: string, posts: Array<{ id: s
   return new Set(ids.filter((id): id is string => !!id));
 }
 
+/**
+ * The posts a person's own revision rewrote (calendar_plans.revisions). A
+ * revision nobody asked for (the rewrite client notes ask for) keeps them,
+ * as it keeps every post someone worked on.
+ */
+export function revisedByPerson(revisions: unknown): Set<string> {
+  const out = new Set<string>();
+  for (const r of (Array.isArray(revisions) ? revisions : []) as Array<{ by?: unknown; replaced?: unknown }>) {
+    if (!r?.by || !Array.isArray(r.replaced)) continue;
+    for (const p of r.replaced as Array<{ id?: unknown }>) if (p?.id) out.add(String(p.id));
+  }
+  return out;
+}
+
 export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): Promise<WeekJobOutcome> {
   const week = String(job.occurrence ?? "").slice(0, 10);
   let planId: string | null = null;
@@ -534,6 +548,7 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
     const all = (rows ?? []) as any[];
     const planPosts = all.filter((p) => p.plan_id === plan.id && p.post_date >= today);
     const worked = await workedOn(admin, client.id, planPosts);
+    if (!pending.by) for (const id of revisedByPerson(plan.revisions)) worked.add(id);
     const kept = planPosts.filter((p) => worked.has(p.id)).map((p) => p.id);
     const targets = planPosts.filter((p) => !worked.has(p.id) && (pending.scope === "empty" ? !String(p.copy || "").trim() : true));
     if (!targets.length) {
