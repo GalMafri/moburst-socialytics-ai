@@ -17,6 +17,10 @@
 // report_pipeline steps in a lane of their own (worker.ts), and the daily
 // sweep removes expired pipeline payloads and old pipeline runs.
 //
+// Client notes (_shared/notes/run.ts): a notes_read job reads one part of a
+// client's waiting notes per run; the daily sweep queues one for a client
+// whose notes wait with no job on its way (client_notes_queue_waiting).
+//
 // POST {"mode":"replay_competitive","report_id":"<id>"[,"reuse_analysis":true]}
 //                              starts a shadow run of the in-app competitive
 //                              pipeline for a past report, from its saved
@@ -72,6 +76,7 @@ import { makeDispatchStore, makeJobStore } from "./store.ts";
 import { filterCheckRequest, runTrendJob, startTrendReplay, startTrendWeek } from "./trends.ts";
 import type { ScheduledJob } from "./types.ts";
 import { runReportText, sonnetCompletion } from "../_shared/reports/correctText.ts";
+import { runNotesRead } from "../_shared/notes/run.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -88,6 +93,7 @@ const JOB_LABELS: Partial<Record<ScheduledJob["kind"], string>> = {
   lifecycle_step: "client lifecycle step",
   report_pipeline: "report pipeline step",
   trend_refresh: "industry trends",
+  notes_read: "client notes",
 };
 
 Deno.serve(async (req) => {
@@ -168,6 +174,8 @@ Deno.serve(async (req) => {
           case "lifecycle_step": return runLifecycleStep(db, job as unknown as LifecycleJob);
           case "report_pipeline": return runPipelineJob(job, pipelineDeps);
           case "trend_refresh": return runTrendJob(db, job);
+          // The file parsers load only for a notes job that needs them, so the worker boots without them.
+          case "notes_read": return runNotesRead(db, job, { parsers: () => import("../_shared/notes/parsers.ts").then((m) => m.PARSERS) });
           default: return Promise.resolve({ status: "failed" as const, reason: `Unknown job kind ${(job as ScheduledJob).kind}` });
         }
       },
@@ -199,7 +207,13 @@ Deno.serve(async (req) => {
       const repairs = repairsFor(summary);
       const requeued = repairs.requeue.length ? await attempt("put stopped jobs back in the queue", () => jobs.requeue(repairs.requeue, now), 0) : 0;
       const enqueued = repairs.enqueue ? await attempt("queue due work", async () => (await jobs.enqueue(false)).enqueued.length, 0) : 0;
-      const ran = repairs.work || requeued || enqueued ? await attempt("run the queue", async () => (await tick()).results, [] as TickResult["results"]) : [];
+      // Client notes still waiting to be read with no job on their way.
+      const notesQueued = await attempt("queue client notes waiting to be read", async () => {
+        const { data, error } = await db.rpc("client_notes_queue_waiting");
+        if (error) throw new Error(error.message);
+        return Number(data) || 0;
+      }, 0);
+      const ran = repairs.work || requeued || enqueued || notesQueued ? await attempt("run the queue", async () => (await tick()).results, [] as TickResult["results"]) : [];
       // In-between pipeline data past its keep date, then pipeline runs past theirs.
       const payloadsExpired = await attempt("expire pipeline payloads", () => expirePayloads(db, now), 0);
       const pipelineRetention = await attempt("expire pipeline runs", async () => {
@@ -215,7 +229,7 @@ Deno.serve(async (req) => {
       }));
       return json({
         at: now.toISOString(), counts: summary.counts,
-        repaired: { requeued, enqueued, ran },
+        repaired: { requeued, enqueued, notes_queued: notesQueued, ran },
         pipelines: { payloads_expired: payloadsExpired, retention: pipelineRetention },
         failed: brief(summary.failed), blocked: brief(summary.blocked), stuck: brief(summary.stuck), overdue: brief(summary.overdue),
         unscheduled: summary.unscheduled.map((g) => ({ client: g.client_name ?? g.client_id, job: `${g.report_kind} dispatch`, reason: `due ${g.next_run_at} and never queued` })),
