@@ -724,6 +724,189 @@ export type Database = {
           },
         ]
       }
+      client_note_links: {
+        Row: {
+          client_id: string
+          created_at: string
+          id: string
+          other_id: string
+          point_id: string
+          relation: string
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          id?: string
+          other_id: string
+          point_id: string
+          relation: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          id?: string
+          other_id?: string
+          point_id?: string
+          relation?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_note_links_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "client_note_links_other_id_fkey"
+            columns: ["other_id"]
+            isOneToOne: false
+            referencedRelation: "client_note_points"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "client_note_links_point_id_fkey"
+            columns: ["point_id"]
+            isOneToOne: false
+            referencedRelation: "client_note_points"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      client_note_points: {
+        Row: {
+          client_id: string
+          created_at: string
+          id: string
+          kind: string
+          note_id: string
+          part: number
+          platform: string | null
+          removed_at: string | null
+          removed_by: string | null
+          said_on: string | null
+          text: string
+          until: string | null
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          id?: string
+          kind: string
+          note_id: string
+          part?: number
+          platform?: string | null
+          removed_at?: string | null
+          removed_by?: string | null
+          said_on?: string | null
+          text: string
+          until?: string | null
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          id?: string
+          kind?: string
+          note_id?: string
+          part?: number
+          platform?: string | null
+          removed_at?: string | null
+          removed_by?: string | null
+          said_on?: string | null
+          text?: string
+          until?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_note_points_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "client_note_points_note_id_fkey"
+            columns: ["note_id"]
+            isOneToOne: false
+            referencedRelation: "client_notes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      client_notes: {
+        Row: {
+          added_by: string | null
+          added_by_name: string | null
+          client_id: string
+          created_at: string
+          date_set_by: string
+          file_path: string | null
+          file_type: string | null
+          id: string
+          input_tokens: number
+          kind: string
+          note_date: string
+          output_tokens: number
+          parts_done: number
+          read_at: string | null
+          state: string
+          text: string | null
+          text_chars: number | null
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          added_by?: string | null
+          added_by_name?: string | null
+          client_id: string
+          created_at?: string
+          date_set_by?: string
+          file_path?: string | null
+          file_type?: string | null
+          id?: string
+          input_tokens?: number
+          kind: string
+          note_date?: string
+          output_tokens?: number
+          parts_done?: number
+          read_at?: string | null
+          state?: string
+          text?: string | null
+          text_chars?: number | null
+          title?: string
+          updated_at?: string
+        }
+        Update: {
+          added_by?: string | null
+          added_by_name?: string | null
+          client_id?: string
+          created_at?: string
+          date_set_by?: string
+          file_path?: string | null
+          file_type?: string | null
+          id?: string
+          input_tokens?: number
+          kind?: string
+          note_date?: string
+          output_tokens?: number
+          parts_done?: number
+          read_at?: string | null
+          state?: string
+          text?: string | null
+          text_chars?: number | null
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_notes_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       client_users: {
         Row: {
           client_id: string
@@ -3418,6 +3601,11 @@ export type Database = {
         Args: { p_holder: string; p_name: string; p_seconds: number }
         Returns: boolean
       }
+      client_notes_queue_read: {
+        Args: { p_client: string }
+        Returns: undefined
+      }
+      client_notes_queue_waiting: { Args: never; Returns: number }
       client_value_is_set: {
         Args: { p_field: string; p_value: Json }
         Returns: boolean
