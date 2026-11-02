@@ -9,6 +9,7 @@
 // writes, so a run never sets off another run of the same step.
 //
 // In the order a new client goes through them:
+//   website         a website for a client with none, confirmed from its own posts (a client added from Sprout)
 //   brand_read      the website: brand identity, logo, location and timezone, country, language
 //   brief_pillars   a brief from the strategy document or the site when there is none, then pillars and keywords
 //   accounts        Sprout profiles matched by Sprout's brand name and by the site's profile links
@@ -27,6 +28,8 @@ import { StyleError } from "../brand-references/errors.ts";
 import { learnBrandStyle } from "../brand-references/learnStyle.ts";
 import { defaultSproutCustomerId } from "../sprout/customer.ts";
 import { listCustomerProfiles } from "../sprout/profiles.ts";
+import { listBrandPosts, POSTS_WINDOW_DAYS } from "../sprout/posts.ts";
+import { searchWebsite, webReader } from "../sprout/website.ts";
 import { fetchSiteHtml, logoOnPage, normalizeWebsite, openaiKeyFor, ResearchError, researchBrand } from "../brand/research.ts";
 import { anthropicKey, briefFromStrategyDoc, derivePillars, isGenericPillars, PillarsError, type PillarClient } from "../brand/pillars.ts";
 import { fetchSiteText, identifyCompetitors, IdentifyError } from "../competitive/identify.ts";
@@ -35,7 +38,7 @@ import { confirmDraftSet } from "../competitive/confirmSet.ts";
 import { advanceSetupOnServer, resetTracking, rivalIqApi, SetupError, syncTrackedHandles } from "../competitive/rivaliqSetupRun.ts";
 import { LANDSCAPE_MISSING } from "../competitive/landscapeCheck.ts";
 import { scrapeMarkdown } from "../net/firecrawl.ts";
-import { matchProfiles, platformsOf, profileListKey, siteProfileLinks } from "./accounts.ts";
+import { matchProfiles, platformsOf, profileListKey, siteProfileLinks, type SproutProfile } from "./accounts.ts";
 import { pickBackground, placementFor, referencePaths } from "./designSettings.ts";
 import { lifecycleMayWrite, setBy, writeClientFields } from "./fields.ts";
 import { countryCode, htmlLanguage, replacesLocation, resolveLocation, SOURCE_RANK, zoneCountry } from "./location.ts";
@@ -94,6 +97,9 @@ export const deps = {
   scrapeMarkdown,
   fetchSiteText,
   listCustomerProfiles,
+  listBrandPosts,
+  searchWebsite,
+  siteReader: () => webReader(),
   identifyCompetitors,
   detectCompetitorHandles,
   confirmDraftSet,
@@ -170,8 +176,47 @@ export function weeksFor(timeZone: string | null | undefined, now: Date): { toda
   return { today, monday, next: day(new Date(Date.parse(`${monday}T00:00:00Z`) + 7 * DAY)), daysLeft: isoDow < 7 };
 }
 
+/** The client's active Sprout profiles, as Sprout lists a profile. */
+async function activeProfiles(db: Db, clientId: string): Promise<SproutProfile[]> {
+  const { data, error } = await db.from("sprout_profiles").select("sprout_profile_id, profile_name, native_name, network_type, native_link")
+    .eq("client_id", clientId).eq("is_active", true);
+  if (error) throw new Error(`Could not read the client's social accounts: ${error.message}`);
+  return (data ?? []).map((r: Record<string, unknown>) => ({
+    id: String(r.sprout_profile_id), name: str(r.profile_name), native_name: str(r.native_name), network_type: str(r.network_type), native_link: str(r.native_link), status: "active",
+  })).sort((a: SproutProfile, b: SproutProfile) => a.id.length - b.id.length || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
 /** Steps in the order a new client goes through them. */
 export const STEPS: Record<string, StepDef> = {
+  // A website for a client that has none and that nobody set (spec:
+  // docs/superpowers/specs/2026-11-02-sprout-auto-onboarding-design.md,
+  // section 5): the search the Sprout onboarding job runs (sprout/website.ts)
+  // over the posts of the client's assigned profiles in the last 90 days.
+  // Looked at again every 7 days as posts arrive, and whenever its profiles
+  // change. The website it confirms is brand_read's input; a website the
+  // client has, or one a person set, is never replaced.
+  website: {
+    policy: { recheckDays: 7 },
+    async inputs(db, client) {
+      if (siteKey(client.website_url) || !lifecycleMayWrite(client.field_sources, "website_url")) return null;
+      const ids = (await activeProfiles(db, client.id)).map((p) => p.id);
+      return ids.length ? `profiles:${ids.join(",")}` : null;
+    },
+    async run(db, client) {
+      if (siteKey(client.website_url) || !lifecycleMayWrite(client.field_sources, "website_url")) return { status: "done", result: { kept: true } };
+      const profiles = await activeProfiles(db, client.id);
+      if (!profiles.length) return { status: "waiting", reason: "social_accounts" };
+      const now = deps.now();
+      const posts = await deps.listBrandPosts(profiles.map((p) => p.id), {
+        since: new Date(now.getTime() - POSTS_WINDOW_DAYS * DAY), until: now, customerId: String(client.sprout_customer_id || defaultSproutCustomerId()),
+      });
+      const found = await deps.searchWebsite({ name: client.name, profiles }, posts, deps.siteReader());
+      if (!found.website) return { status: "waiting", reason: "website", recheckDays: 7, result: { posts: posts.length, most_linked: found.most_linked, tried: found.tried } };
+      const written = await writeClientFields(db, client.id, { website_url: found.website });
+      return { status: "done", result: { website: found.website, confirmed_by: found.confirmed_by, posts: posts.length, written: written.written, kept: written.skipped } };
+    },
+  },
+
   // The website: brand identity, logo, where the business is (and so its
   // timezone), its country and its language. Re-read every 180 days and
   // whenever the website changes. The model call is made only when something

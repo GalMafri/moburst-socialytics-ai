@@ -48,6 +48,63 @@ describe("helpers", () => {
   });
 });
 
+describe("website", () => {
+  // A client the Sprout onboarding added with no confirmed website: Olo-shaped, two assigned profiles.
+  const olo = (over: Record<string, unknown> = {}) => client({ id: "c1", name: "Olo", website_url: null, ...over });
+  const profiles = () => [
+    { client_id: "c1", sprout_profile_id: 7, profile_name: "Olo", native_name: "olo", network_type: "linkedin_company", native_link: "", is_active: true },
+    { client_id: "c1", sprout_profile_id: 8, profile_name: "Olo", native_name: "olo.hq", network_type: "fb_instagram_account", native_link: "", is_active: true },
+    { client_id: "c1", sprout_profile_id: 9, profile_name: "Olo old", native_name: "oloold", network_type: "facebook", native_link: "", is_active: false },
+  ];
+  const site = (pages: Record<string, string>) => () => ({
+    resolve: async (url: string) => url,
+    homepage: async (url: string) => (new URL(url).hostname in pages ? { html: pages[new URL(url).hostname], url: `https://www.${new URL(url).hostname}/` } : null),
+  });
+
+  it("is the first step", () => {
+    expect(Object.keys(STEPS)[0]).toBe("website");
+  });
+  it("never runs when the client has a website or a person set it, and waits for the client's profiles", async () => {
+    const db = dbWith({ sprout_profiles: profiles() });
+    expect(await STEPS.website.inputs(db, client(), new Map())).toBeNull();
+    expect(await STEPS.website.inputs(db, olo({ field_sources: person("website_url") }), new Map())).toBeNull();
+    expect(await STEPS.website.inputs(dbWith({ sprout_profiles: [] }), olo(), new Map())).toBeNull();
+    expect(await STEPS.website.inputs(db, olo(), new Map())).toBe("profiles:7,8");
+  });
+  it("writes the website its posts confirm, as the lifecycle's, so brand_read gets its input", async () => {
+    const c = olo();
+    const db = dbWith({ clients: [c], sprout_profiles: profiles() });
+    deps.now = () => new Date(T);
+    let asked: unknown = null;
+    deps.listBrandPosts = (async (ids: string[], o: { since: Date; until: Date }) => {
+      asked = { ids, since: o.since.toISOString(), until: o.until.toISOString() };
+      return [{ text: "Order ahead at https://www.olo.com/order", created_time: T, perma_link: null, profile_id: "7" }];
+    }) as never;
+    deps.siteReader = site({ "olo.com": `<a href="https://www.instagram.com/olo.hq/">ig</a>` }) as never;
+    const out = await STEPS.website.run(db, c, ctx());
+    expect(asked).toEqual({ ids: ["7", "8"], since: "2026-07-21T10:00:00.000Z", until: T });
+    expect(out).toMatchObject({ status: "done", result: { website: "https://www.olo.com", confirmed_by: "profile_link", written: ["website_url"] } });
+    expect(c.website_url).toBe("https://www.olo.com");
+    expect(c.field_sources.website_url).toMatchObject({ by: "lifecycle" });
+    expect(await STEPS.brand_read.inputs(db, c, new Map())).toBe("olo.com");
+    expect(await STEPS.website.inputs(db, c, new Map())).toBeNull();
+  });
+  it("waits 7 days when no linked site is confirmed", async () => {
+    const c = olo();
+    deps.listBrandPosts = (async () => [{ text: "See https://partner.example", created_time: T, perma_link: null, profile_id: "7" }]) as never;
+    deps.siteReader = site({ "partner.example": "<p>Partner</p>" }) as never;
+    const out = await STEPS.website.run(dbWith({ clients: [c], sprout_profiles: profiles() }), c, ctx());
+    expect(out).toMatchObject({ status: "waiting", reason: "website", recheckDays: 7, result: { posts: 1, most_linked: "partner.example" } });
+    expect(c.website_url).toBeNull();
+  });
+  it("replaces nothing a person set, even when asked to run", async () => {
+    const c = olo({ website_url: "https://olo-person.example", field_sources: person("website_url") });
+    deps.listBrandPosts = fail("the post read");
+    expect(await STEPS.website.run(dbWith({ clients: [c], sprout_profiles: profiles() }), c, ctx())).toEqual({ status: "done", result: { kept: true } });
+    expect(c.website_url).toBe("https://olo-person.example");
+  });
+});
+
 describe("brand_read", () => {
   it("waits for a website, and keys on it", async () => {
     expect(await STEPS.brand_read.inputs(dbWith(), client({ website_url: null }), new Map())).toBeNull();

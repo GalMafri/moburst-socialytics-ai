@@ -16,7 +16,7 @@ type Db = any;
 
 /** The client fields the lifecycle writes, and the only ones lifecycle_write_client accepts. */
 export const LIFECYCLE_FIELDS = [
-  "brand_identity", "logo_url", "timezone", "geo", "language", "location", "brief_text", "content_pillars", "pillars_source",
+  "website_url", "brand_identity", "logo_url", "timezone", "geo", "language", "location", "brief_text", "content_pillars", "pillars_source",
   "pillars_derived_at", "social_keywords", "primary_platforms", "company_slug", "hub_company_name",
 ] as const;
 export type LifecycleField = typeof LIFECYCLE_FIELDS[number];
