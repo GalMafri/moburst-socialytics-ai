@@ -1809,25 +1809,25 @@ export type Database = {
       }
       design_reference_choices: {
         Row: {
+          choice: string
           chosen_at: string
           chosen_by: string | null
-          choice: string
           client_id: string
           path: string
           source: string
         }
         Insert: {
+          choice: string
           chosen_at?: string
           chosen_by?: string | null
-          choice: string
           client_id: string
           path: string
           source?: string
         }
         Update: {
+          choice?: string
           chosen_at?: string
           chosen_by?: string | null
-          choice?: string
           client_id?: string
           path?: string
           source?: string
