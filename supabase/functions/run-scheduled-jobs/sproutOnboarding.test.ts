@@ -107,10 +107,12 @@ describe("the Sprout onboarding job", () => {
     const out = await runSproutOnboardingJob(db, job(), d);
     expect(out.status).toBe("done");
     const report = out.result as { results: Array<Record<string, unknown> & { brand: string; decision: string }>; created: string[]; left: string[] };
-    expect(decisions(report.results)).toEqual({
-      "Moburst - Growth Done Right": "matched", "Moburst | Mobile-First Digital Agency": "matched", "Moburst Careers": "client_website",
-      "Bader Law": "matched", "Pay The Pyper": "matched", "Gone Co": "archived", "Olo": "created", "Noah Glass": "person", "Quiet Brand": "no_posts", "Yangra": "created",
-    });
+    // Named as people know them: both Moburst profiles are "Moburst" before their taglines, and "Gone Co" is "Gone".
+    expect(report.results.map((r) => [r.key, r.brand, r.decision])).toEqual([
+      ["600", "Gone", "archived"], ["5555", "Moburst Careers", "client_website"], ["7001", "Olo", "created"], ["8001", "Noah Glass", "person"],
+      ["9001", "Quiet Brand", "no_posts"], ["9100", "Yangra", "created"], ["5489335", "Moburst", "matched"], ["5719052", "Moburst", "matched"],
+      ["7480884", "Bader Law", "matched"], ["7727415", "Pay The Pyper", "matched"],
+    ]);
     const olo = db.tables.clients.find((c) => c.name === "Olo" && !c.demo_job_id)!;
     expect(olo).toMatchObject({ website_url: "https://www.olo.com", created_by: null, field_sources: { website_url: { by: "lifecycle" } }, origin: { source: "sprout", brand: "Olo", profile_ids: [7001, 7002, 7003] } });
     // Olo Dining joined Olo by the website: one client with all three profiles.
@@ -171,7 +173,7 @@ describe("the Sprout onboarding job", () => {
     expect(snapshot(db)).toBe(before);
     expect(db.rpcCalls).toEqual([]);
     expect(report).toMatchObject({ dry_run: true, created: [], left: [] });
-    expect(decisions(report.results)).toMatchObject({ Olo: "would_create", Yangra: "would_create", "Gone Co": "archived", "Moburst Careers": "client_website" });
+    expect(decisions(report.results)).toMatchObject({ Olo: "would_create", Yangra: "would_create", Gone: "archived", "Moburst Careers": "client_website" });
     const olo = report.results.find((r) => r.brand === "Olo")!;
     expect(olo.reason).toMatch(/^Would be created/);
     expect(olo.website).toMatchObject({ website: "https://www.olo.com", confirmed_by: "profile_link", tried: [{ domain: "olo.com", read: true, fact: "profile_link" }] });
@@ -200,18 +202,20 @@ describe("the Sprout onboarding job", () => {
 // The 2 Nov dry run: Sprout names a brand's profiles differently per network; its groups keep each brand whole.
 describe("the job with Sprout's groups", () => {
   const G = (groups: string[], profile: SproutProfile): SproutProfile => ({ ...profile, groups });
-  const GROUPS = [{ id: "11", name: "Olo" }, { id: "12", name: "Yangra" }, { id: "13", name: "Agency Team" }, { id: "14", name: "Bader Law" }];
+  const GROUPS = [{ id: "11", name: "Olo" }, { id: "12", name: "Yangra" }, { id: "13", name: "Agency Team" }, { id: "14", name: "Bader Law" }, { id: "15", name: "ewc" }];
   const GROUPED = [
     G(["11"], p("7001", "Olo - Skip the Line", "olo", "facebook")), G(["11"], p("7002", "Olo App | Food Ordering", "oloapp", "fb_instagram_account")),
     G(["11"], p("7003", "Olo App | Food Ordering", "oloapp", "tiktok")),
     p("7100", "Olo", "olo_x", "twitter"),
     G(["12"], p("9100", "Yangra", "yangra", "facebook")), G(["12", "13"], p("9101", "Yangra | Hinduism for Modern Life", "yangra.life", "fb_instagram_account")),
     G(["14"], p("7480884", "Bader Law", "BaderLawLLC", "facebook")), G(["14"], p("7481075", "Bader Law Firm", "Bader Law", "youtube")),
+    G(["15"], p("8800", "European Wax Center (Erie)", "ewc_erie", "facebook")), G(["15"], p("8801", "European Wax Center", "waxcenter", "fb_instagram_account")),
   ];
   const groupedDeps = () => deps({
     profiles: async () => GROUPED,
     groups: async () => GROUPS,
-    posts: async (ids: string[]) => ids.includes("7001") ? Array.from({ length: 7 }, (_, i) => ({ text: `Order at https://app.olo.com/r/${i}`, created_time: NOW.toISOString(), perma_link: null, profile_id: "7002" })) : [],
+    posts: async (ids: string[]) => ids.includes("7001") ? Array.from({ length: 7 }, (_, i) => ({ text: `Order at https://app.olo.com/r/${i}`, created_time: NOW.toISOString(), perma_link: null, profile_id: "7002" }))
+      : ids.includes("8800") ? [{ text: "Book your first wax", created_time: NOW.toISOString(), perma_link: null, profile_id: "8800" }] : [],
     reader: { resolve: async (url: string) => url, homepage: async (url: string) => (new URL(url).hostname === "olo.com" ? { html: "<p>Order online</p>", url: "https://www.olo.com/" } : null) },
   });
 
@@ -246,5 +250,22 @@ describe("the job with Sprout's groups", () => {
     ]);
     expect(report.results.find((r) => r.key === "7100")).toMatchObject({ group: null, profiles: [{ id: "7100", groups: [] }], decision: "matched" });
     expect(report.results.find((r) => r.key === "group:13")!.profiles).toEqual([{ id: "9101", name: "Yangra | Hinduism for Modern Life", network: "fb_instagram_account", groups: ["12", "13"] }]);
+  });
+
+  it("names a new client as people know the brand, and keeps the group's label in its origin", async () => {
+    const db = world();
+    const report = await sproutOnboarding(db, groupedDeps(), { dryRun: false });
+    const ewc = report.results.find((r) => r.key === "group:15")!;
+    expect(ewc).toMatchObject({ brand: "European Wax Center", decision: "created", group: { id: "15", name: "ewc" } });
+    expect(db.tables.clients.find((c) => c.id === ewc.client_id)).toMatchObject({ name: "European Wax Center", origin: { brand: "ewc", profile_ids: [8800, 8801] } });
+  });
+
+  it("shows in the dry run the name chosen and why", async () => {
+    const report = await sproutOnboarding(world(), groupedDeps(), { dryRun: true });
+    expect(report.results.find((r) => r.key === "group:15")).toMatchObject({
+      brand: "European Wax Center", decision: "would_create",
+      name_reason: `Named "European Wax Center": the name 2 of its 2 profile names share; the Sprout group is "ewc".`,
+    });
+    expect(report.results.find((r) => r.key === "group:11")!.name_reason).toMatch(/^Named "Olo": the name 3 of its 3 profile names share/);
   });
 });

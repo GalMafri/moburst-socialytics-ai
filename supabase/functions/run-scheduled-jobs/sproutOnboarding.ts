@@ -6,7 +6,8 @@
 // enqueue_sprout_onboarding_job queues one run on Monday (or after 8 days
 // with none). A run lists Sprout's profiles and groups, takes each Sprout
 // group as one brand (_shared/sprout/brands.ts; profiles in no group by the
-// name rule), leaves a group with a profile in two groups alone, and leaves every brand that already is a
+// name rule), named as people know it from its profiles' names (the client
+// goes by that name; its origin keeps the group's label), leaves a group with a profile in two groups alone, and leaves every brand that already is a
 // client to that client: an active one's accounts step adds new profiles
 // within a day; an archived client's brand, a profile a person removed, and a
 // brand matching two clients are left alone for good. An unmatched brand
@@ -70,7 +71,10 @@ export type Decision =
 export interface BrandResult {
   /** The brand's smallest profile id, as the next run is asked for it. */
   key: string;
+  /** The brand as people know it: the new client's name. */
   brand: string;
+  /** How that name was chosen. */
+  name_reason: string;
   /** The Sprout group the brand is, or null for profiles in no group. */
   group: CustomerGroup | null;
   profile_ids: string[];
@@ -104,8 +108,8 @@ const FACT_WORDS: Record<SiteFact, string> = {
   site_name: "its og:site_name is the brand name",
 };
 
-const base = (b: Brand): Pick<BrandResult, "key" | "brand" | "group" | "profile_ids" | "profiles"> => ({
-  key: b.key, brand: b.name, group: b.group, profile_ids: b.profiles.map((p) => String(p.id)),
+const base = (b: Brand): Pick<BrandResult, "key" | "brand" | "name_reason" | "group" | "profile_ids" | "profiles"> => ({
+  key: b.key, brand: b.name, name_reason: b.name_reason, group: b.group, profile_ids: b.profiles.map((p) => String(p.id)),
   profiles: b.profiles.map((p) => ({ id: String(p.id), name: p.name, network: p.network_type, groups: (p.groups ?? []).map(String) })),
 });
 /** Results in the order of each brand's oldest profile. */
@@ -291,7 +295,8 @@ async function decide(db: Db, brand: Brand, members: Brand[], looked: Evaluated[
     return { ...out, decision: "would_create", reason: `Would be created: ${what}` };
   }
   const { data, error } = await db.rpc("sprout_onboard_client", {
-    p_name: brand.name, p_website: confirmed?.website ?? null, p_brand: brand.name,
+    // The client goes by the brand's name; its origin keeps Sprout's group label.
+    p_name: brand.name, p_website: confirmed?.website ?? null, p_brand: brand.group?.name || brand.name,
     p_profiles: brand.profiles.map((p) => ({ id: String(p.id), name: p.name, native_name: p.native_name, network_type: p.network_type, native_link: p.native_link })),
   });
   if (error) throw new Error(`Could not create the client for ${brand.name}: ${error.message}`);
