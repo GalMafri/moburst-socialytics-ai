@@ -1,27 +1,25 @@
 // Reading a note's file into text, with no model call for text (client notes
-// design, section 3). The file parsers (mammoth, SheetJS, unpdf) are imported
-// from the network in parsers.ts and cannot load under Vitest, so they stand
-// behind the Parsers boundary: these tests give read.ts the real fixture files
-// and parsers that answer as the libraries do, and check everything read.ts
-// does around them. TXT, MD and CSV are decoded here for real.
+// design, section 3). SheetJS and unpdf are imported from the network in
+// parsers.ts and cannot load under Vitest, so they stand behind the Parsers
+// boundary: these tests give read.ts the real fixture files and parsers that
+// answer as those libraries do, and check everything read.ts does around
+// them. TXT, MD and CSV are decoded here for real, and DOCX is read by the
+// real reader (docx.ts, tested on its own in docx.test.ts).
 
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { base64, decodeText, isScan, noteText, readNoteFile, splitParts, IMAGE_MAX_BYTES, NOTE_READ_MAX_CHARS, PART_CHARS, PDF_MAX_PAGES, type Parsers } from "./read";
+import { docxText } from "./docx";
 
 const PDF_TEXT = "Meeting notes, Oct 28: never say cheap. They asked for shorter captions on Instagram and no puns anywhere.";
 const fixture = (name: string) => new Uint8Array(readFileSync(join(__dirname, "fixtures", name)));
 const startsWith = (bytes: Uint8Array, magic: string) => new TextDecoder("latin1").decode(bytes.slice(0, magic.length)) === magic;
 
-/** Parsers that answer as the libraries do, and fail the test when handed anything but the file they read. */
+/** The real DOCX reader, and parsers that answer as SheetJS and unpdf do and fail the test when handed anything but the file they read. */
 function parsers(over: Partial<Parsers> = {}): Parsers {
   return {
-    docxText: vi.fn(async (bytes: Uint8Array) => {
-      expect(startsWith(bytes, "PK")).toBe(true);
-      // mammoth's extractRawText: each paragraph followed by two newlines.
-      return 'Meeting with Bader Law, Oct 28.\n\nNever say "cheap". Say "affordable".\n\n';
-    }),
+    docxText: vi.fn(async (bytes: Uint8Array) => docxText(bytes)),
     xlsxSheets: vi.fn(async (bytes: Uint8Array) => {
       expect(startsWith(bytes, "PK")).toBe(true);
       return [{ name: "November", csv: "Date,Note\nNov 1,Holiday sale starts" }, { name: "Empty", csv: "" }];
@@ -43,11 +41,15 @@ describe("readNoteFile", () => {
     expect(await readNoteFile(fixture("utf16.txt"), "txt", parsers())).toMatchObject({ kind: "text", text: 'Never say "cheap".' });
   });
 
-  it("reads a DOCX through its parser and keeps its paragraphs", async () => {
+  it("reads a DOCX with the real reader, a paragraph a line", async () => {
     const p = parsers();
     const out = await readNoteFile(fixture("meeting.docx"), "docx", p);
     expect(p.docxText).toHaveBeenCalledTimes(1);
-    expect(out).toEqual({ kind: "text", text: 'Meeting with Bader Law, Oct 28.\n\nNever say "cheap". Say "affordable".', chars: 69 });
+    expect(out).toEqual({ kind: "text", text: 'Meeting with Bader Law, Oct 28.\nNever say "cheap". Say "affordable".', chars: 68 });
+    // A table reads like the CSV path, and the footnotes come after the body.
+    const rich = await readNoteFile(fixture("rich.docx"), "docx", p);
+    expect(rich).toMatchObject({ kind: "text", text: expect.stringContaining("Date\tNote\nNov 1\tSale starts All stores") });
+    expect((rich as { text: string }).text.endsWith("Footnote: said on the Oct 28 call.\n\nEndnote text.")).toBe(true);
   });
 
   it("reads an XLSX as one CSV per sheet, leaving out empty sheets", async () => {
@@ -75,7 +77,8 @@ describe("readNoteFile", () => {
   });
 
   it("finds nothing in a file its parser cannot open, or one with no text", async () => {
-    expect(await readNoteFile(fixture("meeting.docx"), "docx", parsers({ docxText: async () => { throw new Error("Corrupted zip"); } }))).toMatchObject({ kind: "nothing" });
+    // A .docx that is not a zip: the real reader cannot open it.
+    expect(await readNoteFile(new TextEncoder().encode("not a zip"), "docx", parsers())).toMatchObject({ kind: "nothing" });
     expect(await readNoteFile(new TextEncoder().encode(" \n\n "), "txt", parsers())).toMatchObject({ kind: "nothing" });
   });
 });
