@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { MAX_CANDIDATES, parseBriefs, requestProgress, type JobState } from "./options";
+import { MAX_CANDIDATES, parseBriefs, plannerPrompt, requestProgress, type JobState } from "./options";
 
 const done: JobState = { status: "done", step: "finished" };
 const failed: JobState = { status: "failed", step: "edit" };
@@ -123,5 +123,19 @@ describe("leastRecentPosts", () => {
     expect(briefs[0].refs).toEqual(["a.jpg", "b.jpg"]);
     expect(briefs[1].refs).toEqual(["a.jpg"]);
     expect(briefs[2].refs).toEqual(["c.jpg", "d.jpg"]);
+  });
+});
+
+describe("plannerPrompt", () => {
+  const args = { brand: "Pay The Pyper", platform: "Instagram", copy: "Captains pay last.", voice: null, count: 3, postCount: 8, recent: "" };
+
+  it("tells the planner a Story is seen full screen for a few seconds, and keeps the headline limits", () => {
+    const story = plannerPrompt({ ...args, story: true });
+    expect(story).toContain("This post is a Story: its frame is seen full screen for a few seconds, so the headline carries the message, and a second line may carry the call to action.");
+    expect(story).toContain("One line of at most 8 words, optionally a second, shorter line.");
+  });
+
+  it("says nothing of Stories for a feed post", () => {
+    expect(plannerPrompt(args)).not.toContain("Story");
   });
 });

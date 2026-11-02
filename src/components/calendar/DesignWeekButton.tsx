@@ -59,7 +59,7 @@ export function DesignWeekBand({ clientId, clientName, week }: { clientId: strin
     setBusy(true);
     const started = await designWeek({
       clientId, week,
-      estimate: { posts: n, single: counts.single, carousel: counts.carousel, video: counts.video, credits, minutes },
+      estimate: { posts: n, single: counts.single, story: counts.story ?? 0, carousel: counts.carousel, video: counts.video, credits, minutes },
     });
     setBusy(false);
     if (started?.run) toast.success("Designing this week's posts", { description: "Each post shows where it stands on its card." });

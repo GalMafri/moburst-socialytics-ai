@@ -11,6 +11,7 @@ import { useAuth } from "@/hooks/useAuth";
 import type { CalendarPost } from "@/lib/calendarRevision";
 import { PostReason } from "@/components/calendar/PostReason";
 import type { PostReason as Reason } from "@/lib/calendarPosts";
+import { isStoryPost } from "@/lib/platform";
 
 interface Props {
   post: any;
@@ -21,6 +22,8 @@ interface Props {
 
 export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
   const { isMoburstStaff } = useAuth();
+  // A Story's copy is the message its frame's words are written from; it has no caption to regenerate.
+  const story = isStoryPost(post);
   const initialCopy = postCopyOf(post);
   const [isEditing, setIsEditing] = useState(false);
   const [editedCopy, setEditedCopy] = useState(initialCopy);
@@ -114,7 +117,7 @@ export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
 
       setDisplayCopy(editedCopy);
       setIsEditing(false);
-      toast.success("Post copy saved");
+      toast.success(story ? "Message saved" : "Post copy saved");
     } catch {
       track("post_copy_edited", { client_id: clientId, platform: post.platform || null, ok: false, error_code: "not_saved" });
       // The editor stays open with the person's text.
@@ -196,7 +199,7 @@ export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
             onChange={(e) => setEditedCopy(e.target.value)}
             rows={6}
             className="text-sm"
-            placeholder="Edit post copy..."
+            placeholder={story ? "Edit the message..." : "Edit post copy..."}
           />
           <div className="flex items-center gap-2">
             <Button
@@ -224,6 +227,7 @@ export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
         </div>
       ) : (
         <>
+          {story && <p className="t-secondary">The words on the Story are written from this message.</p>}
           <div className="bg-background rounded-md p-4 border">
             <p className="text-base leading-relaxed whitespace-pre-line">{displayCopy}</p>
             {/* Hashtags the copy does not already end with; most copy carries its own. */}
@@ -250,7 +254,7 @@ export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
               >
                 <Pencil className="h-3.5 w-3.5 mr-1" /> Edit
               </Button>
-              {isMoburstStaff && <Button
+              {isMoburstStaff && !story && <Button
                 variant="ghost"
                 size="sm"
                 onClick={handleRegenerate}

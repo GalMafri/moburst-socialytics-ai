@@ -1,6 +1,8 @@
 // Platform keys and names come from the one display layer (src/lib/display.ts).
 // These names stay so existing imports keep working; there is one implementation.
 export { PLATFORM_NAMES as PLATFORM_LABELS, platformKey as normalizePlatform, platformName as platformLabel } from "./display";
+// What a Story is, one rule with the edge functions (supabase/functions/_shared/design/story.ts).
+export { STORY_FORMAT, canBeStory, isStoryFormat, isStoryPost } from "../../supabase/functions/_shared/design/story";
 import { platformKey as normalizePlatform } from "./display";
 
 /**

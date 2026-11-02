@@ -67,6 +67,8 @@ export interface CalendarPostRow {
   source: "plan" | "ad_hoc" | "insight";
   plan_id: string | null;
   post_key: string;
+  /** A Story made from a feed post: that post's key (supabase/functions/_shared/design/story.ts). */
+  story_of?: string | null;
   raw: Record<string, unknown> | null;
   created_at: string;
 }
@@ -178,7 +180,25 @@ export function boardPost(row: CalendarPostRow): CalendarPost {
     // Worded now, so every card reads the current wording.
     _reasons: (row.reasons ?? []).map((r) => ({ ...r, label: reasonWords(r) })),
     _source: row.source,
+    // A Story links back to the post it was made from.
+    _storyOf: row.story_of ?? undefined,
   };
+}
+
+/** A day's posts with each Story moved right after the post it was made from, when that post is on the same day. */
+function storiesAfterTheirPosts(rows: CalendarPostRow[]): CalendarPostRow[] {
+  const keys = new Set(rows.map((r) => r.post_key));
+  const follows = (r: CalendarPostRow) => !!r.story_of && r.story_of !== r.post_key && keys.has(r.story_of);
+  const out: CalendarPostRow[] = [];
+  const place = (r: CalendarPostRow, seen: Set<string>) => {
+    if (seen.has(r.post_key)) return;
+    seen.add(r.post_key);
+    out.push(r);
+    for (const s of rows) if (s.story_of === r.post_key && follows(s)) place(s, seen);
+  };
+  const seen = new Set<string>();
+  for (const r of rows) if (!follows(r)) place(r, seen);
+  return out;
 }
 
 /** One week of the calendar in the board's shape: Monday to Sunday, each day with its posts. */
@@ -187,8 +207,8 @@ export function weekBoard(rows: CalendarPostRow[], monday: string): Array<{ day:
     const date = addDays(monday, i);
     const posts = rows
       .filter((r) => r.post_date === date)
-      .sort((a, b) => (a.posting_time || "").localeCompare(b.posting_time || "") || a.created_at.localeCompare(b.created_at))
-      .map(boardPost);
-    return { day, date_label: shortDate(date), posts };
+      .sort((a, b) => (a.posting_time || "").localeCompare(b.posting_time || "") || a.created_at.localeCompare(b.created_at));
+    return { day, date_label: shortDate(date), posts: storiesAfterTheirPosts(posts).map(boardPost) };
   });
 }
+

@@ -57,6 +57,31 @@ describe("designKind", () => {
     expect(designKind("Story", "TikTok")).toBe("video");
     expect(designKind("Single image", "Instagram")).toBe("single");
   });
+
+  it("makes a Story a single still", () => {
+    expect(designKind("Story", "Instagram")).toBe("single");
+    expect(designKind("Story", "Facebook")).toBe("single");
+  });
+});
+
+describe("a Story in the week", () => {
+  it("is designed like any still post: classified in, as a single design, and marked a Story", () => {
+    expect(classifyPost(facts("s", {}, { format: "Story" }), "UTC", NOW)).toMatchObject({ in: true, kind: "single", story: true, route: null, askFilming: false });
+    expect(classifyPost(facts("a"), "UTC", NOW)).toMatchObject({ in: true, kind: "single", story: false });
+    // A post called Story on another network is what it was before: TikTok's is a video.
+    expect(classifyPost(facts("t", {}, { format: "Story", platform: "TikTok" }), "UTC", NOW)).toMatchObject({ in: true, kind: "video", story: false });
+  });
+
+  it("is counted on its own", () => {
+    const keys = ["a", "s1", "s2", "c"];
+    const list = [
+      classifyPost(facts("a"), "UTC", NOW),
+      classifyPost(facts("s1", {}, { format: "Story" }), "UTC", NOW),
+      classifyPost(facts("s2", { copy: "" }, { format: "Story", platform: "Facebook" }), "UTC", NOW),
+      classifyPost(facts("c", {}, { format: "Carousel" }), "UTC", NOW),
+    ];
+    expect(weekCounts(keys.map((k, i) => ({ post_key: k, copy: k === "s2" ? "" : "x", result: list[i] })))).toEqual({ single: 1, story: 2, carousel: 1, video: 0, copy_waits: 1, filming: 0 });
+  });
 });
 
 describe("currentCopyOf", () => {
@@ -84,7 +109,7 @@ describe("weekCounts", () => {
     ];
     const copies = new Map([["a", "x"], ["b", ""], ["c", "x"], ["v", "x"], ["f", "x"], ["d", "x"]]);
     const keys = ["a", "b", "c", "v", "f", "d"];
-    expect(weekCounts(keys.map((k, i) => ({ post_key: k, copy: copies.get(k)!, result: list[i] })))).toEqual({ single: 2, carousel: 1, video: 1, copy_waits: 1, filming: 1 });
+    expect(weekCounts(keys.map((k, i) => ({ post_key: k, copy: copies.get(k)!, result: list[i] })))).toEqual({ single: 2, story: 0, carousel: 1, video: 1, copy_waits: 1, filming: 1 });
   });
 });
 

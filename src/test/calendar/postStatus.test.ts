@@ -24,6 +24,12 @@ describe("resolvePostStatus", () => {
     ).toBe("scheduled");
   });
 
+  it("never puts a Story at Scheduled: it is posted by hand", () => {
+    // A Story carries its post's copy, so a scheduled feed post with the same words must not mark it.
+    expect(resolvePostStatus({ mediaUrls: ["u"], isSelectedAny: true, isApproved: false, hasScheduledPost: true, story: true })).toBe("designed");
+    expect(resolvePostStatus({ mediaUrls: [], isSelectedAny: false, isApproved: true, hasScheduledPost: true, story: true })).toBe("approved");
+  });
+
   it("approved comes before designed when both conditions are met", () => {
     expect(
       resolvePostStatus({

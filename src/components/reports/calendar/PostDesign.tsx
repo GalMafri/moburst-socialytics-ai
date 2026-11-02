@@ -3,7 +3,8 @@
  * shown large. A carousel shows every slide, with arrows, a slide count and
  * a full-screen view. "Regenerate" makes a new design from the post as it is
  * now; the current design stays until the new one is ready, and earlier
- * designs can be put back in use.
+ * designs can be put back in use. A Story says it is posted by hand, and its
+ * Download saves the PNG under the Story's own name.
  */
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
@@ -17,6 +18,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { DesignProgressCard } from "./DesignProgressCard";
 import { DESIGN_FEEDBACK_REASONS, currentDesign, isVideoMedia, type DesignRequest, type DesignVersion, type ShotBrief } from "@/lib/designRequests";
+import { STORY_POSTED_BY_HAND, storageDownloadUrl } from "@/lib/story";
 
 interface Props {
   versions: DesignVersion[];
@@ -47,9 +49,11 @@ interface Props {
   filmedReason?: string | null;
   /** What to film, for Moburst staff and admins only (null for everyone else). */
   shotBrief?: ShotBrief | null;
+  /** A Story: posted by hand, its design downloaded under this name ("brand-story-2026-11-05.png"). */
+  storyFileName?: string | null;
 }
 
-export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub, onCreate, creating, onUse, usingId, onFeedback, waitingForCopy, onCamera, textOnly, onUploadClip, uploadingClip, onMakeFromPosts, filmedReason, shotBrief }: Props) {
+export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub, onCreate, creating, onUse, usingId, onFeedback, waitingForCopy, onCamera, textOnly, onUploadClip, uploadingClip, onMakeFromPosts, filmedReason, shotBrief, storyFileName }: Props) {
   const clipInput = useRef<HTMLInputElement>(null);
   const design = currentDesign(versions);
   const earlier = versions.filter((v) => v !== design);
@@ -104,6 +108,7 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
             )}
           </div>
         )}
+        {storyFileName && <p className="t-secondary">{STORY_POSTED_BY_HAND}</p>}
       </div>
     );
   }
@@ -138,7 +143,7 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
           {creating ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5 mr-1.5" />}
           Regenerate
         </Button>
-        <DownloadButton urls={design.urls} filenameStub={filenameStub} />
+        {storyFileName ? <StoryDownload url={design.urls[0]} filename={storyFileName} /> : <DownloadButton urls={design.urls} filenameStub={filenameStub} />}
         {/* A filmed post keeps the way to film it after a video was made from the posts. */}
         {filmedReason && onUploadClip && <ClipUpload input={clipInput} onUploadClip={onUploadClip} uploadingClip={uploadingClip} compact />}
         <div className="ml-auto flex items-center gap-1">
@@ -153,6 +158,7 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
       {!preparing && (
         <p className="t-secondary">Regenerate makes a new {noun} from the post as it is now, including any copy changes. This one stays until the new one is ready.</p>
       )}
+      {storyFileName && <p className="t-secondary">{STORY_POSTED_BY_HAND}</p>}
 
       {earlier.length > 0 && (
         <div className="space-y-2">
@@ -424,6 +430,17 @@ function DownloadButton({ urls, filenameStub }: { urls: string[]; filenameStub: 
     <Button size="sm" variant="ghost" className="h-9" onClick={download} disabled={busy}>
       {busy ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1.5" />}
       {urls.length > 1 ? "Download slides" : "Download"}
+    </Button>
+  );
+}
+
+/** A Story's design, saved under its own name through the storage address's download option. */
+function StoryDownload({ url, filename }: { url: string; filename: string }) {
+  return (
+    <Button asChild size="sm" variant="ghost" className="h-9">
+      <a href={storageDownloadUrl(url, filename)} download={filename}>
+        <Download className="h-3.5 w-3.5 mr-1.5" />Download
+      </a>
     </Button>
   );
 }

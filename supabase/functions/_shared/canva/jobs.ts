@@ -8,6 +8,7 @@
 import { type Brief, optionStates, requestProgress, type JobState } from "./options.ts";
 import { TIMING } from "../video/compose.ts";
 import type { EndReason } from "../design/requestRules.ts";
+import { STORY_PAGE, STORY_SURFACE, isStoryPost, storyLogoPlacement } from "../design/story.ts";
 
 export const BUCKET = "generated-media";
 
@@ -65,6 +66,8 @@ export async function startOption(admin: any, req: DesignRequest, settings: Sett
   if (req.kind === "video") return startVideoOption(admin, req, settings, brandName, brief, optionIndex, [lw, lh]);
   const slides = req.kind === "carousel" && brief.slides?.length ? brief.slides : [brief];
   const carousel = req.kind === "carousel" && slides.length > 1;
+  // A Story is drawn on its own 9:16 page, as a Story, with the client's logo spot moved into Meta's safe band.
+  const story = isStoryPost(req);
   const rows = slides.map((slide, i) => ({
     client_id: req.client_id,
     created_by: req.requested_by,
@@ -77,12 +80,15 @@ export async function startOption(admin: any, req: DesignRequest, settings: Sett
       logo_path: settings.logo_path,
       logo_size: [lw, lh],
       copy: slide.headline,
-      placement: settings.placement,
+      placement: story ? storyLogoPlacement(settings.placement, lw, lh) : settings.placement,
       title: `${brandName} ${req.platform ?? ""} option ${optionIndex + 1}${carousel ? ` slide ${i + 1}` : ""}`.replace(/\s+/g, " "),
       layout: brief.layout ?? null,
       // The posts this design builds on, as the planner chose them for this
       // post; a brief from before that choice existed uses the first three.
-      generate: { brand_name: brandName, platform: req.platform ?? "social", concept: slide.picture, background: settings.background, refs: brief.refs?.length ? brief.refs : settings.reference_paths.slice(0, 3) },
+      generate: {
+        brand_name: brandName, platform: req.platform ?? "social", concept: slide.picture, background: settings.background, refs: brief.refs?.length ? brief.refs : settings.reference_paths.slice(0, 3),
+        ...(story ? { size: { ...STORY_PAGE }, surface: STORY_SURFACE } : {}),
+      },
     },
   }));
   const { error } = await admin.from("canva_finish_jobs").insert(rows);

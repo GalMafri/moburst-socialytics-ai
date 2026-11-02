@@ -10,6 +10,7 @@ import { staffGate } from "../_shared/auth/requireStaff.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
 import { COPY_MODEL, loadClientVoice } from "../_shared/voice/load.ts";
 import { voicePromptBlock } from "../_shared/voice/voice.ts";
+import { adHocFormat, settleFormat } from "./format.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -30,6 +31,9 @@ Deno.serve(async (req) => {
         400,
       );
     }
+    // A Story is a person's choice, on Instagram or Facebook only (format.ts).
+    const format = adHocFormat(creative_type, platform);
+    if ("refused" in format) return jsonResp({ error: format.refused }, 400);
 
     const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
     if (!anthropicKey) {
@@ -73,21 +77,21 @@ BRAND BRIEF: ${client?.brand_book_text?.slice(0, 500) || "Not available"}
 
 ${voiceBlock}
 ${competitive ? `\n${competitive}\nWhere the request allows, make the post act on an endorsed gap and say which one in "pillar" or "concept".\n` : ""}
-CREATIVE TYPE: ${creative_type || "AI decides based on topic and platform"}
+CREATIVE TYPE: ${format.creative}
 
 USER REQUEST: ${topic}
 
 Generate a complete post recommendation. Return ONLY this JSON:
 {
   "platform": "${platform}",
-  "format": "the creative format (Image/Carousel/Video/Reel/Story)",
+  "format": "${format.formatField}",
   "pillar": "which content pillar this aligns with",
   "hook": "attention-grabbing opening line",
   "concept": "3-5 sentence concept with visual description",
   "visual_direction": "detailed design/visual prompt for image or video generation",
-  "caption_angle": "the full post caption text",
+  "caption_angle": "${format.captionField}",
   "CTA": "specific call to action",
-  "hashtags": "relevant hashtags"
+  "hashtags": "${format.hashtagsField}"
 }`;
 
     const result = await anthropicMessages({
@@ -110,7 +114,7 @@ Generate a complete post recommendation. Return ONLY this JSON:
       return jsonResp({ error: "Failed to parse post from AI response" }, 500);
     }
 
-    return jsonResp({ post });
+    return jsonResp({ post: settleFormat(post, format) });
   } catch (err: any) {
     return jsonResp({ error: err.message }, 500);
   }

@@ -4,6 +4,7 @@ import type { PostStatus } from "./PostStatusChip";
 import type { CalendarFilterState } from "./CalendarFilters";
 import { postCopyOf } from "@/lib/postCopy";
 import { iterationMatchesPost, type CalendarPost } from "@/lib/calendarRevision";
+import { isStoryPost } from "@/lib/platform";
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -126,6 +127,7 @@ export function CalendarKanban({
                     isSelectedAny: !!iteration?.is_selected,
                     isApproved: !!iteration?.is_approved,
                     hasScheduledPost: hasMatchingScheduledPost(scheduledPosts, post),
+                    story: isStoryPost(post),
                   });
                   if (!matchesFilters(post, status, filters)) {
                     return (

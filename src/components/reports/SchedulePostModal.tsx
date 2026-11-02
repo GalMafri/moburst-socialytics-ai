@@ -177,6 +177,7 @@ export function SchedulePostModal({
     text: postContent,
     mediaUrls,
     sendAt: sendAt ?? "",
+    format: post?.format,
   });
   const ready = !!selectedProfile && !!sendAt && problems.length === 0;
 

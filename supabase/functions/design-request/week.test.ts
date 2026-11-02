@@ -124,6 +124,12 @@ describe("week_preview", () => {
     expect(db.tables.design_week_runs).toEqual([]);
   });
 
+  it("counts the week's Stories on their own, as stills that need no credits", async () => {
+    const db = world({ calendar_posts: [calendarPost("feed"), calendarPost("story", { format: "Story" }), calendarPost("fb-story", { format: "Story", platform: "Facebook" })] });
+    const r = await weekPreview(deps(db), { client_id: "c1", week_start: WEEK });
+    expect(r.body).toMatchObject({ counts: { single: 1, story: 2, carousel: 0, video: 0 }, credits: 0 });
+  });
+
   it("gives staff the credits a finished week used, from the quote recorded on each clip", async () => {
     const db = world({
       design_week_runs: [{ id: "run-1", client_id: "c1", week_start: WEEK, status: "done", posts: [], requested_by: STAFF, created_at: "2026-11-03T08:00:00Z" }],
@@ -158,6 +164,14 @@ describe("week_start", () => {
     const third = await weekStart(deps(db, { requireStaff: async () => "person-2" }), { client_id: "c1", week_start: WEEK });
     expect(third.body.added).toEqual(["late"]);
     expect(db.tables.design_week_runs[0].posts.find((p: Row) => p.post_key === "late").added_by).toBe("person-2");
+  });
+
+  it("designs a Story like any still post, and keeps the Stories shown in the estimate", async () => {
+    const db = world({ calendar_posts: [calendarPost("story", { format: "Story" })] });
+    const r = await weekStart(deps(db), { client_id: "c1", week_start: WEEK, estimate: { posts: 1, single: 0, story: 1, carousel: 0, video: 0, credits: 0, minutes: 10 } });
+    expect(r.body.added).toEqual(["story"]);
+    expect(db.tables.design_week_runs[0].posts[0]).toMatchObject({ post_key: "story", kind: "single", state: "queued" });
+    expect(db.tables.design_week_runs[0].estimate).toEqual({ posts: 1, single: 0, story: 1, carousel: 0, video: 0, credits: 0, minutes: 10 });
   });
 
   it("makes no run when nothing in the week needs a design", async () => {

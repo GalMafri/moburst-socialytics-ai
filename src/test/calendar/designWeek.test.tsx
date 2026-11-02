@@ -42,7 +42,7 @@ vi.mock('@/integrations/supabase/client', () => ({ supabase: {
 afterEach(() => { cleanup(); f.staff = true; f.runs = []; f.requests = []; f.preview = null; f.invokes = []; });
 
 const WEEK = '2026-11-02';
-const counts = (over: any = {}) => ({ single: 0, carousel: 0, video: 0, copy_waits: 0, filming: 0, ...over });
+const counts = (over: any = {}) => ({ single: 0, story: 0, carousel: 0, video: 0, copy_waits: 0, filming: 0, ...over });
 const request = (id: string, over: any = {}) => ({
   id, client_id: 'c1', calendar_post_key: `key-${id}`, platform: 'Instagram', post_copy: `Copy ${id}`, status: 'preparing', stage: 'designing', kind: 'single',
   options_wanted: 1, options_ready: 0, requested_by: 'me', error: null, created_at: '2026-11-03T10:00:00Z', updated_at: '2026-11-03T10:05:00Z', batch_id: null, ...over,
@@ -61,6 +61,9 @@ describe('the words', () => {
     expect(previewLine(counts({ single: 6, carousel: 2, video: 1 }), 100, 45)).toBe('9 posts this week have no design yet: 6 designs, 2 carousels, 1 video. About 100 Higgsfield credits and 45 minutes.');
     expect(previewLine(counts({ single: 1 }), 0, 10)).toBe('1 post this week has no design yet: 1 design. About 10 minutes.');
     expect(previewLine(counts({ carousel: 3 }), 0, 75)).toBe('3 posts this week have no design yet: 3 carousels. About 1 hour and 15 minutes.');
+    // Stories are designed like any still and counted on their own.
+    expect(previewLine(counts({ single: 6, story: 2, video: 1 }), 100, 45)).toBe('9 posts this week have no design yet: 6 designs, 2 Stories, 1 video. About 100 Higgsfield credits and 45 minutes.');
+    expect(previewLine(counts({ story: 1 }), 0, 10)).toBe('1 post this week has no design yet: 1 Story. About 10 minutes.');
     expect(buttonLabel(9)).toBe('Design 9 posts');
     expect(buttonLabel(1)).toBe('Design 1 post');
   });
@@ -86,6 +89,8 @@ describe('the words', () => {
     expect(weekMinutes(counts({ single: 6, carousel: 2, video: 1 }), [])).toBe(45);
     // One long post is never shorter than itself.
     expect(weekMinutes(counts({ video: 1 }), [])).toBe(20);
+    // A Story takes what a design takes.
+    expect(weekMinutes(counts({ single: 4, story: 2, carousel: 2, video: 1 }), [])).toBe(45);
   });
 });
 
@@ -97,7 +102,16 @@ describe('the band', () => {
     expect(screen.getByText("1 video is filmed, so it isn't included.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Design 9 posts' }));
     await waitFor(() => expect(f.invokes.find((i) => i.action === 'week_start')).toBeTruthy());
-    expect(f.invokes.find((i) => i.action === 'week_start')).toEqual({ name: 'design-request', action: 'week_start', client_id: 'c1', week_start: WEEK, estimate: { posts: 9, single: 6, carousel: 2, video: 1, credits: 100, minutes: 45 } });
+    expect(f.invokes.find((i) => i.action === 'week_start')).toEqual({ name: 'design-request', action: 'week_start', client_id: 'c1', week_start: WEEK, estimate: { posts: 9, single: 6, story: 0, carousel: 2, video: 1, credits: 100, minutes: 45 } });
+  });
+
+  it('counts the week\'s Stories in what a press designs', async () => {
+    f.preview = { client_name: 'Pay The Pyper', week_start: WEEK, counts: counts({ single: 2, story: 2 }), credits: 0, credits_per_clip: 100, run_id: null, credits_used: null };
+    band();
+    expect(await screen.findByText('4 posts this week have no design yet: 2 designs, 2 Stories. About 15 minutes.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Design 4 posts' }));
+    await waitFor(() => expect(f.invokes.find((i) => i.action === 'week_start')).toBeTruthy());
+    expect(f.invokes.find((i) => i.action === 'week_start').estimate).toEqual({ posts: 4, single: 2, story: 2, carousel: 0, video: 0, credits: 0, minutes: 15 });
   });
 
   it('offers nothing when the week has nothing to design', async () => {

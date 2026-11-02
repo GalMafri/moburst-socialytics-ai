@@ -1,5 +1,5 @@
 import {describe,it,expect} from 'vitest';
-import {isPublishedPost,normalizeOwnedCompetitive} from '../../../supabase/functions/_shared/competitive/ownedSource';
+import {isPublishedPost,normalizeOwnedCompetitive,ownedStories} from '../../../supabase/functions/_shared/competitive/ownedSource';
 import {mergeOwnedCompetitivePosts} from '../../../supabase/functions/_shared/competitive/ownedMerge';
 import {competitiveCompanyMetrics,normalizedCompetitiveMetrics} from '../../../supabase/functions/_shared/competitive/reportMetrics';
 import {competitiveReportQuality} from '../../../supabase/functions/_shared/competitive/reportEvidence';
@@ -27,6 +27,15 @@ describe('owned competitive sources',()=>{
  it('deduplicates exact identities and excludes stories and unsent posts',()=>{
   const row=post(1,'2026-08-02');
   expect(normalize([row,row,{...post(2,'2026-08-02'),post_type:'INSTAGRAM_STORY'},{...post(3,'2026-08-02'),sent:false}]).posts).toHaveLength(1);
+ });
+ // The weekly planner suggests Stories only to a client that posts them (Stories design, 2 Nov 2026).
+ it('gives the Instagram Story history from INSTAGRAM_STORY rows, which stay out of posts',()=>{
+  const story=(id:number,date:string,guid:string)=>({...post(id,date,guid),post_type:'INSTAGRAM_STORY',content_category:'STORY'});
+  const rows=[post(1,'2026-08-02'),story(1,'2026-08-03','igst:1'),story(2,'2026-08-10','igst:2'),story(2,'2026-08-10','igst:2'),story(1,'2026-07-20','igst:old'),{...story(1,'2026-08-11','igst:3'),sent:false},{...post(1,'2026-08-12','fbst:1'),post_type:'FACEBOOK_STORY'}];
+  expect(normalize(rows).posts.map((p:any)=>p.postId)).toEqual(['sprout:1']);
+  // Inside the period only, each Story once; Facebook Stories are not Instagram's.
+  expect(ownedStories(profiles,period,rows)).toEqual([{channel:'instagram',publishedAt:'2026-08-03T12:00:00Z'},{channel:'instagram',publishedAt:'2026-08-10T12:00:00Z'}]);
+  expect(ownedStories(profiles,period,[{...story(999,'2026-08-03','igst:x')}])).toEqual([]);
  });
  it('counts no ads as posts: every Sprout ad post type, and every "fa:" ad guid',()=>{
   const ads=['FACEBOOK_AD','TIKTOK_AD','FB_INSTAGRAM_AD_POST','FACEBOOK_AD_COMMENT','AD_POST'].map((post_type,i)=>({...post(1,'2026-08-02','ad'+i),post_type}));
