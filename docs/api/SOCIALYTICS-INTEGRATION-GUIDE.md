@@ -103,7 +103,7 @@ Authorization: Bearer soc_...
 | `GET /clients/{id}/setup` | `{ ready, issues[] }`: brand identity, pillars, keywords, Sprout profile, confirmed competitor set, approved design system, schedule. |
 | `GET /clients/{id}/analytics?start=&end=` | Sprout performance over a window (default the last 30 days): totals, the previous window, changes, per profile, top posts. `422 unprocessable` with `reason: no_sprout_profiles` for a brand not managed in Sprout. |
 | `GET /reports?client_id=&status=&from=&to=` | Social reports: period, previous period, status, deck, counts, metric changes, warnings, trend status, links. |
-| `GET /reports/{id}` | One social report, plus `analysis`, `calendar` (the content calendar), `performance`, `trends` summaries and `industry_trends` (the themes stored for the weeks of the report's period, each with example posts; `null` when there are none). |
+| `GET /reports/{id}` | One social report, plus `analysis`, `calendar` (the content calendar), `performance` and `trends` summaries. |
 | `GET /competitive-reports?client_id=&status=` | Competitive reports: period, status, deck, totals, quality check. |
 | `GET /competitive-reports/{id}` | One competitive report, plus `analysis` (executive summary, scorecard, gaps, teardown, breakdowns, schedule) and `aggregates` per company. |
 | `GET /competitor-sets?client_id=&status=`, `GET /competitor-sets/{id}` | Competitor sets with competitors (website, rationale, similarity, selection, rank) and their social handles (platform, handle, URL, confidence, source). |

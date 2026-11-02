@@ -1,7 +1,7 @@
 /** Rows shaped like the production tables, for the serializer and route tests. */
 export const CLIENT = {
   id: "c-bader", name: "Bader Law", website_url: "https://baderlaw.com", company_slug: "bader-law", primary_platforms: ["Instagram", "TikTok", "Facebook", "LinkedIn", "YouTube"], geo: "US", language: "en", timezone: "America/New_York",
-  content_pillars: [{ name: "Know your rights", description: "Plain explanations of legal situations." }], social_keywords: ["personal injury", "car accident lawyer"],
+  content_pillars: [{ name: "Know your rights", description: "Plain explanations of legal situations." }], social_keywords: ["personal injury", "car accident lawyer"], trends_keywords: null as string | null,
   brand_identity: { primary_color: "#1F3A5F", secondary_color: "#FFFFFF", accent_color: "#C8A951", font_family: "Montserrat", visual_style: "clean, confident", tone_of_voice: "direct and reassuring", logo_description: "Serif wordmark", design_elements: "gold rules", background_style: "navy" },
   brand_notes: "[VOICE:plain]\nShort sentences.", brief_text: "Bader Law represents injury victims.", logo_url: "https://x.supabase.co/storage/v1/object/public/brand-assets/logos/bader.png",
   design_style_synthesis: { synthesized_at: "2026-09-20T10:00:00.000Z", source_count: 8, reference_pipeline_version: 1 }, harvested_design_references: [{ path: "c-bader/social-1.jpg" }, { path: "c-bader/social-2.jpg" }, { path: "c-bader/social-3.jpg" }], design_references: null as unknown,
@@ -36,44 +36,3 @@ export const SCHEDULE = { id: "rs-1", client_id: "c-bader", frequency: "monthly"
 export const SCHEDULED_POST = { id: "sch-post-1", client_id: "c-bader", report_id: "rep-1", sprout_post_id: "9988", profile_id: "sp-1", platform: "instagram", scheduled_time: "2026-09-10T15:00:00.000Z", status: "scheduled", post_content: "Know your rights.", media_url: "https://x/1.png", created_at: "2026-09-03T10:00:00.000Z", created_by: "u1" };
 export const ALERT = { id: "al-1", client_id: "c-bader", window_start: "2026-09-15", window_end: "2026-09-21", topic: "Back to school safety", topic_key: "back-to-school-safety", summary: "Three competitors posted about it.", companies: ["Morgan & Morgan", "Cellino"], platforms: ["instagram"], post_urls: ["https://instagram.com/p/2"], post_count: 4, confidence: 0.8, status: "new", created_at: "2026-09-22T06:00:00.000Z" };
 export const DESIGN_SYSTEM = { id: "ds-1", client_id: "c-bader", version: 2, status: "approved", system: { version: 1, tokens: { font: { family: "Montserrat" }, colors: { ink: "#1F3A5F", surface: "#FFFFFF", accent: "#C8A951", background: "#0B1E33" } }, templates: [{ id: "t-quote", name: "Quote card", formats: ["square", "portrait"] }], logo_aspect: 3.2 }, previews: [{ template_id: "t-quote", format: "square", path: "previews/c-bader/v2-t-quote.png", url: "https://x/previews/v2-t-quote.png" }], built_from: ["c-bader/social-1.jpg"], approved_by: "u1", approved_at: "2026-09-21T10:00:00.000Z", created_by: "u1", created_at: "2026-09-21T09:00:00.000Z", updated_at: "2026-09-21T10:00:00.000Z" };
-
-/**
- * Rows shaped like the trend tables. The weeks around REPORT's August period test its edges: a Monday inside the
- * period, one on the last day, one still running, and one on each side. Every row also carries the columns the team
- * keeps for itself (engagement, fit, why, lesson, search, drop_reason, tripwire, dismissed_by), which the API must not serve.
- */
-const week = (id: string, week_start: string, status: string, client_id = "c-bader") => ({ id, client_id, week_start, status, platforms: {}, filter_status: "ok", cost: {}, finished_at: `${week_start}T09:00:00.000Z` });
-export const TREND_WEEKS = [
-  week("tw-jul-27", "2026-07-27", "done"), week("tw-aug-03", "2026-08-03", "done"), week("tw-aug-10", "2026-08-10", "running"),
-  week("tw-aug-17", "2026-08-17", "partial"), week("tw-aug-31", "2026-08-31", "done"), week("tw-sep-07", "2026-09-07", "done"), week("tw-calm", "2026-08-17", "done", "c-calm"),
-];
-const post = (id: string, week_id: string, platform: string, author: string, text: string, format: string | null, kept = true, client_id = "c-bader") => ({
-  id, week_id, client_id, platform, url: `https://${platform}.example/${id}`, author, text, posted_at: "2026-08-20T14:30:00.000Z", format, kept,
-  views: 120000, likes: 9000, comments: 310, shares: 140, saves: 500, engagement: 4120.5, search: "personal injury", fit: 88, why: "Fits the audience", lesson: "Lead with the question", drop_reason: kept ? null : "low_fit", tripwire: false,
-});
-export const TREND_POSTS = [
-  post("tp-1", "tw-aug-31", "tiktok", "@lawyerkate", "New ruling, in 30 seconds.", "short_video"),
-  post("tp-2", "tw-aug-31", "instagram", "@thelegalexplainer", "What the ruling means for you.", "carousel"),
-  post("tp-3", "tw-aug-31", "tiktok", "@spamaccount", "Click the link in bio", "short_video", false),
-  post("tp-4", "tw-aug-31", "linkedin", "Dana Cole", "Three questions to ask before you sign.", "text"),
-  post("tp-5", "tw-aug-31", "youtube", "Rights Explained", "Your rights at a traffic stop.", null),
-  post("tp-6", "tw-aug-17", "instagram", "@clientstories", "I thought I would never walk again.", "image"),
-  post("tp-7", "tw-aug-03", "tiktok", "@courtroomlife", "A day on trial.", "long_video"),
-  post("tp-sep", "tw-sep-07", "tiktok", "@later", "Next month.", "short_video"),
-  post("tp-calm", "tw-calm", "tiktok", "@calmcreator", "Breathe in.", "short_video", true, "c-calm"),
-];
-const theme = (id: string, week_id: string, position: number, title: string, post_ids: string[], over: Record<string, unknown> = {}, client_id = "c-bader") => ({
-  id, week_id, client_id, position, title, happening: `${title}: what is happening.`, why_it_matters: `${title}: why it matters.`, angle: `${title}: the angle for the brand.`,
-  platforms: ["tiktok", "instagram"], post_ids, dismissed_at: null as string | null, dismissed_by: null as string | null, created_at: "2026-09-01T09:00:00.000Z", ...over,
-});
-export const TREND_THEMES = [
-  theme("th-31-1", "tw-aug-31", 1, "Plain-English legal explainers", ["tp-5", "tp-4"], { platforms: ["youtube", "linkedin"] }),
-  theme("th-31-0", "tw-aug-31", 0, "Reaction videos to new rulings", ["tp-2", "tp-1", "tp-3"]),
-  theme("th-17-1", "tw-aug-17", 1, "A dismissed theme", ["tp-6"], { dismissed_at: "2026-08-25T10:00:00.000Z", dismissed_by: "u1" }),
-  theme("th-17-0", "tw-aug-17", 0, "Client stories in the first person", ["tp-6"]),
-  theme("th-03-0", "tw-aug-03", 0, "Inside the courtroom", ["tp-7", "tp-7"]),
-  theme("th-10-0", "tw-aug-10", 0, "A week still running", ["tp-1"]),
-  theme("th-jul-0", "tw-jul-27", 0, "Before the period", ["tp-1"]),
-  theme("th-sep-0", "tw-sep-07", 0, "After the period", ["tp-sep"]),
-  theme("th-calm-0", "tw-calm", 0, "Another client's theme", ["tp-calm"], {}, "c-calm"),
-];

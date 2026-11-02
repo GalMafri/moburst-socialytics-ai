@@ -24,7 +24,7 @@ export const STORAGE_URL = `${SUPABASE_URL}/storage/v1/object/public`;
 export interface BrandIdentity { primary_color?: string; secondary_color?: string; accent_color?: string; font_family?: string; visual_style?: string; tone_of_voice?: string; logo_description?: string; design_elements?: string; background_style?: string; [k: string]: unknown }
 export interface ClientRow {
   id: string; name: string; website_url: string | null; company_slug: string | null; primary_platforms: string[] | null; geo: string | null; language: string | null; timezone: string | null;
-  content_pillars: unknown; social_keywords: string[] | null; brand_identity: BrandIdentity | null; brand_notes?: string | null; brief_text: string | null; logo_url: string | null;
+  content_pillars: unknown; social_keywords: string[] | null; trends_keywords?: string[] | null; brand_identity: BrandIdentity | null; brand_notes?: string | null; brief_text: string | null; logo_url: string | null;
   design_style_synthesis: unknown; harvested_design_references: unknown; design_references: unknown; sprout_customer_id?: string | null; hub_company_name?: string | null; media_backend?: string | null;
   archived_at: string | null; created_at: string; updated_at?: string | null; created_by?: string | null; demo_job_id: string | null; pillars_source?: string | null; pillars_derived_at?: string | null;
 }
@@ -44,12 +44,6 @@ export interface ScheduleRow { id: string; client_id: string; frequency: string;
 export interface ScheduledPostRow { id: string; client_id: string; report_id: string | null; sprout_post_id?: string | null; profile_id?: string | null; platform: string; scheduled_time: string; status: string; post_content: string | null; media_url: string | null; created_at: string; created_by?: string | null }
 export interface AlertRow { id: string; client_id: string; window_start: string; window_end: string; topic: string; topic_key?: string | null; summary: string | null; companies: string[] | null; platforms: string[] | null; post_urls: string[] | null; post_count: number | null; confidence: number | null; status: string; created_at: string }
 export interface DesignSystemRow { id: string; client_id: string; version: number; status: string; system: unknown; previews: unknown; built_from?: unknown; approved_by?: string | null; approved_at: string | null; created_by?: string | null; created_at: string; updated_at?: string | null }
-
-export interface TrendWeekRow { id: string; client_id: string; week_start: string; status: string }
-export interface TrendThemeRow { id: string; week_id: string; client_id: string; position: number; title: string; happening: string; why_it_matters: string; angle: string; platforms: string[] | null; post_ids: string[] | null; dismissed_at: string | null }
-export interface TrendPostRow { id: string; client_id: string; platform: string; url: string; author: string; text: string; posted_at: string | null; format: string | null; kept: boolean }
-/** The stored trend rows a report's period may draw on (store.trendRows): the weeks, themes and posts of its client. */
-export interface TrendRows { weeks: TrendWeekRow[]; themes: TrendThemeRow[]; posts: TrendPostRow[] }
 
 export type SetWithCompetitors = CompetitorSetRow & { competitors: Array<CompetitorRow & { handles: HandleRow[] }> };
 
@@ -75,13 +69,8 @@ export interface ReportOut {
   id: string; client_id: string; type: string | null; status: string; period: { start: string | null; end: string | null }; previous_period: { start: string | null; end: string | null } | null; created_at: string; completed_at: string | null; duration_minutes: number | null;
   deck: { url: string | null; status: string | null }; counts: Record<string, unknown> | null; metrics_summary: Record<string, unknown> | null; warnings: string[]; trend_status: string | null; error: string | null; demo_job_id: string | null; links: Links;
   analysis?: Record<string, unknown> | null; calendar?: Array<{ day?: string; date_label?: string; posts: Array<Record<string, unknown>> }> | null; performance?: Record<string, unknown> | null; trends?: { tiktok: TrendOut; instagram: TrendOut } | null;
-  /** The themes stored for the weeks of the report's period (industryTrendsOut); null when there are none. */
-  industry_trends?: IndustryTrendsOut | null;
 }
 export interface TrendOut { posts: number; patterns: unknown }
-export interface IndustryPostOut { platform: string; url: string; author: string; text: string; format: string | null; posted_at: string | null }
-export interface IndustryThemeOut { title: string; happening: string; why_it_matters: string; angle: string; platforms: string[]; posts: IndustryPostOut[] }
-export interface IndustryTrendsOut { themes: IndustryThemeOut[] }
 export interface CompetitiveReportOut {
   id: string; client_id: string; set_id: string | null; status: string; period: { start: string | null; end: string | null; days: number | null }; created_at: string; completed_at: string | null; duration_minutes: number | null;
   deck: { url: string | null }; totals: Record<string, unknown> | null; quality_check: unknown; provider_status: string | null; demo_job_id: string | null; links: Links;
@@ -189,35 +178,7 @@ export function competitorSetOut(set: SetWithCompetitors): CompetitorSetOut {
 
 const trendOut = (v: unknown): TrendOut => ({ posts: Array.isArray(obj(v).posts) ? (obj(v).posts as unknown[]).length : 0, patterns: obj(v).patterns ?? null });
 
-/** A trend week counts once it has finished, whole (done) or in part (partial). */
-export const FINISHED_TREND_WEEKS = ["done", "partial"];
-
-/**
- * The industry trends of a report: the themes the weekly collection stored for its client, whichever engine wrote the report. The rule is the one the
- * app's screens read (trend_themes_in_range, supabase/migrations/20261102100000_trend_access.sql): finished weeks whose Monday falls from the period's
- * first day to its last, both included; dismissed themes left out; newest week first, then by position; each theme's posts are the kept ones it lists,
- * in the order it lists them. Only the fields below leave: the weighted engagement, the fit score, the filter's reasons and the tripwire flag stay with
- * the team. Null when no theme falls in the period, or the report has no period.
- */
-export function industryTrendsOut(rows: TrendRows | null, report: Pick<ReportRow, "client_id" | "date_range_start" | "date_range_end">): IndustryTrendsOut | null {
-  const { client_id: client, date_range_start: from, date_range_end: to } = report;
-  if (!rows || !from || !to) return null;
-  const weekStart = new Map(rows.weeks.filter((w) => w.client_id === client && FINISHED_TREND_WEEKS.includes(w.status) && w.week_start >= from && w.week_start <= to).map((w) => [w.id, w.week_start]));
-  const kept = new Map(rows.posts.filter((p) => p.client_id === client && p.kept).map((p) => [p.id, p]));
-  const startOf = (t: TrendThemeRow) => weekStart.get(t.week_id)!;
-  const themes = rows.themes.filter((t) => t.client_id === client && weekStart.has(t.week_id) && !t.dismissed_at)
-    .sort((a, b) => (startOf(a) === startOf(b) ? a.position - b.position : startOf(a) < startOf(b) ? 1 : -1));
-  if (!themes.length) return null;
-  return {
-    themes: themes.map((t) => ({
-      title: t.title, happening: t.happening, why_it_matters: t.why_it_matters, angle: t.angle, platforms: strs(t.platforms),
-      posts: [...new Set(t.post_ids ?? [])].flatMap((id) => { const p = kept.get(id); return p ? [{ platform: p.platform, url: p.url, author: p.author, text: p.text, format: p.format, posted_at: p.posted_at }] : []; }),
-    })),
-  };
-}
-
-/** `trendRows` is what store.trendRows read; a caller that reads none (the demo's output builder) gets no `industry_trends` field at all. */
-export function reportOut(row: ReportRow, opts: { detail?: boolean; trendRows?: TrendRows | null } = {}): ReportOut {
+export function reportOut(row: ReportRow, opts: { detail?: boolean } = {}): ReportOut {
   const rd = obj(row.report_data);
   const period = obj(rd.report_period);
   const cur = obj(period.current_month), prev = obj(period.previous_month);
@@ -235,7 +196,6 @@ export function reportOut(row: ReportRow, opts: { detail?: boolean; trendRows?: 
     out.calendar = Array.isArray(rd.content_calendar) ? (rd.content_calendar as ReportOut["calendar"]) : null;
     out.performance = rd.sprout_performance && typeof rd.sprout_performance === "object" ? omitDeep(rd.sprout_performance as Record<string, unknown>, INTERNAL_KEYS) : null;
     out.trends = rd.tiktok_trends || rd.instagram_trends ? { tiktok: trendOut(rd.tiktok_trends), instagram: trendOut(rd.instagram_trends) } : null;
-    if (opts.trendRows !== undefined) out.industry_trends = industryTrendsOut(opts.trendRows, row);
   }
   return out;
 }

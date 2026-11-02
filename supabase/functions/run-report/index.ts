@@ -36,6 +36,7 @@ Deno.serve(async (req) => {
     let kind: Kind = body.kind === "competitive" ? "competitive" : "social";
     let clientId: string | undefined = body.client_id || undefined;
     let range: ReportRange = { start: body.date_range_start || "", end: body.date_range_end || "" };
+    const skipTrends = body.skip_trends === true;
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
@@ -95,7 +96,7 @@ Deno.serve(async (req) => {
       dedupe_key: `run:${kind}:${clientId}:${range.start}:${range.end}:${Date.now()}`,
       priority: 15,
       available_at: requestedAt,
-      payload: { run: "manual", kind, range, requested_by: caller.userId ?? null, requested_at: requestedAt },
+      payload: { run: "manual", kind, range, requested_by: caller.userId ?? null, requested_at: requestedAt, ...(skipTrends ? { skip_trends: true } : {}) },
       result: { range },
     }).select("id, created_at").single();
     if (jobError) {

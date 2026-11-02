@@ -12,9 +12,10 @@ import { Section } from "@/components/ui/section";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useEffect, useRef, useState } from "react";
-import { Play, CheckCircle2, CalendarDays } from "lucide-react";
+import { Play, CheckCircle2, CalendarDays, TrendingUp } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Loading } from "@/components/ui/loading";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
 import { Navigate } from "react-router-dom";
@@ -38,6 +39,7 @@ export default function RunAnalysis() {
   const defaultEnd = localDateString(now);
   const [dateRangeStart, setDateRangeStart] = useState(defaultStart);
   const [dateRangeEnd, setDateRangeEnd] = useState(defaultEnd);
+  const [skipTrends, setSkipTrends] = useState(false);
   // Wall-clock for the whole run, so latency is measured as the user feels it.
   const runStartedAt = useRef(0);
 
@@ -101,6 +103,9 @@ export default function RunAnalysis() {
     enabled: !!id,
   });
 
+  const hasKeywords = (client?.social_keywords?.length || 0) > 0;
+  const effectiveSkipTrends = skipTrends || !hasKeywords;
+
   // A run that is already going shows its own period.
   const runRange = "range" in run.view ? run.view.range : null;
   useEffect(() => {
@@ -127,8 +132,9 @@ export default function RunAnalysis() {
     track("analysis_started", {
       client_id: id,
       range_days: dateRangeStart && dateRangeEnd ? Math.round((new Date(dateRangeEnd).getTime() - new Date(dateRangeStart).getTime()) / 86400000) : null,
+      skip_trends: effectiveSkipTrends,
     });
-    await run.start({ date_range_start: dateRangeStart || undefined, date_range_end: dateRangeEnd || undefined });
+    await run.start({ date_range_start: dateRangeStart || undefined, date_range_end: dateRangeEnd || undefined, skip_trends: skipTrends });
   };
 
   if (!canRunAnalysis) return <Navigate to="/" replace />;
@@ -185,6 +191,25 @@ export default function RunAnalysis() {
               <Input id="range-end" disabled={active} type="date" value={dateRangeEnd} onChange={(e) => setDateRangeEnd(e.target.value)} min={dateRangeStart} max={defaultEnd} />
             </div>
           </div>
+        </Section>
+
+        <Section
+          layout="split"
+          eyebrow="Options"
+          title={<><TrendingUp className="h-4 w-4 text-[#b9e045]" aria-hidden /> Trend analysis</>}
+          description="Trending TikTok and Instagram content in the client's niche, read from its keywords."
+        >
+          {active ? <p className="t-secondary">This analysis uses the trend settings selected when it started.</p> : <>
+          <div className="glass-inner p-inner flex items-center gap-4">
+            <Switch id="include-trends" checked={!skipTrends} onCheckedChange={(checked) => setSkipTrends(!checked)} disabled={!hasKeywords} />
+            <div className="min-w-0 space-y-0.5">
+              <Label htmlFor="include-trends">Include trend analysis</Label>
+              <p className="t-label">Adds a trends section to the report.</p>
+            </div>
+          </div>
+          {!hasKeywords && <p className="t-secondary">This client has no social keywords yet, so the report covers performance without trends.</p>}
+          {hasKeywords && skipTrends && <p className="t-secondary">Trends are left out of this report. It covers performance.</p>}
+          </>}
           <div className="border-t border-[rgba(255,255,255,0.06)] pt-4 space-y-4">
             {run.view.state === "idle" && (
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2">

@@ -35,15 +35,10 @@ export interface Client {
   setup: Setup; archived: boolean; demo_job_id: string | null; created_at: string; links: Links;
   sprout_profiles?: Array<{ name: string | null; handle: string | null; network: string | null; url: string | null }>; competitor_sets?: CompetitorSet[]; schedules?: Schedule[];
 }
-export interface IndustryPost { platform: string; url: string; author: string; text: string; format: string | null; posted_at: string | null }
-/** One theme of the weekly industry trends, with the kept posts that show it. */
-export interface IndustryTheme { title: string; happening: string; why_it_matters: string; angle: string; platforms: string[]; posts: IndustryPost[] }
 export interface Report {
   id: string; client_id: string; type: string | null; status: string; period: Period; previous_period: Period | null; created_at: string; completed_at: string | null; duration_minutes: number | null;
   deck: { url: string | null; status: string | null }; counts: Record<string, unknown> | null; metrics_summary: Record<string, unknown> | null; warnings: string[]; trend_status: string | null; error: string | null; demo_job_id: string | null; links: Links;
   analysis?: Record<string, unknown> | null; calendar?: Array<{ day?: string; date_label?: string; posts: Array<Record<string, unknown>> }> | null; performance?: Record<string, unknown> | null; trends?: { tiktok: { posts: number; patterns: unknown }; instagram: { posts: number; patterns: unknown } } | null;
-  /** The themes stored for the weeks that start inside the report's period, newest week first; null when there are none. */
-  industry_trends?: { themes: IndustryTheme[] } | null;
 }
 export interface CompetitiveReport {
   id: string; client_id: string; set_id: string | null; status: string; period: Period & { days: number | null }; created_at: string; completed_at: string | null; duration_minutes: number | null;
