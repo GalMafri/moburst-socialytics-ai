@@ -211,7 +211,7 @@ export function ClientNotes({ clientId, clientName, brandNotes, timeZone }: {
     >
       <div className="space-y-2">
         <Label htmlFor="client-note-text">Add a note</Label>
-        <Textarea id="client-note-text" aria-label="New note" value={typed} maxLength={NOTE_TEXT_MAX} rows={4}
+        <Textarea id="client-note-text" value={typed} maxLength={NOTE_TEXT_MAX} rows={4}
           onChange={(e) => setTyped(e.target.value)} placeholder="What the client said: words to use or avoid, what is coming up, what changed." />
         <div className="flex flex-wrap items-center gap-2">
           <Input type="date" aria-label="Date of the new note" className="w-auto" value={date} max={tomorrowOf(localToday())}

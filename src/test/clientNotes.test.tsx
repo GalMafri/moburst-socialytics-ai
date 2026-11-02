@@ -81,12 +81,12 @@ describe('adding notes', () => {
 
   it('adds a typed note with an id of its own, dated only when a person picks a date', async () => {
     mount();
-    fireEvent.change(await screen.findByLabelText('New note'), { target: { value: 'Call with Bader Law.\nNo puns.' } });
+    fireEvent.change(await screen.findByLabelText('Add a note'), { target: { value: 'Call with Bader Law.\nNo puns.' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
     await waitFor(() => expect(f.invoke).toHaveBeenCalledTimes(1));
     const body = f.invoke.mock.calls[0][1].body;
     expect(body).toEqual({ action: 'add_text', client_id: 'c1', note_id: expect.stringMatching(/^[0-9a-f-]{36}$/), text: 'Call with Bader Law.\nNo puns.' });
-    fireEvent.change(screen.getByLabelText('New note'), { target: { value: 'Second call.' } });
+    fireEvent.change(screen.getByLabelText('Add a note'), { target: { value: 'Second call.' } });
     fireEvent.change(screen.getByLabelText('Date of the new note'), { target: { value: '2026-10-28' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
     await waitFor(() => expect(f.invoke).toHaveBeenCalledTimes(2));
