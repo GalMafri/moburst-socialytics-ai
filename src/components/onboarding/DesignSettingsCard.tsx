@@ -1,11 +1,15 @@
 /**
  * What every design for a client is built from: the logo file, where the
- * client puts it, the background behind it, and the client's own posts whose
- * look the designs follow. The client lifecycle works these out on its own
- * (Lital's decision 2, 19 Oct 2026: the logo from the website, its place
- * from the client's posts, the background from the brand colors) and they
- * are in place from then on. A person may change any of them here; the
- * lifecycle never replaces settings a person saved.
+ * client puts it and the background behind it. The client lifecycle works
+ * these out on its own (Lital's decision 2, 19 Oct 2026: the logo from the
+ * website, its place from the client's posts, the background from the brand
+ * colors) and they are in place from then on. A person may change any of them
+ * here; the lifecycle never replaces settings a person saved.
+ *
+ * The client's own posts the designs follow are not set here: they refresh
+ * on their own every week, on every client's row, and staff keep or leave out
+ * posts on the Brand references card (design: docs/superpowers/specs/
+ * 2026-11-02-design-refs-refresh-design.md).
  *
  * There is no switch for automatic designs: they stay off for good (Lital,
  * 20 Oct 2026). Designs are made only when a person asks for one on a post.
@@ -27,6 +31,7 @@ import { formatDate } from "@/lib/display";
 import { Loading } from "@/components/ui/loading";
 import { sendQuietly, writeResendable } from "@/lib/quietSend";
 import { fileKey, useQuietUpload } from "@/hooks/useQuietUpload";
+import { referencesFor } from "../../../supabase/functions/_shared/design-prompts/designRefs";
 
 type Anchor = "left" | "center" | "right";
 type Spot = `${"top" | "bottom"}-${Anchor}`;
@@ -115,17 +120,11 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
       ]);
       if (sErr) throw sErr;
       if (cErr) throw cErr;
+      // The client's library as the lifecycle keeps it: a row made here before the lifecycle's starts with it.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const own = ((client as any)?.design_references as string[] | null) || [];
+      const paths = referencesFor((client as any)?.design_references, (client as any)?.harvested_design_references, MAX_REFS, null);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const harvested = (((client as any)?.harvested_design_references as Array<{ path?: string }> | null) || []).map((r) => r.path).filter(Boolean) as string[];
-      const paths = [...new Set([...own, ...harvested])];
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: signed } = paths.length ? await supabase.storage.from("design-references").createSignedUrls(paths, 3600) : { data: [] as any[] };
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const previews = Object.fromEntries((signed || []).filter((r: any) => r.signedUrl).map((r: any) => [r.path, r.signedUrl]));
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return { settings: settings as any, paths, previews: previews as Record<string, string> };
+      return { settings: settings as any, paths };
     },
   });
 
@@ -135,7 +134,6 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
   const [widthPct, setWidthPct] = useState(25);
   const [edgePct, setEdgePct] = useState(4);
   const [background, setBackground] = useState("#0B0E1A");
-  const [refs, setRefs] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [notSaved, setNotSaved] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -151,7 +149,6 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
     if (!s || dirty) return;
     setLogoPath(s.logo_path);
     setBackground(s.background);
-    setRefs(s.reference_paths?.length ? s.reference_paths : []);
     const img = new Image();
     img.onload = () => {
       const aspect = img.naturalWidth / Math.max(1, img.naturalHeight);
@@ -162,12 +159,6 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
     img.src = supabase.storage.from("generated-media").getPublicUrl(s.logo_path).data.publicUrl;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data?.settings]);
-
-  // Before anything is stored, every post the client has is in.
-  useEffect(() => {
-    if (data && !data.settings && data.paths.length && !dirty) setRefs(data.paths.slice(0, MAX_REFS));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data]);
 
   const pathFor = (file: File) => `${clientId}/design-settings/logo-${fileKey(file).replace(/\.[^.]+$/, "")}.png`;
   const uploadLogo = useCallback(async (file: File) => {
@@ -191,29 +182,23 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
     void logo.send(file);
   };
 
-  const toggleRef = (path: string) => {
-    edit(setRefs)(refs.includes(path) ? refs.filter((p) => p !== path) : refs.length >= MAX_REFS ? refs : [...refs, path]);
-  };
-
   const placement = toPlacement(spot, widthPct, edgePct, logoAspect);
-  const complete = !!logoPath && HEX.test(background) && refs.length >= 1;
+  // A new row needs the client's posts; a stored one already has them, kept current by the lifecycle.
+  const complete = !!logoPath && HEX.test(background) && (!!data?.settings || (data?.paths.length ?? 0) > 0);
 
-  // A person's save: from then on these are theirs (source 'person', by trigger), and the lifecycle leaves them alone.
+  // A person's save: from then on the logo, placement and background are theirs (source 'person', by
+  // trigger), and the lifecycle leaves them alone. The posts are not part of it: they keep refreshing.
   const save = async () => {
     if (!complete) return;
     setSaving(true);
     const { data: auth } = await supabase.auth.getUser();
+    const now = new Date().toISOString();
+    const fields = { logo_path: logoPath, placement, background: background.toUpperCase(), confirmed_at: now, confirmed_by: auth?.user?.id ?? null, updated_at: now };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await sendQuietly(() => (supabase.from("design_brand_settings" as any) as any).upsert({
-      client_id: clientId,
-      logo_path: logoPath,
-      placement,
-      background: background.toUpperCase(),
-      reference_paths: refs,
-      confirmed_at: new Date().toISOString(),
-      confirmed_by: auth?.user?.id ?? null,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: "client_id" }), { again: writeResendable });
+    const table = () => supabase.from("design_brand_settings" as any) as any;
+    const { error } = await sendQuietly(() => data?.settings
+      ? table().update(fields).eq("client_id", clientId)
+      : table().upsert({ client_id: clientId, ...fields, reference_paths: (data?.paths ?? []).slice(0, MAX_REFS) }, { onConflict: "client_id" }), { again: writeResendable });
     setSaving(false);
     if (error) { setNotSaved(true); return; }
     setDirty(false);
@@ -242,6 +227,7 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
         <>
           Every design for this client is built from these. Designs are made only when someone asks for one on a post.
           <span className="block mt-2 t-label">{origin || "They are worked out automatically from the client's logo and its own posts once those are read."}</span>
+          <span className="block mt-2 t-label">The client's posts they follow refresh on their own, under Brand references from social posts.</span>
         </>
       }
     >
@@ -295,32 +281,6 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
               <input type="color" aria-label="Pick a background color" value={HEX.test(background) ? background : "#000000"} onChange={(e) => edit(setBackground)(e.target.value.toUpperCase())} className="h-9 w-12 rounded-[8px] bg-transparent border border-white/10" />
               <Input id="design-bg" value={background} onChange={(e) => edit(setBackground)(e.target.value)} className="w-32" />
             </div>
-          </div>
-
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <Label>The client's posts designs are built from · {refs.length} of {Math.min(MAX_REFS, data?.paths.length ?? 0)}</Label>
-              {data && data.paths.length > 0 && refs.length < Math.min(MAX_REFS, data.paths.length) && (
-                <Button type="button" variant="ghost" size="sm" onClick={() => edit(setRefs)(data.paths.slice(0, MAX_REFS))}>Use all</Button>
-              )}
-            </div>
-            <p className="t-label">Each design builds on the one or two of these whose layout suits what its post says, and on different ones than the designs before it.</p>
-            {data?.paths.length ? (
-              <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-                {data.paths.map((p) => {
-                  const on = refs.includes(p);
-                  return (
-                    <button key={p} type="button" onClick={() => toggleRef(p)} aria-pressed={on} aria-label={on ? "Leave this post out" : "Use this post"}
-                      className={`relative aspect-square rounded-[12px] overflow-hidden border ${on ? "border-primary ring-1 ring-primary/50" : "border-white/10"} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary`}>
-                      {data.previews[p] ? <img src={data.previews[p]} alt="" className="w-full h-full object-cover" /> : <span className="t-label">Preview not available</span>}
-                      {on && <span className="absolute top-1.5 right-1.5 bg-primary text-primary-foreground rounded-full p-1"><Check className="h-3 w-3" /></span>}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="t-secondary">The client's own posts appear here once they are read from its accounts.</p>
-            )}
           </div>
 
           {(dirty || !data?.settings) && (

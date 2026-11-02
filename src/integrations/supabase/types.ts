@@ -246,6 +246,7 @@ export type Database = {
           last_confirmed_at: string
           pattern_description: string
           pattern_type: string
+          platform: string | null
           replaced_by: string | null
           source: string
           status: string
@@ -260,6 +261,7 @@ export type Database = {
           last_confirmed_at?: string
           pattern_description: string
           pattern_type: string
+          platform?: string | null
           replaced_by?: string | null
           source?: string
           status?: string
@@ -274,6 +276,7 @@ export type Database = {
           last_confirmed_at?: string
           pattern_description?: string
           pattern_type?: string
+          platform?: string | null
           replaced_by?: string | null
           source?: string
           status?: string
@@ -1797,6 +1800,135 @@ export type Database = {
             columns: ["source_iteration_id"]
             isOneToOne: false
             referencedRelation: "post_iterations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      design_reference_choices: {
+        Row: {
+          chosen_at: string
+          chosen_by: string | null
+          choice: string
+          client_id: string
+          path: string
+          source: string
+        }
+        Insert: {
+          chosen_at?: string
+          chosen_by?: string | null
+          choice: string
+          client_id: string
+          path: string
+          source?: string
+        }
+        Update: {
+          chosen_at?: string
+          chosen_by?: string | null
+          choice?: string
+          client_id?: string
+          path?: string
+          source?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "design_reference_choices_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      design_reference_reviews: {
+        Row: {
+          client_id: string
+          confidence: number | null
+          content_hash: string | null
+          network: string
+          path: string | null
+          posted_at: string | null
+          reason: string | null
+          reviewed_at: string
+          source_post_id: string
+          source_url: string | null
+          verdict: string
+        }
+        Insert: {
+          client_id: string
+          confidence?: number | null
+          content_hash?: string | null
+          network?: string
+          path?: string | null
+          posted_at?: string | null
+          reason?: string | null
+          reviewed_at?: string
+          source_post_id: string
+          source_url?: string | null
+          verdict: string
+        }
+        Update: {
+          client_id?: string
+          confidence?: number | null
+          content_hash?: string | null
+          network?: string
+          path?: string | null
+          posted_at?: string | null
+          reason?: string | null
+          reviewed_at?: string
+          source_post_id?: string
+          source_url?: string | null
+          verdict?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "design_reference_reviews_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      design_refs_conversion: {
+        Row: {
+          client_id: string
+          converted_at: string
+          kept: string[]
+          left_out: string[]
+          posts: string[]
+          posts_seen: boolean
+          reference_paths: string[]
+          settings_updated_at: string | null
+          uploads: string[]
+        }
+        Insert: {
+          client_id: string
+          converted_at?: string
+          kept: string[]
+          left_out: string[]
+          posts: string[]
+          posts_seen: boolean
+          reference_paths: string[]
+          settings_updated_at?: string | null
+          uploads: string[]
+        }
+        Update: {
+          client_id?: string
+          converted_at?: string
+          kept?: string[]
+          left_out?: string[]
+          posts?: string[]
+          posts_seen?: boolean
+          reference_paths?: string[]
+          settings_updated_at?: string | null
+          uploads?: string[]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "design_refs_conversion_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: true
+            referencedRelation: "clients"
             referencedColumns: ["id"]
           },
         ]
@@ -3811,6 +3943,10 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      design_reference_choose: {
+        Args: { p_choice: string; p_client: string; p_path: string }
+        Returns: Json
+      }
       enqueue_scheduled_report_jobs: {
         Args: { p_dry_run?: boolean; p_now?: string }
         Returns: Json
@@ -3959,6 +4095,10 @@ export type Database = {
       lifecycle_write_client: {
         Args: { p_by?: string; p_client: string; p_fields: Json }
         Returns: Json
+      }
+      lifecycle_write_design_library: {
+        Args: { p_client: string; p_reference_paths: string[] }
+        Returns: boolean
       }
       lifecycle_write_design_settings: {
         Args: {
