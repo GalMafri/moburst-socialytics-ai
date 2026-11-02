@@ -1,14 +1,15 @@
 /** An in-memory Store for the route tests: the same filters and keyset paging over fixture rows. */
 import type { ClientScope } from "../_shared/api/router.ts";
-import type { AlertRow, ClientRow, CompetitiveReportRow, CompetitorRow, CompetitorSetRow, DesignSystemRow, HandleRow, MediaJobRow, PostRow, ReportRow, ScheduledPostRow, ScheduleRow, SetWithCompetitors, SproutProfileRow } from "./serializers.ts";
+import type { AlertRow, ClientRow, CompetitiveReportRow, CompetitorRow, CompetitorSetRow, DesignSystemRow, HandleRow, MediaJobRow, PostRow, ReportRow, ScheduledPostRow, ScheduleRow, SetWithCompetitors, SproutProfileRow, TrendPostRow, TrendThemeRow, TrendWeekRow } from "./serializers.ts";
 import type { ClientExtras, Page, Store } from "./store.ts";
 
 export interface FakeData {
   clients: ClientRow[]; sproutProfiles: SproutProfileRow[]; sets: CompetitorSetRow[]; competitors: CompetitorRow[]; handles: HandleRow[]; reports: ReportRow[]; competitiveReports: CompetitiveReportRow[];
   posts: PostRow[]; mediaJobs: MediaJobRow[]; schedules: ScheduleRow[]; scheduledPosts: ScheduledPostRow[]; alerts: AlertRow[]; designSystems: DesignSystemRow[];
+  trendWeeks: TrendWeekRow[]; trendThemes: TrendThemeRow[]; trendPosts: TrendPostRow[];
 }
 export function emptyData(over: Partial<FakeData> = {}): FakeData {
-  return { clients: [], sproutProfiles: [], sets: [], competitors: [], handles: [], reports: [], competitiveReports: [], posts: [], mediaJobs: [], schedules: [], scheduledPosts: [], alerts: [], designSystems: [], ...over };
+  return { clients: [], sproutProfiles: [], sets: [], competitors: [], handles: [], reports: [], competitiveReports: [], posts: [], mediaJobs: [], schedules: [], scheduledPosts: [], alerts: [], designSystems: [], trendWeeks: [], trendThemes: [], trendPosts: [], ...over };
 }
 
 function keyset<T extends { id: string; created_at: string }>(rowsIn: T[], page: Page): T[] {
@@ -57,5 +58,7 @@ export function makeFakeStore(d: FakeData): Store {
     async listScheduledPosts(scope, f, page) { return keyset(inScope(byClient(d.scheduledPosts, f.client_id), scope).filter((s) => !f.status || s.status === f.status), page); },
     async listAlerts(scope, f, page) { return keyset(inScope(byClient(d.alerts, f.client_id), scope).filter((a) => !f.status || a.status === f.status), page); },
     async listDesignSystems(scope, f, page) { return keyset(inScope(byClient(d.designSystems, f.client_id), scope), page); },
+    // The client's rows and nothing narrower, so the serializer's own rule is what the route tests exercise.
+    async trendRows(clientId) { return { weeks: byClient(d.trendWeeks, clientId), themes: byClient(d.trendThemes, clientId), posts: byClient(d.trendPosts, clientId) }; },
   };
 }

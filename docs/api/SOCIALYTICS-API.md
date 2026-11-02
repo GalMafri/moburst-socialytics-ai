@@ -41,7 +41,7 @@ Every request is recorded (key, route, status, duration; never the body or the k
 | `GET /v1/clients/{id}/setup` | `{ ready, issues[] }`: brand identity, pillars, keywords, Sprout profile, confirmed competitor set, approved design system, schedule. |
 | `GET /v1/clients/{id}/analytics?start=&end=` | Sprout performance over a window (default the last 30 days): totals, the previous window, changes, per profile, top posts. `422 unprocessable` with `reason: no_sprout_profiles` for a brand not managed in Sprout. |
 | `GET /v1/reports?client_id=&status=&from=&to=` | Social reports: period, previous period, status, deck, counts, metric changes, warnings, trend status, links. |
-| `GET /v1/reports/{id}` | One social report, plus `analysis`, `calendar` (the content calendar), `performance` (without raw post ids) and `trends` summaries. |
+| `GET /v1/reports/{id}` | One social report, plus `analysis`, `calendar` (the content calendar), `performance` (without raw post ids), `trends` summaries and `industry_trends`: the themes (title, what is happening, why it matters, the angle for the brand, platforms, and example posts) stored for the weeks that start inside the report's period, newest week first, or `null` when there are none. |
 | `GET /v1/competitive-reports?client_id=&status=` | Competitive reports: period, status, deck, totals, quality check. |
 | `GET /v1/competitive-reports/{id}` | One competitive report, plus `analysis` (executive summary, scorecard, gaps, teardown, breakdowns, schedule) and `aggregates` per company. |
 | `GET /v1/competitor-sets?client_id=&status=`, `GET /v1/competitor-sets/{id}` | Competitor sets with competitors (website, rationale, similarity, selection, rank) and their social handles (platform, handle, URL, confidence, source). |

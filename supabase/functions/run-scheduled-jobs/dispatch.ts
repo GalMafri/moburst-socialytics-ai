@@ -84,7 +84,6 @@ export interface ManualRun {
   range: ReportRange;
   requested_by: string | null;
   requested_at: string;
-  skip_trends?: boolean;
 }
 
 /** The job's manual run, or null for a schedule's dispatch. */
@@ -95,7 +94,7 @@ export function manualRun(job: Pick<ScheduledJob, "schedule_id" | "payload" | "c
   if (!kind || !p.range?.start || !p.range?.end) return null;
   return {
     run: "manual", kind, range: { start: String(p.range.start), end: String(p.range.end) },
-    requested_by: p.requested_by ?? null, requested_at: p.requested_at ?? job.created_at, skip_trends: p.skip_trends === true,
+    requested_by: p.requested_by ?? null, requested_at: p.requested_at ?? job.created_at,
   };
 }
 
@@ -188,7 +187,7 @@ export interface DispatchDeps {
   now(): Date;
   /** Sends the workflow request. Throws on a network failure. */
   post(url: string, body: unknown): Promise<{ ok: boolean; status: number }>;
-  buildSocialPayload(args: { client: ClientRow; reportId: string; range: ReportRange; scheduled: boolean; staggerSeconds: number; competitiveReportId?: string; skipTrends?: boolean }): Promise<Record<string, unknown>>;
+  buildSocialPayload(args: { client: ClientRow; reportId: string; range: ReportRange; scheduled: boolean; staggerSeconds: number; competitiveReportId?: string }): Promise<Record<string, unknown>>;
   buildCompetitivePayload(args: { client: ClientRow; reportId: string; set: CompetitorSetRow; range: ReportRange; attemptStartedAt: string; scheduled: boolean; staggerSeconds: number }): Promise<Record<string, unknown>>;
   /** The shared RivalIQ landscape check (landscapeCheck.ts), bound to the project's key. One provider read. */
   checkLandscape(client: ClientRow, set: CompetitorSetRow): Promise<LandscapeCheck>;
@@ -602,7 +601,7 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
       ...memory, range, runs, competitive_report_id: sentOn ?? null,
       ...(without && dependencyId ? { competitive_report_skipped: dependencyId } : {}),
     };
-    const payload = await d.buildSocialPayload({ client, reportId, range, scheduled: !manual, staggerSeconds: job.stagger_seconds, competitiveReportId: sentOn, ...(manual?.skip_trends ? { skipTrends: true } : {}) });
+    const payload = await d.buildSocialPayload({ client, reportId, range, scheduled: !manual, staggerSeconds: job.stagger_seconds, competitiveReportId: sentOn });
     if (d.dryRun) {
       const preview = { range, payload_keys: Object.keys(payload) };
       return wait

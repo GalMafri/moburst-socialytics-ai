@@ -35,10 +35,13 @@ const Client = obj({
   sprout_profiles: arr(obj({ name: str, handle: str, network: str, url: str })), competitor_sets: arr(CompetitorSet), schedules: arr(Schedule),
 });
 const Trend = obj({ posts: { type: "integer" }, patterns: anyObj });
+const IndustryPost = obj({ platform: { type: "string" }, url: { type: "string" }, author: { type: "string" }, text: { type: "string" }, format: str, posted_at: str });
+const IndustryTheme = obj({ title: { type: "string" }, happening: { type: "string" }, why_it_matters: { type: "string" }, angle: { type: "string" }, platforms: arr({ type: "string" }), posts: arr(IndustryPost) });
 const Report = obj({
   id: { type: "string" }, client_id: { type: "string" }, type: str, status: { type: "string" }, period: Period, previous_period: { oneOf: [Period, { type: "null" }] }, created_at: { type: "string" }, completed_at: str, duration_minutes: num,
   deck: obj({ url: str, status: str }), counts: anyObj, metrics_summary: anyObj, warnings: arr({ type: "string" }), trend_status: str, error: str, demo_job_id: str, links: Links,
   analysis: anyObj, calendar: { type: ["array", "null"], items: obj({ day: str, date_label: str, posts: arr({ type: "object" }) }) }, performance: anyObj, trends: { oneOf: [obj({ tiktok: Trend, instagram: Trend }), { type: "null" }] },
+  industry_trends: { oneOf: [obj({ themes: arr(IndustryTheme) }, ["themes"]), { type: "null" }], description: "The themes the weekly trend collection stored for the weeks that start inside the report's period (newest week first), each with its example posts. Null when none." },
 });
 const CompetitiveReport = obj({
   id: { type: "string" }, client_id: { type: "string" }, set_id: str, status: { type: "string" }, period: obj({ start: str, end: str, days: int }), created_at: { type: "string" }, completed_at: str, duration_minutes: num,

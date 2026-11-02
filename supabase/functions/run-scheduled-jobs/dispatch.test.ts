@@ -147,6 +147,7 @@ function harness(w: ReturnType<typeof world>, transport: Transport = "accept", o
   const posts: Array<{ url: string; body: Record<string, unknown> }> = [];
   const saved: Array<Record<string, unknown>> = [];
   const checks: string[] = [];
+  const payloadArgs: Array<Parameters<DispatchDeps["buildSocialPayload"]>[0]> = [];
   let mode: Transport = transport;
   const deps = (job: ScheduledJob): DispatchDeps => ({
     store: w.store,
@@ -159,6 +160,7 @@ function harness(w: ReturnType<typeof world>, transport: Transport = "accept", o
       return mode === "reject" ? { ok: false, status: 503 } : { ok: true, status: 200 };
     },
     async buildSocialPayload(a) {
+      payloadArgs.push(a);
       const comp = a.competitiveReportId ? w.tables.competitive.find((r) => r.id === a.competitiveReportId) : w.tables.competitive.filter((r) => r.status === "complete").at(-1);
       return { report_id: a.reportId, client_id: a.client.id, date_range_start: a.range.start, date_range_end: a.range.end, competitive_report_id: comp?.id ?? null, stagger_seconds: a.staggerSeconds };
     },
@@ -180,7 +182,7 @@ function harness(w: ReturnType<typeof world>, transport: Transport = "accept", o
     job.status = outcome.status;
     return outcome;
   };
-  return { posts, saved, checks, run, setTransport: (t: Transport) => { mode = t; } };
+  return { posts, saved, checks, payloadArgs, run, setTransport: (t: Transport) => { mode = t; } };
 }
 
 describe("runDispatch", () => {
@@ -594,7 +596,7 @@ describe("makePoster", () => {
 function manualJob(kind: "competitive" | "social", over: Partial<ScheduledJob> = {}): ScheduledJob {
   return jobFor(kind, {
     id: `manual-${kind}`, schedule_id: null, occurrence: null, priority: 15, created_at: NOW.toISOString(),
-    payload: { run: "manual", kind, range: { start: "2026-08-01", end: "2026-08-31" }, requested_by: "person-1", requested_at: NOW.toISOString(), ...(kind === "social" ? { skip_trends: true } : {}) },
+    payload: { run: "manual", kind, range: { start: "2026-08-01", end: "2026-08-31" }, requested_by: "person-1", requested_at: NOW.toISOString() },
     result: { range: { start: "2026-08-01", end: "2026-08-31" } },
     ...over,
   });
@@ -605,6 +607,22 @@ describe("a manual run follows the scheduled path", () => {
     expect(manualRun(manualJob("social"))).toMatchObject({ kind: "social", range: { start: "2026-08-01", end: "2026-08-31" }, requested_by: "person-1" });
     expect(manualRun(jobFor("social"))).toBeNull();
     expect(manualRun({ schedule_id: null, created_at: DUE, payload: { run: "manual", kind: "other", range: { start: "a", end: "b" } } })).toBeNull();
+  });
+
+  it("has no trend switch: a request that still carries skip_trends is read and run like one that does not", async () => {
+    const older = manualJob("social", { payload: { ...manualJob("social").payload, skip_trends: true } });
+    expect(manualRun(older)).not.toHaveProperty("skip_trends");
+    expect(manualRun(manualJob("social"))).not.toHaveProperty("skip_trends");
+    const w = world();
+    const h = harness(w);
+    await h.run(older);
+    expect(h.payloadArgs).toHaveLength(1);
+    expect(h.payloadArgs[0]).not.toHaveProperty("skipTrends");
+    expect(h.payloadArgs[0]).toMatchObject({ reportId: w.tables.reports[0].id, range: { start: "2026-08-01", end: "2026-08-31" }, scheduled: false });
+    // It builds the same request a plain one does.
+    const hp = harness(world());
+    await hp.run(manualJob("social"));
+    expect(Object.keys(hp.payloadArgs[0]).sort()).toEqual(Object.keys(h.payloadArgs[0]).sort());
   });
 
   it("makes the person's report for their period and touches no schedule", async () => {

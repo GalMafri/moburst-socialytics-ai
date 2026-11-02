@@ -70,6 +70,14 @@ for(const kind of ['social','competitive']) describe(kind+' run screen',()=>{
  });
 });
 
+it('asks for the monthly report with no trend switch: trends come from the stored weeks',async()=>{
+ f.invokes.mockResolvedValue({data:{job_id:'job',queued:true},error:null});mount('social');await tick();await tick();
+ expect(screen.queryByRole('switch')).toBeNull();expect(screen.queryByText(/include trend|trend analysis|trend settings/i)).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'Run full analysis'}));await tick();
+ expect(f.invokes).toHaveBeenCalledTimes(1);
+ expect(f.invokes).toHaveBeenCalledWith('run-report',{body:{client_id:'client',kind:'social',date_range_start:'2026-09-01',date_range_end:'2026-09-17'}});
+});
+
 for (const state of ['missing','weak']) it(`runs a confirmed competitive selection whose profiles are ${state}: tracking reads RivalIQ by website`,async()=>{
  f.profiles=state;f.invokes.mockResolvedValue({data:{job_id:'job',queued:true},error:null});mount('competitive');await tick();await tick();
  const button=screen.getByRole('button',{name:'Run competitive analysis'});expect(button).toBeEnabled();

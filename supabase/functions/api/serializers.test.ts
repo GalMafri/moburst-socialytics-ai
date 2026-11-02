@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { ALERT, CLIENT, COMPETITIVE_REPORT, COMPETITOR, COMPETITOR_SET, DESIGN_SYSTEM, HANDLE, MEDIA_JOB, POST, REPORT, REPORT_DATA, SCHEDULE, SCHEDULED_POST, SPROUT_PROFILE } from "./fixtures";
-import { alertOut, APP_URL, appUrl, clientOut, competitiveReportOut, competitorSetOut, designSystemOut, mediaJobOut, postOut, reportOut, scheduledPostOut, scheduleOut } from "./serializers";
+import { ALERT, CLIENT, COMPETITIVE_REPORT, COMPETITOR, COMPETITOR_SET, DESIGN_SYSTEM, HANDLE, MEDIA_JOB, POST, REPORT, REPORT_DATA, SCHEDULE, SCHEDULED_POST, SPROUT_PROFILE, TREND_POSTS, TREND_THEMES, TREND_WEEKS } from "./fixtures";
+import { alertOut, APP_URL, appUrl, clientOut, competitiveReportOut, competitorSetOut, designSystemOut, industryTrendsOut, mediaJobOut, postOut, reportOut, scheduledPostOut, scheduleOut, type TrendRows } from "./serializers";
+import { SCHEMAS } from "./schemas";
 
 describe("clientOut", () => {
   const out = clientOut(CLIENT, { sproutProfiles: [SPROUT_PROFILE], sets: [{ ...COMPETITOR_SET, competitors: [{ ...COMPETITOR, handles: [HANDLE] }] }], designSystems: [DESIGN_SYSTEM], counts: { reports: 4, competitive_reports: 2, posts: 9, schedules: 1 }, lastReport: REPORT });
@@ -105,5 +106,71 @@ describe("appUrl", () => {
     expect(appUrl(() => undefined)).toBe("https://moburst-socialytics-ai.lovable.app");
     expect(appUrl((k) => (k === "PUBLIC_APP_URL" ? "https://socialytics.moburst.ai/" : undefined))).toBe("https://socialytics.moburst.ai");
     expect(appUrl(() => "   ")).toBe("https://moburst-socialytics-ai.lovable.app");
+  });
+});
+
+describe("industryTrendsOut", () => {
+  const rows: TrendRows = { weeks: TREND_WEEKS, themes: TREND_THEMES, posts: TREND_POSTS };
+  const august = { client_id: "c-bader", date_range_start: "2026-08-01", date_range_end: "2026-08-31" };
+  const titles = (o: ReturnType<typeof industryTrendsOut>) => o?.themes.map((t) => t.title);
+
+  it("takes the finished weeks that start from the first day of the period to the last, both included", () => {
+    // Aug 3 and Aug 31 are Mondays; Aug 10 is still running; Jul 27 and Sep 7 are outside.
+    expect(titles(industryTrendsOut(rows, august))).toEqual(["Reaction videos to new rulings", "Plain-English legal explainers", "Client stories in the first person", "Inside the courtroom"]);
+    expect(titles(industryTrendsOut(rows, { ...august, date_range_start: "2026-08-03", date_range_end: "2026-08-03" }))).toEqual(["Inside the courtroom"]);
+    expect(titles(industryTrendsOut(rows, { ...august, date_range_start: "2026-08-04", date_range_end: "2026-08-30" }))).toEqual(["Client stories in the first person"]);
+  });
+  it("counts a partial week and not a running one", () => {
+    const only = (status: string) => industryTrendsOut({ ...rows, weeks: TREND_WEEKS.map((w) => (w.id === "tw-aug-17" ? { ...w, status } : w)) }, { ...august, date_range_start: "2026-08-17", date_range_end: "2026-08-17" });
+    expect(titles(only("partial"))).toEqual(["Client stories in the first person"]);
+    expect(only("running")).toBeNull();
+  });
+  it("leaves a dismissed theme out and lists a theme whose posts were all dropped with none", () => {
+    const dropped = TREND_POSTS.map((p) => (p.id === "tp-7" ? { ...p, kept: false } : p));
+    const out = industryTrendsOut({ ...rows, posts: dropped }, { ...august, date_range_start: "2026-08-03", date_range_end: "2026-08-03" });
+    expect(out?.themes).toHaveLength(1);
+    expect(out?.themes[0].posts).toEqual([]);
+    expect(industryTrendsOut(rows, { ...august, date_range_start: "2026-08-17", date_range_end: "2026-08-17" })?.themes).toHaveLength(1);
+  });
+  it("lists a theme's kept posts in the order the theme lists them, each once", () => {
+    const out = industryTrendsOut(rows, august);
+    expect(out?.themes[0].posts.map((p) => p.url)).toEqual(["https://instagram.example/tp-2", "https://tiktok.example/tp-1"]);
+    expect(out?.themes[3].posts.map((p) => p.url)).toEqual(["https://tiktok.example/tp-7"]);
+  });
+  it("never shows another client's week, theme or post", () => {
+    const foreign = { ...TREND_THEMES[0], id: "th-x", position: 9, title: "A theme row of another client", client_id: "c-calm" };
+    const reaches = { ...TREND_THEMES[3], id: "th-y", title: "Lists another client's post", post_ids: ["tp-6", "tp-calm"] };
+    const out = industryTrendsOut({ ...rows, themes: [...TREND_THEMES, foreign, reaches] }, august);
+    expect(titles(out)).not.toContain("A theme row of another client");
+    expect(titles(out)).not.toContain("Another client's theme");
+    expect(out?.themes.find((t) => t.title === "Lists another client's post")?.posts.map((p) => p.author)).toEqual(["@clientstories"]);
+    expect(titles(industryTrendsOut(rows, { ...august, client_id: "c-calm" }))).toEqual(["Another client's theme"]);
+  });
+  it("is null with no theme in the period, no stored rows, or no period", () => {
+    expect(industryTrendsOut(rows, { ...august, date_range_start: "2026-09-08", date_range_end: "2026-09-13" })).toBeNull();
+    expect(industryTrendsOut({ weeks: [], themes: [], posts: [] }, august)).toBeNull();
+    expect(industryTrendsOut(null, august)).toBeNull();
+    expect(industryTrendsOut(rows, { ...august, date_range_start: null })).toBeNull();
+    expect(industryTrendsOut(rows, { ...august, date_range_end: null })).toBeNull();
+  });
+  it("leaves the rows it was given as they were", () => {
+    const frozen: TrendRows = { weeks: Object.freeze([...TREND_WEEKS]) as never, themes: Object.freeze([...TREND_THEMES]) as never, posts: Object.freeze([...TREND_POSTS]) as never };
+    expect(() => industryTrendsOut(frozen, august)).not.toThrow();
+    expect(frozen.themes.map((t) => t.id)).toEqual(TREND_THEMES.map((t) => t.id));
+  });
+  it("serves exactly the fields the OpenAPI schema documents", () => {
+    const out = industryTrendsOut(rows, august)!;
+    const schema = (SCHEMAS.ReportObject.properties as Record<string, { oneOf: Array<{ properties?: Record<string, { items: { properties: Record<string, { items?: { properties: Record<string, unknown> } }> } }> }> }>).industry_trends.oneOf[0].properties!.themes.items;
+    expect(Object.keys(out.themes[0]).sort()).toEqual(Object.keys(schema.properties).sort());
+    expect(Object.keys(out.themes[0].posts[0]).sort()).toEqual(Object.keys(schema.properties.posts.items!.properties).sort());
+  });
+  it("is part of the report detail only when the detail is given the stored rows", () => {
+    expect(reportOut(REPORT, { detail: true, trendRows: rows }).industry_trends?.themes).toHaveLength(4);
+    expect(reportOut(REPORT, { detail: true, trendRows: null }).industry_trends).toBeNull();
+    // A caller that reads no stored rows (the demo's output builder) gets no field at all, and a list row never has it.
+    expect("industry_trends" in reportOut(REPORT, { detail: true })).toBe(false);
+    expect("industry_trends" in reportOut(REPORT, { trendRows: rows })).toBe(false);
+    // The report's own trends stay as the report holds them.
+    expect(reportOut(REPORT, { detail: true, trendRows: rows }).trends).toEqual({ tiktok: { posts: 1, patterns: { top_hashtags: ["#law"] } }, instagram: { posts: 0, patterns: {} } });
   });
 });

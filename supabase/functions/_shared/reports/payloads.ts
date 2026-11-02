@@ -152,7 +152,6 @@ export async function buildSocialPayload(args: {
   reportId: string;
   range: ReportRange;
   competitiveReportId?: string;
-  skipTrends?: boolean;
   scheduled?: boolean;
   staggerSeconds?: number;
 }): Promise<Record<string, unknown>> {
@@ -217,7 +216,6 @@ export async function buildSocialPayload(args: {
     brand_book_file_path: client.brand_book_file_path || null,
     date_range_start: range.start || "",
     date_range_end: range.end || "",
-    skip_trends: args.skipTrends === true,
     timezone: client.timezone || "UTC",
     competitive_report_id: latestCompetitive?.id || null,
     competitive_context: competitiveContext(latestCompetitive, (feedback || []) as InsightFeedbackRow[], (learnings || []) as CompetitiveLearning[]),
