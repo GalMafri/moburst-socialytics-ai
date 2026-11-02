@@ -37,4 +37,20 @@ else
   echo "SKIP  api key checks (SOCIALYTICS_API_TEST_KEY not set)"
 fi
 
+# 4. The Claude connector (mcp): closed without a token, pointing at its metadata, which
+#    names this endpoint and Supabase Auth's OAuth server; the consent page is served.
+MCP="$FN/mcp"
+AUTH="https://rwouwxqggjjacbpbhqsn.supabase.co/.well-known/oauth-authorization-server/auth/v1"
+field() { node -e 'let s="";process.stdin.on("data",(d)=>s+=d).on("end",()=>{let v;try{v=JSON.parse(s)}catch{}for(const k of process.argv[1].split("."))v=v==null?v:v[k];console.log(Array.isArray(v)?v.join(" "):v==null?"":v)})' "$1"; }
+check "mcp refuses no token" 401 "$(code -X POST "$MCP" -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')"
+check "mcp points at its metadata" yes "$(curl -s -D - -o /dev/null -m 30 -X POST "$MCP" -H 'Content-Type: application/json' -d '{}' | tr -d '\r' | grep -qi "^www-authenticate: Bearer resource_metadata=\"$MCP/oauth-protected-resource\"" && echo yes || echo no)"
+META=$(curl -s -m 30 "$MCP/oauth-protected-resource")
+DISCOVERY=$(curl -s -m 30 "$AUTH")
+check "mcp metadata names the connector URL" "$MCP" "$(printf '%s' "$META" | field resource)"
+check "mcp metadata names Supabase Auth's issuer" "$(printf '%s' "$DISCOVERY" | field issuer)" "$(printf '%s' "$META" | field authorization_servers.0)"
+check "auth server allows dynamic registration" yes "$([ -n "$(printf '%s' "$DISCOVERY" | field registration_endpoint)" ] && echo yes || echo no)"
+check "auth server takes PKCE S256" yes "$(printf '%s' "$DISCOVERY" | field code_challenge_methods_supported | grep -qw S256 && echo yes || echo no)"
+check "consent page served on socialytics.moburst.ai" 200 "$(code https://socialytics.moburst.ai/oauth/consent)"
+check "bundle carries the consent page" 1 "$(curl -s -m 30 "$APP$BUNDLE" | grep -c 'Connect Claude to Socialytics' | sed 's/^[2-9].*/1/')"
+
 echo "----"; echo "$pass passed, $fail failed"; [ "$fail" -eq 0 ]
