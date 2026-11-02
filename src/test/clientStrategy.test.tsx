@@ -142,7 +142,7 @@ describe('a client strategy', () => {
     mount();
     const pillars = within(await screen.findByTestId('strategy-pillars-grid'));
     expect(pillars.getByText('Beer League Truths')).toBeInTheDocument();
-    expect(pillars.getAllByText('50% of posts')).toHaveLength(2);
+    expect(pillars.getAllByText('50% of calendar posts in the last 8 weeks')).toHaveLength(2);
     const platforms = within(section('strategy-platforms'));
     expect(platforms.getByText('Posting now')).toBeInTheDocument();
     expect(platforms.getByText('New')).toBeInTheDocument();
@@ -207,11 +207,23 @@ describe('a client strategy', () => {
     warn.mockRestore();
   });
 
-  it('states when the strategy is written before the first write', async () => {
-    f.strategy = null;
+  it('states when the strategy is written before the first write, also while the first write is under way', async () => {
+    for (const before of [null, { client_id: 'c1', sections: {}, platforms: [], pillars: [], sources: [], written_at: null }]) {
+      f.strategy = before;
+      mount();
+      expect(await screen.findByText('No strategy yet')).toBeInTheDocument();
+      expect(screen.getByText("Written once the client's brief and trend profile are ready.")).toBeInTheDocument();
+      cleanup();
+    }
+  });
+
+  it("gives a pillar's share of the client's calendar posts only where it has one", async () => {
+    f.strategy.pillars = [{ name: 'Beer League Truths', description: '', share: 60 }, { name: 'Captain Life', description: '', share: null }];
     mount();
-    expect(await screen.findByText('No strategy yet')).toBeInTheDocument();
-    expect(screen.getByText("Written once the client's brief and trend profile are ready.")).toBeInTheDocument();
+    const pillars = within(await screen.findByTestId('strategy-pillars-grid'));
+    expect(pillars.getAllByText(/of calendar posts/)).toHaveLength(1);
+    expect(pillars.getByText('60% of calendar posts in the last 8 weeks')).toBeInTheDocument();
+    expect(screen.queryByText(/% of posts/)).toBeNull();
   });
 });
 

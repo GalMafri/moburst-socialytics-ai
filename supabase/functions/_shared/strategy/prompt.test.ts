@@ -9,6 +9,7 @@ import { fakeDb } from "../lifecycle/fakeDb";
 
 const stored = (over: Record<string, unknown> = {}) => ({
   client_id: "c1",
+  written_at: "2026-11-02T10:00:00.000Z",
   sections: {
     goals: "Grow saves on Instagram.", audience: "Rec league captains.", positioning: "Built around the captain's week.",
     "pillar:Beer League Truths": "Carousels of league truths.", "pillar:Captain Life": "Checklists and reminders.",
@@ -55,6 +56,8 @@ describe("the strategy block", () => {
 
   it("is empty for a client with no strategy, and reads people's versions with the stored one", async () => {
     expect(await strategyPromptBlock(fakeDb({}), "c1")).toBe("");
+    // A row that holds only a write under way is no strategy yet.
+    expect(await strategyPromptBlock(fakeDb({ content_strategies: [{ client_id: "c1", sections: {}, platforms: [], pillars: [], written_at: null, pending: { phase: "check" } }] }), "c1")).toBe("");
     const db = fakeDb({ content_strategies: [stored()], content_strategy_edits: [{ client_id: "c1", section_key: "goals", text: "Win playoffs season." }, { client_id: "c2", section_key: "avoid", text: "Another client's." }] });
     const block = await strategyPromptBlock(db, "c1");
     expect(block).toContain("Win playoffs season.");

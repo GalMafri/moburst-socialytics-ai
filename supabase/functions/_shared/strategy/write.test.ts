@@ -1,15 +1,16 @@
 // @vitest-environment node
 // Writing a client's content strategy (spec: docs/superpowers/specs/2026-11-
-// 02-content-strategy-tab-design.md, "Cost"): one Opus call writes it and one
-// Sonnet call lists what the evidence does not support. Proves each code check
-// rejects, that a bad reply is asked again once with its problems named, that
-// flagged statements get one fix and one more check, that a strategy still
-// flagged after that is not returned, the call counts and model ids, and what
-// the evidence holds.
+// 02-content-strategy-tab-design.md, "Cost"), one model call per lifecycle
+// run: write (Opus), check (Sonnet), fix if flagged (Opus), check again
+// (Sonnet). Proves each code check rejects, that a bad or cut-off reply is
+// asked again once in its own run and never read or kept, that flagged
+// statements get one fix and one more check, that a write still failing ends
+// with no strategy, the call counts, model ids and token limits, and what the
+// evidence holds.
 import { describe, expect, it } from "vitest";
 import {
-  CHECK_MODEL, evenShares, parseStrategy, saveStrategy, STRATEGY_MAX_TOKENS, STRATEGY_MODEL, strategyEvidence, strategyProblems, strategyRequest, writeStrategy,
-  type StrategyEvidence, type StrategyIO,
+  CHECK_MAX_TOKENS, CHECK_MODEL, parseStrategy, readPending, savePending, saveStrategy, startStrategy, STRATEGY_MAX_TOKENS, STRATEGY_MODEL, strategyEvidence,
+  strategyPhase, strategyProblems, strategyRequest, type PendingStrategy, type PhaseOutcome, type StrategyEvidence, type StrategyIO,
 } from "./write";
 import type { StrategyPlatform } from "./platforms";
 import { fakeDb } from "../lifecycle/fakeDb";
@@ -23,7 +24,7 @@ const platform = (name: string, state: StrategyPlatform["state"], over: Partial<
 const E: StrategyEvidence = {
   client: { name: "Pay The Pyper", market: ["US"], languages: ["es", "en"], first_language: "es" },
   brief: "Pay The Pyper keeps rec league captains from chasing payments.",
-  pillars: [{ name: "Beer League Truths", description: "Funny truths", share: 50 }, { name: "Captain Life", description: "", share: 50 }],
+  pillars: [{ name: "Beer League Truths", description: "Funny truths", share: 60 }, { name: "Captain Life", description: "", share: null }],
   keywords: ["beer league"],
   brand_notes: "Never mock other apps.",
   brand_book: "",
@@ -57,11 +58,14 @@ const draft = (over: Record<string, unknown> = {}) => ({
   measures: "Instagram: median engagement per post above 42.",
   ...over,
 });
-const reply = (d: unknown, usage = { input_tokens: 100, output_tokens: 50 }) => ({ text: JSON.stringify(d), raw: { usage } });
-const clean = { text: JSON.stringify({ unsupported: [] }), raw: { usage: { input_tokens: 10, output_tokens: 5 } } };
+const reply = (d: unknown, usage = { input_tokens: 100, output_tokens: 50 }, stopReason = "end_turn") => ({ text: JSON.stringify(d), stopReason, raw: { usage } });
+/** A reply the model stopped because it ran out of room: whatever it holds is never read. */
+const cutOff = (d: unknown) => reply(d, { input_tokens: 100, output_tokens: 16000 }, "max_tokens");
+const clean = { text: JSON.stringify({ unsupported: [] }), stopReason: "end_turn", raw: { usage: { input_tokens: 10, output_tokens: 5 } } };
+const flagged = (statement = "x") => ({ text: JSON.stringify({ unsupported: [{ section: "goals", statement }] }), stopReason: "end_turn", raw: {} });
 
 /** A stand-in for the Messages API: answers in order, and keeps every request. */
-function calls(...answers: Array<{ text: string; raw?: unknown }>) {
+function calls(...answers: Array<{ text: string; stopReason?: string; raw?: unknown }>) {
   const bodies: Array<Record<string, any>> = [];
   const call = async ({ body }: { apiKey: string; body: Record<string, unknown> }) => {
     bodies.push(body);
@@ -70,6 +74,25 @@ function calls(...answers: Array<{ text: string; raw?: unknown }>) {
     return next;
   };
   return { call, bodies };
+}
+
+/** The write as the lifecycle runs it: one phase per run, each run exactly one model call, until it passes or is over. */
+async function drive(...answers: Array<{ text: string; stopReason?: string; raw?: unknown }>) {
+  const { call, bodies } = calls(...answers);
+  let pending: PendingStrategy = startStrategy(E, "key-1", NOW);
+  const phases: string[] = [];
+  const kept: PendingStrategy[] = [];
+  for (let run = 0; run < 10; run++) {
+    const before = bodies.length;
+    phases.push(pending.phase);
+    const out: PhaseOutcome = await strategyPhase(call, "key", pending);
+    expect(bodies.length - before).toBe(1);
+    if (out.kind !== "next") return { out, phases, bodies, kept };
+    // What the next run reads back is what was stored, as JSON.
+    pending = JSON.parse(JSON.stringify(out.pending));
+    kept.push(pending);
+  }
+  throw new Error("the write never ended");
 }
 
 describe("the code checks", () => {
@@ -124,17 +147,17 @@ describe("the code checks", () => {
   });
 });
 
-describe("writing a strategy", () => {
-  it("writes with one Opus call and checks with one Sonnet call, and puts each platform in its written state", async () => {
-    const { call, bodies } = calls(reply(draft(), { input_tokens: 1000, output_tokens: 700 }), clean);
-    const out = await writeStrategy(call, "key", E);
+
+describe("writing a strategy, one model call per run", () => {
+  it("writes in one run and checks in the next, and puts each platform in its written state", async () => {
+    const { out, phases, bodies } = await drive(reply(draft(), { input_tokens: 1000, output_tokens: 700 }), clean);
+    expect(phases).toEqual(["write", "check"]);
     expect(bodies.map((b) => b.model)).toEqual([STRATEGY_MODEL, CHECK_MODEL]);
     expect(STRATEGY_MODEL).toBe("claude-opus-5-5");
     expect(CHECK_MODEL).toBe("claude-sonnet-5-5");
-    expect(bodies[0].max_tokens).toBe(STRATEGY_MAX_TOKENS);
-    expect(STRATEGY_MAX_TOKENS).toBe(8000);
-    if (!("value" in out)) throw new Error(out.error);
+    if (out.kind !== "passed") throw new Error(JSON.stringify(out));
     expect(out.usage).toEqual({ calls: { writer: 1, checker: 1 }, tokens: { [STRATEGY_MODEL]: { input: 1000, output: 700 }, [CHECK_MODEL]: { input: 10, output: 5 } } });
+    expect(out.inputs_key).toBe("key-1");
     expect(Object.keys(out.value.sections).sort()).toEqual([
       "audience", "avoid", "goals", "measures", "not_now", "pillar:Beer League Truths", "pillar:Captain Life",
       "platform:instagram:posting", "platform:pinterest:new", "platform:tiktok:new", "positioning",
@@ -148,28 +171,46 @@ describe("writing a strategy", () => {
     expect(out.value.platforms[3]).toMatchObject({ reason: "Long video is costly to make." });
   });
 
-  it("asks once more with the problems named when the reply breaks a rule", async () => {
-    const { call, bodies } = calls(reply(draft({ goals: "Grow — fast." })), reply(draft()), clean);
-    const out = await writeStrategy(call, "key", E);
-    expect("value" in out).toBe(true);
-    expect(out.usage.calls).toEqual({ writer: 2, checker: 1 });
+  it("gives the writer room to think and the checker room to list", async () => {
+    const { bodies } = await drive(reply(draft()), clean);
+    expect([bodies[0].max_tokens, bodies[1].max_tokens]).toEqual([16000, 4000]);
+    expect([STRATEGY_MAX_TOKENS, CHECK_MAX_TOKENS]).toEqual([16000, 4000]);
+  });
+
+  it("asks once more, in its own run, with the problems named, when the reply breaks a rule", async () => {
+    const { out, phases, bodies } = await drive(reply(draft({ goals: "Grow — fast." })), reply(draft()), clean);
+    expect(phases).toEqual(["write", "reask", "check"]);
+    expect(out.kind).toBe("passed");
     const again = bodies[1].messages as Array<{ role: string; content: string }>;
     expect(again.map((m) => m.role)).toEqual(["user", "assistant", "user"]);
     expect(again[2].content).toMatch(/em dash/);
+    expect(out.usage.calls).toEqual({ writer: 2, checker: 1 });
   });
 
-  it("returns no strategy when the second reply still breaks a rule, and checks nothing", async () => {
-    const { call, bodies } = calls(reply(draft({ goals: "" })), reply(draft({ goals: "" })));
-    const out = await writeStrategy(call, "key", E);
-    expect(out).toHaveProperty("error");
-    expect(bodies.map((b) => b.model)).toEqual([STRATEGY_MODEL, STRATEGY_MODEL]);
+  it("never reads or keeps a reply that was cut off, and asks again for a shorter one", async () => {
+    // A cut-off reply may still hold JSON that parses; it is never read.
+    const { out, phases, bodies, kept } = await drive(cutOff(draft()), reply(draft({ goals: "The second answer's goals." })), clean);
+    expect(phases).toEqual(["write", "reask", "check"]);
+    expect(JSON.stringify(kept[0])).not.toContain("saved checklists bring captains back");
+    const again = bodies[1].messages as Array<{ role: string; content: string }>;
+    expect(again.map((m) => m.role)).toEqual(["user", "user"]);
+    expect(again[1].content).toMatch(/cut off/);
+    expect(out.kind === "passed" && out.value.sections.goals).toBe("The second answer's goals.");
   });
 
-  it("fixes the statements the check flags once, then checks again", async () => {
-    const flagged = { text: JSON.stringify({ unsupported: [{ section: "goals", statement: "Double installs by March." }] }), raw: {} };
-    const { call, bodies } = calls(reply(draft({ goals: "Double installs by March." })), flagged, reply(draft()), clean);
-    const out = await writeStrategy(call, "key", E);
-    expect("value" in out && out.value.sections.goals).toBe(draft().goals);
+  it("ends the write when the second reply is cut off or breaks a rule, and checks nothing", async () => {
+    for (const second of [cutOff(draft()), reply(draft({ goals: "" }))]) {
+      const { out, phases, bodies } = await drive(reply(draft({ goals: "" })), second);
+      expect(phases).toEqual(["write", "reask"]);
+      expect(out.kind).toBe("over");
+      expect(bodies.map((b) => b.model)).toEqual([STRATEGY_MODEL, STRATEGY_MODEL]);
+    }
+  });
+
+  it("fixes the flagged statements in one run, then checks again in the next", async () => {
+    const { out, phases, bodies } = await drive(reply(draft({ goals: "Double installs by March." })), flagged("Double installs by March."), reply(draft()), clean);
+    expect(phases).toEqual(["write", "check", "fix", "recheck"]);
+    expect(out.kind === "passed" && out.value.sections.goals).toBe(draft().goals);
     expect(bodies.map((b) => b.model)).toEqual([STRATEGY_MODEL, CHECK_MODEL, STRATEGY_MODEL, CHECK_MODEL]);
     const fix = (bodies[2].messages as Array<{ role: string; content: string }>).at(-1)!;
     expect(fix.role).toBe("user");
@@ -179,26 +220,32 @@ describe("writing a strategy", () => {
     expect(bodies[1].messages[0].content).toContain("Double installs by March.");
   });
 
-  it("returns no strategy when the fix is still flagged, after at most three Opus and two Sonnet calls", async () => {
-    const flagged = () => ({ text: JSON.stringify({ unsupported: [{ section: "goals", statement: "x" }] }), raw: {} });
-    const { call, bodies } = calls(reply(draft({ goals: "A — b" })), reply(draft()), flagged(), reply(draft()), flagged());
-    const out = await writeStrategy(call, "key", E);
-    expect(out).toHaveProperty("error");
+  it("ends the write when the fix is still flagged, after at most three Opus and two Sonnet calls", async () => {
+    const { out, phases, bodies } = await drive(reply(draft({ goals: "A — b" })), reply(draft()), flagged(), reply(draft()), flagged());
+    expect(phases).toEqual(["write", "reask", "check", "fix", "recheck"]);
+    expect(out.kind).toBe("over");
     expect(bodies.filter((b) => b.model === STRATEGY_MODEL)).toHaveLength(3);
     expect(bodies.filter((b) => b.model === CHECK_MODEL)).toHaveLength(2);
     expect(out.usage.calls).toEqual({ writer: 3, checker: 2 });
   });
 
-  it("returns no strategy when the fix breaks a rule, without asking again", async () => {
-    const flagged = { text: JSON.stringify({ unsupported: [{ section: "goals", statement: "x" }] }), raw: {} };
-    const { call, bodies } = calls(reply(draft()), flagged, reply(draft({ goals: "" })));
-    expect(await writeStrategy(call, "key", E)).toHaveProperty("error");
-    expect(bodies).toHaveLength(3);
+  it("ends the write when the fix is cut off or breaks a rule, without asking again", async () => {
+    for (const fix of [cutOff(draft()), reply(draft({ goals: "" }))]) {
+      const { out, phases } = await drive(reply(draft()), flagged(), fix);
+      expect(phases).toEqual(["write", "check", "fix"]);
+      expect(out.kind).toBe("over");
+    }
   });
 
-  it("returns no strategy when the check's reply cannot be read", async () => {
-    const { call } = calls(reply(draft()), { text: "Looks fine to me.", raw: {} });
-    expect(await writeStrategy(call, "key", E)).toHaveProperty("error");
+  it("ends the write when the check's reply cannot be read or was cut off", async () => {
+    expect((await drive(reply(draft()), { text: "Looks fine to me.", stopReason: "end_turn", raw: {} })).out.kind).toBe("over");
+    // A cut-off check that reads as "nothing unsupported" is no pass.
+    expect((await drive(reply(draft()), { ...clean, stopReason: "max_tokens" })).out.kind).toBe("over");
+  });
+
+  it("keeps the evidence with the draft, so the runs after the first read nothing again", () => {
+    const p = startStrategy(E, "key-1", NOW);
+    expect(p).toMatchObject({ inputs_key: "key-1", phase: "write", evidence: E, usage: { calls: { writer: 0, checker: 0 }, tokens: {} } });
   });
 });
 
@@ -206,12 +253,20 @@ describe("what the writer is told", () => {
   it("gives the evidence, the code's numbers and the first content language, and never an evidence id", () => {
     const body = strategyRequest(E) as { system: string; messages: Array<{ content: string }> };
     const prompt = body.messages[0].content;
-    for (const part of ["rec league captains", "Beer League Truths (50% of posts)", "2.4 posts a week", "median engagement per post 42", "3.1%", "@paythepyper", "Captains plan seasons there.", "BenchApp", "Our playoff checklist", "2.7x", "Never mock other apps.", "job ads", "Office day"]) {
+    for (const part of ["rec league captains", "Beer League Truths (60% of the client's calendar posts over the last 8 weeks)", "2.4 posts a week", "median engagement per post 42", "3.1%", "@paythepyper", "Captains plan seasons there.", "BenchApp", "Our playoff checklist", "2.7x", "Never mock other apps.", "job ads", "Office day"]) {
       expect(prompt).toContain(part);
     }
     expect(prompt).not.toMatch(/\bP1\b/);
     expect(`${body.system}\n${prompt}`).toMatch(/example posts[^.]*\(es\)/i);
     expect(`${body.system}\n${prompt}`).not.toMatch(/—/);
+  });
+
+  it("gives a pillar's share only where the client's calendar has posts", () => {
+    const prompt = (strategyRequest(E) as { messages: Array<{ content: string }> }).messages[0].content;
+    expect(prompt).toMatch(/^- Captain Life$/m);
+    const none = (strategyRequest({ ...E, pillars: E.pillars.map((p) => ({ ...p, share: null })) }) as { system: string; messages: Array<{ content: string }> });
+    expect(none.messages[0].content).not.toMatch(/% of/);
+    expect(none.messages[0].content).toContain("- Beer League Truths: Funny truths");
   });
 
   it("gives people's versions as fixed context, to keep the other sections consistent with them", () => {
@@ -221,6 +276,7 @@ describe("what the writer is told", () => {
     expect((strategyRequest(E) as { messages: Array<{ content: string }> }).messages[0].content).not.toMatch(/team's own versions/i);
   });
 });
+
 
 describe("the evidence a strategy is written from", () => {
   const client = (over: Record<string, unknown> = {}) => ({
@@ -241,11 +297,13 @@ describe("the evidence a strategy is written from", () => {
     siteText: async () => "Pay The Pyper: payments, attendance and subs for captains.",
     ...over,
   });
+  const post = (post_date: string, pillar: string | null, client_id = "c1") => ({ client_id, post_date, pillar });
   const tables = (over: Record<string, Record<string, unknown>[]> = {}) => ({
     trend_profiles: [{ client_id: "c1", audience: "Captains.", fit_rubric: "Fits.", platforms: [{ platform: "instagram", reason: "primary" }, { platform: "pinterest", reason: "Plans." }], written_at: "2026-11-01T00:00:00Z" }],
     trend_terms: [{ client_id: "c1", kind: "exclusion", platform: null, term: "job ads", reason: "r", source: "lifecycle", removed_at: null }],
     sprout_profiles: [{ client_id: "c1", network_type: "tiktok", native_name: "paythepyper", is_active: true }],
     clients: [{ id: "c1", brand_book_text: "Book" }],
+    calendar_posts: [],
     content_strategy_edits: [
       { client_id: "c1", section_key: "audience", text: "Captains and co-captains." },
       { client_id: "c1", section_key: "pillar:Old pillar", text: "Kept, hidden." },
@@ -258,10 +316,9 @@ describe("the evidence a strategy is written from", () => {
     expect(await strategyEvidence(fakeDb({}), client(), NOW, io())).toBeNull();
   });
 
-  it("reads the brief capped, the pillars evenly shared, every platform's state, and the people's versions still in play", async () => {
+  it("reads the brief capped, every platform's state, and the people's versions still in play", async () => {
     const e = (await strategyEvidence(fakeDb(tables()), client(), NOW, io()))!;
     expect(e.brief).toHaveLength(6000);
-    expect(e.pillars).toEqual([{ name: "Beer League Truths", description: "Funny", share: 34 }, { name: "Captain Life", description: "", share: 33 }, { name: "Rink Rules", description: "", share: 33 }]);
     expect(e.client).toMatchObject({ languages: ["es", "en"], first_language: "es" });
     expect(e.platforms.map((p) => [p.platform, p.state, p.handle])).toEqual([["Instagram", "posting", null], ["TikTok", "new", "paythepyper"], ["Pinterest", "candidate", null]]);
     // TikTok had no rate among the competitors, so every tracked company's were read.
@@ -274,24 +331,55 @@ describe("the evidence a strategy is written from", () => {
     expect(e.sources).toEqual(["brief", "website", "brand_book", "competitors", "posts"]);
   });
 
-  it("evenly shares the pillars so the shares add up to 100", () => {
-    expect(evenShares(3)).toEqual([34, 33, 33]);
-    expect(evenShares(4)).toEqual([25, 25, 25, 25]);
-    expect(evenShares(0)).toEqual([]);
+  it("shares each pillar by the client's own calendar posts over the last 8 weeks", async () => {
+    const posts = [
+      post("2026-10-30", "Beer League Truths"), post("2026-10-20", "Beer League Truths"), post("2026-09-10", " beer league truths "),
+      post("2026-10-01", "Captain Life"), post("2026-10-02", null),
+      post("2026-08-20", "Captain Life"), // more than 8 weeks ago
+      post("2026-11-09", "Captain Life"), // planned, not posted yet
+      post("2026-10-15", "Captain Life", "c2"), // another client's
+    ];
+    const e = (await strategyEvidence(fakeDb(tables({ calendar_posts: posts })), client(), NOW, io()))!;
+    expect(e.pillars).toEqual([
+      { name: "Beer League Truths", description: "Funny", share: 60 },
+      { name: "Captain Life", description: "", share: 20 },
+      { name: "Rink Rules", description: "", share: 0 },
+    ]);
+  });
+
+  it("gives no share at all for a client with no calendar posts in the last 8 weeks", async () => {
+    const e = (await strategyEvidence(fakeDb(tables({ calendar_posts: [post("2026-08-01", "Captain Life"), post("2026-11-20", "Rink Rules")] })), client(), NOW, io()))!;
+    expect(e.pillars.map((p) => p.share)).toEqual([null, null, null]);
   });
 });
 
-describe("saving a strategy", () => {
-  it("writes the product's version, the platforms with their numbers, the key, the date, the models and the tokens, and never people's versions", async () => {
+describe("keeping a write between runs, and saving it", () => {
+  it("keeps the draft on the client's strategy row, and drops it", async () => {
+    const db = fakeDb({ content_strategies: [{ client_id: "c1", sections: { goals: "The last good goals." }, inputs_key: "old", written_at: "2026-10-01T00:00:00.000Z", pending: null }] });
+    const pending = startStrategy(E, "key-1", NOW);
+    await savePending(db, "c1", pending, NOW);
+    expect(await readPending(db, "c1")).toEqual(pending);
+    // The stored strategy is untouched while a new one is under way.
+    expect(db.tables.content_strategies[0]).toMatchObject({ sections: { goals: "The last good goals." }, inputs_key: "old" });
+    await savePending(db, "c1", null, NOW);
+    expect(await readPending(db, "c1")).toBeNull();
+    // A client with no strategy yet gets a row that holds only the draft.
+    const fresh = fakeDb({});
+    await savePending(fresh, "c1", pending, NOW);
+    expect(fresh.tables.content_strategies).toHaveLength(1);
+    expect(fresh.tables.content_strategies[0]).toMatchObject({ client_id: "c1", pending, updated_at: NOW.toISOString() });
+    expect(fresh.tables.content_strategies[0]).not.toHaveProperty("written_at");
+  });
+
+  it("writes the product's version, the platforms with their numbers, the key, the date, the models and the tokens, clears the draft, and never touches people's versions", async () => {
     const db = fakeDb({ content_strategy_edits: [{ client_id: "c1", section_key: "goals", text: "Ours." }] });
-    const { call } = calls(reply(draft()), clean);
-    const out = await writeStrategy(call, "key", E);
-    if (!("value" in out)) throw new Error(out.error);
-    await saveStrategy(db, "c1", E, out, "key-1", NOW);
+    const { out } = await drive(reply(draft()), clean);
+    if (out.kind !== "passed") throw new Error(JSON.stringify(out));
+    await saveStrategy(db, "c1", out, NOW);
     expect(db.tables.content_strategies).toHaveLength(1);
     expect(db.tables.content_strategies[0]).toMatchObject({
-      client_id: "c1", inputs_key: "key-1", written_at: NOW.toISOString(), sources: ["brief", "website", "posts"],
-      pillars: [{ name: "Beer League Truths", share: 50 }, { name: "Captain Life", share: 50 }],
+      client_id: "c1", inputs_key: "key-1", written_at: NOW.toISOString(), sources: ["brief", "website", "posts"], pending: null,
+      pillars: [{ name: "Beer League Truths", share: 60 }, { name: "Captain Life", share: null }],
       models: { writer: STRATEGY_MODEL, checker: CHECK_MODEL }, usage: out.usage,
     });
     expect(db.tables.content_strategies[0].sections.goals).toBe(draft().goals);

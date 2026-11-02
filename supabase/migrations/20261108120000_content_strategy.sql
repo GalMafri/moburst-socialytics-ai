@@ -6,8 +6,11 @@
 --                           of every section, the platform states with the
 --                           numbers code worked out, what it was written
 --                           from, the inputs key, the written date, the
---                           models and the tokens. Only the lifecycle writes
---                           it (service role).
+--                           models and the tokens, and the write under way
+--                           (pending), one model call per lifecycle run.
+--                           Only the lifecycle writes it (service role). A
+--                           row with only a draft (written_at null) holds no
+--                           strategy yet.
 --   content_strategy_edits  people's versions, one per client and section.
 --                           People write it only through
 --                           strategy_section_save; the lifecycle never does.
@@ -29,16 +32,19 @@ create table if not exists public.content_strategies (
   platforms jsonb not null default '[]'::jsonb,
   pillars jsonb not null default '[]'::jsonb,
   sources jsonb not null default '[]'::jsonb,
-  inputs_key text not null,
-  written_at timestamptz not null default now(),
+  inputs_key text,
+  written_at timestamptz,
   models jsonb not null default '{}'::jsonb,
   usage jsonb not null default '{}'::jsonb,
+  pending jsonb,
   updated_at timestamptz not null default now()
 );
 comment on table public.content_strategies is 'The product''s latest content strategy per client, written by the lifecycle step content_strategy. People''s versions of sections are in content_strategy_edits.';
 comment on column public.content_strategies.sections is 'The product''s version of every section, by key: goals, audience, positioning, pillar:<name>, platform:<platform>:<posting|new>, not_now, avoid, measures.';
 comment on column public.content_strategies.platforms is 'Each platform''s state (posting, new, not_now) with the cadence and 90-day baselines code worked out.';
 comment on column public.content_strategies.sources is 'What the strategy was written from (brief, strategy_doc, website, brand_book, competitors, posts).';
+comment on column public.content_strategies.written_at is 'When the stored strategy passed every check; null while the row holds only a write under way.';
+comment on column public.content_strategies.pending is 'The write under way between lifecycle runs (one model call each): its inputs key, its phase (write, reask, check, fix, recheck), the evidence it is written from, the draft and the usage so far. Null when no write is under way; the stored strategy stays until a new one passes every check.';
 comment on column public.content_strategies.usage is 'Model calls and tokens per model for the write: {"calls": {"writer": n, "checker": n}, "tokens": {"<model>": {"input": n, "output": n}}}.';
 
 create table if not exists public.content_strategy_edits (

@@ -4,17 +4,26 @@
 // (spec: docs/superpowers/specs/2026-11-02-content-strategy-tab-design.md).
 // The lifecycle step content_strategy (lifecycle/steps.ts) calls this; nobody
 // has to fill anything in. Code works out every number (each platform's state,
-// cadence and baselines in platforms.ts, each pillar's share here) and the
-// model writes the words around them:
-//   1. one Opus call writes every section; a reply that fails the code checks
-//      is asked again once with its problems named (askTwice);
-//   2. one Sonnet call lists any number, name, result or claim the evidence
-//      does not support;
-//   3. flagged statements get one fix call and one more check.
-// At most three Opus and two Sonnet calls, usually one of each. A strategy
-// that still fails is not returned: the step tries again later and the stored
-// version stays. People's versions of sections (content_strategy_edits) are
-// read as fixed context and never written here.
+// cadence and baselines in platforms.ts, each pillar's share of the client's
+// calendar posts here) and the model writes the words around them.
+//
+// A write is a series of phases, one model call each, each its own lifecycle
+// run, so no run holds more than one call against the time limit:
+//   write    one Opus call writes every section;
+//   reask    a reply that failed the code checks, or was cut off, is asked
+//            again once with its problems named;
+//   check    one Sonnet call lists any number, name, result or claim the
+//            evidence does not support;
+//   fix      flagged statements get one Opus fix;
+//   recheck  and one more Sonnet check.
+// At most three Opus and two Sonnet calls, usually one of each. A reply cut
+// off at max_tokens is never read or kept. The draft between phases
+// (PendingStrategy) is kept on the client's content_strategies row, with the
+// evidence it is written from, so later phases read nothing again. A write
+// that still fails ends (the step tries again later from the start) and the
+// stored strategy stays until a new one passes every check. People's versions
+// of sections (content_strategy_edits) are read as fixed context and never
+// written here.
 
 import { parseAnswer } from "../pipelines/competitive/analysis.ts";
 import { applyRhythmSetting, type EvidenceItem, type RhythmLine } from "../calendar/evidence.ts";
@@ -22,7 +31,7 @@ import { fmtMultiple } from "../calendar/reasonText.ts";
 import { competitorSet, gatherEvidence, trackedRates, type Gathered } from "../calendar/runWeek.ts";
 import { competitiveBrief } from "../competitive/brief.ts";
 import { setBy } from "../lifecycle/fields.ts";
-import { activeTerms, askTwice } from "../trends/profile.ts";
+import { activeTerms } from "../trends/profile.ts";
 import { clip } from "../trends/text.ts";
 import { loadClientVoice } from "../voice/load.ts";
 import { voicePromptBlock, type VoiceExample } from "../voice/voice.ts";
@@ -37,8 +46,11 @@ type Any = any;
 
 export const STRATEGY_MODEL = "claude-opus-5-5";
 export const CHECK_MODEL = "claude-sonnet-5-5";
-export const STRATEGY_MAX_TOKENS = 8000;
-const CHECK_MAX_TOKENS = 2000;
+/** Room for the reply and Opus's thinking, which counts against it (the calendar's week plan gives the same model 16,000). */
+export const STRATEGY_MAX_TOKENS = 16000;
+export const CHECK_MAX_TOKENS = 4000;
+/** A pillar's share is of the client's calendar posts over this many days (8 weeks), up to today. */
+const SHARE_DAYS = 56;
 const BRIEF_CHARS = 6000;
 const SITE_CHARS = 2500;
 const BOOK_CHARS = 2500;
@@ -51,8 +63,12 @@ const SECTION_NAMES: Record<FixedSection, string> = { goals: "goals", audience: 
 export interface StrategyEvidence {
   client: { name: string; market: string[]; languages: string[]; first_language: string };
   brief: string;
-  /** The pillars from Client setup, unchanged, each with its share of posts. */
-  pillars: Array<{ name: string; description: string; share: number }>;
+  /**
+   * The pillars from Client setup, unchanged, each with its share (a whole
+   * percent) of the client's calendar posts over the last 8 weeks; null for
+   * every pillar when the calendar has no posts in that time.
+   */
+  pillars: Array<{ name: string; description: string; share: number | null }>;
   keywords: string[];
   brand_notes: string;
   brand_book: string;
@@ -108,11 +124,15 @@ async function tryOr<T>(f: () => Promise<T>, fallback: T): Promise<T> {
   }
 }
 
-/** Shares of posts that add up to 100, as even as whole numbers allow (the first pillars take the remainder). */
-export function evenShares(n: number): number[] {
-  if (n <= 0) return [];
-  const base = Math.floor(100 / n);
-  return Array.from({ length: n }, (_, i) => base + (i < 100 - base * n ? 1 : 0));
+/**
+ * Each pillar's share of the client's calendar posts: the posts that carry its
+ * name (any case) over every post in the window, as a whole percent. Null for
+ * every pillar when the window has no posts.
+ */
+export function pillarShares(names: string[], posts: Array<{ pillar: string | null }>): Array<number | null> {
+  if (!posts.length) return names.map(() => null);
+  const key = (s: unknown) => String(s ?? "").trim().toLowerCase();
+  return names.map((n) => Math.round((100 * posts.filter((p) => key(p.pillar) === key(n)).length) / posts.length));
 }
 
 function pillarsOf(v: unknown): Array<{ name: string; description: string }> {
@@ -160,8 +180,13 @@ export async function strategyEvidence(db: Db, client: Any, now: Date, io: Strat
   let states = platformStates(input);
   if (states.needsAllTracked) states = platformStates({ ...input, rates: { ...g.fallbackRates, allTracked: await io.trackedRates(db) } });
 
+  // The client's own calendar posts over the last 8 weeks, read from calendar_posts as the calendar reads them.
+  const day = (d: Date) => d.toISOString().slice(0, 10);
+  const { data: calendar, error: calendarError } = await db.from("calendar_posts").select("pillar")
+    .eq("client_id", client.id).gte("post_date", day(new Date(now.getTime() - SHARE_DAYS * 86_400_000))).lte("post_date", day(now));
+  if (calendarError) throw new Error(`Could not read the client's calendar: ${calendarError.message}`);
   const pillars = pillarsOf(client.content_pillars);
-  const shares = evenShares(pillars.length);
+  const shares = pillarShares(pillars.map((p) => p.name), (calendar ?? []) as Array<{ pillar: string | null }>);
   const website = str(client.website_url);
   const site = website ? clip(await tryOr(() => io.siteText(website), ""), SITE_CHARS) : "";
   const brief = clip(str(client.brief_text), BRIEF_CHARS);
@@ -253,7 +278,10 @@ function evidenceText(e: StrategyEvidence): string {
   lines.push(`Market: ${c.market.join(", ") || "not set"}; content languages: ${c.languages.join(", ") || "en"}`);
   if (e.brief) lines.push(`\nBrief (it carries the words of any strategy document):\n${e.brief}`);
   if (e.pillars.length) {
-    lines.push(`\nContent pillars, each with its share of posts (worked out in code; use the shares as given):\n${e.pillars.map((p) => `- ${p.name} (${p.share}% of posts)${p.description ? `: ${p.description}` : ""}`).join("\n")}`);
+    const shared = e.pillars.some((p) => p.share !== null);
+    const title = shared ? "Content pillars, each with its share of the client's calendar posts over the last 8 weeks (counted in code; use the shares as given):" : "Content pillars:";
+    const share = (p: StrategyEvidence["pillars"][number]) => (p.share === null ? "" : ` (${p.share}% of the client's calendar posts over the last 8 weeks)`);
+    lines.push(`\n${title}\n${e.pillars.map((p) => `- ${p.name}${share(p)}${p.description ? `: ${p.description}` : ""}`).join("\n")}`);
   }
   if (e.keywords.length) lines.push(`\nKeywords the team uses for the brand: ${e.keywords.join(", ")}`);
   if (e.brand_notes) lines.push(`\nBrand notes:\n${e.brand_notes}`);
@@ -291,7 +319,7 @@ Write these parts:
 - goals: two to four goals for the next 90 days, each with its reason. Goals stated in the brief or a strategy document win.
 - audience: who the brand speaks to and what they want, built on the trend profile's audience.
 - positioning: what sets the brand apart from its tracked competitors, and how that shows in its posts.
-- pillars: one per content pillar, named exactly as given. Each gives the formats that worked (the brand's or its competitors'), its share of posts as given, and two example post ideas.
+- pillars: one per content pillar, named exactly as given. Each gives the formats that worked (the brand's or its competitors'), its share of the brand's recent calendar posts where one is given, and two example post ideas.
 - platforms: one per platform that is posting now or new, and one per suggested platform you mark new. Posting now: its role, what to post, and what has worked. New: why this platform, the account basics (name the existing handle when one is given), the first 30 days with example posts, and what to check 30 and 90 days after the first post.
 - candidates: every suggested platform, marked "new" or "not_now", with a one-line reason. At most two can be new.
 - avoid: what to avoid, from the brand's weakest posts, the trend profile's exclusions, and the restrictions in the brief and the brand notes.
@@ -431,9 +459,37 @@ export interface WriteUsage {
   tokens: Record<string, { input: number; output: number }>;
 }
 
-export type WriteOutcome = ({ value: WrittenStrategy } | { error: string }) & { usage: WriteUsage };
+export type StrategyCall = (args: { apiKey: string; body: Record<string, unknown> }) => Promise<{ text: string; stopReason?: string; raw?: unknown }>;
 
-export type StrategyCall = (args: { apiKey: string; body: Record<string, unknown> }) => Promise<{ text: string; raw?: unknown }>;
+export type StrategyPhase = "write" | "reask" | "check" | "fix" | "recheck";
+
+/** A write under way between lifecycle runs (content_strategies.pending). */
+export interface PendingStrategy {
+  /** The inputs the write is for; a draft for other inputs is dropped and the write starts over. */
+  inputs_key: string;
+  /** What the next run does. */
+  phase: StrategyPhase;
+  /** What the strategy is written from, read once when the write starts. */
+  evidence: StrategyEvidence;
+  /** The writer's conversation so far: the request and its last reply that was read. Never a cut-off reply. */
+  messages: Array<{ role: string; content: string }>;
+  /** What the next writer call is asked to put right (reask, fix). */
+  ask?: string;
+  /** The draft that passed the code checks, while it is checked against the evidence. */
+  draft?: StrategyDraft;
+  usage: WriteUsage;
+  started_at: string;
+}
+
+/**
+ * What one phase came to: another phase to run, a strategy that passed every
+ * check (to store), or a write that is over (its draft is dropped; the step
+ * tries again later from the start).
+ */
+export type PhaseOutcome =
+  | { kind: "next"; pending: PendingStrategy }
+  | { kind: "passed"; value: WrittenStrategy; usage: WriteUsage; evidence: StrategyEvidence; inputs_key: string }
+  | { kind: "over"; error: string; usage: WriteUsage };
 
 /** The sections and platforms of an accepted draft. Not now platforms share one section of one line each. */
 function assemble(d: StrategyDraft, e: StrategyEvidence): WrittenStrategy {
@@ -453,71 +509,101 @@ function assemble(d: StrategyDraft, e: StrategyEvidence): WrittenStrategy {
   return { sections, platforms };
 }
 
+/** A new write for these inputs: the first run writes. */
+export function startStrategy(e: StrategyEvidence, inputsKey: string, now: Date): PendingStrategy {
+  return { inputs_key: inputsKey, phase: "write", evidence: e, messages: [], usage: { calls: { writer: 0, checker: 0 }, tokens: {} }, started_at: now.toISOString() };
+}
+
+/** A reply the model stopped because it ran out of room. Whatever it holds is never read. */
+const cutOff = (r: { stopReason?: string; raw?: unknown }) =>
+  r.stopReason === "max_tokens" || (r.raw as { stop_reason?: unknown } | null)?.stop_reason === "max_tokens";
+
+const CUT_OFF_ASK = "Your last answer was cut off before it ended because it ran too long. Send the whole JSON object again, keeping every section shorter.";
+
+function fixAsk(flagged: Array<{ section: string; statement: string }>): string {
+  return [
+    "A check against the evidence found statements it does not support:",
+    ...flagged.map((f) => `- ${f.section ? `(${f.section}) ` : ""}${f.statement}`),
+    "Rewrite only what is needed so none of them remains: drop each one, or say only what the evidence says. Keep every rule above, and send the whole JSON object again.",
+  ].join("\n");
+}
+
 /**
- * Write and check a strategy. At most three Opus calls (a write, one more
- * ask, one fix) and two Sonnet calls (a check, one more after the fix).
+ * Run the next phase of a write: exactly one model call. Write, then reask
+ * once if the reply failed the code checks or was cut off; check; fix once if
+ * the check flagged statements; check again. A reply that fails where no
+ * further ask is allowed ends the write.
  */
-export async function writeStrategy(call: StrategyCall, apiKey: string, e: StrategyEvidence): Promise<WriteOutcome> {
-  const usage: WriteUsage = { calls: { writer: 0, checker: 0 }, tokens: {} };
+export async function strategyPhase(call: StrategyCall, apiKey: string, pending: PendingStrategy): Promise<PhaseOutcome> {
+  const e = pending.evidence;
+  const usage: WriteUsage = structuredClone(pending.usage);
   const count = (model: string, raw: unknown) => {
     const u = (raw as { usage?: { input_tokens?: number; output_tokens?: number } } | null)?.usage;
     const t = (usage.tokens[model] ??= { input: 0, output: 0 });
     t.input += Number(u?.input_tokens) || 0;
     t.output += Number(u?.output_tokens) || 0;
   };
-  let lastMessages: unknown[] = [];
-  let lastText = "";
-  const writer: StrategyCall = async (args) => {
+  const next = (patch: Partial<PendingStrategy>): PhaseOutcome => ({ kind: "next", pending: { ...pending, ask: undefined, ...patch, usage } });
+  const over = (error: string): PhaseOutcome => ({ kind: "over", error, usage });
+
+  if (pending.phase === "write" || pending.phase === "reask" || pending.phase === "fix") {
+    const base = strategyRequest(e);
+    const messages = pending.phase === "write" ? (base.messages as PendingStrategy["messages"]) : [...pending.messages, { role: "user", content: pending.ask ?? "" }];
     usage.calls.writer++;
-    const r = await call(args);
+    const r = await call({ apiKey, body: { ...base, messages } });
     count(STRATEGY_MODEL, r.raw);
-    lastMessages = args.body.messages as unknown[];
-    lastText = r.text;
-    return r;
-  };
-  const check = async (sections: Record<string, string>) => {
-    usage.calls.checker++;
-    const r = await call({ apiKey, body: checkRequest(e, sections) });
-    count(CHECK_MODEL, r.raw);
-    return parseCheck(r.text);
-  };
-  const parse = (text: string) => parseStrategy(text, e);
+    const got = cutOff(r) ? { error: "The answer was cut off before it ended." } : parseStrategy(r.text, e);
+    if (pending.phase === "write") {
+      if (!("error" in got)) return next({ phase: "check", messages: [...messages, { role: "assistant", content: r.text }], draft: got.value });
+      // A cut-off reply is not kept: the writer is asked again without it.
+      return cutOff(r)
+        ? next({ phase: "reask", messages, ask: CUT_OFF_ASK })
+        : next({ phase: "reask", messages: [...messages, { role: "assistant", content: r.text }], ask: `That answer has these problems: ${got.error} Send the whole JSON object again with them fixed.` });
+    }
+    if ("error" in got) return over(`${pending.phase === "fix" ? "The fixed strategy" : "The strategy"} did not meet the rules: ${got.error}`);
+    return next({ phase: pending.phase === "fix" ? "recheck" : "check", messages: [...messages, { role: "assistant", content: r.text }], draft: got.value });
+  }
 
-  const first = await askTwice(writer, apiKey, strategyRequest(e), parse);
-  if ("error" in first) return { error: `The strategy did not meet the rules: ${first.error}`, usage };
-  let written = assemble(first.value, e);
-  const flagged = await check(written.sections);
-  if ("error" in flagged) return { error: flagged.error, usage };
-  if (!flagged.value.length) return { value: written, usage };
-
-  const fix = [
-    "A check against the evidence found statements it does not support:",
-    ...flagged.value.map((f) => `- ${f.section ? `(${f.section}) ` : ""}${f.statement}`),
-    "Rewrite only what is needed so none of them remains: drop each one, or say only what the evidence says. Keep every rule above, and send the whole JSON object again.",
-  ].join("\n");
-  const body = strategyRequest(e);
-  const second = parse((await writer({ apiKey, body: { ...body, messages: [...lastMessages, { role: "assistant", content: lastText }, { role: "user", content: fix }] } })).text);
-  if ("error" in second) return { error: `The fixed strategy did not meet the rules: ${second.error}`, usage };
-  written = assemble(second.value, e);
-  const again = await check(written.sections);
-  if ("error" in again) return { error: again.error, usage };
-  if (again.value.length) return { error: `The strategy still has statements the evidence does not support: ${again.value.map((f) => f.statement).join(" | ").slice(0, 300)}`, usage };
-  return { value: written, usage };
+  if (!pending.draft) return over("The draft to check was missing.");
+  const written = assemble(pending.draft, e);
+  usage.calls.checker++;
+  const r = await call({ apiKey, body: checkRequest(e, written.sections) });
+  count(CHECK_MODEL, r.raw);
+  if (cutOff(r)) return over("The check's reply was cut off before it ended.");
+  const flagged = parseCheck(r.text);
+  if ("error" in flagged) return over(flagged.error);
+  if (!flagged.value.length) return { kind: "passed", value: written, usage, evidence: e, inputs_key: pending.inputs_key };
+  if (pending.phase === "recheck") return over(`The strategy still has statements the evidence does not support: ${flagged.value.map((f) => f.statement).join(" | ").slice(0, 300)}`);
+  return next({ phase: "fix", ask: fixAsk(flagged.value) });
 }
 
-/** Save the product's version. People's versions live in content_strategy_edits, which this never writes. */
-export async function saveStrategy(db: Db, clientId: string, e: StrategyEvidence, out: { value: WrittenStrategy; usage: WriteUsage }, inputsKey: string, now: Date): Promise<void> {
+/** The write under way for a client, if any. */
+export async function readPending(db: Db, clientId: string): Promise<PendingStrategy | null> {
+  const { data, error } = await db.from("content_strategies").select("pending").eq("client_id", clientId).maybeSingle();
+  if (error) throw new Error(`Could not read the content strategy under way: ${error.message}`);
+  return (data?.pending ?? null) as PendingStrategy | null;
+}
+
+/** Keep a write under way between runs, or drop it (null). The stored strategy is never touched. */
+export async function savePending(db: Db, clientId: string, pending: PendingStrategy | null, now: Date): Promise<void> {
+  const { error } = await db.from("content_strategies").upsert({ client_id: clientId, pending, updated_at: now.toISOString() }, { onConflict: "client_id" });
+  if (error) throw new Error(`Could not keep the content strategy under way: ${error.message}`);
+}
+
+/** Save the product's version and drop the draft. People's versions live in content_strategy_edits, which this never writes. */
+export async function saveStrategy(db: Db, clientId: string, out: Extract<PhaseOutcome, { kind: "passed" }>, now: Date): Promise<void> {
   const at = now.toISOString();
   const { error } = await db.from("content_strategies").upsert({
     client_id: clientId,
     sections: out.value.sections,
     platforms: out.value.platforms,
-    pillars: e.pillars,
-    sources: e.sources,
-    inputs_key: inputsKey,
+    pillars: out.evidence.pillars,
+    sources: out.evidence.sources,
+    inputs_key: out.inputs_key,
     written_at: at,
     models: { writer: STRATEGY_MODEL, checker: CHECK_MODEL },
     usage: out.usage,
+    pending: null,
     updated_at: at,
   }, { onConflict: "client_id" });
   if (error) throw new Error(`Could not save the content strategy: ${error.message}`);

@@ -22,6 +22,14 @@ describe("20261108120000_content_strategy.sql", () => {
     expect(sql).not.toMatch(/\bdrop table\b|\bdrop column\b|\btruncate\b/i);
   });
 
+  it("keeps a write under way on the strategy's row, and a row with only a draft holds no strategy", () => {
+    expect(sql).toContain("pending jsonb,");
+    // Null until a strategy passes every check: a row may hold only a write under way.
+    expect(sql).toContain("inputs_key text,");
+    expect(sql).toContain("written_at timestamptz,");
+    expect(sql).not.toMatch(/written_at timestamptz not null/);
+  });
+
   it("lets only staff who can access the client read either table, and nobody but the service role write them", () => {
     for (const table of ["content_strategies", "content_strategy_edits"]) {
       expect(sql).toMatch(new RegExp(`create policy "[^"]+" on public\\.${table} for select to authenticated using \\(public\\.is_moburst_staff\\(\\) and public\\.can_access_client\\(client_id\\)\\);`));

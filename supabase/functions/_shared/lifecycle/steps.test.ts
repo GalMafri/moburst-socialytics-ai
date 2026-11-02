@@ -436,36 +436,84 @@ describe("content_strategy", () => {
       return writes;
     };
 
-    it("saves the product's version only, and never touches people's versions", async () => {
+    const setUp = (db: ReturnType<typeof dbWith>) => {
+      let gathered = 0;
       deps.trendIO = trendIO;
-      deps.strategyIO = io;
+      deps.strategyIO = () => ({ ...io(), gather: async () => { gathered++; return io().gather(); } });
       deps.anthropicKey = async () => "key";
       deps.now = () => new Date("2026-11-02T10:00:00.000Z");
+      return { gathered: () => gathered, writes: watched(db) };
+    };
+    const clean = JSON.stringify({ unsupported: [] });
+    const flagged = JSON.stringify({ unsupported: [{ section: "goals", statement: "Grow saves." }] });
+    const stored = { client_id: "c1", sections: { goals: "The last good goals." }, inputs_key: "old", written_at: "2026-10-01T00:00:00.000Z", pending: null };
+
+    it("makes one model call per run: writes in one run, checks in the next, and only then stores the strategy", async () => {
       const db = dbWith(tables());
       const rows = await current(db);
-      const models = answers(JSON.stringify(draft), JSON.stringify({ unsupported: [] }));
+      const t = setUp(db);
+      const models = answers(JSON.stringify(draft), clean);
       const edits = structuredClone(db.tables.content_strategy_edits);
-      const writes = watched(db);
-      const out = await STEPS.content_strategy.run(db, c(), ctx({ rows }));
-      expect(out).toMatchObject({ status: "done", result: { platforms: { posting: 0, new: 1, not_now: 0 }, calls: { writer: 1, checker: 1 } } });
+
+      const first = await STEPS.content_strategy.run(db, c(), ctx({ rows }));
+      expect(first).toMatchObject({ status: "waiting", reason: "in_progress", recheckMinutes: 1, result: { phase: "check" } });
+      expect(models).toEqual(["claude-opus-5-5"]);
+      expect(db.tables.content_strategies[0].pending).toMatchObject({ phase: "check", inputs_key: await STEPS.content_strategy.inputs(db, c(), rows) });
+      expect(db.tables.content_strategies[0].written_at).toBeUndefined();
+
+      const second = await STEPS.content_strategy.run(db, c(), ctx({ rows }));
+      expect(second).toMatchObject({ status: "done", result: { platforms: { posting: 0, new: 1, not_now: 0 }, calls: { writer: 1, checker: 1 } } });
       expect(models).toEqual(["claude-opus-5-5", "claude-sonnet-5-5"]);
-      expect(writes).toEqual(["upsert content_strategies"]);
-      expect(db.tables.content_strategy_edits).toEqual(edits);
-      expect(db.tables.content_strategies[0]).toMatchObject({ client_id: "c1", inputs_key: await STEPS.content_strategy.inputs(db, c(), rows), written_at: "2026-11-02T10:00:00.000Z" });
+      // The evidence is read once, when the write starts.
+      expect(t.gathered()).toBe(1);
+      expect(db.tables.content_strategies).toHaveLength(1);
+      expect(db.tables.content_strategies[0]).toMatchObject({ client_id: "c1", inputs_key: await STEPS.content_strategy.inputs(db, c(), rows), written_at: "2026-11-02T10:00:00.000Z", pending: null });
       expect(db.tables.content_strategies[0].sections["platform:instagram:new"]).toBe("Launch with carousels.");
+      // Only the strategy's own row is ever written; people's versions are never touched.
+      expect(new Set(t.writes)).toEqual(new Set(["upsert content_strategies"]));
+      expect(db.tables.content_strategy_edits).toEqual(edits);
     });
 
-    it("keeps the stored version and tries again quietly when the strategy is still flagged", async () => {
-      deps.trendIO = trendIO;
-      deps.strategyIO = io;
-      deps.anthropicKey = async () => "key";
-      const db = dbWith({ ...tables(), content_strategies: [{ client_id: "c1", sections: { goals: "The last good goals." }, inputs_key: "old" }] });
+    it("keeps the stored strategy on screen through every run, and drops the draft when the write is still flagged", async () => {
+      const db = dbWith({ ...tables(), content_strategies: [{ ...stored }] });
       const rows = await current(db);
-      const flagged = JSON.stringify({ unsupported: [{ section: "goals", statement: "Grow saves." }] });
-      answers(JSON.stringify(draft), flagged, JSON.stringify(draft), flagged);
-      const out = await STEPS.content_strategy.run(db, c(), ctx({ rows }));
-      expect(out.status).toBe("failed");
-      expect(db.tables.content_strategies).toEqual([{ client_id: "c1", sections: { goals: "The last good goals." }, inputs_key: "old" }]);
+      setUp(db);
+      const models = answers(JSON.stringify(draft), flagged, JSON.stringify(draft), flagged);
+      const statuses: string[] = [];
+      for (let run = 0; run < 4; run++) {
+        statuses.push((await STEPS.content_strategy.run(db, c(), ctx({ rows }))).status);
+        expect(db.tables.content_strategies[0]).toMatchObject({ sections: { goals: "The last good goals." }, inputs_key: "old", written_at: stored.written_at });
+      }
+      expect(statuses).toEqual(["waiting", "waiting", "waiting", "failed"]);
+      expect(models).toEqual(["claude-opus-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "claude-sonnet-5-5"]);
+      expect(db.tables.content_strategies[0].pending).toBeNull();
+    });
+
+    it("drops a draft written for other inputs and starts over", async () => {
+      const db = dbWith({ ...tables(), content_strategies: [{ ...stored }] });
+      const rows = await current(db);
+      const t = setUp(db);
+      db.tables.content_strategies[0].pending = { inputs_key: "an older key", phase: "check", evidence: {}, messages: [], draft: draft, usage: { calls: { writer: 1, checker: 0 }, tokens: {} }, started_at: "2026-10-30T00:00:00.000Z" };
+      const models = answers(JSON.stringify(draft));
+      expect(await STEPS.content_strategy.run(db, c(), ctx({ rows }))).toMatchObject({ status: "waiting", result: { phase: "check" } });
+      expect(models).toEqual(["claude-opus-5-5"]);
+      expect(t.gathered()).toBe(1);
+      expect(db.tables.content_strategies[0].pending).toMatchObject({ inputs_key: await STEPS.content_strategy.inputs(db, c(), rows), usage: { calls: { writer: 1, checker: 0 } } });
+    });
+
+    it("keeps the draft when a call does not get through, so the retry picks up the same phase", async () => {
+      const db = dbWith({ ...tables(), content_strategies: [{ ...stored }] });
+      const rows = await current(db);
+      setUp(db);
+      answers(JSON.stringify(draft));
+      await STEPS.content_strategy.run(db, c(), ctx({ rows }));
+      const kept = structuredClone(db.tables.content_strategies[0].pending);
+      deps.claudeMessages = (async () => { throw new Error("Anthropic API error 529: overloaded"); }) as never;
+      await expect(STEPS.content_strategy.run(db, c(), ctx({ rows }))).rejects.toThrow("529");
+      expect(db.tables.content_strategies[0].pending).toEqual(kept);
+      const models = answers(clean);
+      expect((await STEPS.content_strategy.run(db, c(), ctx({ rows }))).status).toBe("done");
+      expect(models).toEqual(["claude-sonnet-5-5"]);
     });
 
     it("tries again quietly without an AI connection, and waits for a profile", async () => {

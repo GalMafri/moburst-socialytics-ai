@@ -40,9 +40,11 @@ const NAV = [
 interface StoredStrategy {
   sections: Record<string, string>;
   platforms: WrittenPlatform[];
-  pillars: Array<{ name: string; share: number }>;
+  /** Each pillar's share of the client's calendar posts over the last 8 weeks; null with no posts then. */
+  pillars: Array<{ name: string; share: number | null }>;
   sources: string[];
-  written_at: string;
+  /** Null while the row holds only the first write under way. */
+  written_at: string | null;
 }
 
 const none = "None yet";
@@ -123,7 +125,8 @@ export default function ClientStrategy() {
     },
   });
 
-  const s = strategy.data;
+  // A row that holds only a write under way is no strategy yet.
+  const s = strategy.data?.written_at ? strategy.data : null;
   const byKey = new Map((edits.data ?? []).map((e) => [e.section_key, e]));
   const written: Written = { at: s?.written_at ?? "", sources: Array.isArray(s?.sources) ? s.sources : [] };
   const sections = s?.sections ?? {};
@@ -155,7 +158,7 @@ export default function ClientStrategy() {
           <StrategySection id="strategy-audience" title="Audience" {...section("audience")} />
           <StrategySection id="strategy-positioning" title="Positioning" {...section("positioning")} />
 
-          <Section id="strategy-pillars" title="Pillars" description="One per content pillar from Client setup, with its share of posts, the formats that worked and two post ideas.">
+          <Section id="strategy-pillars" title="Pillars" description="One per content pillar from Client setup, with the formats that worked, two post ideas, and its share of the client's calendar posts over the last 8 weeks.">
             <div className="grid gap-inner lg:grid-cols-2" data-testid="strategy-pillars-grid">
               {(s.pillars ?? []).map((p) => (
                 <StrategyCard
@@ -163,7 +166,7 @@ export default function ClientStrategy() {
                   {...section(pillarSectionKey(p.name))}
                   label={p.name}
                   title={p.name}
-                  facts={<p className="t-label">{p.share}% of posts</p>}
+                  facts={p.share === null || p.share === undefined ? undefined : <p className="t-label">{p.share}% of calendar posts in the last 8 weeks</p>}
                 />
               ))}
             </div>

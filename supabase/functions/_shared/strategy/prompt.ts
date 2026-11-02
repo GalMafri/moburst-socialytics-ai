@@ -17,6 +17,8 @@ type Db = any;
 export const STRATEGY_BLOCK_CHARS = 4000;
 
 export interface StoredStrategy {
+  /** Null while the row holds only a write under way: no strategy yet. */
+  written_at?: string | null;
   sections: Record<string, string> | null;
   platforms: Array<{ platform: string; state: string }> | null;
   pillars: Array<{ name: string }> | null;
@@ -52,9 +54,9 @@ export function strategyBlock(s: StoredStrategy, edits: Array<{ section_key: str
 
 /** The client's strategy for the planner's prompts; "" when it has none. */
 export async function strategyPromptBlock(db: Db, clientId: string): Promise<string> {
-  const { data: s, error } = await db.from("content_strategies").select("sections, platforms, pillars").eq("client_id", clientId).maybeSingle();
+  const { data: s, error } = await db.from("content_strategies").select("sections, platforms, pillars, written_at").eq("client_id", clientId).maybeSingle();
   if (error) throw new Error(`Could not read the content strategy: ${error.message}`);
-  if (!s) return "";
+  if (!s?.written_at) return "";
   const { data: edits, error: editsError } = await db.from("content_strategy_edits").select("section_key, text").eq("client_id", clientId);
   if (editsError) throw new Error(`Could not read the team's versions of the strategy: ${editsError.message}`);
   return strategyBlock(s, edits ?? []);

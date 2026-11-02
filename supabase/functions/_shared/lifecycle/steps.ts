@@ -46,7 +46,7 @@ import { anthropicMessages } from "../anthropic.ts";
 import { competitorSet, feedSnapshots, ownPosts } from "../calendar/runWeek.ts";
 import { activeTerms, askTwice, evidenceKey, hashtagsRequest, monthIn, parseHashtags, parseProfile, profileEvidence, profileRequest, syncLifecycleTerms, writeTrendProfile, type ProfileIO } from "../trends/profile.ts";
 import { HASHTAG_PLATFORMS } from "../trends/types.ts";
-import { liveStrategyIO, saveStrategy, strategyEvidence, writeStrategy, type StrategyIO } from "../strategy/write.ts";
+import { liveStrategyIO, readPending, savePending, saveStrategy, startStrategy, strategyEvidence, strategyPhase, type StrategyIO } from "../strategy/write.ts";
 import type { StepOutcome, StepPolicy, StepRow } from "./policy.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -605,9 +605,12 @@ export const STEPS: Record<string, StepDef> = {
   // profile write, then one strategy write. Written again when the profile is
   // rewritten, the client's Sprout networks or posting rhythm change, and
   // monthly so it follows the posts. A person's edit is never an input, and
-  // the step writes only content_strategies, so people's versions stay. A
-  // write that does not pass its checks is tried again quietly and the last
-  // good strategy stays.
+  // the step writes only content_strategies, so people's versions stay.
+  // One model call per run (strategy/write.ts): write, check, fix if flagged,
+  // check again, each its own run a minute apart, with the draft kept on the
+  // client's strategy row. A call that does not get through keeps the draft
+  // for the retry; a write that does not pass its checks drops it and is
+  // tried again quietly from the start. The last good strategy stays.
   content_strategy: {
     policy: { refreshDays: 30 },
     async inputs(db, client, rows) {
@@ -625,13 +628,26 @@ export const STEPS: Record<string, StepDef> = {
       const key = await deps.anthropicKey(db);
       if (!key) return { status: "failed", error: "The AI connection is not configured." };
       const inputsKey = await STEPS.content_strategy.inputs(db, client, rows);
-      const e = inputsKey ? await strategyEvidence(db, client, deps.now(), deps.strategyIO()) : null;
-      if (!inputsKey || !e) return { status: "waiting", reason: "trend_profile", recheckDays: 1 };
-      const got = await writeStrategy(deps.claudeMessages, key, e);
-      if ("error" in got) return { status: "failed", error: `The content strategy could not be written: ${got.error}` };
-      await saveStrategy(db, client.id, e, got, inputsKey, deps.now());
-      const count = (state: string) => got.value.platforms.filter((x) => x.state === state).length;
-      return { status: "done", result: { platforms: { posting: count("posting"), new: count("new"), not_now: count("not_now") }, calls: got.usage.calls } };
+      if (!inputsKey) return { status: "waiting", reason: "trend_profile", recheckDays: 1 };
+      // A draft for other inputs is dropped: the write starts over.
+      let pending = await readPending(db, client.id);
+      if (pending?.inputs_key !== inputsKey) {
+        const e = await strategyEvidence(db, client, deps.now(), deps.strategyIO());
+        if (!e) return { status: "waiting", reason: "trend_profile", recheckDays: 1 };
+        pending = startStrategy(e, inputsKey, deps.now());
+      }
+      const out = await strategyPhase(deps.claudeMessages, key, pending);
+      if (out.kind === "next") {
+        await savePending(db, client.id, out.pending, deps.now());
+        return { status: "waiting", reason: "in_progress", recheckMinutes: 1, result: { phase: out.pending.phase } };
+      }
+      if (out.kind === "over") {
+        await savePending(db, client.id, null, deps.now());
+        return { status: "failed", error: `The content strategy could not be written: ${out.error}` };
+      }
+      await saveStrategy(db, client.id, out, deps.now());
+      const count = (state: string) => out.value.platforms.filter((x) => x.state === state).length;
+      return { status: "done", result: { platforms: { posting: count("posting"), new: count("new"), not_now: count("not_now") }, calls: out.usage.calls } };
     },
   },
 

@@ -145,7 +145,7 @@ describe("runWeekPlan", () => {
   it("plans from the client's content strategy, people's versions included, and gives a client without one today's prompt", async () => {
     m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
     m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [{ date: "2026-10-27", platform: "Instagram", copy: "Captains, this one is for you.", reason_type: "seasonal", moment: "Playoffs start Oct 27", evidence_ids: [] }] }), raw: {} });
-    const strategy = { client_id: "ptp", sections: { goals: "Grow saves on Instagram.", avoid: "Office photos." }, platforms: [], pillars: [] };
+    const strategy = { client_id: "ptp", sections: { goals: "Grow saves on Instagram.", avoid: "Office photos." }, platforms: [], pillars: [], written_at: "2026-11-02T10:00:00Z" };
     await runWeekPlan(fakeDb({ calendar_plans: [plan], clients: [CLIENT], content_strategies: [strategy], content_strategy_edits: [{ client_id: "ptp", section_key: "avoid", text: "Anything that mocks other apps." }] }), job(), NOW);
     const prompt = m.anthropic.mock.calls[0][0].body.messages[0].content as string;
     expect(prompt).toContain("Grow saves on Instagram.");
@@ -301,7 +301,7 @@ describe("runWeekRevise", () => {
 
   it("rewrites with the client's content strategy", async () => {
     m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [{ id: "p1", copy: "New copy" }] }), raw: {} });
-    const strategy = { client_id: "ptp", sections: { positioning: "Built around the captain's week." }, platforms: [], pillars: [] };
+    const strategy = { client_id: "ptp", sections: { positioning: "Built around the captain's week." }, platforms: [], pillars: [], written_at: "2026-11-02T10:00:00Z" };
     const db = fakeDb({ calendar_plans: [ready], clients: [CLIENT], calendar_posts: [post], content_strategies: [strategy] });
     await runWeekRevise(db, job({ kind: "week_revise" }), NOW);
     expect(m.anthropic.mock.calls[0][0].body.messages[0].content).toContain("Built around the captain's week.");

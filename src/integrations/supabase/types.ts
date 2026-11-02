@@ -1302,39 +1302,42 @@ export type Database = {
       content_strategies: {
         Row: {
           client_id: string
-          inputs_key: string
+          inputs_key: string | null
           models: Json
+          pending: Json | null
           pillars: Json
           platforms: Json
           sections: Json
           sources: Json
           updated_at: string
           usage: Json
-          written_at: string
+          written_at: string | null
         }
         Insert: {
           client_id: string
-          inputs_key: string
+          inputs_key?: string | null
           models?: Json
+          pending?: Json | null
           pillars?: Json
           platforms?: Json
           sections?: Json
           sources?: Json
           updated_at?: string
           usage?: Json
-          written_at?: string
+          written_at?: string | null
         }
         Update: {
           client_id?: string
-          inputs_key?: string
+          inputs_key?: string | null
           models?: Json
+          pending?: Json | null
           pillars?: Json
           platforms?: Json
           sections?: Json
           sources?: Json
           updated_at?: string
           usage?: Json
-          written_at?: string
+          written_at?: string | null
         }
         Relationships: [
           {
