@@ -7,7 +7,7 @@
 // (src/test/copyWritersUseVoice.test.ts checks this).
 
 import { anthropicMessages } from "../anthropic.ts";
-import { consolidatePrompt, mergePrompt, parseConsolidation, parseMergeOps, parseVoiceProfile, voiceProfilePrompt, type ClientVoice, type MemorySignal, type Preference, type SocialVoice } from "./voice.ts";
+import { consolidatePrompt, mergePrompt, parseConsolidation, parseMergeOps, parseOverallVoice, parseVoiceProfile, voicePlatforms, voiceProfilePrompt, voiceSample, type ClientVoice, type MemorySignal, type Preference, type SocialVoice } from "./voice.ts";
 import { bestExamples, rhythmFromPosts, scoreOwnPosts, type OwnPost } from "../calendar/evidence.ts";
 import { pointsInUse, readNoteRows, standingNotes, todayIn } from "../notes/notes.ts";
 
@@ -19,7 +19,7 @@ export const MEMORY_MODEL = "claude-sonnet-5-5";
 // deno-lint-ignore no-explicit-any
 type Db = any;
 
-const PREFERENCE_COLUMNS = "id, pattern_type, pattern_description, times_confirmed, source, last_confirmed_at";
+const PREFERENCE_COLUMNS = "id, pattern_type, pattern_description, times_confirmed, source, last_confirmed_at, platform";
 
 export async function activePreferences(admin: Db, clientId: string): Promise<Preference[]> {
   const { data, error } = await admin.from("brand_voice_learnings").select(PREFERENCE_COLUMNS)
@@ -81,14 +81,14 @@ export async function learnFromSignal(admin: Db, clientId: string, signal: Memor
   const confirm = async (p: Preference) => {
     await mustWrite(admin.from("brand_voice_learnings").update({ times_confirmed: p.times_confirmed + 1, last_confirmed_at: now, updated_at: now }).eq("id", p.id).eq("status", "active"), "Could not confirm a preference");
   };
-  // Only one active preference may say a thing; the same wording again is a confirmation.
-  const sameAs = (type: string, description: string) => current.find((p) => p.pattern_type === type && p.pattern_description.trim().toLowerCase() === description.trim().toLowerCase());
+  // Only one active preference may say a thing for a platform (or for all); the same wording again is a confirmation.
+  const sameAs = (type: string, description: string, platform: string | null) => current.find((p) => p.pattern_type === type && (p.platform ?? null) === platform && p.pattern_description.trim().toLowerCase() === description.trim().toLowerCase());
   for (const op of ops) {
     if (op.op === "confirm") {
       await confirm(current.find((p) => p.id === op.id)!);
       continue;
     }
-    const existing = sameAs(op.pattern_type, op.description);
+    const existing = sameAs(op.pattern_type, op.description, op.platform);
     let keptId: string;
     if (existing && existing.id !== (op.op === "replace" ? op.id : "")) {
       await confirm(existing);
@@ -99,7 +99,7 @@ export async function learnFromSignal(admin: Db, clientId: string, signal: Memor
       continue;
     } else {
       const { data: added, error } = await admin.from("brand_voice_learnings")
-        .insert({ client_id: clientId, pattern_type: op.pattern_type, pattern_description: op.description, source, evidence, last_confirmed_at: now })
+        .insert({ client_id: clientId, pattern_type: op.pattern_type, pattern_description: op.description, platform: op.platform, source, evidence, last_confirmed_at: now })
         .select("id").single();
       if (error) throw new Error(`Could not save a preference: ${error.message}`);
       keptId = added.id;
@@ -132,8 +132,11 @@ export async function consolidateMemory(admin: Db, clientId: string): Promise<{ 
     for (const m of merged) {
       const sources = m.from.map((id) => byId.get(id)!).filter(Boolean);
       const latest = sources.map((x) => x.last_confirmed_at).sort().slice(-1)[0] ?? now;
+      // One platform's preference stays that platform's only when every one it came from was.
+      const platforms = new Set(sources.map((x) => x.platform ?? null));
+      const platform = platforms.size === 1 ? [...platforms][0] : null;
       const { data: added, error } = await admin.from("brand_voice_learnings").insert({
-        client_id: clientId, pattern_type: m.pattern_type, pattern_description: m.description, source: "copy_edit",
+        client_id: clientId, pattern_type: m.pattern_type, pattern_description: m.description, platform, source: "copy_edit",
         times_confirmed: sources.reduce((n, x) => n + Math.max(1, x.times_confirmed), 0), last_confirmed_at: latest,
         evidence: `Merged from ${sources.length} earlier preference${sources.length === 1 ? "" : "s"}.`,
       }).select("id").single();
@@ -150,30 +153,38 @@ export async function consolidateMemory(admin: Db, clientId: string): Promise<{ 
 }
 
 /**
- * Learn how the client writes on each platform from the posts it published
- * in the last 90 days, and keep its best ones as examples.
+ * Learn how the client writes from the organic posts it published in the
+ * last 90 days: a voice for each platform with 5 posts, and in the same call
+ * the brand's overall voice from all its platforms, for the platforms with
+ * fewer (recorded as thin, with their own posts as examples). Its best posts
+ * are kept as examples.
  */
 export async function buildVoiceProfile(admin: Db, clientId: string, posts: OwnPost[], now = new Date()): Promise<SocialVoice> {
   const { data: client } = await admin.from("clients").select("name, timezone").eq("id", clientId).maybeSingle();
-  const withText = posts.filter((p) => String(p.text || "").trim().length >= 20);
-  const byPlatform: Record<string, Array<{ text: string; date: string; format: string }>> = {};
-  for (const p of [...withText].sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))) {
-    const list = (byPlatform[p.platform] ??= []);
-    if (list.length < 25) list.push({ text: p.text, date: p.publishedAt.slice(0, 10), format: p.format });
-  }
-  const platforms = Object.keys(byPlatform);
+  const sample = voiceSample(posts);
+  const { own, thin } = voicePlatforms(sample);
   let profile: SocialVoice["platforms"] = {};
-  if (platforms.length) {
-    const result = await anthropicMessages({ apiKey: apiKey(), body: { model: COPY_MODEL, max_tokens: 6000, messages: [{ role: "user", content: voiceProfilePrompt(String(client?.name ?? "the client"), byPlatform) }] } });
-    profile = parseVoiceProfile(result.text, platforms);
-    if (!Object.keys(profile).length) throw new Error("The voice profile reply could not be read.");
+  let overall: SocialVoice["overall"] | null = null;
+  if (Object.keys(sample).length) {
+    const byPlatform = Object.fromEntries(Object.entries(sample).map(([p, xs]) => [p, xs.map(({ text, date, format }) => ({ text, date, format }))]));
+    const result = await anthropicMessages({ apiKey: apiKey(), body: { model: COPY_MODEL, max_tokens: 6000, messages: [{ role: "user", content: voiceProfilePrompt(String(client?.name ?? "the client"), byPlatform, own) }] } });
+    profile = parseVoiceProfile(result.text, own);
+    overall = parseOverallVoice(result.text);
+    if (!overall || (own.length && !Object.keys(profile).length)) throw new Error("The voice profile reply could not be read.");
+  }
+  const examples = bestExamples(scoreOwnPosts(posts, now, { top: 30 }).top);
+  // A platform with too few posts for a voice of its own keeps its own newest posts as examples.
+  for (const p of Object.keys(thin)) {
+    if (!examples[p]?.length) examples[p] = sample[p].slice(0, 3).map((x) => ({ text: excerpt(x.text, 600), date: x.date, link: x.link, format: x.format }));
   }
   const voice: SocialVoice = {
     built_at: now.toISOString(),
-    post_count: withText.length,
+    post_count: posts.filter((p) => !p.boosted && String(p.text || "").trim().length >= 20).length,
     platforms: profile,
-    examples: bestExamples(scoreOwnPosts(posts, now, { top: 30 }).top),
+    examples,
     rhythm: rhythmFromPosts(posts, now, String(client?.timezone || "UTC")).map(({ platform, perWeek, average }) => ({ platform, perWeek, average })),
+    ...(overall ? { overall } : {}),
+    ...(Object.keys(thin).length ? { thin } : {}),
   };
   const { error } = await admin.from("clients").update({ social_voice: voice }).eq("id", clientId);
   if (error) throw new Error(`Could not save the voice profile: ${error.message}`);

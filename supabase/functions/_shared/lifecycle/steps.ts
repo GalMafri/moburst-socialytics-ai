@@ -14,7 +14,7 @@
 //   brief_pillars   a brief from the strategy document or the site when there is none, then pillars and keywords
 //   accounts        Sprout profiles matched by Sprout's brand name and by the site's profile links
 //   access          the company slug, by the portal's slug rule
-//   design_refs     the client's designed posts and the visual style learned from them
+//   design_refs     the client's designed posts per platform, checked weekly, and the visual style learned from them
 //   competitors     identify, pick the three closest with a website, confirm as the system
 //   trend_profile   what Trends tracks: audience, topics, hashtags, exclusions, fit rubric, platforms
 //   trend_hashtags  the profile's hashtags refreshed from the newest best posts, once a month
@@ -25,8 +25,9 @@
 // A demo copy (a client the API demo made) runs only the steps its demo job asks for (run.ts).
 
 import { referenceFingerprint } from "../brand-references/candidates.ts";
+import { choicesKey } from "../brand-references/corpus.ts";
 import { StyleError } from "../brand-references/errors.ts";
-import { learnBrandStyle } from "../brand-references/learnStyle.ts";
+import { liveRefsIO, readChoices, refreshReferences } from "../brand-references/learnStyle.ts";
 import { defaultSproutCustomerId } from "../sprout/customer.ts";
 import { listCustomerProfiles } from "../sprout/profiles.ts";
 import { listBrandPosts, POSTS_WINDOW_DAYS } from "../sprout/posts.ts";
@@ -40,7 +41,8 @@ import { advanceSetupOnServer, resetTracking, rivalIqApi, SetupError, syncTracke
 import { LANDSCAPE_MISSING } from "../competitive/landscapeCheck.ts";
 import { scrapeMarkdown } from "../net/firecrawl.ts";
 import { matchProfiles, platformsOf, profileListKey, siteProfileLinks, type SproutProfile } from "./accounts.ts";
-import { pickBackground, placementFor, referencePaths } from "./designSettings.ts";
+import { libraryPaths, MAX_REFS, pickBackground, placementFor } from "./designSettings.ts";
+import { referencesFor } from "../design-prompts/designRefs.ts";
 import { lifecycleMayWrite, setBy, writeClientFields } from "./fields.ts";
 import { countryCode, htmlLanguage, replacesLocation, resolveLocation, SOURCE_RANK, zoneCountry } from "./location.ts";
 import { normName, slugify, textHash } from "./names.ts";
@@ -63,6 +65,8 @@ export const CLIENT_COLUMNS = [
   "brand_identity", "logo_url", "timezone", "geo", "language", "brief_text", "brief_file_id", "strategy_doc_file_path", "brand_notes",
   "competitor_seed_notes", "content_pillars", "social_keywords", "primary_platforms", "company_slug", "hub_company_name",
   "design_references", "harvested_design_references", "voice_built_at:social_voice->>built_at", "posting_rhythm",
+  // The day a new look began in the client's posts (design_refs): brand_read reads the site again for it.
+  "look_since:design_style_synthesis->look_change->>since",
 ].join(", ");
 
 export interface StepContext {
@@ -109,7 +113,7 @@ export const deps = {
   advanceSetupOnServer,
   resetTracking,
   syncTrackedHandles,
-  learnBrandStyle,
+  refsIO: () => liveRefsIO(),
   imaging: () => import("./imaging.ts"),
   claudeMessages: anthropicMessages,
   trendIO: (): ProfileIO => ({
@@ -227,7 +231,9 @@ export const STEPS: Record<string, StepDef> = {
   brand_read: {
     policy: { refreshDays: 180 },
     async inputs(_db, client) {
-      return siteKey(client.website_url);
+      const site = siteKey(client.website_url);
+      // A new look in the client's posts (design_refs) reads the site again, so the logo file and colors follow a rebrand.
+      return site && str(client.look_since) ? `${site}|look:${str(client.look_since)}` : site;
     },
     async run(db, client) {
       const fs = client.field_sources;
@@ -491,27 +497,38 @@ export const STEPS: Record<string, StepDef> = {
     },
   },
 
-  // The client's designed posts and the visual style learned from them. Runs
-  // when its social accounts change, and every 90 days (the posts window), so
-  // the style follows what the brand publishes now.
+  // The client's designed posts and the visual style learned from them
+  // (spec: docs/superpowers/specs/2026-11-02-design-refs-refresh-design.md).
+  // Checked every week, and at once when its accounts change or a person
+  // keeps, leaves out or uploads a post. A check is one Sprout read; new posts
+  // are reviewed once each; the look is learned again only when the library
+  // changed by two posts, a platform reached its minimum, or a person chose
+  // (brand-references/learnStyle.ts refreshReferences). done_at is the check;
+  // the result's synthesized_at is the last real learning, which
+  // design_settings keys on. A client with fewer than 3 designed posts keeps
+  // its last references and is checked again in a week.
   design_refs: {
-    policy: { refreshDays: 90, recheckDays: 30 },
+    policy: { refreshDays: 7, recheckDays: 7 },
     async inputs(db, client) {
       const { data, error } = await db.from("sprout_profiles").select("sprout_profile_id").eq("client_id", client.id).eq("is_active", true);
       if (error) throw new Error(`Could not read the client's social accounts: ${error.message}`);
       const ids = (data ?? []).map((p: { sprout_profile_id: string }) => String(p.sprout_profile_id));
-      return ids.length ? referenceFingerprint(ids, String(client.sprout_customer_id || defaultSproutCustomerId())) : null;
+      if (!ids.length) return null;
+      const uploads = Array.isArray(client.design_references) ? client.design_references.filter((p: unknown): p is string => typeof p === "string" && !!p) : [];
+      const choices = await readChoices(db, client.id);
+      return `${referenceFingerprint(ids, String(client.sprout_customer_id || defaultSproutCustomerId()))}|chosen:${choicesKey(choices, uploads)}`;
     },
-    async run(db, client, { force }) {
+    async run(db, client) {
       try {
-        const learned = await deps.learnBrandStyle(db, String(client.id), { discover: true, force });
-        const learnedAt = learned.synthesis?.synthesized_at ?? null;
-        // A reused style keeps its own date, so the 90-day refresh counts from when it was learned.
-        return { status: "done", result: { references: learned.refs?.length ?? 0, cached: learned.cached, synthesized_at: learnedAt }, doneAt: learnedAt };
+        const out = await refreshReferences(db, String(client.id), deps.refsIO());
+        if (out.kind === "no_accounts") return { status: "waiting", reason: "social_accounts" };
+        if (out.kind === "in_progress") return { status: "waiting", reason: "in_progress", recheckMinutes: 1, result: { reviewed: out.reviewed, left: out.left } };
+        if (out.kind === "too_few") return { status: "waiting", reason: "designed_posts", recheckDays: 7, result: { designed: out.designed, posts_read: out.posts_read } };
+        return { status: "done", result: out.result };
       } catch (e) {
         if (!(e instanceof StyleError)) throw e;
         if (e.code === "no_accounts") return { status: "waiting", reason: "social_accounts" };
-        if (e.code === "too_few" || e.code === "no_sources") return { status: "waiting", reason: "designed_posts", recheckDays: 30 };
+        if (e.code === "too_few" || e.code === "no_sources") return { status: "waiting", reason: "designed_posts", recheckDays: 7 };
         if (e.code === "accounts_changed") return { status: "failed", error: e.message, soonMinutes: 5 };
         return { status: "failed", error: e.message };
       }
@@ -755,7 +772,7 @@ export const STEPS: Record<string, StepDef> = {
       const refs = rows.get("design_refs");
       if (!refs || !refs.done_at) return null;
       if (!str(client.logo_url)) return null;
-      if (!referencePaths(client.design_references, client.harvested_design_references).length) return null;
+      if (!libraryPaths(client.design_references, client.harvested_design_references).length) return null;
       const { data, error } = await db.from("design_brand_settings").select("source").eq("client_id", client.id).maybeSingle();
       if (error) throw new Error(`Could not read the design settings: ${error.message}`);
       if (data?.source === "person") return "person";
@@ -771,12 +788,13 @@ export const STEPS: Record<string, StepDef> = {
       const imaging = await deps.imaging();
       const logo = await imaging.logoPng(db, client.id, String(client.logo_url));
       if (!logo) return { status: "waiting", reason: "logo_file", result: { logo_url: client.logo_url } };
-      const harvested = referencePaths([], client.harvested_design_references);
-      const spot = harvested.length ? await imaging.readLogoSpot(db, client.name, harvested, key) : null;
+      // Where the client's own posts put the logo, read from its posts, not its uploads.
+      const posts = referencesFor([], (Array.isArray(client.harvested_design_references) ? client.harvested_design_references : []).filter((r: { upload?: boolean }) => !r?.upload), MAX_REFS, null);
+      const spot = posts.length ? await imaging.readLogoSpot(db, client.name, posts, key) : null;
       const { placement, from } = placementFor(spot, logo.width / Math.max(1, logo.height));
       const b = client.brand_identity ?? {};
       const background = pickBackground([b.primary_color, b.secondary_color, b.accent_color], logo.ink);
-      const paths = referencePaths(client.design_references, client.harvested_design_references);
+      const paths = libraryPaths(client.design_references, client.harvested_design_references);
       const derived = { logo_from: client.logo_url, logo_file: logo.converted, placement_from: from, logo_read: spot, background_from: background.from, at: deps.now().toISOString() };
       const { data: wrote, error: writeError } = await db.rpc("lifecycle_write_design_settings", {
         p_client: client.id, p_logo_path: logo.path, p_placement: placement, p_background: background.hex, p_reference_paths: paths, p_derived: derived,

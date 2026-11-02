@@ -77,7 +77,7 @@ Deno.serve(async (req) => {
       await requireStaff(req, {writeClientId: client_id});
       const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
       const {data} = await db.from("clients").select("design_references,harvested_design_references").eq("id",client_id).maybeSingle();
-      if (!referencesFor(data?.design_references,data?.harvested_design_references,8).includes(reference_path)) return jsonResp({error:"Reference does not belong to this client."},403);
+      if (!referencesFor(data?.design_references,data?.harvested_design_references,16,null).includes(reference_path)) return jsonResp({error:"Reference does not belong to this client."},403);
       referenceImage = await sourceImage(db, reference_path);
     }
     const avoid = referenceImage ? null : await antiPatternsFor(client_id);

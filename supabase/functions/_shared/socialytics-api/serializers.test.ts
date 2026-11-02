@@ -17,6 +17,11 @@ describe("clientOut", () => {
     expect(JSON.stringify(out)).not.toContain("123456");
     expect(JSON.stringify(out)).not.toContain("L123");
   });
+  it("counts each design reference once, an upload the library keeps included", () => {
+    const withUpload = clientOut({ ...CLIENT, design_references: ["c-bader/upload.png"], harvested_design_references: [{ path: "c-bader/upload.png", upload: true, kept: true }, { path: "c-bader/social-1.jpg", quality_checked: true }] },
+      { sproutProfiles: [], sets: [], designSystems: [], designSettings: null, designSteps: [], counts: { reports: 0, competitive_reports: 0, posts: 0, schedules: 0 }, lastReport: null });
+    expect(withUpload.design.references).toBe(2);
+  });
   it("lists setup issues for a bare client", () => {
     const bare = clientOut({ ...CLIENT, brand_identity: null, content_pillars: null, social_keywords: null, design_style_synthesis: null, harvested_design_references: null }, { sproutProfiles: [], sets: [], designSystems: [], designSettings: null, designSteps: [], counts: { reports: 0, competitive_reports: 0, posts: 0, schedules: 0 }, lastReport: null });
     expect(bare.setup.ready).toBe(false);

@@ -47,8 +47,21 @@ it('shows derived settings as in place, editable, with no automatic designs swit
   fireEvent.change(screen.getByLabelText('Background behind the logo'), { target: { value: '#FFFFFF' } });
   fireEvent.click(await screen.findByRole('button', { name: 'Save changes' }));
   await waitFor(() => expect(f.writes).toHaveLength(1));
-  expect(f.writes.at(-1)).toMatchObject({ client_id: 'c', background: '#FFFFFF', confirmed_by: 'person-1' });
+  expect(f.writes.at(-1)).toMatchObject({ background: '#FFFFFF', confirmed_by: 'person-1' });
+  // The library is not the card's: a save keeps the logo, placement and background only, so the posts keep refreshing.
+  expect(f.writes.at(-1)).not.toHaveProperty('reference_paths');
 });
+
+it('keeps the logo, placement and background only: the posts designs follow refresh on their own', async () => {
+  f.settings = { client_id: 'c', source: 'person', logo_path: 'c/logo.png', background: '#000000', placement: { anchor: 'left', width: 0.2, top: 0.05, left: 0.05 }, reference_paths: ['c/a.jpg'], updated_at: '2026-10-12T09:00:00Z' };
+  mount();
+  await screen.findByText(/Set by your team/);
+  expect(screen.queryByText(/posts designs are built from/)).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Use all' })).toBeNull();
+  expect(screen.queryByRole('button', { name: /Leave this post out|Use this post/ })).toBeNull();
+  expect(screen.getByText("The client's posts they follow refresh on their own, under Brand references from social posts.")).toBeInTheDocument();
+});
+
 
 it('says a person set them, when they did', async () => {
   f.settings = { client_id: 'c', source: 'person', logo_path: 'c/logo.png', background: '#000000', placement: { anchor: 'left', width: 0.2, top: 0.05, left: 0.05 }, reference_paths: ['c/a.jpg'], updated_at: '2026-10-12T09:00:00Z' };

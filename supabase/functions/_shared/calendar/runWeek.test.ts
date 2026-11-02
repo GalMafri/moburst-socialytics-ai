@@ -10,12 +10,14 @@ const m = vi.hoisted(() => ({
   activePreferences: vi.fn(),
   consolidateMemory: vi.fn(),
   buildVoiceProfile: vi.fn(),
+  // deno-lint-ignore no-explicit-any
+  social: null as any,
 }));
 vi.mock("../anthropic.ts", () => ({ anthropicMessages: m.anthropic }));
 vi.mock("../competitive/ownedSource.ts", () => ({ collectOwnedCompetitive: m.owned }));
 vi.mock("../voice/load.ts", async (original) => ({
   ...(await original<typeof import("../voice/load.ts")>()),
-  loadClientVoice: async () => ({ brand: "Pay The Pyper", preferences: [], social: null, briefTone: null }),
+  loadClientVoice: async () => ({ brand: "Pay The Pyper", preferences: [], social: m.social, briefTone: null }),
   activePreferences: m.activePreferences,
   consolidateMemory: m.consolidateMemory,
   buildVoiceProfile: m.buildVoiceProfile,
@@ -55,7 +57,7 @@ function fakeDb(tables: Record<string, unknown[]>) {
 const job = (over: Partial<WeekJob> = {}): WeekJob => ({ id: "j", kind: "week_plan", client_id: "ptp", occurrence: "2026-10-26T00:00:00Z", attempts: 1, max_attempts: 3, ...over });
 const plan = { id: "plan-1", client_id: "ptp", week_start: "2026-10-26", status: "queued", requested_by: null };
 
-afterEach(() => vi.clearAllMocks());
+afterEach(() => { vi.clearAllMocks(); m.social = null; });
 afterAll(() => vi.unstubAllGlobals());
 
 describe("runWeekPlan", () => {
@@ -73,6 +75,22 @@ describe("runWeekPlan", () => {
     expect(m.anthropic.mock.calls[0][0].body.messages[0].content).toContain("don't plan ideas that need a specific person on camera");
     const ready = db.writes.filter((w) => w.table === "calendar_plans" && w.op === "update").map((w) => w.value as Record<string, unknown>).find((v) => v.status === "ready");
     expect(ready?.rhythm).toEqual(expect.objectContaining({ applied: expect.any(Array), learned: expect.any(Array), sources: expect.any(Object) }));
+  });
+
+  it("queues the voice profile early when a platform that had too few posts for a voice of its own reaches 5", async () => {
+    const posts = (channel: string, n: number) => Array.from({ length: n }, (_, i) => ({ postId: `${channel}${i}`, channel, type: "photo", publishedAt: new Date(NOW.getTime() - (i * 5 + 3) * 86400_000).toISOString(), message: "Captains, this one is for you and your whole team.", engagementTotal: 3 }));
+    m.owned.mockResolvedValue({ coverage: "complete", profiles: [{ network: "instagram" }, { network: "tiktok" }], posts: [...posts("instagram", 8), ...posts("tiktok", 5)] });
+    m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [{ date: "2026-10-27", platform: "Instagram", copy: "Captains, this one is for you.", reason_type: "seasonal", moment: "Playoffs start Oct 27", evidence_ids: [] }] }), raw: {} });
+    m.social = { built_at: "2026-10-05T00:00:00Z", post_count: 11, platforms: {}, examples: {}, thin: { TikTok: 3 } };
+    const db = fakeDb({ calendar_plans: [plan], clients: [CLIENT] });
+    expect((await runWeekPlan(db, job(), NOW)).status).toBe("done");
+    expect(db.writes.filter((w) => w.table === "scheduled_jobs").map((w) => w.value)).toEqual([expect.objectContaining({ kind: "voice_profile", client_id: "ptp", dedupe_key: "voice_profile:ptp:2026-10-19" })]);
+    // Nothing thin, nothing queued.
+    m.social = { ...m.social, thin: { TikTok: 3 } };
+    m.owned.mockResolvedValue({ coverage: "complete", profiles: [{ network: "instagram" }], posts: posts("instagram", 8) });
+    const quiet = fakeDb({ calendar_plans: [plan], clients: [CLIENT] });
+    await runWeekPlan(quiet, job(), NOW);
+    expect(quiet.writes.filter((w) => w.table === "scheduled_jobs")).toEqual([]);
   });
 
   it("plans the week with no trend evidence when nothing is stored yet, and never reads the monthly report's trend strings", async () => {

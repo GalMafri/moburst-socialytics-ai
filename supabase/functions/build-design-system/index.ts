@@ -113,7 +113,7 @@ Deno.serve(async (req) => {
     if (action !== 'build') throw new Error('Unknown action.');
     const { data: client, error: clientError } = await db.from('clients').select('name,design_references,harvested_design_references,logo_url').eq('id', client_id).single();
     if (clientError || !client) throw new Error('Client references could not be loaded.');
-    const paths = referencesFor(client.design_references, client.harvested_design_references, 8);
+    const paths = referencesFor(client.design_references, client.harvested_design_references, 8, null);
     if (paths.length < 3) throw new Error('Connect this client’s social profiles in Client Setup to discover at least three real brand references first.');
     const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
     if (!apiKey) throw new Error('The design service is unavailable.');

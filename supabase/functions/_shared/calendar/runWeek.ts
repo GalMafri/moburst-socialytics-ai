@@ -24,7 +24,7 @@ import { parseRevision, parseWeekPlan, revisePrompt, weekPrompt, withStories, ty
 import { isStoryPost } from "../design/story.ts";
 import { wordReason } from "./reasonText.ts";
 import { activePreferences, buildVoiceProfile, consolidateMemory, COPY_MODEL, learnFromSignal, loadClientVoice } from "../voice/load.ts";
-import { voicePromptBlock } from "../voice/voice.ts";
+import { voicePromptBlock, voiceReady } from "../voice/voice.ts";
 import { activeTerms } from "../trends/profile.ts";
 import { HASHTAG_PLATFORMS, type HashtagPlatform } from "../trends/types.ts";
 import { strategyPromptBlock } from "../strategy/prompt.ts";
@@ -435,6 +435,8 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
     }
 
     const voice = await loadClientVoice(admin, client.id);
+    // A platform that had too few posts for a voice of its own has 5 now: the profile is built again early, for the plans after this one.
+    if (voiceReady(voice.social, gathered.own).length) await queueVoiceRebuild(admin, client.id, now);
     const { data: weekPosts, error: nearError } = await admin.from("calendar_posts").select("post_date, platform, format, copy, plan_id")
       .eq("client_id", client.id).gte("post_date", addDays(week, -21)).lte("post_date", addDays(week, 27)).order("post_date");
     if (nearError) throw new Error(`Could not read the posts around the week: ${nearError.message}`);
@@ -490,6 +492,14 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
     }
     return retryLater(job, reason, now);
   }
+}
+
+/** Queue the client's voice profile now, once a day at most. A queue that does not take it is left for the next plan. */
+async function queueVoiceRebuild(admin: Db, clientId: string, now: Date): Promise<void> {
+  const { error } = await admin.from("scheduled_jobs").upsert({
+    kind: "voice_profile", client_id: clientId, dedupe_key: `voice_profile:${clientId}:${now.toISOString().slice(0, 10)}`, priority: 39, available_at: now.toISOString(),
+  }, { onConflict: "dedupe_key", ignoreDuplicates: true });
+  if (error) console.warn("[calendar] could not queue the voice profile:", error.message);
 }
 
 // ── Revise a week ───────────────────────────────────────────────────────────
