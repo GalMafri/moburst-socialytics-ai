@@ -1,0 +1,99 @@
+import { describe, expect, it } from "vitest";
+import { blockedFromCreation, clientWithSite, groupBrands, isBrandAccount, joinBrands, matchBrand, matchOutcome, type ClientIndex, type KnownClient } from "./brands";
+import type { SproutProfile } from "../lifecycle/accounts";
+
+const p = (id: string, name: string, native: string, network: string, status = "active"): SproutProfile => ({ id, name, native_name: native, network_type: network, native_link: "", status });
+const client = (over: Partial<KnownClient> & { id: string; name: string }): KnownClient => ({ website_url: null, archived_at: null, demo_job_id: null, site_profiles: [], ...over });
+const index = (clients: KnownClient[], over: Partial<ClientIndex> = {}): ClientIndex => ({ clients, assigned: new Map(), removed: new Map(), ...over });
+const ids = (b: { profiles: SproutProfile[] }) => b.profiles.map((x) => x.id);
+
+describe("groupBrands", () => {
+  it("groups by the lifecycle's name rule: case, punctuation, '&' and a trailing LLC, Inc or Co", () => {
+    const brands = groupBrands([
+      p("30", "Pay The Pyper ", "paythepyperapp", "facebook"), p("31", "Pay the Pyper", "paythepyper", "fb_instagram_account"),
+      p("40", "Bader & Law, LLC", "BaderLawLLC", "facebook"), p("41", "Bader and Law", "baderlaw", "youtube"),
+      p("50", "Lega.bot", "legabot", "linkedin_company"), p("51", "LegaBot Inc", "lega.bot", "fb_instagram_account"),
+    ]);
+    expect(brands.map((b) => [b.key, ids(b)])).toEqual([["30", ["30", "31"]], ["40", ["40", "41"]], ["50", ["50", "51"]]]);
+  });
+  it("joins two groups that share a handle on another network", () => {
+    const brands = groupBrands([p("7", "Olo", "olo", "linkedin_company"), p("8", "Olo - Restaurant Software", "@Olo", "fb_instagram_account"), p("9", "Someone", "someone", "facebook")]);
+    expect(brands.map(ids)).toEqual([["7", "8"], ["9"]]);
+    // The same network is not "another network" (an Instagram account is one whichever way Sprout types it), and a two-letter handle never joins.
+    expect(groupBrands([p("1", "A", "acme", "instagram"), p("2", "B", "acme", "fb_instagram_account")]).map(ids)).toEqual([["1"], ["2"]]);
+    expect(groupBrands([p("1", "A", "ab", "facebook"), p("2", "B", "ab", "twitter")]).map(ids)).toEqual([["1"], ["2"]]);
+  });
+  it("leaves out profiles Sprout no longer has active", () => {
+    expect(groupBrands([p("1", "Olo", "olo", "facebook", "disconnected"), p("2", "Olo", "olo_ig", "fb_instagram_account")]).map(ids)).toEqual([["2"]]);
+  });
+  it("names the brand by the spelling most of its profiles carry, the oldest profile's on a tie", () => {
+    const [b] = groupBrands([p("12", "OLO", "olo1", "facebook"), p("10", "Olo", "olo2", "twitter"), p("11", "Olo", "olo3", "tiktok")]);
+    expect(b).toMatchObject({ key: "10", name: "Olo" });
+    expect(groupBrands([p("9", "Yangra ", "y1", "facebook"), p("100", "YANGRA", "y2", "tiktok")])[0].name).toBe("Yangra");
+  });
+  it("joins brands by the pairs the website search found, and names them again", () => {
+    const brands = groupBrands([p("1", "Olo", "olo", "linkedin_company"), p("2", "Olo Hospitality", "olohq", "fb_instagram_account"), p("3", "Olo Hospitality", "olohq_fb", "facebook"), p("4", "Other", "other", "facebook")]);
+    const joined = joinBrands(brands, [["2", "1"]]);
+    expect(joined.map((b) => [b.key, b.name, ids(b)])).toEqual([["1", "Olo Hospitality", ["1", "2", "3"]], ["4", "Other", ["4"]]]);
+  });
+});
+
+describe("matchBrand", () => {
+  const [bader] = groupBrands([p("7480884", "Bader Law", "BaderLawLLC", "facebook"), p("7481075", "Bader Law", "Bader Law", "youtube")]);
+  const active = client({ id: "c1", name: "Bader Law" });
+
+  it("matches by an assigned profile first, leaving the brand to that client's accounts step", () => {
+    const m = matchBrand(bader, index([active, client({ id: "c2", name: "Someone" })], { assigned: new Map([["7481075", ["c2"]]]) }));
+    expect(m).toMatchObject({ by: "assigned", clients: [{ id: "c2" }] });
+    expect(matchOutcome(m!).decision).toBe("matched");
+  });
+  it("leaves a brand alone for good when a person removed one of its profiles", () => {
+    const m = matchBrand(bader, index([active], { removed: new Map([["7480884", ["c1"]]]) }));
+    expect(m).toMatchObject({ by: "removed", clients: [{ id: "c1" }] });
+    expect(matchOutcome(m!).decision).toBe("removed");
+  });
+  it("matches by the name rule, and by a profile the client's homepage links to", () => {
+    expect(matchBrand(bader, index([client({ id: "c1", name: "Bader Law, LLC" })]))).toMatchObject({ by: "name" });
+    const [moburst] = groupBrands([p("5719052", "Moburst - Growth Done Right", "moburst", "linkedin_company")]);
+    const m = matchBrand(moburst, index([client({ id: "m", name: "Moburst", site_profiles: ["linkedin:moburst", "instagram:moburst.agency"] })]));
+    expect(m).toMatchObject({ by: "site_link", clients: [{ id: "m" }] });
+  });
+  it("leaves an archived client's brand alone and never brings the client back", () => {
+    const m = matchBrand(bader, index([client({ id: "c1", name: "Bader Law", archived_at: "2026-09-30T00:00:00Z" })]));
+    expect(matchOutcome(m!)).toMatchObject({ decision: "archived" });
+  });
+  it("never counts a same-named demo copy as a match", () => {
+    expect(matchBrand(bader, index([client({ id: "d", name: "Bader Law", demo_job_id: "job-1" })]))).toBeNull();
+  });
+  it("leaves a brand that matches two clients alone", () => {
+    const m = matchBrand(bader, index([client({ id: "c1", name: "Bader Law" }), client({ id: "c2", name: "Bader Law Inc" })]));
+    expect(matchOutcome(m!)).toMatchObject({ decision: "two_clients" });
+  });
+  it("matches nothing for a brand nobody has", () => {
+    expect(matchBrand(bader, index([client({ id: "c9", name: "Pay The Pyper" })]))).toBeNull();
+  });
+});
+
+describe("which unmatched brands become clients (section 3)", () => {
+  const clients = [client({ id: "m", name: "Moburst", website_url: "https://www.moburst.com/" }), client({ id: "d", name: "Demo", website_url: "https://olo.com", demo_job_id: "j" })];
+  const [olo] = groupBrands([p("1", "Olo", "olo", "linkedin_company"), p("2", "Olo", "olo", "fb_instagram_account")]);
+  const [founder] = groupBrands([p("3", "Noah Glass", "noahglass", "linkedin")]);
+
+  it("needs a brand account: a brand made only of personal LinkedIn profiles is a person", () => {
+    expect(isBrandAccount(olo)).toBe(true);
+    expect(isBrandAccount(founder)).toBe(false);
+    expect(blockedFromCreation(founder, { posts: 5, mostLinked: "noahglass.com" }, clients)).toMatchObject({ decision: "person" });
+  });
+  it("needs a post in the last 90 days, else it is looked at again next run", () => {
+    expect(blockedFromCreation(olo, { posts: 0, mostLinked: null }, clients)).toMatchObject({ decision: "no_posts" });
+  });
+  it("leaves a brand alone when the site its posts link to most is an existing client's, a subdomain included", () => {
+    expect(blockedFromCreation(olo, { posts: 4, mostLinked: "moburst.com" }, clients)).toMatchObject({ decision: "client_website", client_id: "m" });
+    expect(blockedFromCreation(olo, { posts: 4, mostLinked: "careers.moburst.com" }, clients)).toMatchObject({ decision: "client_website" });
+    expect(clientWithSite("moburst.co", clients)).toBeNull();
+  });
+  it("lets a brand through when all three hold, a demo copy's website being no client's", () => {
+    expect(blockedFromCreation(olo, { posts: 4, mostLinked: "olo.com" }, clients)).toBeNull();
+    expect(blockedFromCreation(olo, { posts: 4, mostLinked: null }, clients)).toBeNull();
+  });
+});

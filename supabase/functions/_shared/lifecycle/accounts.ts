@@ -44,6 +44,12 @@ export function profileKey(platform: string, handle: string): string {
   return `${platform}:${h}`;
 }
 
+/** A Sprout profile's key, as a site's profile links are keyed; null for a network a site cannot link (a personal LinkedIn profile). */
+export function profileKeyOf(p: Pick<SproutProfile, "network_type" | "native_name">): string | null {
+  const platform = NETWORK_PLATFORM[String(p.network_type || "").toLowerCase()];
+  return platform && p.native_name ? profileKey(platform, p.native_name) : null;
+}
+
 const HARVEST = /(?:https?:)?\/\/[^\s"'<>\\)]+|(?:^|[\s"'(>])((?:www\.)?(?:instagram|facebook|tiktok|linkedin|youtube|twitter|x)\.com\/[^\s"'<>\\)]+)/gi;
 
 /** Every social profile a page links to, as profile keys (every link, not only the best one per platform). */
