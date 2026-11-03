@@ -37,6 +37,7 @@ import { toast as sonnerToast } from "sonner";
 import { formatRange } from "@/lib/dateRange";
 import { ReportActions } from "@/components/reports/ReportActions";
 import { ExportPdfButton } from "@/components/reports/ExportPdfButton";
+import { ReportDecks } from "@/components/reports/ReportDecks";
 import { Prose } from "@/components/ui/prose";
 import { Section, SectionNav } from "@/components/ui/section";
 import { RankedBars, compactNumber } from "@/components/ui/bars";
@@ -673,6 +674,9 @@ export default function CompetitiveReportView() {
           </div>
           }
         />
+
+        {/* Finished decks saved from Claude, for anyone who sees the report. */}
+        <ReportDecks reportId={report.id} kind="competitive" />
 
         {/* Platform filter */}
         {hasChannels && (

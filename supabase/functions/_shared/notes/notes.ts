@@ -444,7 +444,7 @@ export function parseReading(text: string, ctx: { aliases: Record<string, string
 // deno-lint-ignore no-explicit-any
 type Db = any;
 
-export const NOTE_COLUMNS = "id, client_id, kind, title, file_type, text_chars, parts_done, note_date, date_set_by, state, added_by_name, created_at, read_at";
+export const NOTE_COLUMNS = "id, client_id, kind, title, file_type, text_chars, parts_done, note_date, date_set_by, state, added_by_name, created_at, read_at, source";
 const POINT_COLUMNS = "id, note_id, kind, text, platform, said_on, until, part, created_at, removed_at";
 const LINK_COLUMNS = "point_id, other_id, relation";
 const PAGE = 1000;

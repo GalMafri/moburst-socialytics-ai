@@ -74,7 +74,7 @@ describe("the consent page", () => {
   it("shows Claude's request with where it goes back to, who is signed in, and what Claude can do", async () => {
     open();
     expect(await screen.findByText("Connect Claude to Socialytics")).toBeInTheDocument();
-    expect(screen.getByText("Claude will be able to read reports, analytics and trends for the clients you see in Socialytics. It can't change anything.")).toBeInTheDocument();
+    expect(screen.getByText("Claude will be able to read reports, analytics, trends, the calendar and, for Moburst staff, client notes and the strategy. Staff can also save client notes, approved copy, strategy edits and finished decks.")).toBeInTheDocument();
     expect(screen.getByText(/sinead@moburst\.com/)).toBeInTheDocument();
     expect(screen.getByText(/claude\.ai/)).toBeInTheDocument();
     expect(f.get).toHaveBeenCalledWith(ID);

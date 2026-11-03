@@ -28,7 +28,8 @@ export interface ToolDeps {
   apiUrl: string;
 }
 
-export type ToolResult = { ok: true; status: 200; body: unknown; text: string } | { ok: false; status: number; code: string; text: string };
+/** A tool's answer. A write that wrote something names it in target (a note id, a post key, a section key, a deck id) for the audit row. */
+export type ToolResult = { ok: true; status: 200; body: unknown; text: string; target?: string } | { ok: false; status: number; code: string; text: string };
 
 export interface ToolSpec {
   name: string;
@@ -168,13 +169,13 @@ export const TOOLS: ToolSpec[] = [
   },
 ];
 
-const sentence = (m: string) => {
+export const sentence = (m: string) => {
   const t = m.trim().replace(/[.\s]+$/, "");
   return t ? `${t[0].toUpperCase()}${t.slice(1)}.` : "Socialytics could not answer this request.";
 };
 
 /** What a failure says: one plain sentence, nothing internal. */
-function failure(e: unknown, tool: string, requestId: string): ToolResult {
+export function failure(e: unknown, tool: string, requestId: string): ToolResult {
   if (e instanceof ApiError) {
     if (e.status === 404) return { ok: false, status: 404, code: "not_found", text: sentence(e.message) };
     if (e.status === 400) return { ok: false, status: 400, code: "invalid_request", text: sentence(e.message) };

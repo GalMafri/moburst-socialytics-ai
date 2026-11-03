@@ -61,6 +61,7 @@ import { normalizedCompetitiveMetrics } from "@/lib/competitiveMetrics";
 import { competitiveReportQuality, withCompetitiveEvidenceLimits } from "../../supabase/functions/_shared/competitive/reportEvidence";
 import { Prose } from "@/components/ui/prose";
 import { Section, SectionNav } from "@/components/ui/section";
+import { ReportDecks } from "@/components/reports/ReportDecks";
 import { InsightGrid } from "@/components/ui/insight-card";
 import { CompareBars, RankedBars, compactNumber } from "@/components/ui/bars";
 import {
@@ -421,6 +422,9 @@ export default function ReportView() {
           </div>
           }
         />
+
+        {/* Finished decks saved from Claude, for anyone who sees the report. */}
+        <ReportDecks reportId={report.id} kind="social" />
 
         <Tabs value={tab} onValueChange={setTab} className="space-y-section">
           <TabsList className="h-auto flex-wrap justify-start">

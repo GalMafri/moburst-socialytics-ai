@@ -27,7 +27,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { fileKey } from "@/hooks/useQuietUpload";
 import { invokeResendable, sendQuietly, uploadQuietly } from "@/lib/quietSend";
-import { formatDate, noteReadLine, notePointKindName, noteStateLine, platformName } from "@/lib/display";
+import { formatDate, noteAddedLine, noteReadLine, notePointKindName, noteStateLine, platformName } from "@/lib/display";
 import {
   noteFileType, pointStates, pointsInUse, readNoteRows, selectForPrompt, todayIn,
   NOTE_FILE_MAX_BYTES, NOTE_FILES, NOTE_FILES_AT_ONCE, NOTE_TEXT_MAX, NOTES_BUCKET, POINT_KINDS,
@@ -43,6 +43,8 @@ interface NoteItem {
   text_chars: number | null;
   added_by_name: string | null;
   created_at: string;
+  /** claude when a person saved it from Claude. */
+  source?: string | null;
 }
 
 const ACCEPT = Object.keys(NOTE_FILES).map((ext) => `.${ext}`).join(",");
@@ -296,9 +298,7 @@ export function ClientNotes({ clientId, clientName, brandNotes, timeZone }: {
                           className="t-body text-left truncate max-w-full hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
                           {note.title}
                         </button>
-                        <p className="t-label">
-                          {note.added_by_name ? `Added by ${note.added_by_name} on ${formatDate(note.created_at, { timeZone: zone })}` : `Added on ${formatDate(note.created_at, { timeZone: zone })}`}
-                        </p>
+                        <p className="t-label">{noteAddedLine(note, zone)}</p>
                         <p className="t-secondary">{noteStateLine(note.state, counted)}</p>
                         {readLine && <p className="t-label">{readLine}</p>}
                       </div>

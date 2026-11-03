@@ -48,6 +48,7 @@ import { LearnedDesignPreferences } from "@/components/onboarding/LearnedDesignP
 import { TrendsWeTrack } from "@/components/clients/TrendsWeTrack";
 import { ClientOrigin } from "@/components/clients/ClientOrigin";
 import { ClientNotes } from "@/components/onboarding/ClientNotes";
+import { ClaudeProject } from "@/components/onboarding/ClaudeProject";
 
 const PLATFORMS = ["Instagram", "TikTok", "Facebook", "LinkedIn", "Twitter/X", "YouTube"];
 
@@ -759,6 +760,9 @@ export default function ClientSetup() {
                   </div>
               </Section>
             )}
+
+            {/* The client's Claude project instruction and one-time prompt, staff only. */}
+            {clientId && <ClaudeProject clientId={clientId} clientName={form.name} />}
           </TabsContent>
 
           {clientId && (

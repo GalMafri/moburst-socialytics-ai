@@ -10,7 +10,9 @@ import { rememberIntendedDestination } from "@/utils/returnTo";
 // Where Supabase Auth's OAuth server sends a person who connects Claude to
 // Socialytics. Opened anywhere else, it moves to socialytics.moburst.ai,
 // where the team's sessions live. There a signed-in person with a
-// Socialytics role sees Claude's request and allows or cancels it; a
+// Socialytics role sees Claude's request (what Claude reads, and for staff
+// what it saves: docs/superpowers/specs/2026-11-03-claude-sync-design.md)
+// and allows or cancels it; a
 // signed-out visitor goes to sign in and comes back here (ReturnTo). Only
 // Claude's own callback is ever approved.
 
@@ -93,7 +95,7 @@ export default function OAuthConsent() {
           {view.kind === "ask" && (
             <>
               <h2 className="t-h1 text-white">Connect Claude to Socialytics</h2>
-              <p className="t-secondary">Claude will be able to read reports, analytics and trends for the clients you see in Socialytics. It can't change anything.</p>
+              <p className="t-secondary">Claude will be able to read reports, analytics, trends, the calendar and, for Moburst staff, client notes and the strategy. Staff can also save client notes, approved copy, strategy edits and finished decks.</p>
               <p className="t-label">Signed in as {view.email}. After you choose, you'll go back to {view.host}.</p>
               <div className="flex justify-center gap-3 pt-2">
                 <Button variant="outline" disabled={view.busy} onClick={() => decide(false)}>Cancel</Button>

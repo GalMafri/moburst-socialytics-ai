@@ -1,31 +1,38 @@
 /**
  * mcp: the Claude connector. A remote MCP server people add to Claude once,
  * as themselves, through Supabase Auth's OAuth 2.1 server; Claude then reads
- * the reports, analytics and trends of the clients that person sees in
- * Socialytics, and can change nothing. server.ts holds the request path;
- * this file only wires it to the runtime.
+ * the reports, analytics, trends and calendar of the clients that person
+ * sees in Socialytics, and Moburst staff also read the strategy and client
+ * notes and save notes, approved copy, strategy sections and finished decks
+ * (docs/superpowers/specs/2026-11-03-claude-sync-design.md). server.ts holds
+ * the request path; this file only wires it to the runtime.
  *
  * verify_jwt is off (config.toml): the function answers the unauthenticated
  * discovery request itself and verifies every token against the project's
  * JWKS (verify.ts). It needs none of the project's new-format API keys: the
  * person's client is built from SUPABASE_URL, SUPABASE_ANON_KEY and their
  * token, as requireStaff builds asCaller, so the gate and every store query
- * run under RLS as them. The audit row and the minute counter go through the
- * service role. Sprout analytics is the one call to another function,
- * through the operational secret acting for the person (see
- * _shared/invoke.ts), after the scope check.
+ * run under RLS as them. The service role reaches three places only: the
+ * audit row, the minute counter, and the saves' writer (writes.ts
+ * makeServiceWriter), which writes after can_write_client answered true as
+ * the person (mcp/service-role.test.ts holds this). Sprout analytics is the
+ * one call to another function, through the operational secret acting for
+ * the person (see _shared/invoke.ts), after the scope check.
  */
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { callEnvFromDeno, callFunction } from "../_shared/invoke.ts";
 import { makeStore } from "../_shared/socialytics-api/store.ts";
+import { personReads } from "./reads.ts";
 import { connectorFetch, type Caller } from "./server.ts";
 import { issuerOf, projectKeys, tokenVerifier } from "./verify.ts";
+import { makeServiceWriter, personChecks } from "./writes.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const service = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
+const writer = makeServiceWriter(service);
 const PAGE = 1000; // PostgREST's row cap per request
 
 /** One client per request, bound to the person's token, so RLS applies as them. */
@@ -73,6 +80,8 @@ Deno.serve(connectorFetch({
     },
     apiUrl: `${SUPABASE_URL}/functions/v1/api`,
   }),
+  personReads: (caller) => personReads(asPerson(caller)),
+  writes: (caller) => ({ person: personChecks(asPerson(caller)), writer }),
   touch: async (userId) => {
     const { data, error } = await service.rpc("mcp_rate_touch", { p_user: userId });
     if (error) throw new Error(error.message);
