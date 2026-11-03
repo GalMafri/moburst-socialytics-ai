@@ -28,7 +28,7 @@ export async function importPptx(api: GoogleApi, a: { name: string; folderId: st
   });
   const session = start.headers.get("Location");
   if (!session) throw new Error("Drive answered the upload without its session link.");
-  const done = await api.raw("PUT", session, { headers: { "Content-Type": PPTX_MIME }, body: a.bytes });
+  const done = await api.raw("PUT", session, { headers: { "Content-Type": PPTX_MIME }, body: a.bytes as unknown as BodyInit });
   const file = await done.json() as { id?: string };
   if (!file.id) throw new Error("Drive answered the upload without a file id.");
   return file.id;

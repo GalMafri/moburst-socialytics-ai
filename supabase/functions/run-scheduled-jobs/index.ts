@@ -25,6 +25,10 @@
 // client's waiting notes per run; the daily sweep queues one for a client
 // whose notes wait with no job on its way (client_notes_queue_waiting).
 //
+// Strategy decks (_shared/strategy/deckJob.ts): a strategy_deck job makes one
+// Google Slides deck of a client's strategy. The daily sweep also uses the
+// Google sign-in once a week, since Google drops one unused for six months.
+//
 // POST {"mode":"replay_competitive","report_id":"<id>"[,"reuse_analysis":true]}
 //                              starts a shadow run of the in-app competitive
 //                              pipeline for a past report, from its saved
@@ -100,6 +104,8 @@ import { onboardingFieldsCheck } from "./fieldsCheck.ts";
 import type { ScheduledJob } from "../_shared/scheduled-jobs/types.ts";
 import { runReportText, sonnetCompletion } from "../_shared/reports/correctText.ts";
 import { runNotesRead } from "../_shared/notes/run.ts";
+import { runStrategyDeck } from "../_shared/strategy/deckJob.ts";
+import { googleConfig, keepAlive } from "../_shared/google/oauth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -121,6 +127,7 @@ const JOB_LABELS: Partial<Record<ScheduledJob["kind"], string>> = {
   moments_list: "dated moments list",
   week_moments: "week's dated moments",
   moment_feedback: "removed seasonal post",
+  strategy_deck: "strategy deck",
 };
 
 Deno.serve(async (req) => {
@@ -207,6 +214,8 @@ Deno.serve(async (req) => {
           case "sprout_onboarding": return runSproutOnboardingJob(db, job, liveOnboardingDeps());
           // The file parsers load only for a notes job that needs them, so the worker boots without them.
           case "notes_read": return runNotesRead(db, job, { parsers: () => import("../_shared/notes/parsers.ts").then((m) => m.PARSERS) });
+          // The renderer and fonts load only for a deck job.
+          case "strategy_deck": return import("../_shared/strategy/deckLive.ts").then((m) => runStrategyDeck(db, job, m.liveDeckDeps(env)));
           default: return Promise.resolve({ status: "failed" as const, reason: `Unknown job kind ${(job as ScheduledJob).kind}` });
         }
       },
@@ -244,6 +253,8 @@ Deno.serve(async (req) => {
         if (error) throw new Error(error.message);
         return Number(data) || 0;
       }, 0);
+      // The Google sign-in strategy decks are made with, used once a week so Google keeps it.
+      const googleKept = await attempt("keep the Google sign-in in use", () => keepAlive(db, googleConfig(env), now), false);
       const ran = repairs.work || requeued || enqueued || notesQueued ? await attempt("run the queue", async () => (await tick()).results, [] as TickResult["results"]) : [];
       // In-between pipeline data past its keep date, then pipeline runs past theirs.
       const payloadsExpired = await attempt("expire pipeline payloads", () => expirePayloads(db, now), 0);
@@ -260,7 +271,7 @@ Deno.serve(async (req) => {
       }));
       return json({
         at: now.toISOString(), counts: summary.counts,
-        repaired: { requeued, enqueued, notes_queued: notesQueued, ran },
+        repaired: { requeued, enqueued, notes_queued: notesQueued, google_kept: googleKept, ran },
         pipelines: { payloads_expired: payloadsExpired, retention: pipelineRetention },
         failed: brief(summary.failed), blocked: brief(summary.blocked), stuck: brief(summary.stuck), overdue: brief(summary.overdue),
         unscheduled: summary.unscheduled.map((g) => ({ client: g.client_name ?? g.client_id, job: `${g.report_kind} dispatch`, reason: `due ${g.next_run_at} and never queued` })),
