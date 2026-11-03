@@ -21,7 +21,7 @@
 // one or more per tick. Canva's jobs are started on one tick and checked on
 // the next, so no request waits on Canva.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { Image } from "https://deno.land/x/imagescript@1.3.0/mod.ts";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { secretEquals } from "../_shared/auth/secretEquals.ts";

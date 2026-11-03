@@ -17,6 +17,7 @@ import { harvestedPaths, type HarvestedRef } from "../design-prompts/designRefs.
 import { pipelineEngineDeps, readEngine } from "../pipelines/engine.ts";
 import { shadowLinkedInSource } from "../pipelines/shadow.ts";
 import { feedLinkedInAnswer } from "../pipelines/feedLinkedIn.ts";
+import { anthropicFetch } from "../anthropic.ts";
 
 /** A refresh that stopped with an answer for the caller: an HTTP status and, for a known case, a code. */
 export class FeedRefreshError extends Error {
@@ -135,7 +136,7 @@ async function detectTopics(clientName: string, posts: any[], start: string, end
       url: p.postLink || null,
     }));
   const prompt = topicPrompt(clientName, compact, start, end, known);
-  const r = await fetch("https://api.anthropic.com/v1/messages", {
+  const r = await anthropicFetch("/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
     body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 2000, messages: [{ role: "user", content: prompt }] }),

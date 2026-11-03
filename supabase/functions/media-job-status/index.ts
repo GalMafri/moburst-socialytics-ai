@@ -12,7 +12,7 @@
 // was written for. That function still stands for the REST path; this one
 // is the MCP path's collector.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { HiggsfieldError } from "../_shared/higgsfield/generate.ts";
 import { checkVideoJob } from "../_shared/higgsfield/renderVideo.ts";

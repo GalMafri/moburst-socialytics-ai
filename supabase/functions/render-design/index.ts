@@ -5,7 +5,7 @@
 // kind 'prepare': a generated hero resized to the canvas, plus its small blurred copy.
 // kind 'preview': a template preview with a stand-in hero drawn from the tokens.
 // kind 'frame':   a planned frame of a creative run with its prepared hero.
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from "../_shared/supabase.ts";
 import { AuthzError, requireStaff } from '../_shared/auth/requireStaff.ts';
 import { secretEquals } from '../_shared/auth/secretEquals.ts';
 import { platformDesignSpec } from '../_shared/design-prompts/aspect.ts';

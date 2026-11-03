@@ -3,7 +3,7 @@ import {loadCreativePlan} from "../_shared/design-prompts/loadCreativePlan.ts";
 import { sourceImage } from "../_shared/design-prompts/sourceImage.ts";
 import { referencesFor } from "../_shared/design-prompts/designRefs.ts";
 import { requireStaff } from "../_shared/auth/requireStaff.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { CLEAN_VERDICT, validateDesignImage, verdictIsDirty } from "../_shared/design-prompts/validateImage.ts";
 import { staffGate } from "../_shared/auth/requireStaff.ts";
 

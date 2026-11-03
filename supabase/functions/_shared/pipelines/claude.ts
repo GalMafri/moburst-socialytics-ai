@@ -14,7 +14,7 @@
 // Either way the answer goes to the payload store, never into the job's
 // state, so a long answer never grows the queue row.
 
-import { anthropicMessages } from "../anthropic.ts";
+import { anthropicFetch, anthropicMessages } from "../anthropic.ts";
 import { CLAUDE_DIRECT_DEADLINE_MS, CLAUDE_DIRECT_FUNCTION, directFailedKey, directKey, type DirectAnswer, type DirectFailure } from "./claudeDirect.ts";
 import { StepRestart, type Step, type StepContext, type StepResult } from "./types.ts";
 
@@ -32,7 +32,6 @@ export const CLAUDE_DIRECT_POLL_SECONDS = 20;
 /** Direct calls a step starts for one answer: a second only after the first failed outright. */
 export const CLAUDE_DIRECT_STARTS = 2;
 
-const BATCHES = "https://api.anthropic.com/v1/messages/batches";
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 const headers = (apiKey: string) => ({ "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" });
 
@@ -56,8 +55,7 @@ export async function claudeInline(ctx: StepContext, a: { apiKey: string; body: 
 
 /** Submits a one-request message batch. */
 export async function claudeBatchSubmit(ctx: StepContext, a: { apiKey: string; body: Record<string, unknown>; customId: string; fetchImpl?: Fetch }): Promise<string> {
-  const f = a.fetchImpl ?? fetch;
-  const r = await f(BATCHES, { method: "POST", headers: headers(a.apiKey), body: JSON.stringify({ requests: [{ custom_id: a.customId, params: a.body }] }), signal: ctx.signal });
+  const r = await anthropicFetch("/v1/messages/batches", { method: "POST", headers: headers(a.apiKey), body: JSON.stringify({ requests: [{ custom_id: a.customId, params: a.body }] }), signal: ctx.signal }, a.fetchImpl);
   if (!r.ok) throw new Error(`Claude batch was not accepted [${r.status}]: ${(await r.text().catch(() => "")).slice(0, 200)}`);
   const batch = await r.json() as { id?: string };
   if (!batch.id) throw new Error("Claude batch answer had no id.");
@@ -69,7 +67,7 @@ export type BatchRead = { state: "pending" } | ({ state: "done" } & SavedAnswer)
 /** Looks at a batch; once it ended, saves its answer as saveAs. */
 export async function claudeBatchRead(ctx: StepContext, a: { apiKey: string; batchId: string; customId: string; saveAs: string; keepDays?: number; fetchImpl?: Fetch }): Promise<BatchRead> {
   const f = a.fetchImpl ?? fetch;
-  const r = await f(`${BATCHES}/${encodeURIComponent(a.batchId)}`, { headers: headers(a.apiKey), signal: ctx.signal });
+  const r = await anthropicFetch(`/v1/messages/batches/${encodeURIComponent(a.batchId)}`, { headers: headers(a.apiKey), signal: ctx.signal }, a.fetchImpl);
   if (!r.ok) throw new Error(`Claude batch could not be read [${r.status}].`);
   const batch = await r.json() as { processing_status?: string; results_url?: string | null };
   if (batch.processing_status !== "ended") return { state: "pending" };
@@ -93,8 +91,7 @@ export async function claudeBatchRead(ctx: StepContext, a: { apiKey: string; bat
 
 /** Cancels a batch whose answer is no longer needed, so a request it has not reached is not paid for. */
 export async function claudeBatchCancel(a: { apiKey: string; batchId: string; fetchImpl?: Fetch }): Promise<void> {
-  const f = a.fetchImpl ?? fetch;
-  await f(`${BATCHES}/${encodeURIComponent(a.batchId)}/cancel`, { method: "POST", headers: headers(a.apiKey), signal: AbortSignal.timeout(10_000) });
+  await anthropicFetch(`/v1/messages/batches/${encodeURIComponent(a.batchId)}/cancel`, { method: "POST", headers: headers(a.apiKey), signal: AbortSignal.timeout(10_000) }, a.fetchImpl);
 }
 
 /** Asks for a direct call of the request; resolves once it is under way (claudeDirect.ts). */

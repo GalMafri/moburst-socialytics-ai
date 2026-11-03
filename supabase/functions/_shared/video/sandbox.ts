@@ -5,8 +5,8 @@
 // and a small agent whose only tool is bash; each join is one session that
 // runs one script. Hosted, never on a laptop. Nothing waits here: a session
 // is started, and later asked whether it has finished.
+import { anthropicFetch } from "../anthropic.ts";
 
-const API = "https://api.anthropic.com";
 const BETA = "managed-agents-2026-04-01";
 const ENVIRONMENT = "socialytics-video";
 const AGENT = "Socialytics video assembly";
@@ -27,7 +27,7 @@ function headers(): Record<string, string> {
 }
 
 async function call<T = any>(method: string, path: string, body?: unknown): Promise<T> {
-  const resp = await fetch(`${API}${path}`, { method, headers: headers(), body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(60_000) });
+  const resp = await anthropicFetch(path, { method, headers: headers(), body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(60_000) });
   const text = await resp.text();
   if (!resp.ok) throw new Error(`Hosted sandbox ${method} ${path.split("?")[0]} ${resp.status}: ${text.slice(0, 300)}`);
   return (text ? JSON.parse(text) : {}) as T;

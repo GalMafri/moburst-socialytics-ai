@@ -74,7 +74,7 @@
 //                              figures a screen shows first), as JSON and as
 //                              plain lines.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { secretEquals } from "../_shared/auth/secretEquals.ts";
 import { buildCompetitivePayload, buildSocialPayload } from "../_shared/reports/payloads.ts";
 import { closeAbandonedRuns } from "../_shared/reports/schedule.ts";

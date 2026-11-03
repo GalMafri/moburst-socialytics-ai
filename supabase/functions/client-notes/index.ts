@@ -25,7 +25,7 @@
 // Adding queues the client's notes_read job (run-scheduled-jobs,
 // _shared/notes/run.ts), which reads the notes one at a time.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { clipText } from "../_shared/text/clip.ts";
 import { isNotePath, noteFileType, todayIn, validNoteDate, NOTE_FILES_AT_ONCE, NOTES_BUCKET } from "../_shared/notes/notes.ts";

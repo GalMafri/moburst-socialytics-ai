@@ -1,9 +1,10 @@
 import type {CreativePlan} from './creativePlan.ts';
+import { anthropicFetch } from "../anthropic.ts";
 
 /** Measure one image on its own so indices from a multi-image brief cannot be confused. */
 export async function measureLogo(image:any,referenceIndex:number,apiKey:string):Promise<NonNullable<CreativePlan['logo']>> {
   const coordinate={type:'integer',minimum:0,maximum:1000};
-  const response=await fetch('https://api.anthropic.com/v1/messages',{
+  const response=await anthropicFetch("/v1/messages",{
     method:'POST',headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01'},signal:AbortSignal.timeout(30000),
     body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:350,
       tools:[{name:'locate_logo',description:'Measure the complete existing client wordmark and icon.',input_schema:{type:'object',properties:{x1:coordinate,y1:coordinate,x2:coordinate,y2:coordinate},required:['x1','y1','x2','y2'],additionalProperties:false}}],tool_choice:{type:'tool',name:'locate_logo'},

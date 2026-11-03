@@ -14,7 +14,7 @@
 // The refresh token goes to Vault (google_token_save) and never leaves the
 // server: no answer from this function carries a token.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { googleConfig } from "../_shared/google/oauth.ts";
 import { finishSignIn, googleStatus, startSignIn } from "../_shared/google/connect.ts";

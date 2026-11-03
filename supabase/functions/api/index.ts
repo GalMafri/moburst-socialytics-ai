@@ -10,7 +10,7 @@
  * the demo resolved (see _shared/invoke.ts and requireStaff).
  */
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { handleRequest, type CoreDeps } from "../_shared/api/core.ts";
 import type { KeyRow } from "../_shared/api/keys.ts";
 import { callEnvFromDeno, callFunction } from "../_shared/invoke.ts";

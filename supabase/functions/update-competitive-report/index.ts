@@ -11,7 +11,7 @@
 //   { op: "snapshot", ... }  append a raw RivalIQ response to rivaliq_snapshots
 //   { op: "report", ... }    update a competitive_reports row (status/data/deck)
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { handleCompetitiveWrite } from "../_shared/competitive/reportWriter.ts";
 import { secretEquals } from "../_shared/auth/secretEquals.ts";
 

@@ -7,7 +7,7 @@
 // Handle detection is a separate function (detect-competitor-handles) so this
 // call stays fast and so re-detection doesn't require re-identification.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { IDENTIFY_COLUMNS, IdentifyError, identifyCompetitors } from "../_shared/competitive/identify.ts";
 

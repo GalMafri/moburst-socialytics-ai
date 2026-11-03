@@ -4,7 +4,7 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { competitiveBrief } from "../_shared/competitive/brief.ts";
 import { staffGate } from "../_shared/auth/requireStaff.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";

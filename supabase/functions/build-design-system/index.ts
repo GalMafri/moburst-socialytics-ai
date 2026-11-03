@@ -5,7 +5,7 @@
 // the logo is cut once into a transparent asset; a preview of every template
 // is rendered so the system can be approved by looking at it. Nothing here
 // generates imagery: previews use a stand-in hero drawn from the tokens.
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from "../_shared/supabase.ts";
 import { AuthzError, requireStaff } from '../_shared/auth/requireStaff.ts';
 import { secretEquals } from '../_shared/auth/secretEquals.ts';
 import { referencesFor } from '../_shared/design-prompts/designRefs.ts';
@@ -15,6 +15,7 @@ import { bestLogoCut } from '../_shared/design-system/logoAsset.ts';
 import type { DesignSystem, FormatKey } from '../_shared/design-system/types.ts';
 import { renderRemote } from '../_shared/design-system/renderClient.ts';
 import { Image } from 'https://deno.land/x/imagescript@1.3.0/mod.ts';
+import { anthropicFetch } from "../_shared/anthropic.ts";
 
 const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-socialytics-secret', 'Content-Type': 'application/json' };
 const BUCKET = 'brand-assets';
@@ -30,7 +31,7 @@ async function upload(db: any, path: string, bytes: Uint8Array, type: string) {
 async function readSystem(apiKey: string, images: any[], clientName: string) {
   const tool = { name: 'record_design_system', description: 'Record the design system read from the posts.', input_schema: designSystemSchema() };
   const content = [...images.flatMap((img, i) => [{ type: 'text', text: `Reference ${i}` }, img]), { type: 'text', text: `${BUILD_INSTRUCTIONS}\nThe client is ${clientName}.` }];
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const response = await anthropicFetch("/v1/messages", {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' }, signal: AbortSignal.timeout(110_000),
     body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 4000, tools: [tool], tool_choice: { type: 'tool', name: tool.name }, messages: [{ role: 'user', content }] }),
   });

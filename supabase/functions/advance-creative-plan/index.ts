@@ -15,7 +15,7 @@
 // It is idempotent and re-entrant: the browser polls it while a dialog is
 // open, and a schedule calls it without a browser, so a closed tab never
 // loses a paid render.
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from "../_shared/supabase.ts";
 import { AuthzError, requireStaff } from '../_shared/auth/requireStaff.ts';
 import { secretEquals } from '../_shared/auth/secretEquals.ts';
 import { loadCreativePlan } from '../_shared/design-prompts/loadCreativePlan.ts';

@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { staffGate } from "../_shared/auth/requireStaff.ts";
 import { listCustomerGroups, listCustomerProfiles, SproutListError } from "../_shared/sprout/profiles.ts";
 import { declinedProfiles, groupBrands, type BrandDecline } from "../_shared/sprout/brands.ts";

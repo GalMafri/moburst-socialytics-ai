@@ -3,7 +3,7 @@
 // edits), which go through functions because post_iterations writes are
 // staff-only under RLS.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../supabase.ts";
 import { AuthzError, requireStaff } from "./requireStaff.ts";
 import { bearerToken, OAUTH_READ_ONLY, oauthClientOf } from "./authz.ts";
 

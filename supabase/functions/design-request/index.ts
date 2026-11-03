@@ -30,7 +30,7 @@
 // Clients cannot write post_iterations directly (staff-only RLS), so using a
 // design goes through here with the service role after a membership check.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { AuthzError, requireStaff, requireStaffOrSystem } from "../_shared/auth/requireStaff.ts";
 import { requireMember } from "../_shared/auth/requireMember.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";

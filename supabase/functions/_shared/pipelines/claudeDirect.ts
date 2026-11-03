@@ -23,6 +23,7 @@
 // that takes under a second), and the scheduler's own calls go through pg_net.
 
 import type { PayloadStore } from "./types.ts";
+import { anthropicFetch } from "../anthropic.ts";
 
 /** The edge function that makes a direct call. */
 export const CLAUDE_DIRECT_FUNCTION = "claude-direct";
@@ -39,7 +40,6 @@ export interface DirectAnswer { text: string; stop_reason: string; seconds: numb
 export interface DirectFailure { message: string; seconds: number; start: number }
 
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
-const MESSAGES = "https://api.anthropic.com/v1/messages";
 
 /**
  * One Messages API call, streamed so the connection carries data the whole
@@ -48,13 +48,12 @@ const MESSAGES = "https://api.anthropic.com/v1/messages";
  * ends without one, or that carries an error, throws.
  */
 export async function claudeStream(a: { apiKey: string; body: Record<string, unknown>; signal: AbortSignal; fetchImpl?: Fetch }): Promise<{ text: string; stopReason: string; usage: ClaudeUsage }> {
-  const f = a.fetchImpl ?? fetch;
-  const r = await f(MESSAGES, {
+  const r = await anthropicFetch("/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": a.apiKey, "anthropic-version": "2023-06-01" },
     body: JSON.stringify({ ...a.body, stream: true }),
     signal: a.signal,
-  });
+  }, a.fetchImpl);
   if (!r.ok || !r.body) throw new Error(`Claude did not take the request [${r.status}]: ${(await r.text().catch(() => "")).slice(0, 200)}`);
   const texts = new Map<number, string>();
   let stopReason = "";

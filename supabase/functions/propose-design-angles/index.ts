@@ -1,6 +1,7 @@
 // supabase/functions/propose-design-angles/index.ts
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { staffGate, requireStaff } from "../_shared/auth/requireStaff.ts";
+import { anthropicFetch } from "../_shared/anthropic.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -75,7 +76,7 @@ ${design_language?.anti_patterns ? `\nNEVER (this brand's own rules; no angle ma
 
 Generate 6 distinct angles. Every angle stays inside the brand's imagery rules above.`;
 
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    const resp = await anthropicFetch("/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

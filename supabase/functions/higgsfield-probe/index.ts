@@ -13,7 +13,7 @@
 
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { HIGGSFIELD_BASE_URL, authHeader, resolveCredentials } from "../_shared/higgsfield/client.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { McpClient } from "../_shared/higgsfield/mcp.ts";
 import { MCP_URL, accessTokenFor } from "../_shared/higgsfield/oauth.ts";
 

@@ -17,7 +17,21 @@
 // is folded into the user turn as an instruction and the call retried, and
 // every text block is read. None of it depends on which model is current.
 
-import { wellFormedDeep } from "./text/clip.ts";
+import { wellFormedBody } from "./text/clip.ts";
+
+export const ANTHROPIC_API = "https://api.anthropic.com";
+
+/**
+ * fetch for the Anthropic API, and the one place a function reaches it: `path`
+ * under the API, with any half emoji in a JSON body dropped before it is sent
+ * (the Messages and Batches APIs refuse such a request). Everything else about
+ * the request is the caller's. `base` is the fetch to send with; tests pass
+ * their own.
+ */
+export function anthropicFetch(path: string, init?: RequestInit, base?: (url: string, init?: RequestInit) => Promise<Response>): Promise<Response> {
+  const send = base ?? globalThis.fetch;
+  return send(`${ANTHROPIC_API}${path}`, init && typeof init.body === "string" ? { ...init, body: wellFormedBody(init.body) } : init);
+}
 
 /** Parameters the request cannot lose. Anything else is negotiable. */
 const ESSENTIAL = new Set(["model", "messages", "system", "max_tokens", "tools", "tool_choice"]);
@@ -92,15 +106,14 @@ export async function anthropicMessages(args: {
   const body: Record<string, unknown> = { ...args.body };
 
   for (let attempt = 0; attempt < 3; attempt++) {
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    const resp = await anthropicFetch("/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-api-key": args.apiKey,
         "anthropic-version": "2023-06-01",
       },
-      // Half of an emoji anywhere in the prompt is refused; it is dropped here for every caller.
-      body: JSON.stringify(wellFormedDeep(body)),
+      body: JSON.stringify(body),
       ...(args.signal ? { signal: args.signal } : {}),
     });
 

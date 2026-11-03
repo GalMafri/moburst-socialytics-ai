@@ -23,7 +23,8 @@
 // {error, debug}. Mirrors hub-auth-bridge to avoid Lovable's runtime-error banner.
 // The debug object is intentionally minimal (no email / org / slug allowlist).
 
-import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { findAuthUserByEmail } from "../_shared/auth/findUser.ts";
 import { linkPortalCompanies } from "../_shared/lifecycle/portal.ts";
 

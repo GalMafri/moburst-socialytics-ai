@@ -8,9 +8,10 @@
 // Input:  { brief, total, platform, format, post_copy?, design_language? }
 // Output: { slides: [{ index, role, headline, content_brief }, ...] }
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { staffGate } from "../_shared/auth/requireStaff.ts";
 import { sourceSequenceIssue } from "../_shared/design-prompts/sourceSequence.ts";
+import { anthropicFetch } from "../_shared/anthropic.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -146,7 +147,7 @@ Decompose into exactly ${slideCount} per-slide briefs. Slide 0 = cover, slides 1
 
     let feedback = "";
     for (let attempt = 0; attempt < (source_template ? 2 : 1); attempt++) {
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    const resp = await anthropicFetch("/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

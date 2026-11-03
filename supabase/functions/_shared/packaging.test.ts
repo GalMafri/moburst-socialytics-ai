@@ -73,6 +73,23 @@ describe("deploy packaging", () => {
     expect(outside(fn, files)).toEqual([]);
   });
 
+  // Half of an emoji in a request body is refused by the database ("Empty or
+  // invalid json") and by the Messages API. Both boundaries drop it in one
+  // place each (supabase.ts, anthropic.ts), so no function may go around them.
+  const sources = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((d) => {
+    const path = join(dir, d.name);
+    if (d.isDirectory()) return sources(path);
+    return d.isFile() && d.name.endsWith(".ts") && !/\.test\.ts$|fake/.test(d.name) ? [path] : [];
+  });
+  it("reaches the Anthropic API only through _shared/anthropic.ts", () => {
+    const direct = sources(functionsDir).filter((f) => readFileSync(f, "utf8").includes("api.anthropic.com")).map(rel);
+    expect(direct).toEqual(["_shared/anthropic.ts"]);
+  });
+  it("makes every Supabase client through _shared/supabase.ts", () => {
+    const own = sources(functionsDir).filter((f) => /import\s*\{[^}]*\bcreateClient\b[^}]*\}\s*from\s*["'](?:https:\/\/esm\.sh\/|npm:|jsr:)@supabase\/supabase-js/.test(readFileSync(f, "utf8"))).map(rel);
+    expect(own).toEqual(["_shared/supabase.ts"]);
+  });
+
   it("keeps test data out of the deployed folders", () => {
     expect(fixtureFolders(functionsDir)).toEqual([]);
   });

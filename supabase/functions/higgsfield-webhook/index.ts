@@ -16,7 +16,7 @@
 // app_settings. verify_jwt is off in config.toml because Higgsfield cannot
 // present a Supabase JWT — same rationale as gos-auth-bridge.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { secretEquals } from "../_shared/auth/secretEquals.ts";
 
 const TERMINAL = new Set(["completed", "failed", "nsfw", "canceled"]);

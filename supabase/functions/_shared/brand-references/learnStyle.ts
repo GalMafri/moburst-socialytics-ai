@@ -24,6 +24,7 @@ import { defaultSproutCustomerId } from "../sprout/customer.ts";
 import { anthropicKeyFor, type CheckIO, liveCheckIO, reviewPosts } from "./discover.ts";
 import { type Choice, choicesKey, qualifiedPlatforms, relearnReason, type Review, reviewQueue, type Selection, selectLibrary, type StoredEntry } from "./corpus.ts";
 import { StyleError } from "./errors.ts";
+import { anthropicFetch } from "../anthropic.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -210,7 +211,7 @@ export interface RefsIO extends CheckIO {
 }
 
 async function learn(args: { apiKey: string; system: string; content: unknown[] }): Promise<string> {
-  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+  const resp = await anthropicFetch("/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": args.apiKey, "anthropic-version": "2023-06-01" },
     body: JSON.stringify({ model: LEARN_MODEL, max_tokens: 3000, system: args.system, messages: [{ role: "user", content: args.content }] }),
@@ -495,7 +496,7 @@ export async function learnBrandStyle(db: Db, clientId: string, opts: { discover
   }
   if (sourceCount === 0) throw new StyleError("provider", "The references could not be loaded. It will be tried again.");
 
-  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+  const resp = await anthropicFetch("/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-beta": "pdfs-2024-09-25" },
     body: JSON.stringify({ model: LEARN_MODEL, max_tokens: 2000, system: STYLE_SYSTEM_PROMPT, messages: [{ role: "user", content }] }),

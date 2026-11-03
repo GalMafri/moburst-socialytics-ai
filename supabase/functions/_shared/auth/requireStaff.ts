@@ -14,7 +14,8 @@
 // can_write_client) with the CALLER's token, so RLS semantics — including
 // company-scoped staff — apply exactly as they do to direct table access.
 
-import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../supabase.ts";
 import { AuthzError, authzResponse, bearerToken, OAUTH_READ_ONLY, oauthClientOf, SERVER_SECRET_HEADER, SERVER_USER_HEADER, serverActAsUser, serverActor } from "./authz.ts";
 import { secretEquals } from "./secretEquals.ts";
 

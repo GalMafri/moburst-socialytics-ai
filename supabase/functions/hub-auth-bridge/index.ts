@@ -21,7 +21,8 @@
 // have {error, debug}. Returning 200 for errors avoids Lovable's runtime-error banner,
 // which fires on any non-2xx response regardless of whether the frontend handles it.
 
-import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { findAuthUserByEmail } from "../_shared/auth/findUser.ts";
 
 const corsHeaders = {

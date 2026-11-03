@@ -35,7 +35,7 @@
 // monthly voice job keeps the preference memory short, so neither needs an
 // action here.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { requireMember } from "../_shared/auth/requireMember.ts";
 import { learnFromSignal, undoLearning } from "../_shared/voice/load.ts";

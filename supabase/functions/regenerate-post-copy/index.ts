@@ -11,7 +11,7 @@ const corsHeaders = {
 // member of the client or staff with write access to it. Saving the rewrite,
 // and learning from its note, is calendar-posts' save_copy.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { competitiveBrief } from "../_shared/competitive/brief.ts";
 import { AuthzError } from "../_shared/auth/requireStaff.ts";
 import { requireMember } from "../_shared/auth/requireMember.ts";
