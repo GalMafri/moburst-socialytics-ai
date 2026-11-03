@@ -435,7 +435,7 @@ describe("content_strategy", () => {
     // The brief changed since the profile was written: the profile is rewritten first, then the strategy.
     const stale = await current(db, c());
     expect(await STEPS.content_strategy.inputs(db, c({ brief_text: "A new brief." }), stale)).toBeNull();
-    expect(await STEPS.content_strategy.inputs(db, c(), stale)).toMatch(/^profile:2026-11-01T08:00:00.000Z\|networks:fb_instagram_account\|rhythm:/);
+    expect(await STEPS.content_strategy.inputs(db, c(), stale)).toMatch(/^v2\|profile:2026-11-01T08:00:00.000Z\|networks:fb_instagram_account\|rhythm:[^|]+\|public:/);
   });
 
   it("keys on the profile's date, the active Sprout networks and the posting rhythm, never on people's versions", async () => {
@@ -468,10 +468,17 @@ describe("content_strategy", () => {
       competitiveBrief: async () => "",
       competitorSet: async () => [],
       siteText: async () => "",
+      feedSnapshots: async () => [],
     });
+    const goal = (title: string) => ({ title, why: "A steady pace builds the habit.", platform: "Instagram", metric: "posts_per_week", direction: "above" });
     const draft = {
-      goals: "Grow saves.", audience: "Captains.", positioning: "The captain's app.", avoid: "Office photos.", measures: "Instagram: more saves.",
-      pillars: [{ name: "Captain Life", text: "Checklists." }], platforms: [{ platform: "Instagram", text: "Launch with carousels." }], candidates: [],
+      goals: [goal("Grow saves"), goal("Post every week")],
+      audience: { who: "Captains.", wants: ["Less chasing", "Fair splits", "Time back"], where: ["Instagram"] },
+      positioning: { statement: "The captain's app.", points: [] },
+      pillars: [{ name: "Captain Life", purpose: "Checklists.", formats: ["carousel"], planned_share: 100, ideas: [{ hook: "Tu checklist", format: "carousel" }, { hook: "Martes", format: "reel" }] }],
+      platforms: [{ platform: "Instagram", role: "Launch with carousels.", post: ["Checklists", "Reminders", "Tips"], worked: [], first_30: ["Set up", "Three posts", "Replies", "Review"], checks: { day_30: "Saves", day_90: "Follows" } }],
+      candidates: [],
+      avoid: [{ pattern: "Office photos", source: "posts" }],
     };
     const answers = (...texts: string[]) => {
       const models: string[] = [];
@@ -505,7 +512,7 @@ describe("content_strategy", () => {
       return { gathered: () => gathered, writes: watched(db) };
     };
     const clean = JSON.stringify({ unsupported: [] });
-    const flagged = JSON.stringify({ unsupported: [{ section: "goals", statement: "Grow saves." }] });
+    const flagged = JSON.stringify({ unsupported: [{ section: "goals", statement: "Grow saves" }] });
     const stored = { client_id: "c1", sections: { goals: "The last good goals." }, inputs_key: "old", written_at: "2026-10-01T00:00:00.000Z", pending: null };
 
     it("makes one model call per run: writes in one run, checks in the next, and only then stores the strategy", async () => {
@@ -528,7 +535,8 @@ describe("content_strategy", () => {
       expect(t.gathered()).toBe(1);
       expect(db.tables.content_strategies).toHaveLength(1);
       expect(db.tables.content_strategies[0]).toMatchObject({ client_id: "c1", inputs_key: await STEPS.content_strategy.inputs(db, c(), rows), written_at: "2026-11-02T10:00:00.000Z", pending: null });
-      expect(db.tables.content_strategies[0].sections["platform:instagram:new"]).toBe("Launch with carousels.");
+      expect(db.tables.content_strategies[0].sections["platform:instagram:new"]).toMatchObject({ role: "Launch with carousels." });
+      expect(db.tables.content_strategies[0].shape).toBe(2);
       // Only the strategy's own row is ever written; people's versions are never touched.
       expect(new Set(t.writes)).toEqual(new Set(["upsert content_strategies"]));
       expect(db.tables.content_strategy_edits).toEqual(edits);
@@ -574,6 +582,49 @@ describe("content_strategy", () => {
       const models = answers(clean);
       expect((await STEPS.content_strategy.run(db, c(), ctx({ rows }))).status).toBe("done");
       expect(models).toEqual(["claude-sonnet-5-5"]);
+    });
+
+    it("writes a strategy for a client with no Sprout profiles, from its public posts, after the public read", async () => {
+      const db = dbWith({ ...tables(), sprout_profiles: [], client_public_profiles: [{ client_id: "c1", platform: "tiktok", handle: "pyper", url: null, source: "person" }] });
+      const prospect = c({ primary_platforms: [], field_sources: {} });
+      const rows = await current(db, prospect);
+      setUp(db);
+      let reads = 0;
+      deps.strategyPublicRead = async () => {
+        reads++;
+        if (reads === 1) return { key: "k", status: "reading", started_at: "2026-11-02T10:00:00.000Z", window: { start: "2026-08-04", end: "2026-11-02" }, runs: [{ platform: "TikTok", run_id: "r1", targets: [] }], posts: [] };
+        const post = (i: number) => ({ company: "Moburst", client: true, platform: "TikTok", id: `t${i}`, publishedAt: `2026-10-${String(10 + i).padStart(2, "0")}T10:00:00.000Z`, text: "v", link: `https://www.tiktok.com/@pyper/video/${i}`, format: "short_video", engagement: 10, views: 200, followers: 900, boosted: false, source: "apify" as const });
+        return { key: "k", status: "done", started_at: "2026-11-02T10:00:00.000Z", read_at: "2026-11-02T10:03:00.000Z", window: { start: "2026-08-04", end: "2026-11-02" }, runs: [], posts: Array.from({ length: 12 }, (_, i) => post(i)) };
+      };
+      const tiktok = { ...draft, goals: [{ ...goal("Grow views"), platform: "TikTok", metric: "engagement_rate" }, { ...goal("Post often"), platform: "TikTok" }], platforms: [{ ...draft.platforms[0], platform: "TikTok", first_30: [] }], audience: { ...draft.audience, where: ["TikTok"] }, candidates: [{ platform: "Instagram", decision: "not_now", reason: "We start where the brand already posts." }] };
+      const models = answers(JSON.stringify(tiktok), clean);
+      // The public read is still under way: the step looks again in a few minutes and calls no model.
+      expect(await STEPS.content_strategy.run(db, prospect, ctx({ rows }))).toMatchObject({ status: "waiting", reason: "public_read", recheckMinutes: 3 });
+      expect(models).toEqual([]);
+      expect((await STEPS.content_strategy.run(db, prospect, ctx({ rows }))).status).toBe("waiting");
+      const third = await STEPS.content_strategy.run(db, prospect, ctx({ rows }));
+      expect(third, JSON.stringify(third)).toMatchObject({ status: "done" });
+      const tt = db.tables.content_strategies[0].platforms.find((p: { platform: string }) => p.platform === "TikTok");
+      expect(tt).toMatchObject({ state: "posting", figures: { basis: "public", posts: 12, followers: 900, rate_kind: "view" } });
+      expect(db.tables.content_strategies[0].sections.goals.items[0]).toMatchObject({ platform: "TikTok", metric: "engagement_rate", baseline: 0.05 });
+    });
+
+    it("starts a rewrite when Sprout profiles arrive, and keeps people's versions", async () => {
+      const db = dbWith({ ...tables(), sprout_profiles: [] });
+      const rows = await current(db);
+      const before = await STEPS.content_strategy.inputs(db, c(), rows);
+      db.tables.sprout_profiles.push({ client_id: "c1", sprout_profile_id: 9, network_type: "fb_instagram_account", native_name: "pyper", is_active: true });
+      expect(await STEPS.content_strategy.inputs(db, c(), rows)).not.toBe(before);
+      // A person's public profile is an input too; people's versions of sections never are.
+      const withSprout = await STEPS.content_strategy.inputs(db, c(), rows);
+      db.tables.client_public_profiles = [{ client_id: "c1", platform: "tiktok", handle: "pyper", url: null, source: "person" }];
+      expect(await STEPS.content_strategy.inputs(db, c(), rows)).not.toBe(withSprout);
+      const edits = structuredClone(db.tables.content_strategy_edits);
+      setUp(db);
+      answers(JSON.stringify(draft), clean);
+      await STEPS.content_strategy.run(db, c(), ctx({ rows }));
+      await STEPS.content_strategy.run(db, c(), ctx({ rows }));
+      expect(db.tables.content_strategy_edits).toEqual(edits);
     });
 
     it("tries again quietly without an AI connection, and waits for a profile", async () => {

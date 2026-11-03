@@ -56,6 +56,9 @@ import { competitorSet, feedSnapshots, ownPosts } from "../calendar/runWeek.ts";
 import { activeTerms, askTwice, evidenceKey, hashtagsRequest, monthIn, parseHashtags, parseProfile, profileEvidence, profileRequest, syncLifecycleTerms, writeTrendProfile, type ProfileIO } from "../trends/profile.ts";
 import { HASHTAG_PLATFORMS } from "../trends/types.ts";
 import { liveStrategyIO, readPending, savePending, saveStrategy, startStrategy, strategyEvidence, strategyPhase, type StrategyIO } from "../strategy/write.ts";
+import { advancePublicRead, POLL_MINUTES } from "../strategy/publicRead.ts";
+import { desiredProfiles, profileInputs, profilesKey } from "../strategy/profiles.ts";
+import { apifyClient, APIFY_TOKEN_ENV } from "../apify/client.ts";
 import type { StepOutcome, StepPolicy, StepRow } from "./policy.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -134,6 +137,12 @@ export const deps = {
     },
   }),
   strategyIO: (): StrategyIO => liveStrategyIO((url) => deps.trendIO().siteText(url)),
+  /** The strategy's 90-day public read (strategy/publicRead.ts): the stored feed, and the app's Apify actors for what it does not cover. */
+  strategyPublicRead: (db: Db, client: ClientRow, rows: Map<string, StepRow>) => advancePublicRead(db, { id: client.id, name: client.name },
+    { tracking: rows.get("tracking")?.result ?? null, brand_read: rows.get("brand_read")?.result ?? null }, deps.now(), {
+      apify: () => (env(APIFY_TOKEN_ENV) ? apifyClient({ token: env(APIFY_TOKEN_ENV) }) : null),
+      feedSnapshots: (d, id) => feedSnapshots(d, id),
+    }),
 };
 
 const DAY = 86_400_000;
@@ -829,7 +838,9 @@ export const STEPS: Record<string, StepDef> = {
       const { data, error } = await db.from("sprout_profiles").select("network_type").eq("client_id", client.id).eq("is_active", true);
       if (error) throw new Error(`Could not read the client's social accounts: ${error.message}`);
       const networks = [...new Set((data ?? []).map((r: { network_type: unknown }) => String(r.network_type ?? "")))].filter(Boolean).sort().join(",");
-      return `profile:${p.written_at}|networks:${networks}|rhythm:${textHash(JSON.stringify(client.posting_rhythm ?? null))}${socialVersionKey(rows, postsOnly(client))}`;
+      // Version 2 (fields, public reads): each client gets one rewrite after release, and another when its public profiles change.
+      const profiles = desiredProfiles(await profileInputs(db, { id: client.id, name: client.name }, { tracking: rows.get("tracking")?.result ?? null, brand_read: rows.get("brand_read")?.result ?? null }));
+      return `v2|profile:${p.written_at}|networks:${networks}|rhythm:${textHash(JSON.stringify(client.posting_rhythm ?? null))}${socialVersionKey(rows, postsOnly(client))}|public:${profilesKey(profiles)}`;
     },
     async run(db, client, { rows }) {
       const key = await deps.anthropicKey(db);
@@ -839,7 +850,10 @@ export const STEPS: Record<string, StepDef> = {
       // A draft for other inputs is dropped: the write starts over.
       let pending = await readPending(db, client.id);
       if (pending?.inputs_key !== inputsKey) {
-        const e = await strategyEvidence(db, client, deps.now(), deps.strategyIO());
+        // The 90-day public read first, across runs while the app's Apify actors read what the feed does not cover.
+        const read = await deps.strategyPublicRead(db, client, rows);
+        if (read.status === "reading") return { status: "waiting", reason: "public_read", recheckMinutes: POLL_MINUTES, result: { reading: read.runs.length } };
+        const e = await strategyEvidence(db, client, deps.now(), deps.strategyIO(), read);
         if (!e) return { status: "waiting", reason: "trend_profile", recheckDays: 1 };
         pending = startStrategy(e, inputsKey, deps.now());
       }

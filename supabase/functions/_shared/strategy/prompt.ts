@@ -7,9 +7,12 @@
 // wherever they edited a section. New platforms are left out, since their
 // posts need a live account first; measures and the not now list are for the
 // team. A client with no strategy gets "", so its prompts stay as they were.
+// A version 2 strategy (fields, 3 Nov) reads as the same plain lines the
+// writer and people's versions use (sections.ts), under the same cap.
 
 import { clip } from "../trends/text.ts";
 import { pillarSectionKey, platformSectionKey } from "./platforms.ts";
+import { editShown, sectionLines } from "./sections.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -19,7 +22,8 @@ export const STRATEGY_BLOCK_CHARS = 4000;
 export interface StoredStrategy {
   /** Null while the row holds only a write under way: no strategy yet. */
   written_at?: string | null;
-  sections: Record<string, string> | null;
+  /** Text per section (2 Nov) or fields per section (3 Nov). */
+  sections: Record<string, unknown> | null;
   platforms: Array<{ platform: string; state: string }> | null;
   pillars: Array<{ name: string }> | null;
 }
@@ -33,9 +37,9 @@ function capped(text: string, n: number): string {
 }
 
 /** The block from a stored strategy and people's versions of its sections. */
-export function strategyBlock(s: StoredStrategy, edits: Array<{ section_key: string; text: string }>): string {
-  const mine = new Map(edits.filter((e) => String(e.text ?? "").trim()).map((e) => [e.section_key, String(e.text).trim()]));
-  const text = (key: string) => mine.get(key) ?? String(s.sections?.[key] ?? "").trim();
+export function strategyBlock(s: StoredStrategy, edits: Array<{ section_key: string; text: string; value?: unknown }>): string {
+  const mine = new Map(edits.map((e) => [e.section_key, sectionLines(e.section_key, editShown(e))] as const).filter(([, lines]) => lines));
+  const text = (key: string) => mine.get(key) ?? sectionLines(key, s.sections?.[key]);
   const oneLine = (t: string) => t.replace(/\s*\n+\s*/g, " ");
   const part = (title: string, body: string) => (body ? `${title}:\n${body}` : "");
   const pillars = (s.pillars ?? []).map((p) => ({ name: p.name, text: text(pillarSectionKey(p.name)) })).filter((p) => p.text);
@@ -57,7 +61,7 @@ export async function strategyPromptBlock(db: Db, clientId: string): Promise<str
   const { data: s, error } = await db.from("content_strategies").select("sections, platforms, pillars, written_at").eq("client_id", clientId).maybeSingle();
   if (error) throw new Error(`Could not read the content strategy: ${error.message}`);
   if (!s?.written_at) return "";
-  const { data: edits, error: editsError } = await db.from("content_strategy_edits").select("section_key, text").eq("client_id", clientId);
+  const { data: edits, error: editsError } = await db.from("content_strategy_edits").select("section_key, text, value").eq("client_id", clientId);
   if (editsError) throw new Error(`Could not read the team's versions of the strategy: ${editsError.message}`);
   return strategyBlock(s, edits ?? []);
 }
