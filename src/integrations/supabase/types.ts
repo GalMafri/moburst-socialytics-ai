@@ -302,6 +302,8 @@ export type Database = {
       }
       calendar_plans: {
         Row: {
+          canceled_at: string | null
+          canceled_by: string | null
           claimed_at: string | null
           client_id: string
           created_at: string
@@ -322,6 +324,8 @@ export type Database = {
           week_start: string
         }
         Insert: {
+          canceled_at?: string | null
+          canceled_by?: string | null
           claimed_at?: string | null
           client_id: string
           created_at?: string
@@ -342,6 +346,8 @@ export type Database = {
           week_start: string
         }
         Update: {
+          canceled_at?: string | null
+          canceled_by?: string | null
           claimed_at?: string | null
           client_id?: string
           created_at?: string
@@ -498,6 +504,7 @@ export type Database = {
           reasons: Json
           report_id: string | null
           source: string
+          story_of: string | null
           touched_at: string | null
           updated_at: string
           visual_direction: string | null
@@ -525,6 +532,7 @@ export type Database = {
           reasons: Json
           report_id?: string | null
           source: string
+          story_of?: string | null
           touched_at?: string | null
           updated_at: string
           visual_direction?: string | null
@@ -552,6 +560,7 @@ export type Database = {
           reasons?: Json
           report_id?: string | null
           source?: string
+          story_of?: string | null
           touched_at?: string | null
           updated_at?: string
           visual_direction?: string | null
@@ -3863,6 +3872,8 @@ export type Database = {
           p_user?: string
         }
         Returns: {
+          canceled_at: string | null
+          canceled_by: string | null
           claimed_at: string | null
           client_id: string
           created_at: string
@@ -3897,6 +3908,39 @@ export type Database = {
           p_week: string
         }
         Returns: {
+          canceled_at: string | null
+          canceled_by: string | null
+          claimed_at: string | null
+          client_id: string
+          created_at: string
+          error: string | null
+          evidence: Json | null
+          id: string
+          input_tokens: number | null
+          model: string | null
+          output_tokens: number | null
+          pending_revision: Json | null
+          ready_at: string | null
+          requested_by: string | null
+          revisions: Json
+          rhythm: Json | null
+          status: string
+          trigger: string
+          updated_at: string
+          week_start: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "calendar_plans"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      calendar_stop_plan: {
+        Args: { p_plan: string; p_user?: string }
+        Returns: {
+          canceled_at: string | null
+          canceled_by: string | null
           claimed_at: string | null
           client_id: string
           created_at: string
