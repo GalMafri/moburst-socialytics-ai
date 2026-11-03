@@ -10,7 +10,10 @@
  *      (both reads an OAuth session may call), so removing access cuts saves
  *      at the next call;
  *   3. client_name is the id's client, ignoring case, and the post, section
- *      or report belongs to that client;
+ *      or report belongs to that client; a copy or strategy save names the
+ *      version it read, and the database writes it only while that version
+ *      is still current (saveCopy's conditional update, and
+ *      strategy_section_save_as's check under the section's lock);
  *   4. at most 200 saves per client in 24 hours, counted from the audit rows
  *      (the 120 calls a minute per person apply before this).
  * Each save then runs the code the app runs (_shared/notes/add.ts,
@@ -67,7 +70,12 @@ export interface ServiceWriter {
   /** Teaches the client's preference memory from a copy edit, as the app's save does. */
   learn(clientId: string, signal: MemorySignal): Promise<{ changes: LearnedChange[] }>;
   strategy(clientId: string): Promise<StrategyRows>;
-  saveSection(userId: string, clientId: string, key: string, text: string): Promise<void>;
+  /**
+   * strategy_section_save_as for the person, from Claude, only while the
+   * section's version is still `expected`: checked and written in one call
+   * under the section's lock. Otherwise the section as it is now.
+   */
+  saveSection(userId: string, clientId: string, key: string, text: string, expected: string): Promise<{ saved: true } | { conflict: { text: string; version: string } }>;
   report(reportId: string): Promise<{ id: string; client_id: string; kind: "social" | "competitive" } | null>;
   /** A signed URL that puts one file at this path in the decks bucket, for two hours. */
   signUpload(path: string): Promise<string>;
@@ -220,7 +228,10 @@ export const WRITE_TOOLS: WriteSpec[] = [
       }
       // Handing a section back to the product stays on the Strategy page.
       if (text === section.product.trim()) return refused(400, "invalid_request", "That is Socialytics' own version of this section. To go back to it, use the Strategy page");
-      await at.deps.writer.saveSection(at.person.userId, at.client.id, key, text);
+      const written = await at.deps.writer.saveSection(at.person.userId, at.client.id, key, text, version);
+      if ("conflict" in written) {
+        return stale("This section changed in Socialytics after you read it. Show the person the text below and ask again", { section_key: key, text: written.conflict.text, version: written.conflict.version });
+      }
       return saved({ status: "saved", section_key: key, version: await sectionVersion(text), message: `Saved as your version of this section of ${at.client.name}'s strategy.` }, key);
     },
   },
@@ -363,8 +374,12 @@ export function makeServiceWriter(db: Db): ServiceWriter {
       ]);
       return { row: row ?? null, edits: edits ?? [] };
     },
-    saveSection: async (userId, clientId, key, text) => {
-      await must(db.rpc("strategy_section_save_as", { p_user: userId, p_client: clientId, p_key: key, p_text: text, p_source: "claude" }), "Could not save the section");
+    saveSection: async (userId, clientId, key, text, expected) => {
+      const answer = await must<{ conflict?: boolean; text?: string; version?: string } | null>(
+        db.rpc("strategy_section_save_as", { p_user: userId, p_client: clientId, p_key: key, p_text: text, p_source: "claude", p_expected: expected }),
+        "Could not save the section",
+      );
+      return answer?.conflict ? { conflict: { text: String(answer.text ?? ""), version: String(answer.version ?? "") } } : { saved: true as const };
     },
     report: async (id) => {
       const social = await must<{ id: string; client_id: string } | null>(db.from("reports").select("id, client_id").eq("id", id).maybeSingle(), "Could not read the report");

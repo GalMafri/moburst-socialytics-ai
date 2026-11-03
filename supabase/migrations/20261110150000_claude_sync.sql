@@ -15,10 +15,13 @@
 --      notes already typed. One note from Claude per client and text.
 --   2. post_iterations.source takes 'claude'.
 --   3. content_strategy_edits.source, and strategy_section_save_as(p_user,
---      p_client, p_key, p_text, p_source): the section save for a named
---      person, the service role's alone. strategy_section_save keeps its
---      guards and calls it for the signed-in person. A save from Claude never
---      hands a section back.
+--      p_client, p_key, p_text, p_source, p_expected): the section save for a
+--      named person, the service role's alone. With p_expected (the section's
+--      version as Claude read it) the check and the write happen in one call,
+--      under locks taken before the section is read, and a section changed
+--      since is refused with its current text. strategy_section_save keeps
+--      its guards and calls it for the signed-in person. A save from Claude
+--      never hands a section back.
 --   4. report_decks and the private report-decks bucket (.pptx and .pdf, up
 --      to 50 MB): finished decks on a social or competitive report, read by
 --      whoever can see the report, the client included. Written by the
@@ -80,13 +83,30 @@ comment on column public.content_strategy_edits.source is 'app when the person s
 -- the connector calls it after checking can_write_client as that person.
 -- Empty text, or the product's own words, hands the section back for the
 -- app; a save from Claude never does.
-create or replace function public.strategy_section_save_as(p_user uuid, p_client uuid, p_key text, p_text text, p_source text)
+--
+-- p_expected is the section's version as the saver read it: the first 16 hex
+-- digits of the SHA-256 of the text the Strategy page shows (a person's
+-- version, else the product's), as mcp/reads.ts sectionVersion makes it.
+-- Every save of the section waits on the same lock and the strategy's row,
+-- taken before anything is read, so between the check and the write nobody
+-- else saves the section and the lifecycle does not rewrite it. A section
+-- whose version is no longer p_expected is not written: the answer is
+-- {conflict: true, section_key, text, version} with the section as it is
+-- now. Without p_expected (the Strategy page) nothing is checked.
+--
+-- An earlier draft of this migration made the function without p_expected;
+-- that one is dropped, so the name has one signature.
+drop function if exists public.strategy_section_save_as(uuid, uuid, text, text, text);
+create or replace function public.strategy_section_save_as(p_user uuid, p_client uuid, p_key text, p_text text, p_source text, p_expected text default null)
 returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare
   v_key text := btrim(coalesce(p_key, ''));
   v_text text := btrim(coalesce(p_text, ''));
   v_product text;
+  v_edit text;
+  v_shown text;
+  v_version text;
   v_name text;
   v_row public.content_strategy_edits%rowtype;
 begin
@@ -105,9 +125,24 @@ begin
   if length(v_text) > 20000 then
     raise exception 'The text is too long.' using errcode = '22001';
   end if;
-  select btrim(coalesce(s.sections ->> v_key, '')) into v_product
+  -- One save of this section at a time, and no rewrite of the strategy
+  -- under it, from here until the call's transaction ends.
+  perform pg_advisory_xact_lock(hashtextextended('strategy_section:' || p_client::text || ':' || v_key, 0));
+  perform 1 from public.content_strategies s where s.client_id = p_client for update;
+  perform 1 from public.content_strategy_edits e where e.client_id = p_client and e.section_key = v_key for update;
+  select s.sections ->> v_key into v_product
     from public.content_strategies s where s.client_id = p_client;
-  if v_text = '' or v_text = coalesce(v_product, '') then
+  select e.text into v_edit
+    from public.content_strategy_edits e where e.client_id = p_client and e.section_key = v_key;
+  if p_expected is not null then
+    v_shown := coalesce(v_edit, v_product, '');
+    v_version := left(encode(sha256(convert_to(v_shown, 'UTF8')), 'hex'), 16);
+    if v_version <> btrim(p_expected) then
+      return jsonb_build_object('conflict', true, 'section_key', v_key, 'text', v_shown, 'version', v_version);
+    end if;
+  end if;
+  v_product := btrim(coalesce(v_product, ''));
+  if v_text = '' or v_text = v_product then
     if p_source = 'claude' then
       raise exception 'A section saved from Claude is never handed back.' using errcode = '22023';
     end if;
@@ -129,8 +164,8 @@ begin
   return jsonb_build_object('section_key', v_row.section_key, 'text', v_row.text, 'editor_name', v_row.editor_name, 'edited_at', v_row.edited_at, 'source', v_row.source);
 end $$;
 
-revoke all on function public.strategy_section_save_as(uuid, uuid, text, text, text) from public, anon, authenticated;
-grant execute on function public.strategy_section_save_as(uuid, uuid, text, text, text) to service_role;
+revoke all on function public.strategy_section_save_as(uuid, uuid, text, text, text, text) from public, anon, authenticated;
+grant execute on function public.strategy_section_save_as(uuid, uuid, text, text, text, text) to service_role;
 
 -- The Strategy page's save (20261109120000_claude_connector.sql): the same
 -- guards, first, then the save for the signed-in person.

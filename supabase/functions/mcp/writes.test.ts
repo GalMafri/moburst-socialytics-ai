@@ -40,7 +40,7 @@ interface World {
   notes: Array<TypedNoteRow & { created_at: string }>;
   iterations: IterationRow[];
   posts: Map<string, CopyPost>;
-  sections: Array<[string, string, string, string]>;
+  sections: Array<[string, string, string, string, string]>;
   learned: unknown[];
   decks: Map<string, DeckRow & { created_at: string }>;
   files: Set<string>;
@@ -49,7 +49,7 @@ interface World {
   calls: string[];
 }
 
-function world(over: { staff?: boolean; canWrite?: string[]; writes?: number; strategy?: StrategyRows } = {}): { deps: WriteDeps; w: World } {
+function world(over: { staff?: boolean; canWrite?: string[]; writes?: number; strategy?: StrategyRows; sectionNow?: { text: string; version: string } } = {}): { deps: WriteDeps; w: World } {
   const w: World = { notes: [], iterations: [], posts: new Map([[`${BADER}|${KEY}`, { copy: "Hurt in a crash? Call us.", hashtags: ["injurylaw"], cta: "Call now", platform: "Instagram", updated_at: AT }]]), sections: [], learned: [], decks: new Map(), files: new Set(), signed: [], writes: over.writes ?? 0, calls: [] };
   const stored = (n: TypedNoteRow & { created_at: string }): StoredNote => ({ id: n.id, title: n.title, note_date: n.note_date, added_by_name: n.added_by_name, created_at: n.created_at, source: n.source });
   const notes: NoteWrites = {
@@ -76,7 +76,12 @@ function world(over: { staff?: boolean; canWrite?: string[]; writes?: number; st
     notes, copy,
     learn: async (c, s) => { w.learned.push([c, s]); return { changes: [] }; },
     strategy: async (c) => (c === BADER ? over.strategy ?? STRATEGY : { row: null, edits: [] }),
-    saveSection: async (u, c, k, t) => { w.sections.push([u, c, k, t]); },
+    // The database's own check: a section changed since it was read answers with its text now.
+    saveSection: async (u, c, k, t, expected) => {
+      if (over.sectionNow && over.sectionNow.version !== expected) return { conflict: over.sectionNow };
+      w.sections.push([u, c, k, t, expected]);
+      return { saved: true };
+    },
     report: async (id) => (id === REPORT ? { id, client_id: BADER, kind: "social" } : id === COMPETITIVE ? { id, client_id: BADER, kind: "competitive" } : id === CALM_REPORT ? { id, client_id: CALM, kind: "social" } : null),
     signUpload: async (path) => { w.signed.push(path); return `${SIGNED}/${path}?token=t0k3n`; },
     deckFile: async (folder, deckId) => [...w.files].find((f) => f.startsWith(`${folder}/${deckId}.`))?.slice(folder.length + 1) ?? null,
@@ -234,7 +239,7 @@ describe("socialytics_strategy_section_save", () => {
     const { deps, w } = world();
     const r = await save("socialytics_strategy_section_save", { ...bader, section_key: "goals", text: " Grow leads in Queens ", based_on: await sectionVersion("Grow leads") }, deps);
     expect(r).toMatchObject({ ok: true, target: "goals" });
-    expect(w.sections).toEqual([[SINEAD, BADER, "goals", "Grow leads in Queens"]]);
+    expect(w.sections).toEqual([[SINEAD, BADER, "goals", "Grow leads in Queens", await sectionVersion("Grow leads")]]);
     expect(body(r)).toMatchObject({ status: "saved", section_key: "goals", version: await sectionVersion("Grow leads in Queens") });
   });
 
@@ -244,6 +249,18 @@ describe("socialytics_strategy_section_save", () => {
     const [sentence, current] = r.text.split("\n");
     expect(sentence).toBe("This section changed in Socialytics after you read it. Show the person the text below and ask again.");
     expect(JSON.parse(current)).toEqual({ current: { section_key: "audience", text: "Drivers hurt in Queens", version: await sectionVersion("Drivers hurt in Queens") } });
+    expect(w.sections).toEqual([]);
+  });
+
+  it("refuses when the section changes between the read and the save, with the section as the database has it then", async () => {
+    const now = { text: "Grow leads in Brooklyn", version: await sectionVersion("Grow leads in Brooklyn") };
+    const { deps, w } = world({ sectionNow: now });
+    const r = await save("socialytics_strategy_section_save", { ...bader, section_key: "goals", text: "Grow leads in Queens", based_on: await sectionVersion("Grow leads") }, deps);
+    expect(r.ok).toBe(false);
+    expect(r.ok || r.status).toBe(409);
+    const [sentence, current] = r.text.split("\n");
+    expect(sentence).toBe("This section changed in Socialytics after you read it. Show the person the text below and ask again.");
+    expect(JSON.parse(current)).toEqual({ current: { section_key: "goals", text: now.text, version: now.version } });
     expect(w.sections).toEqual([]);
   });
 
@@ -343,6 +360,8 @@ describe("makeServiceWriter", () => {
   it("counts a client's connector writes from the audit rows, saves a section through strategy_section_save_as and signs one upload path", async () => {
     const { db, calls } = fakeDb((c) => {
       if (c.table === "api_requests") return { count: 7 };
+      if (c.table === "rpc:strategy_section_save_as" && (op(c, "rpc")?.[0] as { p_key: string }).p_key === "audience") return { data: { conflict: true, section_key: "audience", text: "Now", version: "fedcba9876543210" } };
+      if (c.table === "rpc:strategy_section_save_as") return { data: { section_key: "goals", text: "Grow", editor_name: "S", edited_at: "x", source: "claude" } };
       if (c.table === "clients") return { data: { id: BADER, name: "Bader Law" } };
       if (c.table === "reports") return { data: null };
       if (c.table === "competitive_reports") return { data: { id: COMPETITIVE, client_id: BADER } };
@@ -367,8 +386,9 @@ describe("makeServiceWriter", () => {
     expect(op(count, "not")).toEqual(["target", "is", null]);
     expect(op(count, "gte")).toEqual(["created_at", "2026-11-02T12:00:00.000Z"]);
     expect(op(count, "select")).toEqual(["id", { count: "exact", head: true }]);
-    await writer.saveSection(SINEAD, BADER, "goals", "Grow");
-    expect(op(calls.find((c) => c.table === "rpc:strategy_section_save_as")!, "rpc")).toEqual([{ p_user: SINEAD, p_client: BADER, p_key: "goals", p_text: "Grow", p_source: "claude" }]);
+    expect(await writer.saveSection(SINEAD, BADER, "goals", "Grow", "0123456789abcdef")).toEqual({ saved: true });
+    expect(op(calls.find((c) => c.table === "rpc:strategy_section_save_as")!, "rpc")).toEqual([{ p_user: SINEAD, p_client: BADER, p_key: "goals", p_text: "Grow", p_source: "claude", p_expected: "0123456789abcdef" }]);
+    expect(await writer.saveSection(SINEAD, BADER, "audience", "Everyone", "0123456789abcdef")).toEqual({ conflict: { text: "Now", version: "fedcba9876543210" } });
     expect(await writer.report(COMPETITIVE)).toEqual({ id: COMPETITIVE, client_id: BADER, kind: "competitive" });
     expect(await writer.signUpload(`${BADER}/${REPORT}/d.pptx`)).toBe(`${SIGNED}/${BADER}/${REPORT}/d.pptx?token=x`);
     expect(await writer.deckFile(`${BADER}/${REPORT}`, "d1")).toBe("d1.pdf");

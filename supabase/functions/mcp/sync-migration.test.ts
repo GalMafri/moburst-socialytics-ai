@@ -7,12 +7,13 @@
 // a named person is the service role's alone, and the app's own save works
 // as before. Notes carry their source and a hash of their text, decks are
 // read by whoever can see their report, and the audit row names its target.
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { noteTextHash } from "../_shared/notes/add";
+import { sectionVersion } from "./reads";
 
 const migrations = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "migrations");
 const read = (f: string) => readFileSync(join(migrations, f), "utf8");
@@ -133,6 +134,14 @@ describe("20261110150000_claude_sync.sql", () => {
     expect(sql).toMatch(/create table if not exists public\.report_decks/);
   });
 
+  it("applies after the migrations main added on 10 Nov, none of which touches what it changes", () => {
+    const later = readdirSync(migrations).filter((f) => f > "20261109120000_claude_connector.sql" && f < "20261110150000_claude_sync.sql");
+    expect(later).toEqual(expect.arrayContaining(["20261110110000_post_notes_stories.sql", "20261110120000_onboarding_complete.sql"]));
+    expect(readdirSync(migrations).sort().filter((f) => f >= "20261110150000").at(0)).toBe("20261110150000_claude_sync.sql");
+    const OURS = /\b(client_notes|post_iterations|content_strateg\w*|strategy_section_save\w*|report_decks|report-decks|api_requests)\b/i;
+    for (const f of later) expect(read(f).replace(/--[^\n]*/g, "").match(OURS)?.[0] ?? null, f).toBeNull();
+  });
+
   it("guards the new table like every other: three OAuth policies on report_decks", async () => {
     await as(null, null);
     for (const t of ["report_decks", "client_notes", "post_iterations", "content_strategy_edits"]) {
@@ -186,6 +195,37 @@ describe("20261110150000_claude_sync.sql", () => {
     await expect(db.query(`select public.strategy_section_save_as($1, $2, 'notes', 'x', 'claude')`, [STAFF, BADER])).rejects.toThrow("Unknown strategy section.");
     await expect(db.query(`select public.strategy_section_save_as(null, $1, 'goals', 'x', 'claude')`, [BADER])).rejects.toThrow(/person/);
     expect((await rows(`select 1 from public.content_strategy_edits where client_id = $1`, [BADER])).length).toBe(1);
+  });
+
+  it("saves from Claude only against the version read, and otherwise refuses with the section as it is now, writing nothing", async () => {
+    await as(null, null);
+    await db.query(`insert into public.content_strategies (client_id, sections, written_at) values ($1, '{"positioning": "Local and fast"}', now()) on conflict (client_id) do update set sections = public.content_strategies.sections || excluded.sections`, [CALM]);
+    await as("service_role", SERVICE);
+    const save = async (text: string, expected: string | null) => (await one(`select public.strategy_section_save_as($1, $2, 'positioning', $3, 'claude', $4) as r`, [STAFF, CALM, text, expected])).r as Record<string, unknown>;
+    // The product's version, as read: saved.
+    expect(await save("Local, fast and fair", await sectionVersion("Local and fast"))).toMatchObject({ section_key: "positioning", text: "Local, fast and fair", source: "claude" });
+    // A second save still naming the product's version: the section changed since, so nothing is written.
+    expect(await save("Cheapest in town", await sectionVersion("Local and fast"))).toEqual({
+      conflict: true, section_key: "positioning", text: "Local, fast and fair", version: await sectionVersion("Local, fast and fair"),
+    });
+    expect((await one(`select text from public.content_strategy_edits where client_id = $1 and section_key = 'positioning'`, [CALM])).text).toBe("Local, fast and fair");
+    // Against the version now shown: saved.
+    expect(await save("Local and fair", await sectionVersion("Local, fast and fair"))).toMatchObject({ text: "Local and fair" });
+    // A section with no text yet has the version of empty text.
+    expect((await one(`select public.strategy_section_save_as($1, $2, 'measures', 'Calls booked', 'claude', $3) as r`, [STAFF, CALM, await sectionVersion("")])).r).toMatchObject({ section_key: "measures", text: "Calls booked" });
+  });
+
+  it("checks the version under locks taken before the section is read, in the same call that writes it", () => {
+    const body = SYNC.slice(SYNC.indexOf("create or replace function public.strategy_section_save_as"), SYNC.indexOf("revoke all on function public.strategy_section_save_as"));
+    const at = (re: RegExp) => body.search(re);
+    expect(body).toMatch(/p_expected text default null/);
+    expect(at(/pg_advisory_xact_lock/)).toBeGreaterThan(0);
+    expect(at(/for update/)).toBeGreaterThan(0);
+    const firstRead = at(/select[\s\S]*?into v_product/);
+    expect(at(/pg_advisory_xact_lock/)).toBeLessThan(firstRead);
+    expect(at(/for update/)).toBeLessThan(firstRead);
+    expect(at(/'conflict', true/)).toBeLessThan(at(/insert into public\.content_strategy_edits/));
+    expect(at(/'conflict', true/)).toBeLessThan(at(/delete from public\.content_strategy_edits/));
   });
 
   it("keeps the Strategy page's save as it was: staff with access, the signed-in editor, empty or product text hands back", async () => {

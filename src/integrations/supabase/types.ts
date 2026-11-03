@@ -4468,6 +4468,7 @@ export type Database = {
       strategy_section_save_as: {
         Args: {
           p_client: string
+          p_expected?: string
           p_key: string
           p_source: string
           p_text: string
