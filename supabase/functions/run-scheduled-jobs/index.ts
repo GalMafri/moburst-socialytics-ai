@@ -53,6 +53,13 @@
 //                              writing nothing.
 //                              Brands its 90 seconds did not reach come back as
 //                              "left"; send them as "left" to look at those.
+// POST {"mode":"onboarding_fields_check","client_id":"<id>"}
+//                              which fields the social read needs Sprout
+//                              returns for one client (fieldsCheck.ts): the
+//                              posts' profile pictures, the follower countries
+//                              and cities, a local profile's address, read
+//                              from Sprout's documented endpoints, writing
+//                              nothing; no model, Apify or Firecrawl call.
 // POST {"mode":"compare_pipeline","run_id":"<id>"}
 //                              a finished shadow run next to the real result
 //                              it shadows (compareResults; for a report, the
@@ -84,6 +91,7 @@ import { directKey, runClaudeDirect } from "../_shared/pipelines/claudeDirect.ts
 import { makeDispatchStore, makeJobStore } from "./store.ts";
 import { filterCheckRequest, runTrendJob, startTrendReplay, startTrendWeek } from "./trends.ts";
 import { liveOnboardingDeps, runSproutOnboardingJob, sproutOnboarding } from "./sproutOnboarding.ts";
+import { onboardingFieldsCheck } from "./fieldsCheck.ts";
 import type { ScheduledJob } from "../_shared/scheduled-jobs/types.ts";
 import { runReportText, sonnetCompletion } from "../_shared/reports/correctText.ts";
 import { runNotesRead } from "../_shared/notes/run.ts";
@@ -357,6 +365,18 @@ Deno.serve(async (req) => {
     if (mode === "sprout_onboarding_dry_run") {
       const only = Array.isArray(body.left) ? body.left.map(String) : null;
       return json(await sproutOnboarding(db, liveOnboardingDeps(), { dryRun: true, only }));
+    }
+
+    // QA, POST {"mode":"onboarding_fields_check","client_id":"<id>"}: the social
+    // read's fields as Sprout returns them for one client, before release.
+    if (mode === "onboarding_fields_check") {
+      const clientId = typeof body.client_id === "string" ? body.client_id : "";
+      if (!clientId) return json({ error: "client_id is required" }, 400);
+      try {
+        return json(await onboardingFieldsCheck(db, clientId));
+      } catch (e) {
+        return json({ error: e instanceof Error ? e.message : String(e) }, 422);
+      }
     }
 
     if (mode === "compare_pipeline") {

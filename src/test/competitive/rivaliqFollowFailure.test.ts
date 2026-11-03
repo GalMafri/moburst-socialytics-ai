@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { describeFollowFailure } from '../../../supabase/functions/_shared/competitive/rivaliqFollowFailure';
+import { describeFollowFailure, FollowFailure, followFailure } from '../../../supabase/functions/_shared/competitive/rivaliqFollowFailure';
 
 describe('describeFollowFailure', () => {
   it('turns the credits snapshot into the plan sentence, names blocked websites, and keeps other errors short', () => {
@@ -12,5 +12,16 @@ describe('describeFollowFailure', () => {
     expect(describeFollowFailure([{ name: 'Reviewed company', result: { status: 3 } }])).toBe('RivalIQ could not finish tracking every reviewed website. Reviewed company: no reason given');
     expect(describeFollowFailure([{ name: 'One', result: { status: 3, error: { code: 'CompanyNotFound', message: 'No public profiles found' } } }])).toBe('RivalIQ could not finish tracking every reviewed website. One: CompanyNotFound: No public profiles found');
     expect(describeFollowFailure([])).toBe('RivalIQ could not start tracking the reviewed websites.');
+  });
+});
+
+describe('followFailure', () => {
+  it('says when the plan is full, so tracking waits for a free place instead of failing', () => {
+    const credits = { data: { credits: { plan: 40, distinct: 40 } } };
+    const full = followFailure([{ name: 'Toast', result: { status: 3, error: credits } }]);
+    expect(full).toBeInstanceOf(FollowFailure);
+    expect(full.planFull).toBe(true);
+    expect(full.message).toMatch(/plan tracks 40 distinct companies/);
+    expect(followFailure([{ name: 'Calm', result: { status: 3, error: 'Response code 403' } }]).planFull).toBe(false);
   });
 });

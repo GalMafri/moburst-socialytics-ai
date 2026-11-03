@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import {
   clientOriginLine, cleanText, declinedBrandLine, competitiveRunStatus, countryNames, eventName, firstRunSentence, formatDate, formatDateTime, formatRange, sproutDraftLine,
-  isRawProfileId, languageNames, notePointKindName, noteReadLine, noteStateLine, platformKey, platformName, profileName, roleName, timelineDetail, timelineKindName, usageStateName,
+  isRawProfileId, languageNames, locationOrigin, notePointKindName, noteReadLine, noteStateLine, onboardingFacts, platformKey, platformName, profileName, roleName, timelineDetail, timelineKindName, usageStateName,
 } from "@/lib/display";
 import { isActiveClient } from "@/lib/activeClients";
 
@@ -178,3 +178,64 @@ describe("A post's line in Sprout", () => {
   });
 });
 
+describe("what the product read from a client's social profiles (onboarding from social profiles, section 6)", () => {
+  const NOW = "2026-11-03T10:00:00.000Z";
+  const olo = (over: Record<string, unknown> = {}) => ({ name: "Olo", website_url: null, timezone: "UTC", geo: "", language: "", location: null, field_sources: {}, ...over });
+  const social = { step: "social_read", status: "done", done_at: NOW, result: {
+    checked_at: NOW, follower_countries: [{ country: "US", followers: 70, share: 0.7 }, { country: "GB", followers: 30, share: 0.3 }],
+    languages: [{ language: "en", posts: 9 }, { language: "es", posts: 3 }], language_posts: 12,
+  } };
+  it("says where the website search looked, and how the website was found", () => {
+    const looking = { step: "website", status: "waiting", result: { posts: 214, months: 12, searched_at: NOW, waiting_for: "website" } };
+    expect(onboardingFacts(olo(), [looking]).website).toBe("No website found yet. Looked through 214 posts from the last 12 months and searched the web for Olo on Nov 3, 2026.");
+    expect(onboardingFacts(olo(), [{ step: "website", status: "waiting", result: { posts: 3, months: 12 } }]).website).toBe("No website found yet. Looked through 3 posts from the last 12 months.");
+    const found = (confirmed_by: string, linked_network: string | null = null) => onboardingFacts(olo({ website_url: "https://www.olo.com", field_sources: { website_url: { by: "lifecycle" } } }),
+      [{ step: "website", status: "done", result: { website: "https://www.olo.com", confirmed_by, linked_network, found_at: NOW } }]).website;
+    expect(found("profile_link", "fb_instagram_account")).toBe("Found on Nov 3, 2026: the site links to the client's Instagram.");
+    expect(found("search_profile_link", "linkedin_company")).toBe("Found on Nov 3, 2026: the site links to the client's LinkedIn.");
+    expect(found("bio_domain_name")).toBe("Found on Nov 3, 2026: the client's Instagram bio links to it.");
+    expect(found("domain_name")).toBe("Found on Nov 3, 2026: the site's domain is the brand's name.");
+    expect(onboardingFacts(olo({ website_url: "https://www.olo.com", field_sources: { website_url: { by: "person" } } }), []).website).toBe("");
+  });
+  it("says which profile picture the logo is, and that the website's or an uploaded logo comes first", () => {
+    const picture = { logo_url: "https://x/logo-profile-linkedin.png", field_sources: { logo_url: { by: "lifecycle", at: NOW, from: "profile_picture:linkedin" } } };
+    expect(onboardingFacts(olo(picture), []).logo).toBe("From the client's LinkedIn profile picture, Nov 3, 2026. The website's logo replaces it once the website is found; a logo you upload is kept.");
+    expect(onboardingFacts(olo({ logo_url: "https://olo.com/logo.svg", field_sources: { logo_url: { by: "lifecycle", from: "website" } } }), []).logo).toBe("");
+  });
+  it("says where the time zone came from, or that it is not known yet", () => {
+    expect(locationOrigin({ source: "profile_address", via: "google_my_business" })).toBe("the address on the client's Google Business Profile");
+    expect(locationOrigin({ source: "post_text" })).toBe("an address in the client's posts");
+    expect(locationOrigin({ source: "post_read" })).toBe("where the client's posts say the business is based");
+    expect(locationOrigin({ source: "followers", locality: "Austin" })).toBe("where most of the client's followers are (Austin)");
+    expect(locationOrigin({ source: "schema.org" })).toBe("the business address the website publishes");
+    expect(onboardingFacts(olo(), [social]).timezone).toBe("Not known yet: no address or location in the client's profiles or posts. Calendar times show in UTC until then.");
+    expect(onboardingFacts(olo({ timezone: "America/Chicago", location: { source: "followers", locality: "Austin" }, field_sources: { timezone: { by: "lifecycle" } } }), [social]).timezone)
+      .toBe("Worked out from where most of the client's followers are (Austin). You can change it here.");
+    expect(onboardingFacts(olo({ timezone: "America/Chicago", field_sources: { timezone: { by: "person" } } }), [social]).timezone).toBe("");
+    expect(onboardingFacts(olo(), []).timezone).toBe("");
+  });
+  it("says where the regions and languages came from, with the counts", () => {
+    const f = onboardingFacts(olo({ geo: "US,GB", language: "en,es", field_sources: { geo: { by: "lifecycle", from: "followers" }, language: { by: "lifecycle", from: "posts" } } }), [social]);
+    expect(f.regions).toBe("From where the client's followers are: United States 70%, United Kingdom 30%.");
+    expect(f.languages).toBe("From the client's posts: English in 9 of 12, Spanish in 3 of 12.");
+  });
+  it("says the brief was drafted from the posts, or how many posts with text it waits for", () => {
+    expect(onboardingFacts(olo({ brief_text: "Drafted from the client's posts on 2026-11-03:\n\nOlo", field_sources: { brief_text: { by: "lifecycle", at: NOW, from: "posts" } } }), []).brief)
+      .toBe("Drafted from the client's posts on Nov 3, 2026.");
+    expect(onboardingFacts(olo(), [{ step: "brief_pillars", status: "waiting", result: { waiting_for: "posts", text_posts: 3 } }]).brief).toBe("Written once the client has 5 posts with text. It has 3.");
+  });
+  it("names the three competitors chosen, and why tracking has not started, as a plain fact", () => {
+    const chosen = { step: "competitors", status: "done", result: { selected: ["Toast", "ChowNow", "Square"], chosen_from: "posts" } };
+    expect(onboardingFacts(olo(), [chosen, { step: "tracking", status: "waiting", result: { waiting_for: "client_website" } }]).competitors)
+      .toEqual({ names: ["Toast", "ChowNow", "Square"], tracking: "RivalIQ follows companies by their website, so tracking starts once the client's website is found." });
+    expect(onboardingFacts(olo({ website_url: "https://olo.com" }), [chosen, { step: "tracking", status: "waiting", result: { waiting_for: "rivaliq_full" } }]).competitors.tracking)
+      .toBe("The RivalIQ plan is full. Tracking starts when a place opens.");
+  });
+  it("writes every line in plain words, with no step names, statuses or dashes", () => {
+    const f = onboardingFacts(olo({ geo: "US,GB", language: "en,es", logo_url: "x", field_sources: { geo: { by: "lifecycle", from: "followers" }, language: { by: "lifecycle", from: "posts" }, logo_url: { by: "lifecycle", at: NOW, from: "profile_picture:instagram" } } }),
+      [social, { step: "website", status: "waiting", result: { posts: 5, months: 12, searched_at: NOW } }, { step: "brief_pillars", status: "waiting", result: { waiting_for: "posts", text_posts: 2 } }]);
+    const text = [f.website, f.logo, f.timezone, f.regions, f.languages, f.brief, f.competitors.tracking].join(" ");
+    expect(text).not.toMatch(/social_read|brief_pillars|waiting|lifecycle|profile_picture|undefined|null|NaN|\u2014|\u2013/);
+    expect(text).not.toMatch(/colour|organis|recognis/);
+  });
+});

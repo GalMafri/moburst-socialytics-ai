@@ -1,5 +1,6 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { extractImageUrls, logoOnPage, parseBrandReply, siteTextExcerpt, visionImageType } from "./research";
+import { extractImageUrls, logoOnPage, parseBrandReply, parseSocialBrandReply, readSocialBrand, siteTextExcerpt, visionImageType } from "./research";
 
 const BASE = "https://www.example.com";
 
@@ -62,5 +63,34 @@ describe("vision images", () => {
     expect(urls[0]).toBe("https://example.com/logotype.png");
     expect(urls).not.toContain("https://cdn.example.com/bloomberg-1.avif");
     expect(urls).toContain("https://example.com/brand.svg");
+  });
+});
+
+describe("the brand read from social profiles", () => {
+  const REPLY = '{"primary_color":"#112233","secondary_color":"#445566","accent_color":"#778899","font_family":"Inter","visual_style":"v","logo_description":"l","tone_of_voice":"t","design_elements":"d","background_style":"b","business_location":{"city":"Austin","region":"TX","country":"US"},"post_languages":["en","ES","english"]}';
+  it("reads the identity, where the posts say the business is and the posts' languages", () => {
+    expect(parseSocialBrandReply(REPLY)).toEqual({
+      identity: { primary_color: "#112233", secondary_color: "#445566", accent_color: "#778899", font_family: "Inter", visual_style: "v", logo_description: "l", tone_of_voice: "t", design_elements: "d", background_style: "b" },
+      stated: { city: "Austin", region: "TX", country: "US" }, languages: ["en", "es"],
+    });
+  });
+  it("fills in nothing generic when the reply is not the JSON asked for", () => {
+    expect(parseSocialBrandReply("Sorry, I cannot.")).toEqual({ identity: null, stated: null, languages: [] });
+    expect(parseSocialBrandReply('{"primary_color":"#112233","business_location":null}').identity).toBeNull();
+  });
+  it("sends the profile picture and designed posts as images, the posts and bio as text, to gpt-4.1", async () => {
+    let body: { model: string; messages: Array<{ role: string; content: unknown }> } | null = null;
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      body = JSON.parse(String(init.body));
+      return new Response(JSON.stringify({ choices: [{ message: { content: REPLY } }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0]);
+    const out = await readSocialBrand({ clientName: "Olo", openaiKey: "sk", images: [{ bytes: png, label: "LinkedIn profile picture" }, { bytes: new Uint8Array([1, 2, 3]), label: "unreadable" }], postsText: "P1 Order ahead", bio: "Austin, TX", fetchImpl });
+    expect(out.stated).toEqual({ city: "Austin", region: "TX", country: "US" });
+    expect(body!.model).toBe("gpt-4.1");
+    const parts = body!.messages[1].content as Array<{ type: string; text?: string }>;
+    expect(parts.filter((p) => p.type === "image_url")).toHaveLength(1);
+    expect(parts[0].text).toContain("P1 Order ahead");
+    expect(parts[0].text).toContain("Austin, TX");
   });
 });

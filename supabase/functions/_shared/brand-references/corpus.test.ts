@@ -192,3 +192,32 @@ describe("when the look is learned again", () => {
     expect(choicesKey({ b: "kept", a: "left_out" }, ["u"])).toBe(choicesKey({ a: "left_out", b: "kept" }, ["u"]));
   });
 });
+
+describe("performance inside each platform's slots (onboarding from social profiles, section 5)", () => {
+  // Eight Instagram posts: the two oldest did best against the platform's median.
+  const ig = days(8).map((d, i) => `ig:${i + 1}`);
+  const rows = ig.map((g, i) => row(g, days(8)[i]));
+  const reviews = ig.map((g, i) => designed(g, days(8)[i]));
+  const multiples = { "ig:7": 2.4, "ig:8": 1.6, "ig:1": 0.5, "ig:2": 0.7, "ig:3": 1, "ig:4": 0.4, "ig:5": 0.3, "ig:6": 0.2 };
+
+  it("takes kept posts first, then posts at or above the median newest first, then the rest newest first", () => {
+    const sel = selectLibrary(input(rows, reviews, { multiples, choices: { [pathOf("ig:5")]: "kept" } }));
+    expect(sel.library.map((e) => e.source_post_id)).toEqual(["ig:5", "ig:3", "ig:7", "ig:8", "ig:1", "ig:2"]);
+    expect(sel.library.find((e) => e.source_post_id === "ig:7")?.multiple).toBe(2.4);
+    // Without the scores, newest first as before.
+    expect(selectLibrary(input(rows, reviews)).library.map((e) => e.source_post_id)).toEqual(["ig:1", "ig:2", "ig:3", "ig:4", "ig:5", "ig:6"]);
+  });
+
+  it("reviews the posts that could reach the library in the same order", () => {
+    expect(reviewQueue(input(rows, [], { multiples })).map((c) => c.source_post_id)).toEqual(["ig:3", "ig:7", "ig:8", "ig:1", "ig:2", "ig:4"]);
+  });
+
+  it("lends a platform the strategy marks not now its posts, without a section of its own", () => {
+    const li = days(5).map((d, i) => row(`li:${i + 1}`, d));
+    const liReviews = days(5).map((d, i) => designed(`li:${i + 1}`, d));
+    const sel = selectLibrary(input([...rows, ...li], [...reviews, ...liReviews], { notNow: ["LinkedIn"] }));
+    expect(sel.platforms.LinkedIn).toMatchObject({ posts: 5, own_rules: false });
+    expect(sel.platforms.Instagram.own_rules).toBe(true);
+    expect(sel.library.some((e) => e.platform === "LinkedIn")).toBe(true);
+  });
+});

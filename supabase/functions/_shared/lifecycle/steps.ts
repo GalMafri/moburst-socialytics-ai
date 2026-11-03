@@ -13,6 +13,7 @@
 //   brand_read      the website: brand identity, logo, location and timezone, country, language
 //   brief_pillars   a brief from the strategy document or the site when there is none, then pillars and keywords
 //   accounts        Sprout profiles matched by Sprout's brand name and by the site's profile links
+//   social_read     the client's profiles and posts, weekly: logo, brand, location, regions, languages and scored posts (socialRead.ts)
 //   access          the company slug, by the portal's slug rule
 //   design_refs     the client's designed posts per platform, checked weekly, and the visual style learned from them
 //   competitors     identify, pick the three closest with a website, confirm as the system
@@ -30,21 +31,24 @@ import { StyleError } from "../brand-references/errors.ts";
 import { liveRefsIO, readChoices, refreshReferences } from "../brand-references/learnStyle.ts";
 import { defaultSproutCustomerId } from "../sprout/customer.ts";
 import { listCustomerProfiles } from "../sprout/profiles.ts";
-import { listBrandPosts, POSTS_WINDOW_DAYS } from "../sprout/posts.ts";
-import { searchWebsite, webReader } from "../sprout/website.ts";
+import { listBrandPosts, MAX_POST_PAGES, POSTS_YEAR_DAYS } from "../sprout/posts.ts";
+import { searchWebsite, searchWebsiteByName, webReader } from "../sprout/website.ts";
 import { fetchSiteHtml, logoOnPage, normalizeWebsite, openaiKeyFor, ResearchError, researchBrand } from "../brand/research.ts";
-import { anthropicKey, briefFromStrategyDoc, derivePillars, isGenericPillars, PillarsError, type PillarClient } from "../brand/pillars.ts";
+import { anthropicKey, briefFromStrategyDoc, derivePillars, isGenericPillars, PillarsError, type PillarClient, type PillarPost } from "../brand/pillars.ts";
 import { fetchSiteText, identifyCompetitors, IdentifyError } from "../competitive/identify.ts";
 import { detectCompetitorHandles } from "../competitive/detectHandles.ts";
 import { confirmDraftSet } from "../competitive/confirmSet.ts";
 import { advanceSetupOnServer, resetTracking, rivalIqApi, SetupError, syncTrackedHandles } from "../competitive/rivaliqSetupRun.ts";
 import { LANDSCAPE_MISSING } from "../competitive/landscapeCheck.ts";
-import { scrapeMarkdown } from "../net/firecrawl.ts";
-import { matchProfiles, platformsOf, profileListKey, siteProfileLinks, type SproutProfile } from "./accounts.ts";
+import { scrapeMarkdown, searchWeb } from "../net/firecrawl.ts";
+import { FollowFailure } from "../competitive/rivaliqFollowFailure.ts";
+import { followerMarkets, runSocialRead, socialResult, socialVersionKey, topPostsText } from "./socialRead.ts";
+import { liveSocialIO } from "./socialIO.ts";
+import { matchProfiles, platformsOf, profileKeyOf, profileListKey, siteProfileLinks, type SproutProfile } from "./accounts.ts";
 import { libraryPaths, MAX_REFS, pickBackground, placementFor } from "./designSettings.ts";
 import { referencesFor } from "../design-prompts/designRefs.ts";
-import { lifecycleMayWrite, setBy, writeClientFields } from "./fields.ts";
-import { countryCode, htmlLanguage, replacesLocation, resolveLocation, SOURCE_RANK, zoneCountry } from "./location.ts";
+import { lifecycleMayWrite, setBy, sourceOf, writeClientFields } from "./fields.ts";
+import { countryCode, htmlLanguage, regionsFor, replacesLocation, resolveLocation, SOURCE_RANK, zoneCountry } from "./location.ts";
 import { normName, slugify, textHash } from "./names.ts";
 import { cleanSiteText } from "./siteText.ts";
 import { anthropicMessages } from "../anthropic.ts";
@@ -106,6 +110,9 @@ export const deps = {
   listBrandPosts,
   searchWebsite,
   siteReader: () => webReader(),
+  searchWebsiteByName,
+  searchWeb: (query: string) => searchWeb(query),
+  socialIO: () => liveSocialIO(),
   identifyCompetitors,
   detectCompetitorHandles,
   confirmDraftSet,
@@ -159,10 +166,36 @@ export function settled(rows: Map<string, StepRow>, step: string): boolean {
   return true;
 }
 
+/** A client whose own posts are its only evidence: no website, no strategy document, no brief a person wrote. */
+export function postsOnly(client: ClientRow): boolean {
+  const personBrief = !!str(client.brief_text) && setBy(client.field_sources, "brief_text") !== "lifecycle";
+  return !siteKey(client.website_url) && !str(client.strategy_doc_file_path) && !personBrief;
+}
+
+/**
+ * A competitor set the system chose from the client's posts alone, untouched
+ * (the selection it chose, confirmed by nobody) and never tracked, for a
+ * client that now has a website: it is identified once more with the site.
+ */
+// deno-lint-ignore no-explicit-any
+async function chosenFromPostsAgain(db: Db, client: ClientRow, rows: Map<string, StepRow>, set: Record<string, any>): Promise<boolean> {
+  const before = rows.get("competitors")?.result as Record<string, unknown> | null | undefined;
+  if (!siteKey(client.website_url) || before?.chosen_from !== "posts" || before?.set_id !== set.id) return false;
+  if (set.status !== "confirmed" || set.confirmed_by || set.rivaliq_landscape_id) return false;
+  const [{ data: job }, { data: selected, error }] = await Promise.all([
+    db.from("rivaliq_setup_jobs").select("set_id").eq("set_id", set.id).maybeSingle(),
+    db.from("competitors").select("name").eq("set_id", set.id).eq("is_selected", true),
+  ]);
+  if (error) throw new Error(`Could not read the selected competitors: ${error.message}`);
+  if (job) return false;
+  const chosen = Array.isArray(before.selected) ? (before.selected as string[]).map(String).sort().join("|") : "";
+  return chosen === (selected ?? []).map((c: { name: string }) => String(c.name)).sort().join("|");
+}
+
 /** The client's current competitor set: the newest confirmed, analyzing, complete or failed one. */
 // deno-lint-ignore no-explicit-any
 async function currentSet(db: Db, clientId: string): Promise<Record<string, any> | null> {
-  const { data, error } = await db.from("competitor_sets").select("id, status, rivaliq_landscape_id, tracking_check, confirmed_at, created_at")
+  const { data, error } = await db.from("competitor_sets").select("id, status, rivaliq_landscape_id, tracking_check, confirmed_at, confirmed_by, created_at")
     .eq("client_id", clientId).in("status", ["confirmed", "analyzing", "complete", "failed"])
     .order("confirmed_at", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }).limit(1).maybeSingle();
   if (error) throw new Error(`Could not read the client's competitor set: ${error.message}`);
@@ -193,41 +226,91 @@ async function activeProfiles(db: Db, clientId: string): Promise<SproutProfile[]
   })).sort((a: SproutProfile, b: SproutProfile) => a.id.length - b.id.length || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
+/** The platforms the client's content strategy marks "not now". */
+async function notNowPlatforms(db: Db, clientId: string): Promise<string[]> {
+  const { data } = await db.from("content_strategies").select("platforms").eq("client_id", clientId).maybeSingle();
+  const list = Array.isArray(data?.platforms) ? data.platforms : [];
+  return [...new Set(list.filter((p: { state?: unknown }) => p?.state === "not_now").map((p: { platform?: unknown }) => String(p.platform ?? "")).filter(Boolean))].sort() as string[];
+}
+
 /** Steps in the order a new client goes through them. */
 export const STEPS: Record<string, StepDef> = {
   // A website for a client that has none and that nobody set (spec:
   // docs/superpowers/specs/2026-11-02-sprout-auto-onboarding-design.md,
-  // section 5): the search the Sprout onboarding job runs (sprout/website.ts)
-  // over the posts of the client's assigned profiles in the last 90 days.
-  // Looked at again every 7 days as posts arrive, and whenever its profiles
-  // change. The website it confirms is brand_read's input; a website the
-  // client has, or one a person set, is never replaced.
+  // section 5, and 2026-11-03-onboarding-complete-design.md, section 4): the
+  // search the Sprout onboarding job runs (sprout/website.ts) over the posts
+  // of the client's assigned profiles in the last 12 months, every page
+  // Sprout returns, with the client's Instagram bio links (social_read) as
+  // one more post; then, at creation, when the name or profiles change and
+  // monthly while there is none, a web search by name that counts only a
+  // site linking to one of the client's profiles. Looked at again every 7
+  // days as posts arrive. The website it confirms is brand_read's input; a
+  // website the client has, or one a person set, is never replaced.
   website: {
     policy: { recheckDays: 7 },
-    async inputs(db, client) {
+    async inputs(db, client, rows) {
       if (siteKey(client.website_url) || !lifecycleMayWrite(client.field_sources, "website_url")) return null;
       const ids = (await activeProfiles(db, client.id)).map((p) => p.id);
-      return ids.length ? `profiles:${ids.join(",")}` : null;
+      const links = ((socialResult(rows)?.instagram?.bio?.links ?? []) as string[]).join(" ");
+      return ids.length ? `profiles:${ids.join(",")}|name:${normName(client.name)}${links ? `|bio:${textHash(links)}` : ""}` : null;
     },
-    async run(db, client) {
+    async run(db, client, { previous, rows }) {
       if (siteKey(client.website_url) || !lifecycleMayWrite(client.field_sources, "website_url")) return { status: "done", result: { kept: true } };
       const profiles = await activeProfiles(db, client.id);
       if (!profiles.length) return { status: "waiting", reason: "social_accounts" };
       const now = deps.now();
       const posts = await deps.listBrandPosts(profiles.map((p) => p.id), {
-        since: new Date(now.getTime() - POSTS_WINDOW_DAYS * DAY), until: now, customerId: String(client.sprout_customer_id || defaultSproutCustomerId()),
+        since: new Date(now.getTime() - POSTS_YEAR_DAYS * DAY), until: now, customerId: String(client.sprout_customer_id || defaultSproutCustomerId()), pages: MAX_POST_PAGES,
       });
-      const found = await deps.searchWebsite({ name: client.name, profiles }, posts, deps.siteReader());
-      if (!found.website) return { status: "waiting", reason: "website", recheckDays: 7, result: { posts: posts.length, most_linked: found.most_linked, tried: found.tried } };
-      const written = await writeClientFields(db, client.id, { website_url: found.website });
-      return { status: "done", result: { website: found.website, confirmed_by: found.confirmed_by, posts: posts.length, written: written.written, kept: written.skipped } };
+      const bio = ((socialResult(rows)?.instagram?.bio?.links ?? []) as string[]).filter((l) => typeof l === "string");
+      const reader = deps.siteReader();
+      const brand = { name: client.name, profiles };
+      // 1. The links in the posts; 2. the Instagram bio's links, confirmed the same way.
+      const found = await deps.searchWebsite(brand, posts, reader);
+      let website = found.website;
+      let confirmedBy: string | null = found.confirmed_by;
+      let linked = found.site_profiles;
+      const tried = [...found.tried];
+      if (!website && bio.length) {
+        const fromBio = await deps.searchWebsite(brand, [{ text: bio.join(" ") }], reader);
+        tried.push(...fromBio.tried);
+        if (fromBio.website) {
+          website = fromBio.website;
+          confirmedBy = `bio_${fromBio.confirmed_by}`;
+          linked = fromBio.site_profiles;
+        }
+      }
+      // The web search by name: at creation, when the name or profiles change, and monthly while there is no website.
+      const before = previous?.result as Record<string, unknown> | null | undefined;
+      const searchedAt = typeof before?.searched_at === "string" ? before.searched_at : null;
+      let searched: { searched_at: string; queries: string[]; tried: unknown } | null = null;
+      if (!website && (!searchedAt || now.getTime() - Date.parse(searchedAt) >= 30 * DAY)) {
+        const byName = await deps.searchWebsiteByName(brand, { search: (q: string) => deps.searchWeb(q) }, reader, { skip: tried.map((t) => t.domain) });
+        searched = { searched_at: now.toISOString(), queries: byName.queries, tried: byName.tried };
+        if (byName.website) {
+          website = byName.website;
+          confirmedBy = "search_profile_link";
+          linked = byName.site_profiles;
+        }
+      }
+      const search = searched ?? (searchedAt ? { searched_at: searchedAt, queries: before?.queries ?? [], tried: before?.searched ?? [] } : null);
+      const looked = { posts: posts.length, months: 12, ...(search ? { searched_at: search.searched_at, queries: search.queries, searched: search.tried } : {}) };
+      if (!website) return { status: "waiting", reason: "website", recheckDays: 7, result: { ...looked, most_linked: found.most_linked, tried } };
+      // Which of the client's profiles the site links to, for the setup page's line.
+      const keys = new Set(linked);
+      const linkedNetwork = profiles.map((p) => ({ p, k: profileKeyOf(p) })).find((x) => x.k && keys.has(x.k))?.p.network_type ?? null;
+      const written = await writeClientFields(db, client.id, { website_url: website });
+      return { status: "done", result: { ...looked, website, confirmed_by: confirmedBy, linked_network: linkedNetwork, found_at: now.toISOString(), written: written.written, kept: written.skipped } };
     },
   },
 
   // The website: brand identity, logo, where the business is (and so its
   // timezone), its country and its language. Re-read every 180 days and
   // whenever the website changes. The model call is made only when something
-  // it reads can still be written.
+  // it reads can still be written. The site's values replace what the social
+  // profiles gave where the site ranks higher (location.ts); the posts'
+  // languages outrank the site's language tag, and the regions keep the
+  // followers' countries (onboarding from social profiles, section 3).
   brand_read: {
     policy: { refreshDays: 180 },
     async inputs(_db, client) {
@@ -235,7 +318,7 @@ export const STEPS: Record<string, StepDef> = {
       // A new look in the client's posts (design_refs) reads the site again, so the logo file and colors follow a rebrand.
       return site && str(client.look_since) ? `${site}|look:${str(client.look_since)}` : site;
     },
-    async run(db, client) {
+    async run(db, client, { rows }) {
       const fs = client.field_sources;
       const may = (f: string) => lifecycleMayWrite(fs, f);
       const website = normalizeWebsite(String(client.website_url));
@@ -287,10 +370,13 @@ export const STEPS: Record<string, StepDef> = {
         if (location.timezone && may("timezone") && location.timezone !== str(client.timezone)) fields.timezone = location.timezone;
       }
       const country = location.country ?? personZone ?? lang.country ?? countryCode(read?.headquarters?.country);
-      if (country && may("geo") && country !== str(client.geo)) fields.geo = country;
+      const regions = regionsFor(country, (socialResult(rows)?.follower_countries ?? []) as Array<{ country: string; share: number }>);
+      if (regions.length && may("geo") && regions.join(",") !== str(client.geo)) fields.geo = regions.join(",");
       const language = lang.language ?? read?.site_language ?? null;
-      if (language && may("language") && language !== str(client.language)) fields.language = language;
-      const written = await writeClientFields(db, client.id, fields);
+      if (language && may("language") && sourceOf(fs, "language") !== "posts" && language !== str(client.language)) fields.language = language;
+      const written = await writeClientFields(db, client.id, fields, "lifecycle", {
+        brand_identity: "website", logo_url: "website", language: "website", timezone: location.source ?? "", geo: regions.some((r) => r !== country) ? "followers" : "website",
+      });
       return {
         status: "done",
         result: {
@@ -313,18 +399,25 @@ export const STEPS: Record<string, StepDef> = {
   // replaced. Pillars and keywords are then derived from the evidence; the
   // five generic default pillars count as none. Runs again when the brief,
   // the strategy document or the website changes, or when a person hands a
-  // field back.
+  // field back. The client's posts from social_read (its top 12 by multiple,
+  // labeled, and its 12 newest) are the posts the pillars read, and for a
+  // client with no website or document the brief is drafted from them; one
+  // with fewer than 5 posts with text waits and looks again weekly. A move
+  // of the posts' evidence version runs it again (socialVersionKey).
   brief_pillars: {
     policy: {},
-    async inputs(_db, client, rows) {
+    async inputs(db, client, rows) {
       const site = siteKey(client.website_url);
-      if (!site && !str(client.brief_text) && !client.strategy_doc_file_path) return null;
+      const fromPosts = postsOnly(client);
+      if (fromPosts && !str(client.brief_text) && !socialResult(rows)) return null;
       if (site && !settled(rows, "brand_read")) return null;
+      // A client with Sprout profiles reads its posts first, so the first pillars already stand on them.
+      if (!settled(rows, "social_read") && (await activeProfiles(db, client.id)).length) return null;
       const fs = client.field_sources;
       // A brief the lifecycle wrote is not an input (the step wrote it), so writing it never re-runs the step.
       const brief = !str(client.brief_text) || setBy(fs, "brief_text") === "lifecycle" ? "site" : textHash(client.brief_text);
       const own = ["brief_text", "content_pillars", "social_keywords"].map((f) => (lifecycleMayWrite(fs, f) ? "p" : "x")).join("");
-      return `brief:${brief}|doc:${str(client.strategy_doc_file_path)}|site:${site ?? ""}|own:${own}`;
+      return `brief:${brief}|doc:${str(client.strategy_doc_file_path)}|site:${site ?? ""}|own:${own}${socialVersionKey(rows, fromPosts)}`;
     },
     async run(db, client, { rows }) {
       const fs = client.field_sources;
@@ -336,9 +429,16 @@ export const STEPS: Record<string, StepDef> = {
       const keywords = Array.isArray(client.social_keywords) ? client.social_keywords : [];
       const wantKeywords = may("social_keywords") && (keywords.length === 0 || setBy(fs, "social_keywords") === "lifecycle");
       if (!wantBrief && !wantPillars && !wantKeywords) return { status: "done", result: { brief: "kept", pillars: "kept" } };
+      const social = socialResult(rows);
+      const posts = (Array.isArray(social?.posts) ? social!.posts : []) as PillarPost[];
+      // A client whose posts are its only evidence needs 5 organic posts with text (in 90 days, else 12 months).
+      if (postsOnly(client) && social && !social.enough) {
+        return { status: "waiting", reason: "posts", recheckDays: 7, result: { text_posts: Number(social.text_posts) || 0, window_days: social.window_days ?? null } };
+      }
 
       const fields: Record<string, unknown> = {};
-      let brief: "from_doc" | "drafted" | "kept" | "none" = personBrief ? "kept" : "none";
+      const from: Record<string, string> = {};
+      let brief: "from_doc" | "drafted" | "from_posts" | "kept" | "none" = personBrief ? "kept" : "none";
       const docPath = str(client.strategy_doc_file_path) || null;
       let briefDoc: string | null = null;
       // 1. The strategy document's own words. One already copied from this document is not read again.
@@ -352,6 +452,7 @@ export const STEPS: Record<string, StepDef> = {
             const fromDoc = await deps.briefFromStrategyDoc(db, docPath, await deps.anthropicKey(db));
             if (fromDoc) {
               fields.brief_text = `From the strategy document, read on ${day(deps.now())}:\n\n${fromDoc.text}`;
+              from.brief_text = "strategy_doc";
               brief = "from_doc";
               briefDoc = docPath;
             }
@@ -372,20 +473,33 @@ export const STEPS: Record<string, StepDef> = {
       if (wantBrief && brief !== "from_doc" && siteText.length >= 80) {
         const body = siteText.slice(0, 2500);
         const current = str(client.brief_text);
-        if (!current.endsWith(body)) fields.brief_text = `Drafted from the website on ${day(deps.now())}:\n\n${body}`;
+        if (!current.endsWith(body)) {
+          fields.brief_text = `Drafted from the website on ${day(deps.now())}:\n\n${body}`;
+          from.brief_text = "website";
+        }
         brief = "drafted";
       }
+      // 3. The client's posts, when there is no document or website to take the brief from: the same call as the pillars writes it.
+      const briefFromPosts = wantBrief && brief === "none" && posts.length > 0;
       let pillars: "derived" | "kept" | "none" = wantPillars ? "none" : "kept";
       let derivedNames: string[] = [];
       let derivedKeywords = 0;
       let source: string | null = null;
-      if (wantPillars || wantKeywords) {
+      if (wantPillars || wantKeywords || briefFromPosts) {
         const key = await deps.anthropicKey(db);
         if (!key) return { status: "failed", error: "The AI connection is not configured." };
         // The derivation reads the strategy document itself, so a brief copied from it is not given twice.
         const evidence = { ...client, brief_text: brief === "drafted" ? (fields.brief_text as string | undefined) ?? str(client.brief_text) : personBrief };
         try {
-          const d = await deps.derivePillars(db, evidence as PillarClient, key, { siteText: brief === "drafted" ? null : siteText || null, language: str(client.language) || null });
+          const d = await deps.derivePillars(db, evidence as PillarClient, key, {
+            siteText: brief === "drafted" ? null : siteText || null, language: str(client.language) || null,
+            ...(posts.length ? { posts, briefFromPosts, bio: (social?.instagram?.bio?.biography as string | undefined) ?? null } : {}),
+          });
+          if (briefFromPosts && d.brief) {
+            fields.brief_text = `Drafted from the client's posts on ${day(deps.now())}:\n\n${d.brief}`;
+            from.brief_text = "posts";
+            brief = "from_posts";
+          }
           if (wantPillars && d.pillars.length) {
             Object.assign(fields, { content_pillars: d.pillars, pillars_source: d.source, pillars_derived_at: d.derived_at });
             pillars = "derived";
@@ -399,16 +513,16 @@ export const STEPS: Record<string, StepDef> = {
         } catch (e) {
           if (!(e instanceof PillarsError)) throw e;
           if (e.code === "no_evidence") {
-            await writeClientFields(db, client.id, fields);
+            await writeClientFields(db, client.id, fields, "lifecycle", from);
             return { status: "waiting", reason: "evidence", recheckDays: 7, result: { brief, brief_doc: briefDoc } };
           }
           // The brief is kept even when the pillars must be tried again.
-          await writeClientFields(db, client.id, fields);
+          await writeClientFields(db, client.id, fields, "lifecycle", from);
           return { status: "failed", error: e.message };
         }
       }
-      const written = await writeClientFields(db, client.id, fields);
-      return { status: "done", result: { brief, brief_doc: briefDoc, pillars, pillar_names: derivedNames, keywords: derivedKeywords, source, site_chars: siteText.length, written: written.written, kept: written.skipped } };
+      const written = await writeClientFields(db, client.id, fields, "lifecycle", from);
+      return { status: "done", result: { brief, brief_doc: briefDoc, pillars, pillar_names: derivedNames, keywords: derivedKeywords, source, site_chars: siteText.length, posts: posts.length, drafted_at: deps.now().toISOString(), written: written.written, kept: written.skipped } };
     },
   },
 
@@ -476,6 +590,20 @@ export const STEPS: Record<string, StepDef> = {
     },
   },
 
+  // The client's Sprout profiles and posts as a source, read weekly (spec:
+  // docs/superpowers/specs/2026-11-03-onboarding-complete-design.md;
+  // socialRead.ts): logo, brand, location, regions and languages when the
+  // evidence moves, and the scored posts the brief, pillars, competitors and
+  // design references read. A quiet week is one Sprout read and no write.
+  social_read: {
+    policy: { refreshDays: 7, recheckDays: 7 },
+    async inputs(db, client) {
+      const ids = (await activeProfiles(db, client.id)).map((p) => p.id);
+      return ids.length ? `profiles:${ids.join(",")}|look:${str(client.look_since)}` : null;
+    },
+    run: (db, client, { rows }) => runSocialRead(db, client, { rows }, deps.socialIO()),
+  },
+
   // The company slug the portal scopes client users by, from the client's
   // name with the portal's slug rule, when nobody set one. Looked at every
   // day. A slug another client already holds is left alone; the portal's
@@ -516,11 +644,14 @@ export const STEPS: Record<string, StepDef> = {
       if (!ids.length) return null;
       const uploads = Array.isArray(client.design_references) ? client.design_references.filter((p: unknown): p is string => typeof p === "string" && !!p) : [];
       const choices = await readChoices(db, client.id);
-      return `${referenceFingerprint(ids, String(client.sprout_customer_id || defaultSproutCustomerId()))}|chosen:${choicesKey(choices, uploads)}`;
+      const notNow = await notNowPlatforms(db, client.id);
+      return `${referenceFingerprint(ids, String(client.sprout_customer_id || defaultSproutCustomerId()))}|chosen:${choicesKey(choices, uploads)}${notNow.length ? `|not_now:${notNow.join(",")}` : ""}`;
     },
-    async run(db, client) {
+    async run(db, client, { rows }) {
       try {
-        const out = await refreshReferences(db, String(client.id), deps.refsIO());
+        // The social read's scores order each platform's slots; a platform the strategy marks "not now" gets no section.
+        const multiples = (socialResult(rows)?.multiples ?? undefined) as Record<string, number> | undefined;
+        const out = await refreshReferences(db, String(client.id), deps.refsIO(), { multiples, notNow: await notNowPlatforms(db, client.id) });
         if (out.kind === "no_accounts") return { status: "waiting", reason: "social_accounts" };
         if (out.kind === "in_progress") return { status: "waiting", reason: "in_progress", recheckMinutes: 1, result: { reviewed: out.reviewed, left: out.left } };
         if (out.kind === "too_few") return { status: "waiting", reason: "designed_posts", recheckDays: 7, result: { designed: out.designed, posts_read: out.posts_read } };
@@ -540,19 +671,30 @@ export const STEPS: Record<string, StepDef> = {
   // are not needed to pick), look up their profiles, confirm as the system.
   // A client that already has a confirmed, analyzing, complete or failed set
   // is never touched, and drafts made by people are ignored. Two runs: the
-  // identification, then the pick and the confirmation a minute later.
+  // identification, then the pick and the confirmation a minute later. A
+  // client with no website is identified once its pillars are written, from
+  // its top posts' text and its followers' countries; that set is identified
+  // once more when a website is found, if nobody changed it and it was never
+  // tracked (onboarding from social profiles, sections 1 and 4).
   competitors: {
     policy: {},
     async inputs(db, client, rows) {
-      if (!siteKey(client.website_url)) return null;
+      const site = siteKey(client.website_url);
       const set = await currentSet(db, client.id);
-      if (set) return `existing:${set.id}`;
+      if (set) return (await chosenFromPostsAgain(db, client, rows, set)) ? `again:${set.id}|site:${site}` : `existing:${set.id}`;
       if (!settled(rows, "brief_pillars")) return null;
-      return `site:${siteKey(client.website_url)}|notes:${textHash(client.competitor_seed_notes)}`;
+      if (!site && isGenericPillars(client.content_pillars)) return null;
+      return `site:${site ?? ""}|notes:${textHash(client.competitor_seed_notes)}`;
     },
-    async run(db, client, { previous }) {
+    async run(db, client, { previous, rows }) {
       const set = await currentSet(db, client.id);
-      if (set) return { status: "done", result: { set_id: set.id, status: set.status, source: "existing" } };
+      const again = !!set && (await chosenFromPostsAgain(db, client, rows, set));
+      if (set && !again) return { status: "done", result: { set_id: set.id, status: set.status, source: "existing" } };
+      const site = siteKey(client.website_url);
+      const social = socialResult(rows);
+      const before = rows.get("competitors")?.result as Record<string, unknown> | null | undefined;
+      // While the set chosen from posts is identified again, the step keeps saying so.
+      const carry = again ? { chosen_from: "posts", set_id: set!.id, selected: before?.selected ?? [] } : {};
       let draftId = (previous?.result?.draft_set_id as string | null | undefined) ?? null;
       if (draftId) {
         const { data: draft } = await db.from("competitor_sets").select("id, status").eq("id", draftId).maybeSingle();
@@ -562,10 +704,12 @@ export const STEPS: Record<string, StepDef> = {
         const key = await deps.anthropicKey(db);
         if (!key) return { status: "failed", error: "The AI connection is not configured." };
         try {
-          const made = await deps.identifyCompetitors(db, client, key, { generatedBy: null });
-          return { status: "waiting", reason: "in_progress", recheckMinutes: 1, result: { draft_set_id: made.set_id, proposed: made.competitors.length } };
+          // With no website: the top posts' text where the homepage's would be, the followers' countries as markets.
+          const markets = site ? [] : followerMarkets(social);
+          const made = await deps.identifyCompetitors(db, markets.length ? { ...client, geo: markets.join(",") } : client, key, { generatedBy: null, ...(site ? {} : { postsText: topPostsText(social) }) });
+          return { status: "waiting", reason: "in_progress", recheckMinutes: 1, result: { ...carry, draft_set_id: made.set_id, proposed: made.competitors.length } };
         } catch (e) {
-          if (e instanceof IdentifyError && e.code === "too_few") return { status: "waiting", reason: "competitors", recheckDays: 30, result: { draft_set_id: null } };
+          if (e instanceof IdentifyError && e.code === "too_few") return { status: "waiting", reason: "competitors", recheckDays: 30, result: { ...carry, draft_set_id: null } };
           throw e;
         }
       }
@@ -573,7 +717,7 @@ export const STEPS: Record<string, StepDef> = {
       if (error) throw new Error(`Could not read the proposed competitors: ${error.message}`);
       const chosen = (comps ?? []).filter((c: { website_url: string | null }) => str(c.website_url))
         .sort((a: { similarity_score: number | null }, b: { similarity_score: number | null }) => (Number(b.similarity_score) || 0) - (Number(a.similarity_score) || 0)).slice(0, 3);
-      if (chosen.length < 3) return { status: "waiting", reason: "competitors", recheckDays: 30, result: { draft_set_id: null } };
+      if (chosen.length < 3) return { status: "waiting", reason: "competitors", recheckDays: 30, result: { ...carry, draft_set_id: null } };
       for (const c of comps ?? []) {
         const rank = chosen.indexOf(c);
         const want = rank >= 0 ? { is_selected: true, selected_rank: rank + 1 } : { is_selected: false, selected_rank: null };
@@ -585,8 +729,8 @@ export const STEPS: Record<string, StepDef> = {
       // Their profiles, for the screens; tracking does not need them.
       await Promise.all(chosen.map((c: { id: string; client_id: string; name: string; website_url: string | null }) =>
         deps.detectCompetitorHandles(db, [c]).catch((e: unknown) => console.warn("[lifecycle] profile lookup skipped", c.name, e instanceof Error ? e.message : e))));
-      await deps.confirmDraftSet(db, draftId, { confirmedBy: null, notes: "Chosen automatically: the three closest competitors with a website." });
-      return { status: "done", result: { set_id: draftId, selected: chosen.map((c: { name: string }) => c.name), proposed: (comps ?? []).length, created: true } };
+      await deps.confirmDraftSet(db, draftId, { confirmedBy: null, notes: site ? "Chosen automatically: the three closest competitors with a website." : "Chosen automatically from the client's posts: the three closest competitors with a website." });
+      return { status: "done", result: { set_id: draftId, selected: chosen.map((c: { name: string }) => c.name), proposed: (comps ?? []).length, created: true, chosen_from: site ? "website" : "posts", ...(again ? { replaced: set!.id } : {}) } };
     },
   },
 
@@ -603,7 +747,8 @@ export const STEPS: Record<string, StepDef> = {
     policy: {},
     async inputs(db, client, rows) {
       if (!settled(rows, "brief_pillars")) return null;
-      if (siteKey(client.website_url) && !settled(rows, "competitors")) return null;
+      // Competitors are identified for a client with a website, and for one without once its pillars are written.
+      if ((siteKey(client.website_url) || !isGenericPillars(client.content_pillars)) && !settled(rows, "competitors")) return null;
       let names: string[] = [];
       try {
         names = (await deps.trendIO().competitorSet(db, client.id)).map((c) => c.name).sort();
@@ -684,7 +829,7 @@ export const STEPS: Record<string, StepDef> = {
       const { data, error } = await db.from("sprout_profiles").select("network_type").eq("client_id", client.id).eq("is_active", true);
       if (error) throw new Error(`Could not read the client's social accounts: ${error.message}`);
       const networks = [...new Set((data ?? []).map((r: { network_type: unknown }) => String(r.network_type ?? "")))].filter(Boolean).sort().join(",");
-      return `profile:${p.written_at}|networks:${networks}|rhythm:${textHash(JSON.stringify(client.posting_rhythm ?? null))}`;
+      return `profile:${p.written_at}|networks:${networks}|rhythm:${textHash(JSON.stringify(client.posting_rhythm ?? null))}${socialVersionKey(rows, postsOnly(client))}`;
     },
     async run(db, client, { rows }) {
       const key = await deps.anthropicKey(db);
@@ -713,21 +858,29 @@ export const STEPS: Record<string, StepDef> = {
     },
   },
 
+  // Without a client website RivalIQ cannot follow the client, and with its
+  // plan full it cannot follow anyone new (Lital, 3 Nov 2026: 40 of 40,
+  // pinned): tracking waits, as a plain fact on the setup page, and starts
+  // when a website is found or a place opens.
   tracking: {
     policy: {},
-    async inputs(db, client) {
+    async inputs(db, client, rows) {
       const set = await currentSet(db, client.id);
       if (!set) return null;
+      // A set chosen from posts alone is identified again with the new website first, never tracked.
+      if (await chosenFromPostsAgain(db, client, rows, set)) return null;
       const { data, error } = await db.from("competitors").select("id, website_url, selected_rank").eq("set_id", set.id).eq("is_selected", true).order("selected_rank");
       if (error) throw new Error(`Could not read the selected competitors: ${error.message}`);
       const selection = textHash((data ?? []).map((c: { id: string; website_url: string | null; selected_rank: number | null }) => `${c.selected_rank}:${c.id}:${c.website_url}`).join("|"));
       return `${set.id}|${set.rivaliq_landscape_id ?? "none"}|${set.tracking_check?.code ?? ""}|${selection}|${siteKey(client.website_url) ?? ""}`;
     },
     async run(db, client, { rows }) {
-      const key = deps.rivaliqKey();
-      if (!key) return { status: "failed", error: "The RivalIQ connection is not configured." };
       const set = await currentSet(db, client.id);
       if (!set) return { status: "waiting", reason: "competitor_set" };
+      // RivalIQ follows companies by their website: nothing is asked of it until the client has one.
+      if (!siteKey(client.website_url) && !set.rivaliq_landscape_id) return { status: "waiting", reason: "client_website", result: { set_id: set.id } };
+      const key = deps.rivaliqKey();
+      if (!key) return { status: "failed", error: "The RivalIQ connection is not configured." };
       const api = deps.rivalIqApi(key);
       let landscape: string | null = str(set.rivaliq_landscape_id) || null;
       const check = set.tracking_check as { code?: string; landscape_id?: string | null } | null;
@@ -749,6 +902,8 @@ export const STEPS: Record<string, StepDef> = {
           if (e instanceof SetupError && e.code === "selection") return { status: "waiting", reason: "selection", result: { set_id: set.id, detail: e.message } };
           if (e instanceof SetupError && e.code === "busy") return { status: "waiting", reason: "analysis_running", recheckMinutes: 60 };
           if (e instanceof SetupError && e.code === "changed") return { status: "failed", error: e.message, soonMinutes: 5 };
+          // The plan is full: tracking waits for a free place, looked at again daily.
+          if (e instanceof FollowFailure && e.planFull) return { status: "waiting", reason: "rivaliq_full", recheckDays: 1, result: { set_id: set.id } };
           throw e;
         }
       }

@@ -14,6 +14,14 @@
 // registrable domain's homepage. The weekly onboarding job and the
 // lifecycle's website step run this same search.
 //
+// When the posts confirm none, the lifecycle's website step searches the web
+// for the brand by name (spec: docs/superpowers/specs/2026-11-03-onboarding-
+// complete-design.md, section 4): up to three searches (the name and each
+// distinct handle), shared platforms and the domains the post search tried
+// dropped, three new domains read at most. A searched domain counts only
+// when its homepage links to one of the brand's own profiles: a short name
+// finds other companies, so a name match alone never does.
+//
 // The network is behind SiteReader, so everything else here is pure and can
 // be tested; webReader is the real one. It follows redirects itself, one hop
 // at a time, so a link in somebody's post can never lead the server into a
@@ -186,6 +194,66 @@ export async function searchWebsite(brand: BrandLike, posts: Array<{ text?: stri
     return { website, confirmed_by: fact, most_linked: domains[0].domain, domains, tried, site_profiles: page ? siteProfileLinks(page.html) : [] };
   }
   return { website: null, confirmed_by: null, most_linked: domains[0]?.domain ?? null, domains, tried, site_profiles: [] };
+}
+
+/** At most this many web searches for a brand's website, and this many new domains read from them. */
+export const MAX_NAME_SEARCHES = 3;
+export const MAX_SEARCHED_SITES = 3;
+
+/** A web search: the addresses of its results, in their order. */
+export interface SearchEngine {
+  search(query: string): Promise<string[]>;
+}
+
+/** What a brand's website is searched by: its name, then each distinct handle, at most three. */
+export function nameQueries(name: string, handles: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const q of [name, ...handles].map((x) => String(x || "").trim()).filter(Boolean)) {
+    const k = q.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(q);
+  }
+  return out.slice(0, MAX_NAME_SEARCHES);
+}
+
+export interface NameSearch {
+  website: string | null;
+  confirmed_by: "profile_link" | null;
+  queries: string[];
+  tried: Array<{ domain: string; read: boolean; linked: boolean }>;
+  /** The profile keys the confirmed homepage links to. */
+  site_profiles: string[];
+}
+
+/** The brand's website searched by name: the first new domain whose homepage links to one of the brand's profiles. */
+export async function searchWebsiteByName(brand: BrandLike, engine: SearchEngine, reader: SiteReader, o: { skip?: string[] } = {}): Promise<NameSearch> {
+  const skip = new Set((o.skip ?? []).map((d) => d.toLowerCase()));
+  const queries = nameQueries(brand.name, brand.profiles.map((p) => p.native_name));
+  const tried: NameSearch["tried"] = [];
+  const asked: string[] = [];
+  const keys = new Set(brand.profiles.map((p: SproutProfile) => profileKeyOf(p)).filter(Boolean) as string[]);
+  for (const q of queries) {
+    asked.push(q);
+    const urls = await engine.search(q).catch(() => [] as string[]);
+    for (const url of urls) {
+      if (tried.length >= MAX_SEARCHED_SITES) break;
+      const domain = registrableDomain(url);
+      if (!domain || sharedPlatformKind(url) || skip.has(domain) || tried.some((t) => t.domain === domain)) continue;
+      const page = await reader.homepage(`https://${domain}`).catch(() => null);
+      const linked = !!page && siteProfileLinks(page.html).some((k) => keys.has(k));
+      tried.push({ domain, read: !!page, linked });
+      if (!linked) continue;
+      let website = `https://${domain}`;
+      try {
+        if (page && !sharedPlatformKind(page.url)) website = new URL(page.url).origin;
+      } catch { /* the domain itself */ }
+      return { website, confirmed_by: "profile_link", queries: asked, tried, site_profiles: siteProfileLinks(page!.html) };
+    }
+    if (tried.length >= MAX_SEARCHED_SITES) break;
+  }
+  return { website: null, confirmed_by: null, queries: asked, tried, site_profiles: [] };
 }
 
 /**

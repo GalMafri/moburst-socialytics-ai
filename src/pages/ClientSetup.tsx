@@ -30,7 +30,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loading } from "@/components/ui/loading";
 import { PlatformIcon } from "@/lib/platform-config";
-import { clientOriginLine, countryNames, declinedBrandLine, formatDate, languageNames, locationSourceWords, platformName, scheduleLines, timeZoneName } from "@/lib/display";
+import { clientOriginLine, countryNames, declinedBrandLine, formatDate, languageNames, locationOrigin, onboardingFacts, platformName, scheduleLines, timeZoneName, type OnboardingStep } from "@/lib/display";
 import { changedColumns, EMPTY_FORM, formFromClient, keywordPhrases, rebaseForm, setByOf, type SetupForm } from "@/lib/clientSetupForm";
 import { invokeResendable, sendQuietly, writeResendable } from "@/lib/quietSend";
 import { useLifecycleStep } from "@/hooks/useLifecycleStep";
@@ -189,6 +189,19 @@ export default function ClientSetup() {
     enabled: !!clientId,
   });
 
+  // What the product read from the client's website search and social profiles: the facts this page states (display.ts onboardingFacts).
+  const { data: onboardingSteps } = useQuery({
+    queryKey: ["onboarding-steps", clientId],
+    queryFn: async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, error } = await (supabase.from as any)("client_lifecycle_steps").select("step, status, done_at, result")
+        .eq("client_id", clientId).in("step", ["website", "social_read", "brief_pillars", "competitors", "tracking"]);
+      if (error) throw error;
+      return (Array.isArray(data) ? data : []) as OnboardingStep[];
+    },
+    enabled: !!clientId,
+  });
+
   // The rhythm the latest week's plan worked out, per platform, and where it came from.
   const { data: planRhythm } = useQuery({
     queryKey: ["plan-rhythm", id],
@@ -303,7 +316,8 @@ export default function ClientSetup() {
 
   const fs = client?.field_sources;
   const by = (field: string) => setByOf(fs, field);
-  const location = (client?.location ?? null) as { source?: string | null } | null;
+  const location = (client?.location ?? null) as { source?: string | null; via?: string | null; locality?: string | null } | null;
+  const facts = onboardingFacts(client, onboardingSteps);
   const brandReadOn = formatDate(brandStep.row?.done_at);
   const pillarsOn = formatDate(client?.pillars_derived_at);
   const zones = form.timezone && !TIME_ZONES.includes(form.timezone) ? [form.timezone, ...TIME_ZONES] : TIME_ZONES;
@@ -357,7 +371,7 @@ export default function ClientSetup() {
           </TabsList>
 
           <TabsContent value="info" className="space-y-section mt-section">
-            <Section layout="split" eyebrow="Client" title="Basic information" description="The website is where the brand, logo, location, time zone and language are read from.">
+            <Section layout="split" eyebrow="Client" title="Basic information" description="The brand, logo, location, time zone and language are read from the website and the client's social profiles.">
                 <div className="space-y-2">
                   <Label htmlFor="client-name">Client name *</Label>
                   <Input id="client-name" value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g., Acme Corp" />
@@ -373,13 +387,14 @@ export default function ClientSetup() {
                       ? `The brand, logo, location, time zone and language are read from the website, last on ${brandReadOn}, and again whenever it changes.`
                       : "The brand, logo, location, time zone and language are read from the website."}
                   </Origin>
+                  {facts.website && <Origin>{facts.website}</Origin>}
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="client-timezone">Client time zone</Label>
                   <Select value={form.timezone || undefined} onValueChange={(value) => set("timezone", value)}>
                     <SelectTrigger id="client-timezone" className="w-full">
-                      <SelectValue placeholder="Worked out from the website" />
+                      <SelectValue placeholder="Worked out from the website, profiles and posts" />
                     </SelectTrigger>
                     <SelectContent>
                       {zones.map((z) => <SelectItem key={z} value={z}>{timeZoneName(z)}</SelectItem>)}
@@ -388,9 +403,11 @@ export default function ClientSetup() {
                   <Origin>
                     {by("timezone") === "person"
                       ? "Set by your team. The product keeps it as it is."
-                      : by("timezone") === "lifecycle" && locationSourceWords(location?.source)
-                        ? `Worked out from ${locationSourceWords(location?.source)}. You can change it here.`
-                        : "Used for posting times on the calendar."}
+                      : facts.timezone
+                        ? facts.timezone
+                        : by("timezone") === "lifecycle" && locationOrigin(location)
+                          ? `Worked out from ${locationOrigin(location)}. You can change it here.`
+                          : "Used for posting times on the calendar."}
                   </Origin>
                 </div>
 
@@ -474,7 +491,7 @@ export default function ClientSetup() {
                 </div>
                 <div className="space-y-2">
                   <Label>Geographic focus (select any)</Label>
-                  <Origin>{by("geo") === "lifecycle" ? "Read from the website. You can change it here." : ""}</Origin>
+                  <Origin>{by("geo") === "lifecycle" ? `${facts.regions || "Read from the website."} You can change it here.` : ""}</Origin>
                   <div className="flex flex-wrap gap-2">
                     {geoOptions.map((g) => {
                       const active = form.geo.includes(g.value);
@@ -501,7 +518,7 @@ export default function ClientSetup() {
                     })}
                   </div>
                   <p className="t-secondary">
-                    {by("language") === "lifecycle" ? "Read from the website. " : ""}AI-generated copy targets these languages, and trends include posts in any of them.
+                    {by("language") === "lifecycle" ? `${facts.languages || "Read from the website."} ` : ""}AI-generated copy targets these languages, and trends include posts in any of them.
                   </p>
                 </div>
             </Section>
@@ -551,6 +568,8 @@ export default function ClientSetup() {
                       <Origin>
                         {by("content_pillars") === "person"
                           ? "Set by your team. The product keeps them as they are."
+                          : facts.brief.startsWith("Written once")
+                            ? facts.brief
                           : by("content_pillars") === "lifecycle"
                             ? `Read from ${PILLAR_SOURCES[String(client?.pillars_source ?? "")] ?? "the brief and the website"}${pillarsOn ? ` on ${pillarsOn}` : ""}, and again when the brief or strategy document changes. You can change any of them here.`
                             : "Read from the strategy document, the brief and the website."}
@@ -642,6 +661,13 @@ export default function ClientSetup() {
                     onChange={(e) => set("competitor_seed_notes", e.target.value)}
                   />
                 </div>
+                {(facts.competitors.names.length > 0 || facts.competitors.tracking) && (
+                  <div className="space-y-2">
+                    <Label>Competitors chosen</Label>
+                    {facts.competitors.names.length > 0 && <p className="t-body">{facts.competitors.names.join(", ")}</p>}
+                    {facts.competitors.tracking && <Origin>{facts.competitors.tracking}</Origin>}
+                  </div>
+                )}
             </Section>
           </TabsContent>
 
@@ -664,7 +690,7 @@ export default function ClientSetup() {
                   <Textarea id="brand-notes" value={form.brand_notes} onChange={(e) => set("brand_notes", e.target.value)} placeholder="Brand voice, positioning, key messaging..." rows={3} />
                 </div>
                 <LogoFileField clientId={clientId} clientName={form.name} logoUrl={form.logo_url} onChange={(url) => set("logo_url", url)} />
-                <Origin>{by("logo_url") === "lifecycle" ? "The logo on file was taken from the client's website." : ""}</Origin>
+                <Origin>{facts.logo || (by("logo_url") === "lifecycle" ? "The logo on file was taken from the client's website." : "")}</Origin>
                 <details className="space-y-3"><summary className="cursor-pointer t-secondary">Optional brand documents and additional references</summary>
                   <BrandBookUpload
                     clientId={clientId}
@@ -687,8 +713,8 @@ export default function ClientSetup() {
                   <Label htmlFor="brief-text">Brief text</Label>
                   <Origin>
                     {by("brief_text") === "lifecycle"
-                      ? `Written by the product from ${client?.strategy_doc_file_path ? "the strategy document" : "the website"}. You can rewrite it; the product never replaces your version.`
-                      : ""}
+                      ? `${facts.brief || `Written by the product from ${client?.strategy_doc_file_path ? "the strategy document" : "the website"}.`} You can rewrite it; the product never replaces your version.`
+                      : by("brief_text") === "person" ? "" : facts.brief}
                   </Origin>
                   <Textarea id="brief-text" value={form.brief_text} onChange={(e) => set("brief_text", e.target.value)} rows={10}
                     placeholder={`Brand Voice: Professional yet approachable\nTarget Audience: B2B SaaS decision-makers\nCampaign Objectives: Increase brand awareness and thought leadership\nContent Restrictions: No competitor mentions\nCompetitive Positioning: Market leader in AI-powered analytics`}

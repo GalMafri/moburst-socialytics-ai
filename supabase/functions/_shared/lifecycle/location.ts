@@ -15,7 +15,17 @@
 // With several addresses, the zone most of them share wins; a tie keeps the
 // first listed. Page text can carry a store "near you" picked by where the
 // page was fetched from, which is why schema.org and the footer come first.
-// Free of Deno and network imports so it can be tested.
+//
+// A client's social profiles are a source the same way (spec: docs/
+// superpowers/specs/2026-11-03-onboarding-complete-design.md, section 3),
+// each ranked with the website source it is as exact as: the address on a
+// Google Business Profile, Yelp or Tripadvisor profile with schema.org; an
+// address in the client's posts with page text; where the posts say the
+// business is with the site read. Below them, and only when the profiles and
+// posts state no location (Lital, 3 Nov 2026), the city most followers are
+// in, when one zone holds half or more of the followers with a known city;
+// then the country's main zone. Below all of them the time zone stays empty:
+// nothing writes UTC. Free of Deno and network imports so it can be tested.
 
 /** US state or territory: [name, IANA zone of most of its people]. */
 const US: Record<string, [string, string]> = {
@@ -229,9 +239,11 @@ export function domainCountry(website: string | null | undefined): string | null
   return COUNTRIES[code] ? code : null;
 }
 
-export type LocationSource = "schema.org" | "page_footer" | "page_text" | "site_read" | "country";
+export type LocationSource = "schema.org" | "profile_address" | "page_footer" | "page_text" | "post_text" | "site_read" | "post_read" | "followers" | "country";
 /** How exact each source is: a lower rank replaces a higher one, never the other way round. */
-export const SOURCE_RANK: Record<LocationSource, number> = { "schema.org": 1, page_footer: 2, page_text: 3, site_read: 4, country: 5 };
+export const SOURCE_RANK: Record<LocationSource, number> = {
+  "schema.org": 1, profile_address: 1, page_footer: 2, page_text: 3, post_text: 3, site_read: 4, post_read: 4, followers: 5, country: 6,
+};
 
 export interface ResolvedLocation {
   timezone: string | null;
@@ -295,12 +307,128 @@ export function resolveLocation(html: string, opts: { headquarters?: Headquarter
   return zone ? { ...none, timezone: zone, source: "country", country } : { ...none, country: country ?? null };
 }
 
-/** True when a new read should replace the stored one: a different website, or a source at least as exact. */
-export function replacesLocation(stored: { source?: string | null; website?: string | null } | null | undefined, next: { source: LocationSource | null; website: string }): boolean {
+/**
+ * True when a new read should replace the stored one: a different website,
+ * or a more exact source. A read from the website carries the website's key;
+ * a read from the social profiles carries none. On a tie the same kind of
+ * read refreshes itself, and between the site and the posts the site's own
+ * words are kept.
+ */
+export function replacesLocation(stored: { source?: string | null; website?: string | null } | null | undefined, next: { source: LocationSource | null; website: string | null }): boolean {
   if (!next.source) return false;
-  if (!stored?.source || stored.website !== next.website) return true;
+  if (!stored?.source) return true;
+  const fromSite = !!next.website;
+  const storedSite = !!stored.website;
+  if (fromSite && storedSite && stored.website !== next.website) return true;
   const was = SOURCE_RANK[stored.source as LocationSource] ?? 99;
-  return SOURCE_RANK[next.source] <= was;
+  const now = SOURCE_RANK[next.source];
+  if (now !== was) return now < was;
+  return fromSite || !storedSite;
+}
+
+// ── From the client's social profiles ──────────────────────────────────────
+
+/** Where the followers' cities put most of them: the zone, its country, its largest city and the share of followers with a known city. */
+export interface FollowersZone {
+  zone: string;
+  country: string;
+  city: string;
+  share: number;
+}
+
+/**
+ * A follower city as the networks write one: "Los Angeles, California,
+ * United States", "Austin, TX", "Tel Aviv, Israel". Null when it names no
+ * zone exactly (a city alone, or a country of several zones with no region).
+ */
+export function cityZone(name: string | null | undefined): { zone: string; country: string; city: string } | null {
+  const parts = String(name ?? "").split(",").map((p) => p.trim()).filter(Boolean);
+  if (parts.length < 2) return null;
+  const city = parts[0];
+  const tries: Address[] = parts.length >= 3
+    ? [{ region: parts[parts.length - 2], country: parts[parts.length - 1] }]
+    : [{ region: parts[1] }, { country: parts[1] }];
+  for (const a of tries) {
+    const z = zoneOf(a);
+    if (z) return { ...z, city };
+  }
+  return null;
+}
+
+/** The zone holding half or more of the followers whose city names a zone, or null. */
+export function followersZone(cities: Array<{ name: string; count: number }>): FollowersZone | null {
+  const zones = new Map<string, { n: number; country: string; cities: Map<string, number> }>();
+  let known = 0;
+  for (const c of cities) {
+    const z = cityZone(c.name);
+    const n = Number(c.count) || 0;
+    if (!z || n <= 0) continue;
+    known += n;
+    const e = zones.get(z.zone) ?? { n: 0, country: z.country, cities: new Map() };
+    e.n += n;
+    e.cities.set(z.city, (e.cities.get(z.city) ?? 0) + n);
+    zones.set(z.zone, e);
+  }
+  let best: [string, { n: number; country: string; cities: Map<string, number> }] | null = null;
+  for (const entry of zones) if (!best || entry[1].n > best[1].n) best = entry;
+  if (!best || !known || best[1].n / known < 0.5) return null;
+  const city = [...best[1].cities].sort((a, b) => b[1] - a[1])[0][0];
+  return { zone: best[0], country: best[1].country, city, share: Math.round((best[1].n / known) * 100) / 100 };
+}
+
+/** The client's regions: the business's country when known, then each country with 20% or more of followers, else the top one. */
+export function regionsFor(businessCountry: string | null | undefined, followerShares: Array<{ country: string; share: number }>): string[] {
+  const out: string[] = [];
+  const add = (c: string | null | undefined) => { if (c && !out.includes(c)) out.push(c); };
+  add(businessCountry);
+  const ranked = [...followerShares].sort((a, b) => b.share - a.share);
+  for (const f of ranked) if (f.share >= 0.2) add(f.country);
+  if (!out.length) add(ranked[0]?.country);
+  return out;
+}
+
+export interface SocialLocationInput {
+  /** The addresses Sprout gives for the client's Google Business Profile, Yelp or Tripadvisor profiles. */
+  profileAddresses: Address[];
+  /** The client's posts and profile bio, each a text: a ZIP or a street number makes an address. */
+  postTexts: string[];
+  /** Where the posts say the business is, as the social brand read gives it (kept only when a post names it). */
+  stated?: Headquarters | null;
+  /** The zone most followers' cities share (followersZone). */
+  followers?: FollowersZone | null;
+  /** The follower countries, most followers first. */
+  countries?: string[];
+}
+
+/** The location of a business from its social profiles, by the order at the top of this file. */
+export function resolveSocialLocation(i: SocialLocationInput): ResolvedLocation {
+  const none = { timezone: null, source: null, country: null, region: null, locality: null, agreeing: 0, found: 0 };
+  const from = (source: LocationSource, list: Address[]): ResolvedLocation | null => {
+    const v = vote(list);
+    return v ? { timezone: v.zone, source, country: v.country, region: str(v.first.region), locality: str(v.first.locality), agreeing: v.agreeing, found: list.length } : null;
+  };
+  const profile = distinct(i.profileAddresses);
+  const byProfile = from("profile_address", profile);
+  if (byProfile) return byProfile;
+  const posts = distinct(i.postTexts.flatMap((t) => textAddresses(String(t ?? ""))));
+  const byPosts = from("post_text", posts);
+  if (byPosts) return byPosts;
+  const said = i.stated;
+  if (said && (said.region || said.country)) {
+    const z = zoneOf({ locality: said.city, region: said.region, country: said.country });
+    if (z) return { timezone: z.zone, source: "post_read", country: z.country, region: str(said.region), locality: str(said.city), agreeing: 1, found: 1 };
+  }
+  // A country the profiles or posts state: its main zone, never the followers' city.
+  const stated = [...profile, ...posts].map((a) => countryCode(a.country)).find(Boolean) ?? countryCode(said?.country);
+  if (stated) {
+    const zone = countryZone(stated);
+    return zone ? { ...none, timezone: zone, source: "country", country: stated } : { ...none, country: stated };
+  }
+  const f = i.followers;
+  if (f) return { timezone: f.zone, source: "followers", country: f.country, region: null, locality: f.city, agreeing: 1, found: 1 };
+  const top = (i.countries ?? []).map((c) => countryCode(c)).find(Boolean) ?? null;
+  const zone = countryZone(top);
+  return zone ? { ...none, timezone: zone, source: "country", country: top } : none;
 }
 
 function str(v: unknown): string | null {

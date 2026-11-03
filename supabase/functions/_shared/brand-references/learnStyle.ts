@@ -70,7 +70,7 @@ export const CORE_FIELDS = STYLE_FIELDS.filter((f) => f !== "platform_adaptation
 /** The rulebook learned from the client's own posts: a core, one section per platform with enough posts, and whether the look changed. */
 export const LIBRARY_STYLE_PROMPT = `You are a senior brand designer doing a forensic style analysis of one brand's own published social posts. You are writing a BINDING STYLE RULEBOOK, not a description. A generative image model will follow these rules verbatim to make new posts for this brand. Soft rules give generic output; sharp, opinionated rules make it look like the brand.
 
-The images are the brand's posts, newest first. Each is labeled with the platform it was published on and its date, and says when the brand's team kept it or uploaded it. When the brand has an earlier rulebook, it follows the images.
+The images are the brand's posts, newest first. Each is labeled with the platform it was published on and its date, says when the brand's team kept it or uploaded it, and, when it was scored, how it did against its platform's median ("2.4x its platform's median"). When the brand has an earlier rulebook, it follows the images.
 
 KEEPING THE RULEBOOK CURRENT:
 - A rule is current when the newest posts show it. Where the newest posts depart from older posts or from the earlier rulebook, the newest posts win.
@@ -271,9 +271,10 @@ async function seedReviews(db: Db, clientId: string, harvested: unknown, reviews
   return rows;
 }
 
-/** The library's images for the rulebook: posts newest first, then uploads, each with its label. */
+/** The library's images for the rulebook: posts newest first, then uploads, each with its label and, when scored, its multiple. */
 async function rulebookImages(db: Db, library: StoredEntry[]): Promise<{ content: unknown[]; count: number }> {
   const entries = libraryEntries(library);
+  const multiples = new Map(library.map((e) => [e.path, e.multiple]));
   const ordered = [...entries.filter((e) => !e.upload).sort((a, b) => String(b.posted_at ?? "").localeCompare(String(a.posted_at ?? ""))), ...entries.filter((e) => e.upload)];
   const content: unknown[] = [];
   let count = 0, bytes = 0;
@@ -285,7 +286,8 @@ async function rulebookImages(db: Db, library: StoredEntry[]): Promise<{ content
       if (buf.byteLength > MAX_IMAGE_BYTES || bytes + buf.byteLength > MAX_REQUEST_BYTES) continue;
       bytes += buf.byteLength;
       count++;
-      content.push({ type: "text", text: `${postLabel(count, e)}:` });
+      const multiple = multiples.get(e.path);
+      content.push({ type: "text", text: `${postLabel(count, e)}${typeof multiple === "number" ? `, ${multiple}x its platform's median` : ""}:` });
       content.push({ type: "image", source: { type: "base64", media_type: mediaType(e.path), data: base64(buf) } });
     } catch (err) {
       console.warn("[learn-style] skipping reference", e.path, err instanceof Error ? err.message : err);
@@ -302,7 +304,7 @@ async function rulebookImages(db: Db, library: StoredEntry[]): Promise<{ content
  * after a relearn, the rulebook. The last references stay whenever it cannot
  * finish.
  */
-export async function refreshReferences(db: Db, clientId: string, io: RefsIO): Promise<RefreshOutcome> {
+export async function refreshReferences(db: Db, clientId: string, io: RefsIO, perf: { multiples?: Record<string, number>; notNow?: string[] } = {}): Promise<RefreshOutcome> {
   const started = Date.now();
   const now = io.now();
   const { data: client, error: clientErr } = await db.from("clients")
@@ -326,6 +328,8 @@ export async function refreshReferences(db: Db, clientId: string, io: RefsIO): P
   const input = {
     candidates, reviews, choices, uploads, previous: client.harvested_design_references, lookSince,
     profilePlatforms: (profiles ?? []).map((p: { network_type: unknown }) => String(p.network_type ?? "")), now,
+    // The social read's scores and the strategy's "not now" platforms (onboarding from social profiles, section 5).
+    multiples: perf.multiples, notNow: perf.notNow,
   };
 
   let reviewed = 0, modelCalls = 0;
