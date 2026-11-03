@@ -22,6 +22,14 @@ describe("response schemas", () => {
     for (const [name, schema] of Object.entries(SCHEMAS)) walk(schema, name, hits);
     expect(hits).toEqual([]);
   });
+  it("document the setup issue kinds and the design field as the serializer answers them", () => {
+    const issue = SCHEMAS.SetupIssue as { properties: { kind: { enum: string[] } } };
+    expect(issue.properties.kind.enum).toEqual(["brand_identity_missing", "pillars_missing", "keywords_missing", "sprout_missing", "competitors_missing", "design_style_missing", "schedule_missing"]);
+    const design = (SCHEMAS.ClientObject as { properties: { design: { properties: Record<string, { type?: unknown; enum?: unknown[] }> } } }).properties.design.properties;
+    expect(Object.keys(design)).toEqual(["synthesis_at", "references", "system", "ready", "waiting_for"]);
+    expect(design.ready.type).toBe("boolean");
+    expect(design.waiting_for.enum).toEqual(["look", "designed_posts", "social_accounts", "logo_file", null]);
+  });
   it("cover every documented response", () => {
     for (const name of ["ClientList", "Client", "Setup", "Analytics", "ReportList", "Report", "CompetitiveReportList", "CompetitiveReport", "CompetitorSetList", "CompetitorSet", "PostList", "Post", "MediaJobList", "ScheduleList", "ScheduledPostList", "AlertList", "DesignSystemList", "Status", "Health", "DemoInput", "DemoJob", "DemoJobList", "ApiKeyCreate", "ApiKeyCreated", "ApiKeyList", "Empty", "Discarded"]) {
       expect(SCHEMAS[name], name).toBeDefined();

@@ -137,4 +137,18 @@ describe("platformDesignSpec", () => {
     expect(platformDesignSpec("LinkedIn", "Carousel").aspect).toBe("1:1");
     expect(platformDesignSpec(null, null).aspect).toBe("1:1");
   });
+
+  it("gives a Story Meta's margins and leaves Reels as they are", () => {
+    for (const platform of ["Instagram", "Facebook"]) {
+      const story = platformDesignSpec(platform, "Story");
+      expect(story.aspect).toBe("9:16");
+      expect(story.safe).toEqual({ top: 0.14, bottom: 0.35, left: 0.06, right: 0.06 });
+      expect(story.note).toContain(platform === "Instagram" ? "Instagram Stories" : "Facebook Stories");
+      expect(story.note).toContain("the bottom 35%");
+    }
+    const reel = platformDesignSpec("Instagram", "Reel/Video");
+    expect(reel.safe).toEqual({ top: 0.14, bottom: 0.22, left: 0.06, right: 0.14 });
+    expect(reel.note).toContain("Instagram Reels");
+    expect(platformDesignSpec("TikTok", "Video").safe).toEqual(reel.safe);
+  });
 });

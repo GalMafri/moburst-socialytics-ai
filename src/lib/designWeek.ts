@@ -12,6 +12,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { invokeResendable, sendQuietly } from "@/lib/quietSend";
 import { typicalMinutes, type DesignRequest } from "@/lib/designRequests";
+import { designWaitingLine, type DesignWaitingFor } from "../../supabase/functions/_shared/design/setup.ts";
 
 export type WeekKind = "single" | "carousel" | "video";
 
@@ -43,10 +44,12 @@ export interface WeekRun {
   finished_at: string | null;
 }
 
-export interface WeekCounts { single: number; carousel: number; video: number; copy_waits: number; filming: number }
+/** Posts a press would design, by kind; Stories (designed as stills) on their own, absent from a server from before Stories. */
+export interface WeekCounts { single: number; story?: number; carousel: number; video: number; copy_waits: number; filming: number }
 
-/** What the client's setup waits for before designs can start. */
-export type WeekWaitingFor = "look" | "designed_posts" | "social_accounts" | "logo_file";
+/** What the client's setup waits for before designs can start (one rule and sentence with the server and the API). */
+export type WeekWaitingFor = DesignWaitingFor;
+export { designWaitingLine as waitingLine };
 
 export interface WeekPreview {
   code?: "not_set_up";
@@ -108,7 +111,7 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 
 /** Posts a press would design. */
 export function postsToDesign(c: WeekCounts | undefined): number {
-  return c ? c.single + c.carousel + c.video : 0;
+  return c ? c.single + (c.story ?? 0) + c.carousel + c.video : 0;
 }
 
 export function durationWords(minutes: number): string {
@@ -117,11 +120,12 @@ export function durationWords(minutes: number): string {
   return `${plural(h, "hour", "hours")}${m ? ` and ${plural(m, "minute", "minutes")}` : ""}`;
 }
 
-/** "9 posts this week have no design yet: 6 designs, 2 carousels, 1 video. About 100 Higgsfield credits and 45 minutes." */
+/** "9 posts this week have no design yet: 6 designs, 2 Stories, 1 video. About 100 Higgsfield credits and 45 minutes." */
 export function previewLine(c: WeekCounts, credits: number, minutes: number): string {
   const n = postsToDesign(c);
   const kinds = [
     c.single ? plural(c.single, "design", "designs") : "",
+    c.story ? plural(c.story, "Story", "Stories") : "",
     c.carousel ? plural(c.carousel, "carousel", "carousels") : "",
     c.video ? plural(c.video, "video", "videos") : "",
   ].filter(Boolean).join(", ");
@@ -136,16 +140,6 @@ export function filmingLine(n: number): string | null {
 
 export function buttonLabel(n: number): string {
   return `Design ${plural(n, "post", "posts")}`;
-}
-
-/** What the client's setup still waits for before designs can start. */
-export function waitingLine(waitingFor: WeekWaitingFor | undefined, clientName: string | null | undefined): string {
-  const name = clientName?.trim() || "this client";
-  const its = clientName?.trim() ? `${name}'s` : "this client's";
-  if (waitingFor === "logo_file") return `Designs start once ${its} logo file is found on its website.`;
-  if (waitingFor === "designed_posts") return `Designs start once ${name} has published enough designed posts to learn its look from.`;
-  if (waitingFor === "social_accounts") return `Designs start once ${its} social accounts are connected.`;
-  return `Designs start once ${its} look is learned from its own posts.`;
 }
 
 export function progressLine(p: { total: number; ready: number }): string {
@@ -164,7 +158,8 @@ export function doneLine(ready: number, creditsUsed: number | null | undefined):
  */
 export function weekMinutes(c: WeekCounts, history: DesignRequest[]): number {
   const each = [
-    ...Array(c.single).fill(typicalMinutes({ kind: "single" }, history)),
+    // A Story is a still: it takes what a design takes.
+    ...Array(c.single + (c.story ?? 0)).fill(typicalMinutes({ kind: "single" }, history)),
     ...Array(c.carousel).fill(typicalMinutes({ kind: "carousel" }, history)),
     ...Array(c.video).fill(typicalMinutes({ kind: "video" }, history)),
   ] as number[];

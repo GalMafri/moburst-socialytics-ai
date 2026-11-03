@@ -4,7 +4,7 @@
 // its tests: from(table) with select, eq (also on a JSON field such as
 // "input->>kind"), neq, in, is, not, order, limit, range, maybeSingle, single,
 // insert, upsert, update and delete; rpc with handlers the test gives;
-// storage that keeps uploads in memory.
+// storage that keeps uploads in memory (upload, download, remove).
 
 // deno-lint-ignore no-explicit-any
 type Row = Record<string, any>;
@@ -50,6 +50,7 @@ export function fakeDb(tables: Record<string, Row[]> = {}, rpcs: Record<string, 
       from(bucket: string) {
         return {
           async upload(path: string, bytes: Uint8Array | string) { db.uploads.set(`${bucket}/${path}`, bytes); return { error: null }; },
+          async remove(paths: string[]) { for (const p of paths) db.uploads.delete(`${bucket}/${p}`); return { data: [], error: null }; },
           getPublicUrl(path: string) { return { data: { publicUrl: `https://project.test/storage/v1/object/public/${bucket}/${path}` } }; },
           async download(path: string) {
             const b = db.uploads.get(`${bucket}/${path}`);

@@ -28,7 +28,9 @@ import { useGenerationForPost } from "@/components/reports/calendar/GenerationCo
 import { CreatePostVideoButton } from "@/components/reports/CreatePostVideoButton";
 import { SchedulePostModal, scheduledFor, sproutStateText, useScheduledPosts } from "@/components/reports/SchedulePostModal";
 import type { ClientContext } from "@/lib/clientContext";
-import { isTextOnlyFormat, isVideoFormat } from "@/lib/platform";
+import { isStoryPost, isTextOnlyFormat, isVideoFormat } from "@/lib/platform";
+import { storyFileName } from "@/lib/story";
+import { StoryLinks } from "./StoryLinks";
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { CalendarPost } from "@/lib/calendarRevision";
@@ -212,6 +214,8 @@ export function PostPanel({
   // only ever produced stills, so clicking it on a video recommendation handed
   // back the wrong asset with nothing to say so.
   const plannedVideo = isVideoFormat(post?.format, post?.platform);
+  // A Story is posted by hand: its panel has Message and Design, no Schedule and no Video (StoryLinks.tsx).
+  const story = isStoryPost(post);
   const [tab, setTab] = useState<string>("copy");
   // A video post's one media tab becomes Video once its design settings load;
   // a click on the older Video list during that moment moves over to it.
@@ -227,7 +231,8 @@ export function PostPanel({
   // video post's design is its video (cover card, footage, end card).
   const videoDesigns = plannedVideo && designsReady;
   // A still post's Video tab is the team's tool; a client sees it only once the post has a video.
-  const showVideoTab = !videoDesigns && (!isClient || videoTiles.length > 0);
+  const showVideoTab = !videoDesigns && !story && (!isClient || videoTiles.length > 0);
+  const showScheduleTab = !isClient && !story;
   const versions = designVersions(postIterations, videoDesigns ? isVideoUrl : (u) => !isVideoUrl(u));
   const otherTiles = imageTiles.filter((t) => !isDesignOption({ variant_angle: t.variantAngle }));
   const isCarouselPost = /carousel|document|pdf/i.test(String(post.format || "")) || (versions[0]?.urls.length ?? 0) > 1;
@@ -270,8 +275,8 @@ export function PostPanel({
           <SheetDescription className="sr-only">Review the copy and creative for this post.</SheetDescription>
 
           <Tabs value={tab} onValueChange={setTab} className="mt-4">
-            <TabsList className={`grid ${TAB_COLUMNS[2 + (showVideoTab ? 1 : 0) + (isClient ? 0 : 1)]}`}>
-              <TabsTrigger value="copy">Copy</TabsTrigger>
+            <TabsList className={`grid ${TAB_COLUMNS[2 + (showVideoTab ? 1 : 0) + (showScheduleTab ? 1 : 0)]}`}>
+              <TabsTrigger value="copy">{story ? "Message" : "Copy"}</TabsTrigger>
               {/* A video post's design is made as a video, so its one media tab is Video. */}
               <TabsTrigger value="design">{videoDesigns ? "Video" : plannedVideo ? "Cover" : "Design"}</TabsTrigger>
               {showVideoTab && (
@@ -280,7 +285,7 @@ export function PostPanel({
                   {plannedVideo && <span className="h-1.5 w-1.5 rounded-full bg-[#b9e045]" aria-hidden />}
                 </TabsTrigger>
               )}
-              {!isClient && <TabsTrigger value="schedule">Schedule</TabsTrigger>}
+              {showScheduleTab && <TabsTrigger value="schedule">Schedule</TabsTrigger>}
             </TabsList>
 
             {/* Copy tab */}
@@ -342,7 +347,9 @@ export function PostPanel({
                     usingId={usingId}
                     onFeedback={designFeedback}
                     waitingForCopy={!postCopyOf(post).trim()}
+                    storyFileName={story ? storyFileName(clientContext?.client_name, String(post.date_label || "")) : null}
                   />
+                  <StoryLinks post={post} clientId={clientId} />
                   {!isClient && otherTiles.length > 0 && (
                     <div className="space-y-2 pt-2">
                       <p className="t-label">Other media for this post</p>

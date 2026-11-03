@@ -17,13 +17,14 @@ import { collectOwnedCompetitive } from "../competitive/ownedSource.ts";
 import { competitiveBrief } from "../competitive/brief.ts";
 import {
   bestExamples, clientCompanyId, compactFeedRow, competitorPosts, feedHistories, isBoosted, isClientPost, latestTrendEvidence, medianRates, numberEvidence, platformName,
-  resolveRhythm, scoreCompetitorPosts, scoreOwnPosts, scoreTrendItems, MIN_COMPETITOR_WEEKS, OWN_DAYS,
+  resolveRhythm, scoreCompetitorPosts, scoreOwnPosts, scoreTrendItems, storyRhythm, MIN_COMPETITOR_WEEKS, OWN_DAYS,
   type CompetitorPost, type EvidenceItem, type FeedRow, type OwnPost, type RhythmLine, type RhythmSources,
 } from "./evidence.ts";
-import { parseRevision, parseWeekPlan, revisePrompt, weekPrompt, type Reason, type RevisePost } from "./weekPlan.ts";
+import { parseRevision, parseWeekPlan, revisePrompt, weekPrompt, withStories, type Reason, type RevisePost } from "./weekPlan.ts";
+import { isStoryPost } from "../design/story.ts";
 import { wordReason } from "./reasonText.ts";
 import { activePreferences, buildVoiceProfile, consolidateMemory, COPY_MODEL, learnFromSignal, loadClientVoice } from "../voice/load.ts";
-import { voicePromptBlock } from "../voice/voice.ts";
+import { voicePromptBlock, voiceReady } from "../voice/voice.ts";
 import { activeTerms } from "../trends/profile.ts";
 import { HASHTAG_PLATFORMS, type HashtagPlatform } from "../trends/types.ts";
 import { strategyPromptBlock } from "../strategy/prompt.ts";
@@ -100,18 +101,26 @@ export interface Gathered {
   fallbackRates: { competitors: Record<string, number>; allTracked: Record<string, number> | null };
   /** trends: "themes" when the newest finished Trends week gave evidence, else "none". */
   sources: { sprout: string; feed_weeks: number; report: string | null; topics: number; trends: "themes" | "none" };
+  /** The client's own Instagram Stories over 90 days, and the Stories this week gets (storyRhythm). */
+  stories: { stories: number; average: number; perWeek: number };
 }
 
-/** The client's own posts for the last 90 days: Sprout where profiles are assigned, RivalIQ's copy for other platforms. */
-export async function ownPosts(admin: Db, client: Record<string, unknown>, snapshots: Array<{ payload: any }>, now: Date): Promise<{ posts: OwnPost[]; sprout: string }> {
+/**
+ * The client's own posts for the last 90 days: Sprout where profiles are
+ * assigned, RivalIQ's copy for other platforms. With them, when its Instagram
+ * Stories went out (Sprout only), for the week's Story suggestions.
+ */
+export async function ownPosts(admin: Db, client: Record<string, unknown>, snapshots: Array<{ payload: any }>, now: Date): Promise<{ posts: OwnPost[]; sprout: string; stories: string[] }> {
   const end = new Date(now.getTime() - DAY).toISOString().slice(0, 10);
   const start = new Date(now.getTime() - OWN_DAYS * DAY).toISOString().slice(0, 10);
   let posts: OwnPost[] = [];
+  let stories: string[] = [];
   let sprout = "not_connected";
   const covered = new Set<string>();
   try {
-    const owned = await collectOwnedCompetitive(admin, client, { start, end }, { fields: ["is_boosted"] });
+    const owned = await collectOwnedCompetitive(admin, client, { start, end }, { fields: ["is_boosted"], stories: true });
     sprout = owned.coverage;
+    stories = ((owned as { stories?: Array<{ publishedAt: string }> }).stories ?? []).map((s) => String(s.publishedAt));
     for (const p of owned.profiles ?? []) covered.add(platformName(p.network));
     posts = (owned.posts ?? []).map((p: any) => ({
       id: String(p.postId), platform: platformName(p.channel), format: String(p.type || "unknown"), publishedAt: String(p.publishedAt),
@@ -135,7 +144,7 @@ export async function ownPosts(admin: Db, client: Record<string, unknown>, snaps
       posts.push({ id, platform, format: String(p.type || "unknown"), publishedAt: String(p.publishedAt), text: String(p.message || ""), link: p.postLink ?? null, impressions: null, engagement: Number(p.engagementTotal) || 0, boosted: isBoosted(p.facebookLikelyBoosted) });
     }
   }
-  return { posts, sprout };
+  return { posts, sprout, stories };
 }
 
 /** The client's weekly competitor feeds, newest first (14 weeks covers the 90 days of own posts). */
@@ -216,7 +225,7 @@ export async function gatherEvidence(admin: Db, client: Record<string, any>, now
   const tz = String(client.timezone || "UTC");
   const week = opts.week ?? nextMonday(todayIn(tz, now));
   const snapshots = await feedSnapshots(admin, client.id);
-  const { posts: own, sprout } = await ownPosts(admin, client, snapshots, now);
+  const { posts: own, sprout, stories } = await ownPosts(admin, client, snapshots, now);
 
   // Competitors: the newest feed week against the four before it.
   const recent = snapshots.slice(0, 1 + MIN_COMPETITOR_WEEKS);
@@ -282,6 +291,7 @@ export async function gatherEvidence(admin: Db, client: Record<string, any>, now
     examples: bestExamples(scored.top), hashtags,
     fallbackRates: { competitors: medianRates([rhythmInput.competitors]), allTracked: rhythmInput.allTracked },
     sources: { sprout, feed_weeks: recent.length, report: report?.id ?? null, topics: (alerts ?? []).length, trends: trends.length ? "themes" : "none" },
+    stories: storyRhythm(stories, now, week),
   };
 }
 
@@ -416,7 +426,7 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
     await must(admin.from("calendar_plans").update({ status: "planning", error: null, updated_at: now.toISOString() }).eq("id", plan.id), "Could not start the plan");
 
     const gathered = await gatherEvidence(admin, client, now, { week });
-    const rhythm = { applied: gathered.rhythm, learned: gathered.learnedRhythm, sources: gathered.rhythmSources };
+    const rhythm = { applied: gathered.rhythm, learned: gathered.learnedRhythm, sources: gathered.rhythmSources, stories: gathered.stories };
     const evidence = { items: gathered.evidence, avoid: gathered.avoid, thin: gathered.thin, sources: gathered.sources, first_date: firstDate };
     // A client that posts less than once a week has weeks with nothing to post on any platform.
     if (!gathered.rhythm.length && gathered.learnedRhythm.length) {
@@ -425,11 +435,14 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
     }
 
     const voice = await loadClientVoice(admin, client.id);
-    const { data: weekPosts, error: nearError } = await admin.from("calendar_posts").select("post_date, platform, copy, plan_id")
+    // A platform that had too few posts for a voice of its own has 5 now: the profile is built again early, for the plans after this one.
+    if (voiceReady(voice.social, gathered.own).length) await queueVoiceRebuild(admin, client.id, now);
+    const { data: weekPosts, error: nearError } = await admin.from("calendar_posts").select("post_date, platform, format, copy, plan_id")
       .eq("client_id", client.id).gte("post_date", addDays(week, -21)).lte("post_date", addDays(week, 27)).order("post_date");
     if (nearError) throw new Error(`Could not read the posts around the week: ${nearError.message}`);
     const inWeek = (d: string) => d >= week && d <= addDays(week, 6);
-    const existing = (weekPosts ?? []).filter((p: any) => inWeek(p.post_date) && !p.plan_id).map((p: any) => ({ date: p.post_date, platform: p.platform, copy: p.copy || "" }));
+    // Stories never count toward the feed rhythm: they are left out of the posts people added.
+    const existing = (weekPosts ?? []).filter((p: any) => inWeek(p.post_date) && !p.plan_id && !isStoryPost(p)).map((p: any) => ({ date: p.post_date, platform: p.platform, copy: p.copy || "" }));
     const recent = (weekPosts ?? []).filter((p: any) => !inWeek(p.post_date) && p.copy).map((p: any) => ({ date: p.post_date, platform: p.platform, copy: p.copy }));
     const ctx = {
       brand: String(client.name),
@@ -465,7 +478,8 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
       await markReady(finishing);
       return { status: "done", result: { plan_id: plan.id, finished: true } };
     }
-    const rows = posts.map((p) => ({ ...p, client_id: client.id, plan_id: plan.id, created_by: plan.requested_by ?? null }));
+    // The week's Stories are added in code, with no model call: one for each of the soonest Instagram posts.
+    const rows = withStories(posts, gathered.stories.perWeek).map((p) => ({ ...p, client_id: client.id, plan_id: plan.id, created_by: plan.requested_by ?? null }));
     await must(admin.from("calendar_posts").insert(rows), "Could not add the week's posts");
     await markReady(finishing);
     return { status: "done", result: { plan_id: plan.id, posts: rows.length, input_tokens: tokens.input, output_tokens: tokens.output } };
@@ -478,6 +492,14 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
     }
     return retryLater(job, reason, now);
   }
+}
+
+/** Queue the client's voice profile now, once a day at most. A queue that does not take it is left for the next plan. */
+async function queueVoiceRebuild(admin: Db, clientId: string, now: Date): Promise<void> {
+  const { error } = await admin.from("scheduled_jobs").upsert({
+    kind: "voice_profile", client_id: clientId, dedupe_key: `voice_profile:${clientId}:${now.toISOString().slice(0, 10)}`, priority: 39, available_at: now.toISOString(),
+  }, { onConflict: "dedupe_key", ignoreDuplicates: true });
+  if (error) console.warn("[calendar] could not queue the voice profile:", error.message);
 }
 
 // ── Revise a week ───────────────────────────────────────────────────────────
@@ -542,7 +564,7 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
     if (!(await claimPlan(admin, plan.id, now))) return busyElsewhere(now);
     claimed = true;
 
-    const { data: rows, error: rowsError } = await admin.from("calendar_posts").select("id, post_key, post_date, platform, format, pillar, copy, hashtags, cta, visual_direction, reasons, touched_at, plan_id")
+    const { data: rows, error: rowsError } = await admin.from("calendar_posts").select("id, post_key, post_date, platform, format, pillar, copy, hashtags, cta, visual_direction, reasons, touched_at, plan_id, story_of")
       .eq("client_id", client.id).gte("post_date", week).lte("post_date", addDays(week, 6)).order("post_date");
     if (rowsError) throw new Error(`Could not read the week's posts: ${rowsError.message}`);
     const all = (rows ?? []) as any[];
@@ -550,7 +572,8 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
     const worked = await workedOn(admin, client.id, planPosts);
     if (!pending.by) for (const id of revisedByPerson(plan.revisions)) worked.add(id);
     const kept = planPosts.filter((p) => worked.has(p.id)).map((p) => p.id);
-    const targets = planPosts.filter((p) => !worked.has(p.id) && (pending.scope === "empty" ? !String(p.copy || "").trim() : true));
+    // A Story is never rewritten as a feed post: it follows its post's new copy (below).
+    const targets = planPosts.filter((p) => !worked.has(p.id) && !isStoryPost(p) && (pending.scope === "empty" ? !String(p.copy || "").trim() : true));
     if (!targets.length) {
       await finish({ rewritten: 0, kept });
       return { status: "done", result: { plan_id: plan.id, rewritten: 0 } };
@@ -577,13 +600,24 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
     if (!revised.length) throw new Error("The rewrite's reply had no usable posts.");
 
     const replaced: Array<Record<string, unknown>> = [];
+    /** The new copy of each post rewritten, by its key. */
+    const rewrote = new Map<string, string>();
     for (const r of revised) {
       const was = targets.find((p) => p.id === r.id)!;
       const patch: Record<string, unknown> = { copy: r.copy, hashtags: r.hashtags, cta: r.cta, visual_direction: r.visual_direction, ...(r.pillar ? { pillar: r.pillar } : {}), ...(r.reason ? { reasons: [r.reason] } : {}) };
       // Only if nobody changed the copy or moved the post since it was read.
       const { data: updated, error: updateError } = await admin.from("calendar_posts").update(patch).eq("id", r.id).eq("copy", was.copy ?? "").is("touched_at", null).select("id");
       if (updateError) throw new Error(`Could not rewrite a post: ${updateError.message}`);
-      if (updated?.length) replaced.push({ id: was.id, copy: was.copy, hashtags: was.hashtags, cta: was.cta, pillar: was.pillar, visual_direction: was.visual_direction, reasons: was.reasons });
+      if (updated?.length) {
+        replaced.push({ id: was.id, copy: was.copy, hashtags: was.hashtags, cta: was.cta, pillar: was.pillar, visual_direction: was.visual_direction, reasons: was.reasons });
+        rewrote.set(was.post_key, r.copy);
+      }
+    }
+    // A planned Story takes its post's new copy, the message its frame is written from, only when nobody worked on the Story.
+    for (const st of planPosts.filter((p) => isStoryPost(p) && p.story_of && rewrote.has(p.story_of) && !worked.has(p.id))) {
+      const { data: updated, error: updateError } = await admin.from("calendar_posts").update({ copy: rewrote.get(st.story_of) }).eq("id", st.id).eq("copy", st.copy ?? "").is("touched_at", null).select("id");
+      if (updateError) throw new Error(`Could not rewrite a Story: ${updateError.message}`);
+      if (updated?.length) replaced.push({ id: st.id, copy: st.copy, hashtags: st.hashtags, cta: st.cta, pillar: st.pillar, visual_direction: st.visual_direction, reasons: st.reasons });
     }
     const u = usage(result.raw);
     await finish({ rewritten: replaced.length, kept, replaced, input_tokens: u.input, output_tokens: u.output });

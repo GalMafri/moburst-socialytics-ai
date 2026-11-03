@@ -25,6 +25,20 @@ describe("calendar weeks", () => {
     expect(board[2]).toMatchObject({ day: "Wednesday", date_label: "Oct 14" });
     expect(board[2].posts[0]).toMatchObject({ _calendarPostKey: "key-1", date_label: "2026-10-14", copy: "Copy" });
   });
+  it("puts a Story right after the post it was made from, and links them", () => {
+    const feed = row({ id: "f", post_key: "post:f", platform: "Instagram", format: "Single image", posting_time: "9:00 AM", created_at: "2026-10-07T00:00:00Z" });
+    const other = row({ id: "o", post_key: "post:o", platform: "LinkedIn", posting_time: "9:00 AM", created_at: "2026-10-08T00:00:00Z" });
+    const later = row({ id: "l", post_key: "post:l", platform: "Facebook", posting_time: "9:30 PM", created_at: "2026-10-07T00:00:00Z" });
+    // Made after the LinkedIn post, at the same time as its Instagram post.
+    const story = row({ id: "s", post_key: "post:s", platform: "Instagram", format: "Story", posting_time: "9:00 AM", story_of: "post:f", created_at: "2026-10-09T00:00:00Z" });
+    const posts = weekBoard([later, story, other, feed], "2026-10-12")[2].posts;
+    expect(posts.map((p) => p._calendarPostKey)).toEqual(["post:f", "post:s", "post:o", "post:l"]);
+    expect(posts[1]).toMatchObject({ _storyOf: "post:f", format: "Story" });
+    // A Story whose post is on another day, or gone, keeps its own place.
+    const alone = weekBoard([later, row({ ...story, story_of: "post:gone" })], "2026-10-12")[2].posts;
+    expect(alone.map((p) => p._calendarPostKey)).toEqual(["post:s", "post:l"]);
+  });
+
   it("words each card's reason now, from its stored parts", () => {
     const reasons = [{ type: "seasonal", label: "Old words", moment: "Halloween on Oct 31", test: false }, { type: "idea", label: "Added by the team" }];
     const [post] = weekBoard([row({ reasons })], "2026-10-12")[2].posts as Array<{ _reasons: Array<{ label: string }> }>;

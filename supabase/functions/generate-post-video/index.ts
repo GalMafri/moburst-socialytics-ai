@@ -281,6 +281,7 @@ serve(async (req) => {
       supabase,
       clientId: client_id,
       clientContext: client_context,
+      platform: typeof platform === "string" ? platform : null,
       legacy: { brandIdentity },
     });
     const footing = footingOf(brand);

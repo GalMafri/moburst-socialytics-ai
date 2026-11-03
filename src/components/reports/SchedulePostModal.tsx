@@ -196,6 +196,7 @@ export function SchedulePostModal({
     text: postContent,
     mediaUrls,
     sendAt: sendAt ?? "",
+    format: post?.format,
   });
   // Everything that keeps the button waiting, in words. The profile list says
   // itself while it loads and when the client has no account for the network.

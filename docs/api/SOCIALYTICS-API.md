@@ -36,9 +36,9 @@ Every request is recorded (key, route, status, duration; never the body or the k
 
 | Route | What it returns |
 |---|---|
-| `GET /v1/clients?q=&company_slug=&include_archived=` | Clients with platforms, pillars, keywords, brand identity, design state, Sprout and competitor summaries, counts, last report, readiness (`setup`), links. |
+| `GET /v1/clients?q=&company_slug=&include_archived=` | Clients with platforms, pillars, keywords, brand identity, design state, Sprout and competitor summaries, counts, last report, readiness (`setup`), links. `design` is `{ synthesis_at, references, system, ready, waiting_for }`: `ready` is true once the client's design settings are confirmed, which is when designs start; until then `waiting_for` is what the setup waits for (`look`, `designed_posts`, `social_accounts` or `logo_file`). `system` is the retired design system, kept for existing readers; designs do not need one. |
 | `GET /v1/clients/{id}` | One client, plus `sprout_profiles[]` (names and networks), `competitor_sets[]` with handles, `schedules[]`. |
-| `GET /v1/clients/{id}/setup` | `{ ready, issues[] }`: brand identity, pillars, keywords, Sprout profile, confirmed competitor set, approved design system, schedule. |
+| `GET /v1/clients/{id}/setup` | `{ ready, issues[] }`: brand identity, pillars, keywords, Sprout profile, confirmed competitor set, design settings, schedule. Issue kinds: `brand_identity_missing`, `pillars_missing`, `keywords_missing`, `sprout_missing`, `competitors_missing`, `design_style_missing` (the design settings are not confirmed yet; its `text` says what the client's setup waits for, in the words the app uses), `schedule_missing`. |
 | `GET /v1/clients/{id}/analytics?start=&end=` | Sprout performance over a window (default the last 30 days): totals, the previous window, changes, per profile, top posts. `422 unprocessable` with `reason: no_sprout_profiles` for a brand not managed in Sprout. |
 | `GET /v1/reports?client_id=&status=&from=&to=` | Social reports: period, previous period, status, deck, counts, metric changes, warnings, trend status, links. |
 | `GET /v1/reports/{id}` | One social report, plus `analysis`, `calendar` (the content calendar), `performance` (without raw post ids) and `trends` summaries. |

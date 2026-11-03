@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contrast, generatedMediaPath, inkColor, parseLogoSpot, pickBackground, placementFor, pngSize, referencePaths, toPlacement } from "./designSettings";
+import { contrast, generatedMediaPath, inkColor, libraryPaths, parseLogoSpot, pickBackground, placementFor, pngSize, referencePaths, toPlacement } from "./designSettings";
 
 describe("placement", () => {
   it("is the design settings card's placement for a spot, width and edge", () => {
@@ -46,6 +46,14 @@ describe("files", () => {
   it("lists a person's uploads first, then the posts found on the client's accounts, at most 16", () => {
     expect(referencePaths(["own.png"], [{ path: "a.jpg" }, { path: "own.png" }, {}])).toEqual(["own.png", "a.jpg"]);
     expect(referencePaths(null, Array.from({ length: 20 }, (_, i) => ({ path: `${i}.jpg` })))).toHaveLength(16);
+  });
+  it("follows the library the design_refs step keeps, on a person's row as on the lifecycle's: an upload left out stays out", () => {
+    // The library holds the uploads a person kept; one left out is in clients.design_references but not in the library.
+    const library = [{ path: "c1/upload-kept.png", upload: true, kept: true }, { path: "c1/social-a.jpg", platform: "Instagram", quality_checked: true }];
+    expect(libraryPaths(["c1/upload-kept.png", "c1/upload-left-out.png"], library)).toEqual(["c1/upload-kept.png", "c1/social-a.jpg"]);
+    // Before there is a library: the uploads, then the posts found.
+    expect(libraryPaths(["own.png"], [{ path: "a.jpg" }])).toEqual(["own.png", "a.jpg"]);
+    expect(libraryPaths(null, Array.from({ length: 20 }, (_, i) => ({ path: `${i}.jpg`, quality_checked: true })))).toHaveLength(16);
   });
   it("knows a file in the project's generated-media bucket", () => {
     expect(generatedMediaPath("https://x.supabase.co/storage/v1/object/public/generated-media/Pay-The-Pyper/logo-1.png", "https://x.supabase.co")).toBe("Pay-The-Pyper/logo-1.png");

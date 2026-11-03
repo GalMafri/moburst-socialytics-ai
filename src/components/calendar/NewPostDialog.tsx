@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { mondayOf } from "@/lib/calendarPosts";
+import { canBeStory } from "@/lib/platform";
 
 const weekOf = (date: string) => mondayOf(date);
 
@@ -27,6 +28,16 @@ const FORMATS = [
   { value: "Reel", label: "Reel or short video" },
   { value: "Story", label: "Story" },
 ];
+
+/** The formats a new post can take on a platform: a Story only on Instagram or Facebook. */
+export function formatChoices(platform: string | null | undefined) {
+  return FORMATS.filter((f) => f.value !== "Story" || canBeStory(platform));
+}
+
+/** The chosen format once the platform changes: Best fit when the new platform does not offer it. */
+export function formatOnPlatform(format: string, platform: string | null | undefined): string {
+  return formatChoices(platform).some((f) => f.value === format) ? format : "auto";
+}
 
 /** Why a post is planned: an insight from a report, or (by default) the idea someone typed. */
 export interface PostReason { type: "performance" | "trend" | "competitor" | "seasonal" | "idea"; label: string; report_id?: string }
@@ -126,7 +137,7 @@ export function NewPostDialog({ clientId, platforms, defaultDate, onCreated, ini
             </div>
             <div className="space-y-1.5">
               <Label>Platform</Label>
-              <Select value={platform} onValueChange={setPlatform}>
+              <Select value={platform} onValueChange={(p) => { setPlatform(p); setFormat((f) => formatOnPlatform(f, p)); }}>
                 <SelectTrigger><SelectValue placeholder="Choose" /></SelectTrigger>
                 <SelectContent>
                   {platforms.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
@@ -139,7 +150,7 @@ export function NewPostDialog({ clientId, platforms, defaultDate, onCreated, ini
             <Select value={format} onValueChange={setFormat}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                {FORMATS.map((f) => <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>)}
+                {formatChoices(platform).map((f) => <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>

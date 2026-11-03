@@ -24,6 +24,7 @@ import { type GenerateInput, canvasLogoRect, designPrompt, resampleRGBA } from "
 import { outputSize, pictureSize } from "../_shared/canva/finish.ts";
 import { copyMatches, logoCheckPrompt, marksPrompt, parseLogoCheck, parseMarks, parseRead, readPrompt, removePrompt } from "../_shared/design/pipeline.ts";
 import { LOGO_SCALES, findLogo, logoFound } from "../_shared/design/logoMatch.ts";
+import { STORY_SURFACE, storyTextBand } from "../_shared/design/story.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
@@ -271,7 +272,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       if (s.generations > MAX_GENERATIONS) throw new Error("FINAL: The design could not be made with the headline's exact words and the logo in its place.");
       return hold(admin, job, async () => {
         s.design_path = await generateDesign(admin, job, `${base}/design-${s.generations}.png`);
-        for (const k of ["logo_rect", "logo_frame", "logo_score", "nologo_path", "unlogos", "final_path", "read", "marks_check", "marks_where", "mark_cleans"]) delete s[k];
+        for (const k of ["logo_rect", "logo_frame", "logo_score", "nologo_path", "unlogos", "final_path", "read", "band_read", "marks_check", "marks_where", "mark_cleans"]) delete s[k];
         job.step = "locate";
       });
     }
@@ -393,6 +394,17 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
         await designAgain(admin, job, `words read as ${JSON.stringify(lines)}`);
         return "next";
       }
+      // A Story's words all sit in Meta's band (_shared/design/story.ts): the band alone is read, and holds the whole copy.
+      if (g.surface === STORY_SURFACE) {
+        const band = storyTextBand(page.width, page.height);
+        const crop = base64Encode((await small.clone().crop(band.x, band.y, band.width, band.height).encodeJPEG(92)) as unknown as ArrayBuffer);
+        s.band_read = await readCheck(() => askAbout("image/jpeg", crop, readPrompt(g.brand_name)), parseRead, "The words in the Story's band");
+        if (!copyMatches(s.band_read, job.input.copy)) {
+          console.warn(`[design-worker] job ${job.id}: the Story's band read ${JSON.stringify(s.band_read)}, wanted ${JSON.stringify(job.input.copy)}`);
+          await designAgain(admin, job, `words outside the Story's band: ${JSON.stringify(s.band_read)} inside it`);
+          return "next";
+        }
+      }
       // Nothing may touch or cross the logo, seen at full size around its known place.
       if (s.logo_rect && s.logo_frame) {
         const k = final.width / s.logo_frame[0];
@@ -424,7 +436,7 @@ async function designAgain(admin: any, job: Job, reason: string): Promise<void> 
   const s = job.state;
   // Why each earlier design was made again, kept for review.
   s.redesigns = [...(Array.isArray(s.redesigns) ? s.redesigns : []), reason].slice(-5);
-  for (const k of ["design_path", "logo_rect", "logo_frame", "logo_score", "logo_check", "nologo_path", "unlogos", "final_path", "read", "marks_check", "marks_where", "mark_cleans"]) delete s[k];
+  for (const k of ["design_path", "logo_rect", "logo_frame", "logo_score", "logo_check", "nologo_path", "unlogos", "final_path", "read", "band_read", "marks_check", "marks_where", "mark_cleans"]) delete s[k];
   job.step = "generate";
   if ((job.slide_count ?? 1) > 1 && (job.slide_index ?? 0) === 0 && job.design_request_id) {
     // The cover's old design is gone from its record before any slide can look for it.

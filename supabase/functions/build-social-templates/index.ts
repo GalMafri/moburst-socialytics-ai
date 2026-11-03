@@ -54,7 +54,7 @@ function facesOf(build: Build): { primary: string; secondary?: string } {
 async function startBuild(db: any, clientId: string, userId: string | null): Promise<{ id: string; build: Build; version: number }> {
   const { data: client, error } = await db.from('clients').select('design_references,harvested_design_references').eq('id', clientId).single();
   if (error || !client) throw new Error('Client references could not be loaded.');
-  const paths = referencesFor(client.design_references, client.harvested_design_references, MAX_POSTS);
+  const paths = referencesFor(client.design_references, client.harvested_design_references, MAX_POSTS, null);
   if (paths.length < 3) throw new Error('Connect this client’s social profiles in Client Setup to discover at least three real brand posts first.');
   const { data: latest } = await db.from('client_design_systems').select('version').eq('client_id', clientId).order('version', { ascending: false }).limit(1).maybeSingle();
   const build: Build = { queue: paths, current: null, templates: [], rejected: [], faces: {}, logo_url: await latestLogo(db, clientId), done: false };

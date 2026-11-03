@@ -30,7 +30,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loading } from "@/components/ui/loading";
 import { PlatformIcon } from "@/lib/platform-config";
-import { clientOriginLine, countryNames, formatDate, languageNames, locationSourceWords, platformName, scheduleLines, timeZoneName } from "@/lib/display";
+import { clientOriginLine, countryNames, declinedBrandLine, formatDate, languageNames, locationSourceWords, platformName, scheduleLines, timeZoneName } from "@/lib/display";
 import { changedColumns, EMPTY_FORM, formFromClient, keywordPhrases, rebaseForm, setByOf, type SetupForm } from "@/lib/clientSetupForm";
 import { invokeResendable, sendQuietly, writeResendable } from "@/lib/quietSend";
 import { useLifecycleStep } from "@/hooks/useLifecycleStep";
@@ -112,7 +112,7 @@ const PILLAR_SOURCES: Record<string, string> = {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = Record<string, any>;
-interface SproutProfile { id: string | number; name?: string; native_name?: string; network_type?: string; network_display?: string; native_link?: string; missing?: boolean }
+interface SproutProfile { id: string | number; name?: string; native_name?: string; network_type?: string; network_display?: string; native_link?: string; missing?: boolean; declined?: { brand?: string; declined_at?: string } | null }
 
 /** A plain line saying where a value came from; nothing when nobody set it yet. */
 function Origin({ children }: { children: React.ReactNode }) {
@@ -921,6 +921,8 @@ function SproutProfileSelector({ assigned, selected, onChange }: {
                   <div className="flex-1 min-w-0">
                     <span className="font-medium t-body">{profile.name}</span>
                     {profile.native_name && <span className="t-label ml-1.5">@{profile.native_name}</span>}
+                    {/* A brand a person chose not to add as a client (sprout_brand_declines); a person may still assign it here. */}
+                    {profile.declined && <span className="t-label block">{declinedBrandLine(profile.declined)}</span>}
                   </div>
                   <Badge variant={on ? "default" : "secondary"} className="shrink-0 gap-1">
                     <PlatformIcon platform={profile.network_type || profile.network_display} className="h-3 w-3" /> {platformName(profile.network_type || profile.network_display)}

@@ -6,6 +6,7 @@
  */
 import { normalizedCompetitiveMetrics } from "../competitive/reportMetrics.ts";
 import { withCompetitiveEvidenceLimits } from "../competitive/reportEvidence.ts";
+import { designWaitingFor, designWaitingLine, type DesignStepRow, type DesignWaitingFor } from "../design/setup.ts";
 declare const Deno: { env: { get(k: string): string | undefined } } | undefined;
 /**
  * The host the API puts in `links.app`. gOS users reach the tool through its branded
@@ -43,6 +44,8 @@ export interface MediaJobRow { id: string; client_id: string; post_iteration_id:
 export interface ScheduleRow { id: string; client_id: string; frequency: string; is_active: boolean; next_run_at: string | null; last_run_at: string | null; trends_date_range_days?: number | null; analysis_date_range_days?: number | null; created_by?: string | null; created_at: string; updated_at?: string | null; report_kind: string | null; run_day_of_month: number | null; range_mode: string | null; last_result: string | null; pending_competitive_report_id?: string | null; dispatch_claimed_at?: string | null }
 export interface ScheduledPostRow { id: string; client_id: string; report_id: string | null; sprout_post_id?: string | null; profile_id?: string | null; platform: string; scheduled_time: string; status: string; post_content: string | null; media_url: string | null; created_at: string; created_by?: string | null }
 export interface AlertRow { id: string; client_id: string; window_start: string; window_end: string; topic: string; topic_key?: string | null; summary: string | null; companies: string[] | null; platforms: string[] | null; post_urls: string[] | null; post_count: number | null; confidence: number | null; status: string; created_at: string }
+/** design_brand_settings, as far as readiness reads it: designs start once confirmed_at is set. */
+export interface DesignSettingsRow { client_id: string; confirmed_at: string | null }
 export interface DesignSystemRow { id: string; client_id: string; version: number; status: string; system: unknown; previews: unknown; built_from?: unknown; approved_by?: string | null; approved_at: string | null; created_by?: string | null; created_at: string; updated_at?: string | null }
 
 export type SetWithCompetitors = CompetitorSetRow & { competitors: Array<CompetitorRow & { handles: HandleRow[] }> };
@@ -58,7 +61,8 @@ export interface ScheduleOut { id: string; client_id: string; kind: string; freq
 export interface ClientOut {
   id: string; name: string; website: string | null; company_slug: string | null; platforms: string[]; geo: string | null; language: string | null; timezone: string | null;
   pillars: Array<{ name: string; description: string | null }>; keywords: string[]; brand_identity: Record<string, string | null> | null; brief: string | null; logo_url: string | null;
-  design: { synthesis_at: string | null; references: number; system: { version: number; status: string; approved_at: string | null } | null };
+  /** system is the retired design system, kept for readers of the field; ready and waiting_for are what designs wait on today. */
+  design: { synthesis_at: string | null; references: number; system: { version: number; status: string; approved_at: string | null } | null; ready: boolean; waiting_for: DesignWaitingFor | null };
   sprout: { profiles: number; networks: string[] }; competitors: { set_status: string | null; selected: string[]; tracked: boolean };
   counts: { reports: number; competitive_reports: number; posts: number; schedules: number };
   last_report: { id: string; status: string; period: { start: string | null; end: string | null }; completed_at: string | null } | null;
@@ -124,7 +128,12 @@ const newestFirst = <T extends { created_at: string }>(rows: T[]) => [...rows].s
 /** The set the reports run on: the newest confirmed one; a newer draft in progress does not hide it. */
 export const activeSet = (sets: SetWithCompetitors[]): SetWithCompetitors | null => newestFirst(sets).find((s) => CONFIRMED_SET.includes(s.status)) ?? newestFirst(sets)[0] ?? null;
 
-export function clientSetup(row: ClientRow, i: { sproutProfiles: SproutProfileRow[]; sets: SetWithCompetitors[]; designSystems: DesignSystemRow[]; schedules: number }): Setup {
+/** Whether designs can start for the client and, when they cannot, what its setup waits for (_shared/design/setup.ts). */
+export function designReadiness(settings: DesignSettingsRow | null, steps: DesignStepRow[]): { ready: boolean; waiting_for: DesignWaitingFor | null } {
+  return settings?.confirmed_at ? { ready: true, waiting_for: null } : { ready: false, waiting_for: designWaitingFor(steps) };
+}
+
+export function clientSetup(row: ClientRow, i: { sproutProfiles: SproutProfileRow[]; sets: SetWithCompetitors[]; designSettings: DesignSettingsRow | null; designSteps: DesignStepRow[]; schedules: number }): Setup {
   const issues: SetupIssue[] = [];
   if (!row.brand_identity || !Object.keys(row.brand_identity).length) issues.push({ kind: "brand_identity_missing", text: "No brand identity: research the website or upload a brand book.", fix: "setup" });
   if (!pillarsOut(row.content_pillars).length) issues.push({ kind: "pillars_missing", text: "No content pillars: derive them from the website or write them.", fix: "setup" });
@@ -132,28 +141,33 @@ export function clientSetup(row: ClientRow, i: { sproutProfiles: SproutProfileRo
   if (!i.sproutProfiles.some((p) => p.is_active !== false)) issues.push({ kind: "sprout_missing", text: "No Sprout Social profile: performance analytics and scheduled posting are not available.", fix: "setup" });
   const set = activeSet(i.sets);
   if (!set || !CONFIRMED_SET.includes(set.status)) issues.push({ kind: "competitors_missing", text: "No confirmed competitor set: competitive reports cannot run.", fix: "competitive" });
-  if (!i.designSystems.some((d) => d.status === "approved")) issues.push({ kind: "design_system_missing", text: "No approved design system: generated posts use the brand colours and fonts only.", fix: "setup" });
+  // Design systems were retired (Lital, 23 Sep 2026); designs start once the design settings are confirmed.
+  const design = designReadiness(i.designSettings, i.designSteps);
+  if (!design.ready) issues.push({ kind: "design_style_missing", text: designWaitingLine(design.waiting_for, row.name), fix: "setup" });
   if (i.schedules <= 0) issues.push({ kind: "schedule_missing", text: "No report schedule: reports run only when started by hand.", fix: "setup" });
   return { ready: issues.length === 0, issues };
 }
 
-export function clientOut(row: ClientRow, extras: { sproutProfiles: SproutProfileRow[]; sets: SetWithCompetitors[]; designSystems: DesignSystemRow[]; counts: { reports: number; competitive_reports: number; posts: number; schedules: number }; lastReport: ReportRow | null; schedules?: ScheduleRow[]; detail?: boolean }): ClientOut {
+export function clientOut(row: ClientRow, extras: { sproutProfiles: SproutProfileRow[]; sets: SetWithCompetitors[]; designSystems: DesignSystemRow[]; designSettings: DesignSettingsRow | null; designSteps: DesignStepRow[]; counts: { reports: number; competitive_reports: number; posts: number; schedules: number }; lastReport: ReportRow | null; schedules?: ScheduleRow[]; detail?: boolean }): ClientOut {
   const set = activeSet(extras.sets);
   const approved = extras.designSystems.filter((d) => d.status === "approved").sort((a, b) => b.version - a.version)[0] ?? newestFirst(extras.designSystems)[0] ?? null;
   const synthesis = obj(row.design_style_synthesis);
-  const refs = (Array.isArray(row.harvested_design_references) ? row.harvested_design_references.length : 0) + (Array.isArray(row.design_references) ? row.design_references.length : 0);
+  // Each reference once: the library the lifecycle keeps holds the uploads a person kept.
+  const refPaths = [...(Array.isArray(row.harvested_design_references) ? row.harvested_design_references : []), ...(Array.isArray(row.design_references) ? row.design_references : [])]
+    .map((r) => (typeof r === "string" ? r : String((r as { path?: unknown } | null)?.path ?? ""))).filter(Boolean);
+  const refs = new Set(refPaths).size;
   const active = extras.sproutProfiles.filter((p) => p.is_active !== false);
   const last = extras.lastReport;
   const lastData = obj(last?.report_data);
   const out: ClientOut = {
     id: row.id, name: row.name, website: row.website_url, company_slug: row.company_slug, platforms: strs(row.primary_platforms), geo: row.geo, language: row.language, timezone: row.timezone,
     pillars: pillarsOut(row.content_pillars), keywords: strs(row.social_keywords), brand_identity: brandOut(row.brand_identity), brief: row.brief_text, logo_url: row.logo_url,
-    design: { synthesis_at: str(synthesis.synthesized_at), references: refs, system: approved ? { version: approved.version, status: approved.status, approved_at: approved.approved_at } : null },
+    design: { synthesis_at: str(synthesis.synthesized_at), references: refs, system: approved ? { version: approved.version, status: approved.status, approved_at: approved.approved_at } : null, ...designReadiness(extras.designSettings, extras.designSteps) },
     sprout: { profiles: active.length, networks: [...new Set(active.map((p) => p.network_type).filter((n): n is string => !!n))] },
     competitors: { set_status: set?.status ?? null, selected: set ? set.competitors.filter((c) => c.is_selected).sort((a, b) => (a.selected_rank ?? 99) - (b.selected_rank ?? 99)).map((c) => c.name) : [], tracked: !!set?.rivaliq_landscape_id },
     counts: extras.counts,
     last_report: last ? { id: last.id, status: last.status, period: { start: last.date_range_start ?? str(obj(obj(lastData.report_period).current_month).start), end: last.date_range_end ?? str(obj(obj(lastData.report_period).current_month).end) }, completed_at: str(lastData.completed_at) } : null,
-    setup: clientSetup(row, { sproutProfiles: extras.sproutProfiles, sets: extras.sets, designSystems: extras.designSystems, schedules: Math.max(extras.counts.schedules, extras.schedules?.length ?? 0) }),
+    setup: clientSetup(row, { sproutProfiles: extras.sproutProfiles, sets: extras.sets, designSettings: extras.designSettings, designSteps: extras.designSteps, schedules: Math.max(extras.counts.schedules, extras.schedules?.length ?? 0) }),
     archived: !!row.archived_at, demo_job_id: row.demo_job_id, created_at: row.created_at, links: { app: `${APP_URL}/clients/${row.id}/setup`, api: `/v1/clients/${row.id}` },
   };
   if (extras.detail) {

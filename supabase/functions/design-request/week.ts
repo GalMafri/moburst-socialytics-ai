@@ -23,6 +23,7 @@
 
 import { type PassRun, type PassStart, type PostFacts, type RunPost, WEEK_AT_ONCE, classifyPost, currentCopyOf, keepStarts, mediaOf, mergeIntoRun, planPass, weekCounts } from "../_shared/design/weekRules.ts";
 import { planningStalled } from "../_shared/design/requestRules.ts";
+import { DESIGN_SETUP_STEPS, designWaitingFor, type DesignStepRow, type DesignWaitingFor } from "../_shared/design/setup.ts";
 import { CLIP_CREDIT_FLOOR, creditsPerClip, creditsUsed } from "../_shared/video/credits.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -87,16 +88,10 @@ async function readWeek(db: Db, client: Row, week: string, now: Date) {
   }));
 }
 
-/** What the client's setup waits for before designs can start, in the lifecycle's own words (design_refs, design_settings). */
-async function waitingFor(db: Db, clientId: string): Promise<string> {
-  const { data } = await db.from("client_lifecycle_steps").select("step, status, result").eq("client_id", clientId).in("step", ["design_refs", "design_settings"]);
-  const step = (name: string) => (data ?? []).find((r: Row) => r.step === name);
-  const waits = (r: Row | undefined) => (r?.status === "waiting" ? String(r.result?.waiting_for ?? "") : "");
-  const settings = waits(step("design_settings"));
-  if (settings === "logo_file") return "logo_file";
-  const refs = waits(step("design_refs"));
-  if (refs === "social_accounts" || refs === "designed_posts") return refs;
-  return "look";
+/** What the client's setup waits for before designs can start, in the lifecycle's own words (_shared/design/setup.ts). */
+async function waitingFor(db: Db, clientId: string): Promise<DesignWaitingFor> {
+  const { data } = await db.from("client_lifecycle_steps").select("step, status, result").eq("client_id", clientId).in("step", [...DESIGN_SETUP_STEPS]);
+  return designWaitingFor((data ?? []) as DesignStepRow[]);
 }
 
 async function setUp(db: Db, clientId: string): Promise<Row | null> {
@@ -189,7 +184,7 @@ export async function weekPreview(d: WeekDeps, body: Row): Promise<Answer> {
 function estimateOf(raw: unknown): Record<string, number> | null {
   if (!raw || typeof raw !== "object") return null;
   const out: Record<string, number> = {};
-  for (const k of ["posts", "single", "carousel", "video", "credits", "minutes"]) {
+  for (const k of ["posts", "single", "story", "carousel", "video", "credits", "minutes"]) {
     const n = Number((raw as Row)[k]);
     if (Number.isFinite(n) && n >= 0) out[k] = Math.round(n * 100) / 100;
   }

@@ -123,13 +123,36 @@ export function normalizeOwnedCompetitive(profiles:OwnedProfile[],period:Period,
     posts:all.filter(p=>day(p.publishedAt)>=period.start),metrics:{provider:'sprout',coverage:'complete',published_posts_only:true,period,previous_period:previous,by_network,audience_snapshot}};
 }
 
-/** opts.fields: extra Sprout post fields to request (the weekly calendar asks for is_boosted). */
-export async function collectOwnedCompetitive(db:any,client:any,period:Period,opts:{fields?:string[]}={}) {
+/**
+ * The client's Instagram Stories in the period, from the INSTAGRAM_STORY rows
+ * the posts read already returns (Sprout's Post Types; it has no Facebook
+ * Story type). Stories are not posts (isPublishedPost): this is only their
+ * history, for the weekly planner's Story suggestions. Each Story once, from
+ * an assigned profile, sent.
+ */
+export function ownedStories(profiles:OwnedProfile[],period:Period,postRows:any[]):Array<{channel:'instagram';publishedAt:string}> {
+  const ids=new Set(profiles.map(p=>String(p.sprout_profile_id)));
+  const seen=new Set<string>(); const out:Array<{channel:'instagram';publishedAt:string}>=[];
+  for(const row of postRows) {
+    if(String(row.post_type||'').toUpperCase()!=='INSTAGRAM_STORY' || row.sent===false) continue;
+    if(!ids.has(String(row.customer_profile_id || row.dimensions?.customer_profile_id || ''))) continue;
+    const date=day(row.created_time); const key=String(row.guid || row.perma_link || '');
+    if(!key || seen.has(key) || !Number.isFinite(Date.parse(row.created_time)) || date<period.start || date>period.end) continue;
+    seen.add(key); out.push({channel:'instagram',publishedAt:String(row.created_time)});
+  }
+  return out;
+}
+
+/**
+ * opts.fields: extra Sprout post fields to request (the weekly calendar asks for is_boosted).
+ * opts.stories: also answer the period's Instagram Stories (ownedStories); the weekly calendar asks for them.
+ */
+export async function collectOwnedCompetitive(db:any,client:any,period:Period,opts:{fields?:string[];stories?:boolean}={}) {
   const {data:profiles,error}=await db.from('sprout_profiles').select('sprout_profile_id,network_type,native_name,profile_name,native_link').eq('client_id',client.id).neq('is_active',false);
   if(error) throw new Error('Could not read assigned client profiles');
   // Sprout does not expose X consistently; RivalIQ remains the X source.
   const selected=(profiles||[]).filter((p:OwnedProfile)=>['facebook','instagram','linkedin','youtube','tiktok'].includes(ownedNetwork(p.network_type)));
-  if(!selected.length) return {provider:'sprout',coverage:'not_connected',profiles:[],posts:[],metrics:null,period};
+  if(!selected.length) return {provider:'sprout',coverage:'not_connected',profiles:[],posts:[],metrics:null,period,...(opts.stories?{stories:[]}:{})};
   if(selected.length>100) throw new Error('More than 100 profiles assigned to this client');
   const tokenResponse=await fetch('https://identity.sproutsocial.com/oauth2/84e39c75-d770-45d9-90a9-7b79e3037d2c/v1/token',{
     method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id:(globalThis as any).Deno.env.get('SPROUT_CLIENT_ID')||'',client_secret:(globalThis as any).Deno.env.get('SPROUT_CLIENT_SECRET')||'',grant_type:'client_credentials',scope:'organization_id'}),signal:AbortSignal.timeout(15000),
@@ -161,6 +184,7 @@ export async function collectOwnedCompetitive(db:any,client:any,period:Period,op
     pages('posts',{timezone:'UTC',filters:[filter,`created_time.in(${previous.start}T00:00:00...${period.end}T23:59:59)`],fields:['guid','customer_profile_id','network','created_time','perma_link','text','post_type','content_category','visual_media',...(opts.fields||[])],metrics:['lifetime.reactions','lifetime.likes','lifetime.comments_count','lifetime.shares_count','lifetime.impressions','lifetime.video_views'],limit:50}),
     audience(period),audience(previous),audience({start:new Date(Date.parse(latest)-2*DAY).toISOString().slice(0,10),end:latest}),
   ]);
-  return normalizeOwnedCompetitive(selected,period,postRows,[...currentRows,...previousRows,...latestRows],collectedAt);
+  const owned=normalizeOwnedCompetitive(selected,period,postRows,[...currentRows,...previousRows,...latestRows],collectedAt);
+  return opts.stories ? {...owned,stories:ownedStories(selected,period,postRows)} : owned;
 }
 

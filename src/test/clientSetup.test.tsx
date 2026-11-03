@@ -17,7 +17,7 @@ vi.mock('@/components/layout/AppLayout', () => ({ AppLayout: ({ children, action
 vi.mock('@/integrations/supabase/client', () => ({ supabase: {
   auth: { getUser: async () => ({ data: { user: { id: 'person-1' } } }) },
   rpc: async (name: string, args: any) => { f.rpcs.push({ name, ...args }); if (name === 'lifecycle_request') f.runningStep = args.p_step; return { data: null, error: null }; },
-  functions: { invoke: async (name: string) => { f.invokes.push(name); return name === 'sprout-profiles' ? { data: { profiles: [{ id: 11, name: 'Bader IG', native_name: 'baderlaw', network_type: 'fb_instagram_account' }, { id: 12, name: 'Bader FB', network_type: 'facebook' }, { id: 13, name: 'Someone else', network_type: 'facebook' }] }, error: null } : { data: {}, error: null }; } },
+  functions: { invoke: async (name: string) => { f.invokes.push(name); return name === 'sprout-profiles' ? { data: { profiles: [{ id: 11, name: 'Bader IG', native_name: 'baderlaw', network_type: 'fb_instagram_account' }, { id: 12, name: 'Bader FB', network_type: 'facebook' }, { id: 13, name: 'Someone else', network_type: 'facebook', declined: { brand: 'Someone else', declined_at: '2026-11-02T12:30:00Z' } }] }, error: null } : { data: {}, error: null }; } },
   storage: { from: () => ({ createSignedUrls: async () => ({ data: [] }), getPublicUrl: () => ({ data: { publicUrl: 'https://x/logo.png' } }) }) },
   from: (table: string) => {
     const filters: Record<string, unknown> = {};
@@ -108,6 +108,12 @@ it('keeps the matched Sprout accounts, and removes only the one a person takes o
   expect(f.deletes[0]).toMatchObject({ table: 'sprout_profiles', filters: { client_id: 'c1', sprout_profile_id: [12] } });
   expect(f.upserts).toEqual([]);
   expect(f.updates.filter((u) => u.table === 'clients')).toEqual([]);
+});
+
+it('shows a Sprout brand a person chose not to add as declined, and still lets a person assign it', async () => {
+  mount('sprout');
+  expect(await screen.findByText('Declined as a client on Nov 2, 2026')).toBeInTheDocument();
+  expect(screen.getByRole('checkbox', { name: 'Assign Someone else' })).toBeInTheDocument();
 });
 
 it("says where each schedule stands in plain words, never the scheduler's own note", async () => {

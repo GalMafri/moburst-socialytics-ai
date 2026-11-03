@@ -34,6 +34,6 @@ describe('automatic brand evidence', () => {
     expect(referenceFingerprint(['7'], '1')).not.toBe(referenceFingerprint(['7'], '2'));
   });
   it('gives reviewed social posts priority over stale manual references', () => {
-    expect(referencesFor(['old.png'], [{ path: 'social.png', quality_checked: true }, { path: 'unvetted.png' }], 1)).toEqual(['social.png']);
+    expect(referencesFor(['old.png'], [{ path: 'social.png', quality_checked: true }, { path: 'unvetted.png' }], 1, null)).toEqual(['social.png']);
   });
 });

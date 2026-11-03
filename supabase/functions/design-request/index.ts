@@ -7,6 +7,9 @@
 //        Plans the options from the post and the client's own posts, then
 //        starts them. A second call while the post's designs are being
 //        prepared returns the open request.
+//   POST {action:"story", client_id, calendar_post_key}
+//        "Design as a Story" on a Facebook or Instagram post: one Story post
+//        linked to it, designed like the post's own design (story.ts).
 //   POST {action:"close_filming"}   (operational secret, as the system) filming
 //        requests closed when their footage arrived or cannot come in time; spends nothing
 //   POST {action:"week_preview"|"week_start"|"week_stop"|"week_continue", ...}
@@ -30,6 +33,7 @@ import { BRIEFS_PLANNED, CAROUSEL_SLIDES, OPTIONS_WANTED, type RecentDesign, car
 import { type DesignRequest, type Settings, endRequest, startOption } from "../_shared/canva/jobs.ts";
 import { filmingOutcome, postInstant } from "../_shared/design/requestRules.ts";
 import { currentCopyOf, designKind, type PassStart } from "../_shared/design/weekRules.ts";
+import { isStoryPost } from "../_shared/design/story.ts";
 import { wakeWorker, wakeVideoWorker } from "../_shared/canva/worker.ts";
 import { DESIGN_ANGLE } from "../_shared/canva/jobs.ts";
 import { learningLines, recordFeedback } from "../_shared/design-prompts/feedback.ts";
@@ -39,6 +43,8 @@ import { creditBalance } from "../_shared/higgsfield/generate.ts";
 import { McpClient } from "../_shared/higgsfield/mcp.ts";
 import { MCP_URL, accessTokenFor } from "../_shared/higgsfield/oauth.ts";
 import { type WeekDeps, weekContinue, weekPreview, weekStart, weekStop } from "./week.ts";
+import { designStory } from "./story.ts";
+import { plannerLibrary } from "./library.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -86,6 +92,16 @@ Deno.serve(async (req) => {
         clientId, postKey, copy, reportId: body.report_id || null, platform: body.platform || null, format: body.format || null, requestedBy: userId, visual: visual || null, route,
       });
       return json({ request });
+    }
+
+    // "Design as a Story": whoever can work on the client's posts, as create (story.ts).
+    if (body?.action === "story") {
+      const answer = await designStory({
+        db: admin,
+        requireMember: (clientId) => requireMember(req, clientId),
+        startRequest: (settings, p) => startRequest(admin, settings as Settings, p),
+      }, body);
+      return json(answer.body, answer.status ?? 200);
     }
 
     // Stop a design being prepared: whoever could start it can stop it. The
@@ -274,7 +290,7 @@ async function plan(admin: any, request: DesignRequest, settings: Settings): Pro
 }
 
 async function planNow(admin: any, request: DesignRequest, settings: Settings): Promise<void> {
-  const { data: client } = await admin.from("clients").select("name, brand_identity, video_references, video_style").eq("id", request.client_id).maybeSingle();
+  const { data: client } = await admin.from("clients").select("name, brand_identity, video_references, video_style, harvested_design_references").eq("id", request.client_id).maybeSingle();
   // A video is planned from the client's own videos (14 Oct: "make videos in a
   // similar style to their VIDEOS, not statics"). Until their style has been
   // read, the request waits; the video worker plans it when the style is in.
@@ -296,21 +312,13 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
   const brand = client?.name ?? "the brand";
   const voice = client?.brand_identity?.tone_of_voice ?? null;
 
-  // The client's whole confirmed library, shown as numbered posts so each
-  // brief can name the posts its layout builds on.
-  const library: string[] = [];
-  const content: unknown[] = [];
-  for (const path of videoStyle ? videoStyle.frames as string[] : settings.reference_paths.slice(0, MAX_LIBRARY)) {
-    const { data } = await admin.storage.from("design-references").download(path);
-    if (!data) continue;
-    const bytes = new Uint8Array(await data.arrayBuffer());
-    let bin = "";
-    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-    const mediaType = /\.png$/i.test(path) ? "image/png" : /\.webp$/i.test(path) ? "image/webp" : "image/jpeg";
-    library.push(path);
-    content.push({ type: "text", text: `${videoStyle ? "Still" : "Post"} ${library.length}:` });
-    content.push({ type: "image", source: { type: "base64", media_type: mediaType, data: btoa(bin) } });
-  }
+  // The client's whole library, shown as numbered posts so each brief can
+  // name the posts its layout builds on: the request platform's posts first,
+  // each labeled with its platform and date (library.ts).
+  const { library, content, otherPlatforms } = await plannerLibrary(admin, {
+    paths: videoStyle ? videoStyle.frames as string[] : settings.reference_paths, harvested: client?.harvested_design_references, platform: request.platform ?? null,
+    max: videoStyle ? Infinity : MAX_LIBRARY, stills: !!videoStyle,
+  });
   if (!library.length) throw new Error("None of the client's reference posts could be read.");
   const recentList = await recentDesigns(admin, request.client_id);
   const recent = recentLines(recentList, library);
@@ -321,9 +329,9 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
   const carousel = request.kind === "carousel";
   const video = request.kind === "video";
-  const common = { brand, platform: request.platform ?? "social", copy: request.post_copy, voice, count: BRIEFS_PLANNED, postCount: library.length, recent, guidance };
+  const common = { brand, platform: request.platform ?? "social", copy: request.post_copy, voice, count: BRIEFS_PLANNED, postCount: library.length, recent, guidance, otherPlatforms };
   const filmed = video && request.footage_path ? (request.on_camera || "the speaker") : null;
-  const instruction = video ? videoPlannerPrompt({ ...common, visual: (request as any).visual_direction ?? null, filmed, style: videoStyle?.profile ?? null, videos: videoStyle?.videos, framesPer: videoStyle?.frames_per_video }) : carousel ? carouselPlannerPrompt({ ...common, slides: CAROUSEL_SLIDES }) : plannerPrompt(common);
+  const instruction = video ? videoPlannerPrompt({ ...common, visual: (request as any).visual_direction ?? null, filmed, style: videoStyle?.profile ?? null, videos: videoStyle?.videos, framesPer: videoStyle?.frames_per_video }) : carousel ? carouselPlannerPrompt({ ...common, slides: CAROUSEL_SLIDES }) : plannerPrompt({ ...common, story: isStoryPost(request) });
   let briefs = [] as ReturnType<typeof parseBriefs>;
   for (let attempt = 0; attempt < 2 && briefs.length < OPTIONS_WANTED; attempt++) {
     const result = await anthropicMessages({

@@ -246,6 +246,7 @@ export type Database = {
           last_confirmed_at: string
           pattern_description: string
           pattern_type: string
+          platform: string | null
           replaced_by: string | null
           source: string
           status: string
@@ -260,6 +261,7 @@ export type Database = {
           last_confirmed_at?: string
           pattern_description: string
           pattern_type: string
+          platform?: string | null
           replaced_by?: string | null
           source?: string
           status?: string
@@ -274,6 +276,7 @@ export type Database = {
           last_confirmed_at?: string
           pattern_description?: string
           pattern_type?: string
+          platform?: string | null
           replaced_by?: string | null
           source?: string
           status?: string
@@ -390,6 +393,7 @@ export type Database = {
           reasons: Json
           report_id: string | null
           source: string
+          story_of: string | null
           touched_at: string | null
           updated_at: string
           visual_direction: string | null
@@ -415,6 +419,7 @@ export type Database = {
           reasons?: Json
           report_id?: string | null
           source?: string
+          story_of?: string | null
           touched_at?: string | null
           updated_at?: string
           visual_direction?: string | null
@@ -440,6 +445,7 @@ export type Database = {
           reasons?: Json
           report_id?: string | null
           source?: string
+          story_of?: string | null
           touched_at?: string | null
           updated_at?: string
           visual_direction?: string | null
@@ -1797,6 +1803,135 @@ export type Database = {
             columns: ["source_iteration_id"]
             isOneToOne: false
             referencedRelation: "post_iterations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      design_reference_choices: {
+        Row: {
+          choice: string
+          chosen_at: string
+          chosen_by: string | null
+          client_id: string
+          path: string
+          source: string
+        }
+        Insert: {
+          choice: string
+          chosen_at?: string
+          chosen_by?: string | null
+          client_id: string
+          path: string
+          source?: string
+        }
+        Update: {
+          choice?: string
+          chosen_at?: string
+          chosen_by?: string | null
+          client_id?: string
+          path?: string
+          source?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "design_reference_choices_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      design_reference_reviews: {
+        Row: {
+          client_id: string
+          confidence: number | null
+          content_hash: string | null
+          network: string
+          path: string | null
+          posted_at: string | null
+          reason: string | null
+          reviewed_at: string
+          source_post_id: string
+          source_url: string | null
+          verdict: string
+        }
+        Insert: {
+          client_id: string
+          confidence?: number | null
+          content_hash?: string | null
+          network?: string
+          path?: string | null
+          posted_at?: string | null
+          reason?: string | null
+          reviewed_at?: string
+          source_post_id: string
+          source_url?: string | null
+          verdict: string
+        }
+        Update: {
+          client_id?: string
+          confidence?: number | null
+          content_hash?: string | null
+          network?: string
+          path?: string | null
+          posted_at?: string | null
+          reason?: string | null
+          reviewed_at?: string
+          source_post_id?: string
+          source_url?: string | null
+          verdict?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "design_reference_reviews_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      design_refs_conversion: {
+        Row: {
+          client_id: string
+          converted_at: string
+          kept: string[]
+          left_out: string[]
+          posts: string[]
+          posts_seen: boolean
+          reference_paths: string[]
+          settings_updated_at: string | null
+          uploads: string[]
+        }
+        Insert: {
+          client_id: string
+          converted_at?: string
+          kept: string[]
+          left_out: string[]
+          posts: string[]
+          posts_seen: boolean
+          reference_paths: string[]
+          settings_updated_at?: string | null
+          uploads: string[]
+        }
+        Update: {
+          client_id?: string
+          converted_at?: string
+          kept?: string[]
+          left_out?: string[]
+          posts?: string[]
+          posts_seen?: boolean
+          reference_paths?: string[]
+          settings_updated_at?: string | null
+          uploads?: string[]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "design_refs_conversion_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: true
+            referencedRelation: "clients"
             referencedColumns: ["id"]
           },
         ]
@@ -3205,6 +3340,36 @@ export type Database = {
           },
         ]
       }
+      sprout_brand_declines: {
+        Row: {
+          brand: string
+          declined_at: string
+          declined_by: string | null
+          id: string
+          note: string | null
+          profile_ids: number[]
+          sprout_group_id: string | null
+        }
+        Insert: {
+          brand: string
+          declined_at?: string
+          declined_by?: string | null
+          id?: string
+          note?: string | null
+          profile_ids?: number[]
+          sprout_group_id?: string | null
+        }
+        Update: {
+          brand?: string
+          declined_at?: string
+          declined_by?: string | null
+          id?: string
+          note?: string | null
+          profile_ids?: number[]
+          sprout_group_id?: string | null
+        }
+        Relationships: []
+      }
       sprout_profile_removals: {
         Row: {
           client_id: string
@@ -3811,6 +3976,10 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      design_reference_choose: {
+        Args: { p_choice: string; p_client: string; p_path: string }
+        Returns: Json
+      }
       enqueue_scheduled_report_jobs: {
         Args: { p_dry_run?: boolean; p_now?: string }
         Returns: Json
@@ -3959,6 +4128,10 @@ export type Database = {
       lifecycle_write_client: {
         Args: { p_by?: string; p_client: string; p_fields: Json }
         Returns: Json
+      }
+      lifecycle_write_design_library: {
+        Args: { p_client: string; p_reference_paths: string[] }
+        Returns: boolean
       }
       lifecycle_write_design_settings: {
         Args: {
@@ -4134,6 +4307,16 @@ export type Database = {
           schedule_id: string
         }[]
       }
+      sprout_brand_decline: {
+        Args: {
+          p_brand: string
+          p_group_id: string
+          p_note?: string
+          p_profile_ids: number[]
+        }
+        Returns: string
+      }
+      sprout_brand_undecline: { Args: { p_id: string }; Returns: boolean }
       sprout_onboard_client: {
         Args: {
           p_brand?: string

@@ -10,6 +10,7 @@
 // Free of Deno and network imports so it can be tested.
 
 import { LOGO_SPOTS } from "../canva/options.ts";
+import { referencesFor } from "../design-prompts/designRefs.ts";
 
 export type Spot = typeof LOGO_SPOTS[number];
 export type Anchor = "left" | "center" | "right";
@@ -142,6 +143,15 @@ export function referencePaths(uploaded: unknown, harvested: unknown): string[] 
   const own = Array.isArray(uploaded) ? uploaded.filter((p): p is string => typeof p === "string" && !!p) : [];
   const found = Array.isArray(harvested) ? harvested.map((r) => (r && typeof r === "object" ? String((r as { path?: unknown }).path ?? "") : "")).filter(Boolean) : [];
   return [...new Set([...own, ...found])].slice(0, MAX_REFS);
+}
+
+/**
+ * The posts designs follow: the library the design_refs step keeps (the
+ * uploads a person kept first, a post or upload left out never), at most 16;
+ * before there is one, the uploads, then the posts found.
+ */
+export function libraryPaths(uploaded: unknown, harvested: unknown): string[] {
+  return referencesFor(uploaded, harvested, MAX_REFS, null);
 }
 
 /** Where a public URL in the project's generated-media bucket points, or null for any other address. */

@@ -1,6 +1,10 @@
-import { describe, it, expect } from "vitest";
-import { consolidatePrompt, mergePrompt, parseConsolidation, parseMergeOps, parseVoiceProfile, voicePromptBlock, voiceProfilePrompt, type ClientVoice, type Preference } from "./voice";
-import { loadClientVoice } from "./load";
+import { afterAll, afterEach, describe, it, expect, vi } from "vitest";
+import { consolidatePrompt, mergePrompt, parseConsolidation, parseMergeOps, parseVoiceProfile, voicePlatforms, voicePromptBlock, voiceProfilePrompt, voiceReady, voiceSample, type ClientVoice, type Preference } from "./voice";
+import { buildVoiceProfile, loadClientVoice } from "./load";
+import type { OwnPost } from "../calendar/evidence";
+
+const anthropic = vi.hoisted(() => vi.fn());
+vi.mock("../anthropic.ts", () => ({ anthropicMessages: anthropic }));
 import { fakeDb } from "../lifecycle/fakeDb";
 import type { DatedPoint } from "../notes/notes";
 
@@ -169,8 +173,8 @@ describe("the preference memory", () => {
       { op: "add", pattern_type: "tone", description: "Fourth op" },
     ] }), ["p1", "p2"]);
     expect(ops).toEqual([
-      { op: "replace", id: "p1", pattern_type: "cta_style", description: "End with a direct call to action." },
-      { op: "add", pattern_type: "other", description: "No emoji on LinkedIn." },
+      { op: "replace", id: "p1", pattern_type: "cta_style", description: "End with a direct call to action.", platform: null },
+      { op: "add", pattern_type: "other", description: "No emoji on LinkedIn.", platform: null },
       { op: "confirm", id: "p2" },
     ]);
     expect(parseMergeOps("not json", ["p1"])).toEqual([]);
@@ -180,5 +184,103 @@ describe("the preference memory", () => {
     expect(consolidatePrompt("Moburst", current)).toContain("[p1] 2026-08-26 (cta_style)");
     const merged = parseConsolidation(JSON.stringify({ preferences: [{ pattern_type: "cta_style", description: "Direct CTAs.", from: ["p1", "x"] }, { description: "No source", from: [] }] }), ["p1", "p2"]);
     expect(merged).toEqual([{ pattern_type: "cta_style", description: "Direct CTAs.", from: ["p1"] }]);
+  });
+});
+
+// Bader Law posts on Facebook and Instagram most weeks and has only begun on TikTok.
+const NOW = new Date("2026-11-02T10:00:00Z");
+const own = (platform: string, n: number, over: Partial<OwnPost> = {}): OwnPost[] => Array.from({ length: n }, (_, i) => ({
+  id: `${platform}-${i}`, platform, format: "image", publishedAt: new Date(NOW.getTime() - (i + 3) * 86400_000).toISOString(),
+  text: `${platform} post ${i}: Injured at work? Call Bader Law today.`, link: null, impressions: 100, engagement: 5 + i, ...over,
+}));
+
+describe("the posts a voice is learned from", () => {
+  it("are organic posts with text, the newest 25 per platform", () => {
+    const sample = voiceSample([...own("Facebook", 30), ...own("Instagram", 2, { boosted: true }), ...own("TikTok", 2, { text: "Short" })]);
+    expect(Object.keys(sample)).toEqual(["Facebook"]);
+    expect(sample.Facebook).toHaveLength(25);
+    expect(sample.Facebook[0].text).toBe("Facebook post 0: Injured at work? Call Bader Law today.");
+  });
+  it("give a platform a voice of its own at 5 posts; below that it is thin", () => {
+    expect(voicePlatforms(voiceSample([...own("Facebook", 6), ...own("Instagram", 5), ...own("TikTok", 3)]))).toEqual({ own: ["Facebook", "Instagram"], thin: { TikTok: 3 } });
+  });
+  it("say when a thin platform has reached 5, so the profile is built again early", () => {
+    const social = { built_at: "2026-10-05T00:00:00Z", post_count: 14, platforms: {}, examples: {}, thin: { TikTok: 3, X: 1 } };
+    expect(voiceReady(social, [...own("Facebook", 6), ...own("TikTok", 5), ...own("X", 2)])).toEqual(["TikTok"]);
+    expect(voiceReady({ ...social, thin: undefined }, own("TikTok", 9))).toEqual([]);
+    expect(voiceReady(null, own("TikTok", 9))).toEqual([]);
+  });
+});
+
+describe("buildVoiceProfile", () => {
+  vi.stubGlobal("Deno", { env: { get: (k: string) => (k === "ANTHROPIC_API_KEY" ? "test" : undefined) } });
+  afterEach(() => anthropic.mockReset());
+  afterAll(() => vi.unstubAllGlobals());
+  const voiceJson = (platforms: string[]) => JSON.stringify({
+    platforms: Object.fromEntries(platforms.map((p) => [p, { summary: `${p}: plain and urgent.`, phrases: ["Call us"] }])),
+    overall: { summary: "Plain, urgent and local.", opening: "A question", phrases: ["Call Bader Law"] },
+  });
+
+  it("leaves boosted posts out, writes a voice only for platforms with 5 posts, adds the overall voice in the same call, and records the thin ones", async () => {
+    anthropic.mockResolvedValue({ text: voiceJson(["Facebook", "TikTok"]), raw: {} });
+    const db = fakeDb({ clients: [{ id: "c1", name: "Bader Law", timezone: "America/New_York" }] });
+    const voice = await buildVoiceProfile(db, "c1", [...own("Facebook", 6), ...own("Facebook", 4, { boosted: true, id: "ad" }), ...own("TikTok", 3)], NOW);
+    expect(anthropic).toHaveBeenCalledTimes(1);
+    const prompt = anthropic.mock.calls[0][0].body.messages[0].content as string;
+    expect(prompt).toContain("Facebook (6 posts):");
+    expect(prompt).toContain("TikTok (3 posts):");
+    expect(prompt).toContain("Describe these platforms on their own: Facebook.");
+    expect(prompt).toContain('"overall"');
+    expect(Object.keys(voice.platforms)).toEqual(["Facebook"]);
+    expect(voice.overall?.summary).toBe("Plain, urgent and local.");
+    expect(voice.thin).toEqual({ TikTok: 3 });
+    expect(voice.post_count).toBe(9);
+    // The thin platform's own posts are its examples.
+    expect(voice.examples.TikTok?.length).toBeGreaterThan(0);
+  });
+});
+
+describe("a platform with too few posts for a voice of its own", () => {
+  const social = {
+    built_at: "2026-11-02T08:00:00Z", post_count: 9,
+    platforms: { Facebook: { summary: "Plain and urgent.", opening: "", length: "", structure: "", emoji: "", hashtags: "", cta: "", person: "", formality: "", phrases: [] } },
+    overall: { summary: "Plain, urgent and local.", opening: "A question", length: "", structure: "", emoji: "", hashtags: "", cta: "", person: "", formality: "", phrases: ["Call Bader Law"] },
+    thin: { TikTok: 3 },
+    examples: { TikTok: [{ text: "Hurt on the job? 3 things to do first.", date: "2026-10-28", link: null, format: "video" }] },
+  };
+  const v: ClientVoice = { brand: "Bader Law", preferences: [], social, briefTone: null };
+
+  it("gets the brand's overall voice, labeled as learned from the other platforms, with its own posts as examples", () => {
+    const block = voicePromptBlock(v, { platforms: ["TikTok"], examples: {} });
+    expect(block).toContain("TikTok: 3 posts so far, too few for a voice of its own. Write it in Bader Law's overall voice, learned from its other platforms:");
+    expect(block).toContain("Overall: Plain, urgent and local.");
+    expect(block).toContain('Phrases it uses: "Call Bader Law"');
+    expect(block).not.toContain("Facebook: Plain and urgent.");
+    expect(block).toContain('- TikTok, 2026-10-28: "Hurt on the job? 3 things to do first."');
+  });
+  it("is the same for a platform with no posts at all", () => {
+    expect(voicePromptBlock(v, { platforms: ["LinkedIn"] })).toContain("LinkedIn: no posts so far, too few for a voice of its own. Write it in Bader Law's overall voice, learned from its other platforms:");
+  });
+  it("leaves a platform with a voice of its own as it was", () => {
+    const block = voicePromptBlock(v, { platforms: ["Facebook"] });
+    expect(block).toContain("Facebook: Plain and urgent.");
+    expect(block).not.toContain("overall voice");
+  });
+});
+
+describe("a preference for one platform", () => {
+  const prefs = [pref("p1", "Direct, instructional tone.", 3), { ...pref("p2", "No emoji."), platform: "LinkedIn" }];
+  it("reaches only that platform's writer; a preference for every platform reaches all", () => {
+    const ig = voicePromptBlock({ ...VOICE, preferences: prefs }, { platforms: ["Instagram"] });
+    expect(ig).toContain("- Direct, instructional tone.");
+    expect(ig).not.toContain("No emoji.");
+    expect(voicePromptBlock({ ...VOICE, preferences: prefs }, { platforms: ["LinkedIn"] })).toMatch(/- No emoji\. \(LinkedIn only, Oct 13(, 2026)?\)/);
+  });
+  it("is learned when the signal says so, and the memory says which platform each one is for", () => {
+    expect(mergePrompt("Moburst", prefs, { kind: "copy_edit", before: "A 🚀", after: "A", platform: "LinkedIn" })).toContain("- [p2] (tone, LinkedIn only) No emoji.");
+    expect(mergePrompt("Moburst", prefs, { kind: "revise_note", note: "x" })).toContain('"platform"');
+    const ops = parseMergeOps(JSON.stringify({ ops: [{ op: "add", pattern_type: "emoji_usage", description: "No emoji.", platform: "linkedin" }, { op: "add", pattern_type: "length", description: "Short.", platform: null }] }), []);
+    expect(ops).toEqual([{ op: "add", pattern_type: "emoji_usage", description: "No emoji.", platform: "LinkedIn" }, { op: "add", pattern_type: "length", description: "Short.", platform: null }]);
+    expect(consolidatePrompt("Moburst", prefs)).toContain("(tone, LinkedIn only) No emoji.");
   });
 });

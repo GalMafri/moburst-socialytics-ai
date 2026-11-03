@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { MAX_CANDIDATES, parseBriefs, requestProgress, type JobState } from "./options";
+import { MAX_CANDIDATES, carouselPlannerPrompt, parseBriefs, plannerPrompt, requestProgress, videoPlannerPrompt, type JobState } from "./options";
 
 const done: JobState = { status: "done", step: "finished" };
 const failed: JobState = { status: "failed", step: "edit" };
@@ -123,5 +123,34 @@ describe("leastRecentPosts", () => {
     expect(briefs[0].refs).toEqual(["a.jpg", "b.jpg"]);
     expect(briefs[1].refs).toEqual(["a.jpg"]);
     expect(briefs[2].refs).toEqual(["c.jpg", "d.jpg"]);
+  });
+});
+
+describe("plannerPrompt", () => {
+  const args = { brand: "Pay The Pyper", platform: "Instagram", copy: "Captains pay last.", voice: null, count: 3, postCount: 8, recent: "" };
+
+  it("tells the planner a Story is seen full screen for a few seconds, and keeps the headline limits", () => {
+    const story = plannerPrompt({ ...args, story: true });
+    expect(story).toContain("This post is a Story: its frame is seen full screen for a few seconds, so the headline carries the message, and a second line may carry the call to action.");
+    expect(story).toContain("One line of at most 8 words, optionally a second, shorter line.");
+  });
+
+  it("says nothing of Stories for a feed post", () => {
+    expect(plannerPrompt(args)).not.toContain("Story");
+  });
+});
+
+describe("posts from other platforms", () => {
+  const args = { brand: "Bader Law", platform: "LinkedIn", copy: "Injured at work? Know your rights.", voice: null, count: 3, postCount: 6, recent: "" };
+  const line = "Each post is labeled with the platform it was published on and its date, LinkedIn's own posts first. Posts from other platforms show the brand, not LinkedIn's layout.";
+  it("tell the planner they show the brand, not the post's platform's layout", () => {
+    expect(plannerPrompt({ ...args, otherPlatforms: true })).toContain(line);
+    expect(carouselPlannerPrompt({ ...args, slides: 5, otherPlatforms: true })).toContain(line);
+    expect(videoPlannerPrompt({ ...args, otherPlatforms: true })).toContain(line);
+    expect(videoPlannerPrompt({ ...args, filmed: "its founder", otherPlatforms: true })).toContain(line);
+  });
+  it("say nothing when every post is the platform's own", () => {
+    expect(plannerPrompt(args)).not.toContain("other platforms");
+    expect(plannerPrompt(args).split("\n")[1]).not.toBe("");
   });
 });

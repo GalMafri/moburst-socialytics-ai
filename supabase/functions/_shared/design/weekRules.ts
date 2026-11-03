@@ -12,6 +12,7 @@
 
 import { type PostRequest, postInstant, weekDecision } from "./requestRules.ts";
 import { DESIGN_ANGLE } from "../canva/jobs.ts";
+import { isStoryPost } from "./story.ts";
 
 /**
  * Week posts being designed at once across the app: the pace the automatic
@@ -76,7 +77,8 @@ export interface PostFacts {
 }
 
 export type Classified =
-  | { in: true; kind: DesignKind; route: string | null; askFilming: boolean; postAt: Date | null }
+  /** story: a Facebook or Instagram Story, designed as a single still and counted on its own. */
+  | { in: true; kind: DesignKind; story: boolean; route: string | null; askFilming: boolean; postAt: Date | null }
   | { in: false; why: LeftOut };
 
 /** Whether the button designs this post now, and how; or why not. */
@@ -89,7 +91,7 @@ export function classifyPost(f: PostFacts, timeZone: string | null | undefined, 
   const d = weekDecision(f.requests);
   if (!d.start) return { in: false, why: d.why === "ready" ? "designed" : d.why };
   const kind = designKind(f.post.format, f.post.platform);
-  return { in: true, kind, route: kind === "video" ? d.route : null, askFilming: kind === "video" && d.askFilming, postAt };
+  return { in: true, kind, story: isStoryPost(f.post), route: kind === "video" ? d.route : null, askFilming: kind === "video" && d.askFilming, postAt };
 }
 
 /** A post's copy as it is now: its latest saved edit (a revision row without media), or the copy it was planned with. */
@@ -109,15 +111,16 @@ export function mediaOf(rows: Array<{ variant_angle?: string | null; is_selected
   };
 }
 
-/** What a press would design, by kind; posts whose copy is not written yet; and video posts left for filming. */
-export function weekCounts(posts: Array<{ post_key: string; copy: string; result: Classified }>): { single: number; carousel: number; video: number; copy_waits: number; filming: number } {
-  const out = { single: 0, carousel: 0, video: 0, copy_waits: 0, filming: 0 };
+/** What a press would design, by kind (Stories on their own); posts whose copy is not written yet; and video posts left for filming. */
+export function weekCounts(posts: Array<{ post_key: string; copy: string; result: Classified }>): { single: number; story: number; carousel: number; video: number; copy_waits: number; filming: number } {
+  const out = { single: 0, story: 0, carousel: 0, video: 0, copy_waits: 0, filming: 0 };
   for (const p of posts) {
     if (!p.result.in) {
       if (p.result.why === "filming") out.filming++;
       continue;
     }
-    out[p.result.kind]++;
+    if (p.result.story) out.story++;
+    else out[p.result.kind]++;
     if (!p.copy.trim()) out.copy_waits++;
   }
   return out;

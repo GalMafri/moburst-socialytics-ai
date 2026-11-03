@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
-  clientOriginLine, cleanText, competitiveRunStatus, countryNames, eventName, firstRunSentence, formatDate, formatDateTime, formatRange,
+  clientOriginLine, cleanText, declinedBrandLine, competitiveRunStatus, countryNames, eventName, firstRunSentence, formatDate, formatDateTime, formatRange,
   isRawProfileId, languageNames, notePointKindName, noteReadLine, noteStateLine, platformKey, platformName, profileName, roleName, timelineDetail, timelineKindName, usageStateName,
 } from "@/lib/display";
 import { isActiveClient } from "@/lib/activeClients";
@@ -156,5 +156,13 @@ describe("client notes", () => {
     expect(noteReadLine(512345, 400000)).toBe("About the first 400,000 of 512,345 characters were read.");
     expect(noteReadLine(9000, 400000)).toBe("");
     expect(noteReadLine(null, 400000)).toBe("");
+  });
+});
+
+describe("a Sprout brand a person chose not to add", () => {
+  it("says it was declined as a client, and on which day", () => {
+    expect(declinedBrandLine({ brand: "Ai Degree", declined_at: "2026-11-02T12:30:00Z" })).toBe("Declined as a client on Nov 2, 2026");
+    expect(declinedBrandLine({ brand: "Ai Degree" })).toBe("Declined as a client");
+    expect(declinedBrandLine(null)).toBe("");
   });
 });

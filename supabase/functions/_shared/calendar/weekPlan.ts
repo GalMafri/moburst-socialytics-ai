@@ -9,6 +9,8 @@
 
 import type { EvidenceItem, RhythmLine } from "./evidence.ts";
 import { clientFit, fmtMultiple, reasonLabel, type EvidenceRef, type Reason, type ReasonType } from "./reasonText.ts";
+import { STORY_FORMAT, isStoryFormat } from "../design/story.ts";
+import { postInstant } from "../design/requestRules.ts";
 
 export { clientFit, evidenceSentence, fmtMultiple, headline } from "./reasonText.ts";
 export type { EvidenceRef, Reason, ReasonType } from "./reasonText.ts";
@@ -54,6 +56,11 @@ export interface PlannedPost {
   visual_direction: string | null;
   reasons: Reason[];
   source: "plan";
+  /** Set when the week has Stories (withStories): the row's id and key, so a Story can name its post before either is written. */
+  id?: string;
+  post_key?: string;
+  /** A Story: its post's key. */
+  story_of?: string;
 }
 
 const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -160,7 +167,9 @@ const toRef = (e: EvidenceItem): EvidenceRef => ({ ...e });
 /**
  * The week's posts from the planner's reply. Posts outside the usable dates,
  * without a platform or without copy are dropped; each platform keeps at most
- * the posts its rhythm allows; only the first test stays a test.
+ * the posts its rhythm allows; only the first test stays a test. A feed post
+ * the model set to Story is saved as a single image: Stories are added in
+ * code (withStories) and never count toward the rhythm.
  */
 export function parseWeekPlan(text: string, c: Pick<WeekContext, "monday" | "firstDate" | "rhythm" | "evidence" | "existing">): PlannedPost[] {
   const data = jsonObject(text);
@@ -193,7 +202,7 @@ export function parseWeekPlan(text: string, c: Pick<WeekContext, "monday" | "fir
     out.push({
       post_date: date,
       platform,
-      format: str(p.format, 40) || null,
+      format: isStoryFormat(str(p.format, 40)) ? "Single Image" : str(p.format, 40) || null,
       posting_time: str(p.posting_time, 10) || null,
       pillar: str(p.pillar, 120) || null,
       copy,
@@ -203,6 +212,39 @@ export function parseWeekPlan(text: string, c: Pick<WeekContext, "monday" | "fir
       reasons: [reason],
       source: "plan",
     });
+  }
+  return out;
+}
+
+// ── The week's Stories ──────────────────────────────────────────────────────
+
+/**
+ * The week's posts with their Stories (Stories design, 2 Nov 2026): one Story
+ * for each of the soonest planned Instagram posts, up to the week's count
+ * (storyRhythm, from the client's own Instagram Stories). Each Story is dated
+ * with its post, carries its copy (the message its frame is written from) and
+ * reasons, and names it in story_of. No model call; Facebook Stories are
+ * never suggested, as Sprout reports no Facebook Story type. With Stories,
+ * every row carries its id and key: a bulk insert sends one set of columns,
+ * and a row without an id would be sent with none.
+ */
+export function withStories(posts: PlannedPost[], count: number, newId: () => string = () => crypto.randomUUID()): PlannedPost[] {
+  const at = (p: PlannedPost) => postInstant(p.post_date, p.posting_time, "UTC")?.getTime() ?? Number.MAX_SAFE_INTEGER;
+  const chosen = new Set(posts.filter((p) => /instagram/i.test(p.platform) && !isStoryFormat(p.format)).sort((a, b) => at(a) - at(b)).slice(0, Math.max(0, count)));
+  if (!chosen.size) return posts;
+  const keyed = (p: PlannedPost): PlannedPost => {
+    const id = newId();
+    return { ...p, id, post_key: `post:${id}` };
+  };
+  const out: PlannedPost[] = [];
+  for (const p of posts) {
+    const post = keyed(p);
+    out.push(post);
+    if (!chosen.has(p)) continue;
+    out.push(keyed({
+      post_date: p.post_date, platform: p.platform, format: STORY_FORMAT, posting_time: p.posting_time, pillar: p.pillar, copy: p.copy,
+      hashtags: [], cta: p.cta, visual_direction: null, reasons: p.reasons, source: "plan", story_of: post.post_key,
+    }));
   }
   return out;
 }

@@ -29,7 +29,8 @@ export interface Schedule { id: string; client_id: string; kind: string; frequen
 export interface Client {
   id: string; name: string; website: string | null; company_slug: string | null; platforms: string[]; geo: string | null; language: string | null; timezone: string | null;
   pillars: Array<{ name: string; description: string | null }>; keywords: string[]; brand_identity: Record<string, string | null> | null; brief: string | null; logo_url: string | null;
-  design: { synthesis_at: string | null; references: number; system: { version: number; status: string; approved_at: string | null } | null };
+  /** system is the retired design system; ready (design settings confirmed) and waiting_for say whether designs can start. */
+  design: { synthesis_at: string | null; references: number; system: { version: number; status: string; approved_at: string | null } | null; ready: boolean; waiting_for: "look" | "designed_posts" | "social_accounts" | "logo_file" | null };
   sprout: { profiles: number; networks: string[] }; competitors: { set_status: string | null; selected: string[]; tracked: boolean };
   counts: { reports: number; competitive_reports: number; posts: number; schedules: number }; last_report: { id: string; status: string; period: Period; completed_at: string | null } | null;
   setup: Setup; archived: boolean; demo_job_id: string | null; created_at: string; links: Links;

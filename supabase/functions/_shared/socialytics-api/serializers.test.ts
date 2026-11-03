@@ -1,15 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { ALERT, CLIENT, COMPETITIVE_REPORT, COMPETITOR, COMPETITOR_SET, DESIGN_SYSTEM, HANDLE, MEDIA_JOB, POST, REPORT, REPORT_DATA, SCHEDULE, SCHEDULED_POST, SPROUT_PROFILE } from "./fixtures";
+import { ALERT, CLIENT, COMPETITIVE_REPORT, COMPETITOR, COMPETITOR_SET, DESIGN_SETTINGS, DESIGN_SYSTEM, HANDLE, MEDIA_JOB, POST, REPORT, REPORT_DATA, SCHEDULE, SCHEDULED_POST, SPROUT_PROFILE } from "./fixtures";
 import { alertOut, APP_URL, appUrl, clientOut, competitiveReportOut, competitorSetOut, designSystemOut, mediaJobOut, postOut, reportOut, scheduledPostOut, scheduleOut } from "./serializers";
 
 describe("clientOut", () => {
-  const out = clientOut(CLIENT, { sproutProfiles: [SPROUT_PROFILE], sets: [{ ...COMPETITOR_SET, competitors: [{ ...COMPETITOR, handles: [HANDLE] }] }], designSystems: [DESIGN_SYSTEM], counts: { reports: 4, competitive_reports: 2, posts: 9, schedules: 1 }, lastReport: REPORT });
+  const out = clientOut(CLIENT, { sproutProfiles: [SPROUT_PROFILE], sets: [{ ...COMPETITOR_SET, competitors: [{ ...COMPETITOR, handles: [HANDLE] }] }], designSystems: [DESIGN_SYSTEM], designSettings: DESIGN_SETTINGS, designSteps: [], counts: { reports: 4, competitive_reports: 2, posts: 9, schedules: 1 }, lastReport: REPORT });
   it("carries the brand, pillars, keywords, design, sprout and competitor summaries with links", () => {
     expect(out).toMatchObject({
       id: "c-bader", name: "Bader Law", website: "https://baderlaw.com", company_slug: "bader-law", platforms: ["Instagram", "TikTok", "Facebook", "LinkedIn", "YouTube"], geo: "US", language: "en", timezone: "America/New_York",
       pillars: [{ name: "Know your rights", description: "Plain explanations of legal situations." }], keywords: ["personal injury", "car accident lawyer"],
       brand_identity: { primary_color: "#1F3A5F", font_family: "Montserrat", tone_of_voice: "direct and reassuring" },
-      design: { synthesis_at: "2026-09-20T10:00:00.000Z", references: 3, system: { version: 2, status: "approved", approved_at: "2026-09-21T10:00:00.000Z" } },
+      design: { synthesis_at: "2026-09-20T10:00:00.000Z", references: 3, system: { version: 2, status: "approved", approved_at: "2026-09-21T10:00:00.000Z" }, ready: true, waiting_for: null },
       sprout: { profiles: 1, networks: ["instagram"] }, competitors: { set_status: "confirmed", selected: ["Morgan & Morgan"], tracked: true },
       counts: { reports: 4, competitive_reports: 2, posts: 9, schedules: 1 }, last_report: { id: "rep-1", status: "completed", period: { start: "2026-08-01", end: "2026-08-31" } },
       setup: { ready: true, issues: [] }, links: { app: `${APP_URL}/clients/c-bader/setup`, api: "/v1/clients/c-bader" },
@@ -17,21 +17,47 @@ describe("clientOut", () => {
     expect(JSON.stringify(out)).not.toContain("123456");
     expect(JSON.stringify(out)).not.toContain("L123");
   });
+  it("counts each design reference once, an upload the library keeps included", () => {
+    const withUpload = clientOut({ ...CLIENT, design_references: ["c-bader/upload.png"], harvested_design_references: [{ path: "c-bader/upload.png", upload: true, kept: true }, { path: "c-bader/social-1.jpg", quality_checked: true }] },
+      { sproutProfiles: [], sets: [], designSystems: [], designSettings: null, designSteps: [], counts: { reports: 0, competitive_reports: 0, posts: 0, schedules: 0 }, lastReport: null });
+    expect(withUpload.design.references).toBe(2);
+  });
   it("lists setup issues for a bare client", () => {
-    const bare = clientOut({ ...CLIENT, brand_identity: null, content_pillars: null, social_keywords: null, design_style_synthesis: null, harvested_design_references: null }, { sproutProfiles: [], sets: [], designSystems: [], counts: { reports: 0, competitive_reports: 0, posts: 0, schedules: 0 }, lastReport: null });
+    const bare = clientOut({ ...CLIENT, brand_identity: null, content_pillars: null, social_keywords: null, design_style_synthesis: null, harvested_design_references: null }, { sproutProfiles: [], sets: [], designSystems: [], designSettings: null, designSteps: [], counts: { reports: 0, competitive_reports: 0, posts: 0, schedules: 0 }, lastReport: null });
     expect(bare.setup.ready).toBe(false);
-    expect(bare.setup.issues.map((i) => i.kind)).toEqual(["brand_identity_missing", "pillars_missing", "keywords_missing", "sprout_missing", "competitors_missing", "design_system_missing", "schedule_missing"]);
+    expect(bare.setup.issues.map((i) => i.kind)).toEqual(["brand_identity_missing", "pillars_missing", "keywords_missing", "sprout_missing", "competitors_missing", "design_style_missing", "schedule_missing"]);
+    expect(bare.setup.issues.find((i) => i.kind === "design_style_missing")).toEqual({ kind: "design_style_missing", text: "Designs start once Bader Law's look is learned from its own posts.", fix: "setup" });
+    expect(bare.design).toEqual({ synthesis_at: null, references: 0, system: null, ready: false, waiting_for: "look" });
+  });
+
+  // Design systems were retired (Lital, 23 Sep 2026): designs start once the
+  // client's design settings are confirmed, and the lifecycle says what they wait for.
+  it("reads design readiness from the confirmed design settings, never from a design system", () => {
+    const base = { sproutProfiles: [SPROUT_PROFILE], sets: [{ ...COMPETITOR_SET, competitors: [{ ...COMPETITOR, handles: [HANDLE] }] }], counts: { reports: 1, competitive_reports: 1, posts: 1, schedules: 1 }, lastReport: null };
+    const kinds = (o: ReturnType<typeof clientOut>) => o.setup.issues.map((i) => i.kind);
+    const noSystem = clientOut(CLIENT, { ...base, designSystems: [], designSettings: DESIGN_SETTINGS, designSteps: [] });
+    expect(noSystem.setup).toEqual({ ready: true, issues: [] });
+    expect(noSystem.design).toMatchObject({ system: null, ready: true, waiting_for: null });
+    const unconfirmed = clientOut(CLIENT, { ...base, designSystems: [DESIGN_SYSTEM], designSettings: { ...DESIGN_SETTINGS, confirmed_at: null }, designSteps: [] });
+    expect(kinds(unconfirmed)).toEqual(["design_style_missing"]);
+    expect(unconfirmed.design).toMatchObject({ system: { status: "approved" }, ready: false, waiting_for: "look" });
+    const pyper = { ...CLIENT, id: "c-pyper", name: "Pay The Pyper" };
+    const waiting = clientOut(pyper, { ...base, designSystems: [], designSettings: null, designSteps: [{ step: "design_refs", status: "waiting", result: { waiting_for: "designed_posts" } }] });
+    expect(waiting.setup.issues).toEqual([{ kind: "design_style_missing", text: "Designs start once Pay The Pyper has published enough designed posts to learn its look from.", fix: "setup" }]);
+    expect(waiting.design.waiting_for).toBe("designed_posts");
+    const logo = clientOut(pyper, { ...base, designSystems: [], designSettings: null, designSteps: [{ step: "design_refs", status: "done", result: {} }, { step: "design_settings", status: "waiting", result: { waiting_for: "logo_file" } }] });
+    expect(logo.setup.issues[0].text).toBe("Designs start once Pay The Pyper's logo file is found on its website.");
   });
   it("reads the competitor summary from the newest confirmed set even when a newer draft is in progress", () => {
     const draft = { ...COMPETITOR_SET, id: "set-2", status: "draft", rivaliq_landscape_id: null, confirmed_at: null, created_at: "2026-09-30T10:00:00.000Z", competitors: [] };
-    const out = clientOut(CLIENT, { sproutProfiles: [{ ...SPROUT_PROFILE, native_link: "" }], sets: [draft, { ...COMPETITOR_SET, competitors: [{ ...COMPETITOR, handles: [HANDLE] }] }], designSystems: [DESIGN_SYSTEM], counts: { reports: 1, competitive_reports: 1, posts: 0, schedules: 1 }, lastReport: null, detail: true });
+    const out = clientOut(CLIENT, { sproutProfiles: [{ ...SPROUT_PROFILE, native_link: "" }], sets: [draft, { ...COMPETITOR_SET, competitors: [{ ...COMPETITOR, handles: [HANDLE] }] }], designSystems: [DESIGN_SYSTEM], designSettings: DESIGN_SETTINGS, designSteps: [], counts: { reports: 1, competitive_reports: 1, posts: 0, schedules: 1 }, lastReport: null, detail: true });
     expect(out.competitors).toEqual({ set_status: "confirmed", selected: ["Morgan & Morgan"], tracked: true });
     expect(out.setup.issues.map((i) => i.kind)).not.toContain("competitors_missing");
     expect(out.competitor_sets?.map((s) => s.id)).toEqual(["set-2", "set-1"]);
     expect(out.sprout_profiles?.[0].url).toBeNull();
   });
   it("adds detail blocks on request without Sprout ids", () => {
-    const d = clientOut(CLIENT, { sproutProfiles: [SPROUT_PROFILE], sets: [{ ...COMPETITOR_SET, competitors: [{ ...COMPETITOR, handles: [HANDLE] }] }], designSystems: [DESIGN_SYSTEM], counts: { reports: 0, competitive_reports: 0, posts: 0, schedules: 0 }, lastReport: null, schedules: [SCHEDULE], detail: true });
+    const d = clientOut(CLIENT, { sproutProfiles: [SPROUT_PROFILE], sets: [{ ...COMPETITOR_SET, competitors: [{ ...COMPETITOR, handles: [HANDLE] }] }], designSystems: [DESIGN_SYSTEM], designSettings: DESIGN_SETTINGS, designSteps: [], counts: { reports: 0, competitive_reports: 0, posts: 0, schedules: 0 }, lastReport: null, schedules: [SCHEDULE], detail: true });
     expect(d.sprout_profiles).toEqual([{ name: "Bader Law", handle: "baderlaw", network: "instagram", url: "https://instagram.com/baderlaw" }]);
     expect(d.competitor_sets?.[0].competitors[0].handles[0]).toMatchObject({ platform: "instagram", handle: "forthepeople", confidence: 0.95 });
     expect(d.schedules?.[0].kind).toBe("social");

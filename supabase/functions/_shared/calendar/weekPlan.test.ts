@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildReason, clientFit, headline, parseRevision, parseWeekPlan, revisePrompt, STRATEGY_PRECEDENCE, weekPrompt, type WeekContext } from "./weekPlan";
+import { buildReason, clientFit, headline, parseRevision, parseWeekPlan, revisePrompt, STRATEGY_PRECEDENCE, weekPrompt, withStories, type PlannedPost, type WeekContext } from "./weekPlan";
 import { wordReason } from "./reasonText";
 import type { EvidenceItem } from "./evidence";
 
@@ -209,5 +209,50 @@ describe("revising", () => {
   it("gives posts written from empty slots a reason from the evidence they cite", () => {
     const [p] = parseRevision(JSON.stringify({ posts: [{ id: "a", copy: "New", reason_type: "trend", evidence_ids: ["T1"], fit: "Fits" }] }), ["a"], EVIDENCE, true);
     expect(p.reason?.label).toBe("2 competitors posted about Playoff scheduling this week. Fits.");
+  });
+});
+
+describe("a week's Stories", () => {
+  it("saves a feed post the model set to Story as a single image", () => {
+    const text = JSON.stringify({ posts: [post({ format: "Story" }), post({ format: "Instagram Story", date: "2026-10-29" })] });
+    expect(parseWeekPlan(text, CTX).map((p) => p.format)).toEqual(["Single Image", "Single Image"]);
+  });
+
+  const planned = (over: Partial<PlannedPost>): PlannedPost => ({
+    post_date: "2026-10-27", platform: "Instagram", format: "Reel", posting_time: "17:00", pillar: "Beer League Truths", copy: "Copy", hashtags: ["#a"], cta: "Download",
+    visual_direction: "A rink", reasons: [buildReason({ type: "competitor", evidence: [] })], source: "plan", ...over,
+  });
+  let n = 0;
+  const ids = () => `id-${++n}`;
+
+  it("adds one Story for each of the soonest Instagram posts, up to the week's count, linked and dated with its post", () => {
+    n = 0;
+    const posts = [
+      planned({ post_date: "2026-10-29", posting_time: "9:00", copy: "Thursday" }),
+      planned({ post_date: "2026-10-27", posting_time: "17:00", copy: "Tuesday evening" }),
+      planned({ post_date: "2026-10-27", posting_time: "9:00", copy: "Tuesday morning" }),
+      planned({ platform: "Facebook", post_date: "2026-10-26", copy: "Facebook" }),
+    ];
+    const rows = withStories(posts, 2, ids);
+    const stories = rows.filter((r) => r.format === "Story");
+    // The two Tuesday posts are the soonest; each Story follows its post in the reply's order.
+    expect(stories.map((s) => [s.post_date, s.posting_time, s.copy])).toEqual([["2026-10-27", "17:00", "Tuesday evening"], ["2026-10-27", "9:00", "Tuesday morning"]]);
+    for (const s of stories) {
+      const source = rows.find((r) => r.post_key === s.story_of)!;
+      expect(rows[rows.indexOf(s) - 1]).toBe(source);
+      expect(source).toMatchObject({ platform: "Instagram", post_date: s.post_date, copy: s.copy });
+      expect(s).toMatchObject({ platform: "Instagram", hashtags: [], source: "plan", reasons: source.reasons });
+    }
+    // Every row carries its key, so one insert writes the posts and their Stories together.
+    expect(rows.every((r) => r.id && r.post_key === `post:${r.id}`)).toBe(true);
+    expect(rows).toHaveLength(6);
+  });
+
+  it("is capped by the week's Instagram posts, and adds none on Facebook or without a count", () => {
+    n = 0;
+    const posts = [planned({ copy: "A" }), planned({ platform: "Facebook", copy: "B" })];
+    expect(withStories(posts, 20, ids).filter((r) => r.format === "Story")).toHaveLength(1);
+    expect(withStories([planned({ platform: "Facebook" })], 3, ids)).toEqual([planned({ platform: "Facebook" })]);
+    expect(withStories(posts, 0, ids)).toEqual(posts);
   });
 });

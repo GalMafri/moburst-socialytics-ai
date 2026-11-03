@@ -260,14 +260,26 @@ export function recentLines(recent: RecentDesign[], library: string[]): string {
   return [`The designs most recently made for this brand, newest first:`, ...lines].join("\n");
 }
 
+/**
+ * What the planner is told when some of the posts come from other platforms
+ * than the post's: each post is labeled with its platform and date, the
+ * post's own platform first (design-request/library.ts).
+ */
+export function otherPlatformsLine(args: { platform: string; otherPlatforms?: boolean }): string {
+  return args.otherPlatforms
+    ? `Each post is labeled with the platform it was published on and its date, ${args.platform}'s own posts first. Posts from other platforms show the brand, not ${args.platform}'s layout.`
+    : "";
+}
+
 const CHOOSE_POSTS = (brand: string) =>
   `- posts: the numbers of one or two of ${brand}'s posts whose layout suits what this post says (a quote suits a quote layout, a comparison or list a comparison or list layout, a product or feature a product layout, a statement a statement layout). When the recent designs were built on a post and another suits the content as well, choose the other.\n` +
   `- layout: a few words naming the layout of the posts you chose.`;
 
 /** The planner's instruction for carousels: every option is a set of slides read in order. */
-export function carouselPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; slides: number; postCount: number; recent: string; guidance?: string }): string {
+export function carouselPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; slides: number; postCount: number; recent: string; guidance?: string; otherPlatforms?: boolean }): string {
   return [
     `The images are ${args.brand}'s own published posts, numbered Post 1 to Post ${args.postCount}.`,
+    otherPlatformsLine(args),
     args.recent,
     args.guidance ?? "",
     `Plan ${args.count} different carousel options for a new ${args.platform} carousel post with this copy:`,
@@ -513,7 +525,7 @@ export function styleLines(brand: string, s: VideoStyle): string {
  * type of the client's posts, with the client's logo file (13 Oct: video must
  * follow the client's own videos, carry the exact copy and logo, and have sound).
  */
-export function videoPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; visual?: string | null; count: number; postCount: number; recent: string; guidance?: string; filmed?: string | null; style?: VideoStyle | null; videos?: number; framesPer?: number }): string {
+export function videoPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; visual?: string | null; count: number; postCount: number; recent: string; guidance?: string; filmed?: string | null; style?: VideoStyle | null; videos?: number; framesPer?: number; otherPlatforms?: boolean }): string {
   if (args.style && !args.filmed) {
     // Planned from the client's own videos (14 Oct: "make videos in a similar
     // style to their VIDEOS, not statics"): the images are stills from them.
@@ -549,6 +561,7 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
     // The client's own clip is the footage, used as it is with its sound.
     return [
       `The images are ${args.brand}'s own published posts, numbered Post 1 to Post ${args.postCount}.`,
+      otherPlatformsLine(args),
       `Plan ${args.count} different hooks for a new ${args.platform} vertical video post (9:16) with this copy:`,
       `"""${args.copy}"""`,
       args.visual ? `The post's planned visual: ${args.visual}` : "",
@@ -564,6 +577,7 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
   }
   return [
     `The images are ${args.brand}'s own published posts, numbered Post 1 to Post ${args.postCount}.`,
+    otherPlatformsLine(args),
     args.recent,
     args.guidance ?? "",
     `Plan ${args.count} different options for a new ${args.platform} vertical video post (9:16) with this copy:`,
@@ -582,15 +596,21 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
   ].filter(Boolean).join("\n");
 }
 
-/** The planner's instruction. The pictures it writes go to the image model as they are. */
-export function plannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; postCount: number; recent: string; guidance?: string }): string {
+/**
+ * The planner's instruction. The pictures it writes go to the image model as
+ * they are. A Story (story: true) gets one line more; its headline limits are
+ * a feed post's.
+ */
+export function plannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; postCount: number; recent: string; guidance?: string; story?: boolean; otherPlatforms?: boolean }): string {
   return [
     `The images are ${args.brand}'s own published posts, numbered Post 1 to Post ${args.postCount}.`,
+    otherPlatformsLine(args),
     args.recent,
     args.guidance ?? "",
     `Plan ${args.count} different design options for a new ${args.platform} post with this copy:`,
     `"""${args.copy}"""`,
     args.voice ? `${args.brand}'s voice: ${args.voice}` : "",
+    args.story ? "This post is a Story: its frame is seen full screen for a few seconds, so the headline carries the message, and a second line may carry the call to action." : "",
     "For each option give:",
     CHOOSE_POSTS(args.brand),
     `- headline: the words that will be set on the design, written in ${args.brand}'s voice from the post's message, in the copy's language. One line of at most 8 words, optionally a second, shorter line.`,

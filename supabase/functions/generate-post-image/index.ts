@@ -186,6 +186,7 @@ Deno.serve(async (req) => {
       supabase: brandDb,
       clientId: resolvedClientId,
       clientContext: client_context,
+      platform: typeof platform === "string" ? platform : null,
       legacy: {
         brandIdentity: brand_context,
         designReferences: design_references,

@@ -1,14 +1,16 @@
 /** An in-memory Store for the route tests: the same filters and keyset paging over fixture rows. */
 import type { ClientScope } from "../api/router.ts";
-import type { AlertRow, ClientRow, CompetitiveReportRow, CompetitorRow, CompetitorSetRow, DesignSystemRow, HandleRow, MediaJobRow, PostRow, ReportRow, ScheduledPostRow, ScheduleRow, SetWithCompetitors, SproutProfileRow } from "./serializers.ts";
+import type { DesignStepRow } from "../design/setup.ts";
+import type { AlertRow, ClientRow, CompetitiveReportRow, CompetitorRow, CompetitorSetRow, DesignSettingsRow, DesignSystemRow, HandleRow, MediaJobRow, PostRow, ReportRow, ScheduledPostRow, ScheduleRow, SetWithCompetitors, SproutProfileRow } from "./serializers.ts";
 import type { ClientExtras, Page, Store } from "./store.ts";
 
 export interface FakeData {
   clients: ClientRow[]; sproutProfiles: SproutProfileRow[]; sets: CompetitorSetRow[]; competitors: CompetitorRow[]; handles: HandleRow[]; reports: ReportRow[]; competitiveReports: CompetitiveReportRow[];
   posts: PostRow[]; mediaJobs: MediaJobRow[]; schedules: ScheduleRow[]; scheduledPosts: ScheduledPostRow[]; alerts: AlertRow[]; designSystems: DesignSystemRow[];
+  designSettings: DesignSettingsRow[]; lifecycleSteps: Array<DesignStepRow & { client_id: string }>;
 }
 export function emptyData(over: Partial<FakeData> = {}): FakeData {
-  return { clients: [], sproutProfiles: [], sets: [], competitors: [], handles: [], reports: [], competitiveReports: [], posts: [], mediaJobs: [], schedules: [], scheduledPosts: [], alerts: [], designSystems: [], ...over };
+  return { clients: [], sproutProfiles: [], sets: [], competitors: [], handles: [], reports: [], competitiveReports: [], posts: [], mediaJobs: [], schedules: [], scheduledPosts: [], alerts: [], designSystems: [], designSettings: [], lifecycleSteps: [], ...over };
 }
 
 function keyset<T extends { id: string; created_at: string }>(rowsIn: T[], page: Page): T[] {
@@ -35,6 +37,7 @@ export function makeFakeStore(d: FakeData): Store {
         const reports = [...d.reports.filter((r) => r.client_id === id)].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
         out[id] = {
           sproutProfiles: d.sproutProfiles.filter((p) => p.client_id === id), sets: full(d.sets.filter((s) => s.client_id === id)), designSystems: d.designSystems.filter((s) => s.client_id === id && s.status !== "retired"),
+          designSettings: d.designSettings.find((s) => s.client_id === id) ?? null, designSteps: d.lifecycleSteps.filter((s) => s.client_id === id && ["design_refs", "design_settings"].includes(s.step)),
           counts: { reports: reports.length, competitive_reports: d.competitiveReports.filter((r) => r.client_id === id).length, posts: d.posts.filter((p) => p.client_id === id && !p.archived_at).length, schedules: d.schedules.filter((s) => s.client_id === id && s.is_active).length },
           lastReport: reports[0] ?? null,
         };
