@@ -36,6 +36,29 @@ Return ONLY this JSON, no preamble:
 {"pillars":[{"name":"...","description":"...","rationale":"..."}],"keywords":["..."],"notes":"one sentence on what this was read from and anything thin about it"}
 "keywords" is up to 10 search or hashtag terms the brand's audience would use, taken from the same evidence. Omit it as [] if the evidence gives none.`;
 
+/** The reply's JSON schema: post ids on each pillar when posts were given, and brief lines when a brief is asked for. */
+export function pillarsSchema(want: { posts: boolean; brief: boolean }): Record<string, unknown> {
+  const ids = { type: "array", items: { type: "string" } };
+  const pillar = {
+    type: "object",
+    properties: { name: { type: "string" }, description: { type: "string" }, rationale: { type: "string" }, ...(want.posts ? { posts: ids } : {}) },
+    required: ["name", "description", "rationale", ...(want.posts ? ["posts"] : [])],
+    additionalProperties: false,
+  };
+  const briefLine = { type: "object", properties: { text: { type: "string" }, posts: ids }, required: ["text", "posts"], additionalProperties: false };
+  return {
+    type: "object",
+    properties: {
+      pillars: { type: "array", items: pillar },
+      keywords: { type: "array", items: { type: "string" } },
+      notes: { type: "string" },
+      ...(want.brief ? { brief: { type: "array", items: briefLine } } : {}),
+    },
+    required: ["pillars", "keywords", "notes", ...(want.brief ? ["brief"] : [])],
+    additionalProperties: false,
+  };
+}
+
 export type PillarSource = "strategy_doc" | "social_posts" | "brief" | "website";
 
 export interface Pillar {
@@ -182,11 +205,19 @@ export async function derivePillars(db: Db, client: PillarClient, apiKey: string
       (wantBrief ? ` Also write "brief": short lines on what the client offers, who it speaks to, its voice and the claims it keeps making, each with "posts", the ids of the posts it is read from: "brief":[{"text":"...","posts":["P1"]}].` : ""),
   });
 
-  const { text } = await anthropicMessages({
+  // The reply is held to its schema, and the room is the documented default:
+  // thinking counts toward max_tokens, and at 3000 a pillars-and-brief answer
+  // was cut off mid-JSON (Yangra, 3 Nov 2026).
+  const { text, stopReason } = await anthropicMessages({
     apiKey,
-    body: { model: "claude-sonnet-5", max_tokens: wantBrief ? 3000 : 2000, system: PILLARS_SYSTEM, messages: [{ role: "user", content }] },
+    body: {
+      model: "claude-sonnet-5", max_tokens: 16000, system: PILLARS_SYSTEM, messages: [{ role: "user", content }],
+      output_config: { format: { type: "json_schema", schema: pillarsSchema({ posts: given.length > 0, brief: wantBrief }) } },
+    },
     onDropped: (p) => console.log(`[derive-pillars] dropped rejected parameter: ${p}`),
   });
+  if (stopReason === "max_tokens") throw new PillarsError("model", "The pillar reading was cut off before it finished.");
+  if (stopReason === "refusal") throw new PillarsError("model", "The pillar reading was declined.");
   const parsed = parsePillarsReply(text);
   if (!parsed) throw new PillarsError("model", "The pillar reading came back unreadable.");
   const checked = given.length ? checkPostIds(parsed, given, { postsOnly: sources.every((s) => s === "social_posts") }) : { pillars: parsed.pillars, brief: null };

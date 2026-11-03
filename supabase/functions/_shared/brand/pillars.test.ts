@@ -2,9 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { briefFromStrategyDoc, checkPostIds, derivePillars, isGenericPillars, trimBrief, type PillarPost } from "./pillars";
 import { fakeDb } from "../lifecycle/fakeDb";
 
-const asked = vi.hoisted(() => ({ bodies: [] as Array<Record<string, unknown>>, reply: "" }));
-vi.mock("../anthropic.ts", () => ({ anthropicMessages: async (a: { body: Record<string, unknown> }) => { asked.bodies.push(a.body); return { text: asked.reply, stopReason: "end_turn" }; } }));
-afterEach(() => { asked.bodies = []; asked.reply = ""; });
+const asked = vi.hoisted(() => ({ bodies: [] as Array<Record<string, unknown>>, reply: "", stop: "end_turn" }));
+vi.mock("../anthropic.ts", () => ({ anthropicMessages: async (a: { body: Record<string, unknown> }) => { asked.bodies.push(a.body); return { text: asked.reply, stopReason: asked.stop }; } }));
+afterEach(() => { asked.bodies = []; asked.reply = ""; asked.stop = "end_turn"; });
 
 describe("briefFromStrategyDoc", () => {
   it("takes a text document's own words, without a model call", async () => {
@@ -73,6 +73,19 @@ describe("pillars and a brief from the client's posts (onboarding from social pr
     ]);
     expect(out.brief).toBe("Olo sells online ordering to restaurants.\nIts voice is quick and friendly.");
     expect(out.source).toBe("social_posts");
+    // The reply is held to a schema with the post ids and the brief, with room for thinking and the answer.
+    const body = asked.bodies[0] as { max_tokens: number; output_config: { format: { type: string; schema: { required: string[]; properties: { pillars: { items: { required: string[] } } } } } } };
+    expect(body.max_tokens).toBe(16000);
+    expect(body.output_config.format.type).toBe("json_schema");
+    expect(body.output_config.format.schema.required).toEqual(["pillars", "keywords", "notes", "brief"]);
+    expect(body.output_config.format.schema.properties.pillars.items.required).toContain("posts");
+  });
+  it("says a reply was cut off, or declined, instead of calling it unreadable", async () => {
+    asked.reply = REPLY.slice(0, 120);
+    asked.stop = "max_tokens";
+    await expect(derivePillars(fakeDb(), { id: "c1", name: "Olo" }, "key", { posts: POSTS, briefFromPosts: true })).rejects.toThrow("The pillar reading was cut off before it finished.");
+    asked.stop = "refusal";
+    await expect(derivePillars(fakeDb(), { id: "c1", name: "Olo" }, "key", { posts: POSTS })).rejects.toThrow("The pillar reading was declined.");
   });
   it("keeps every pillar when the client has other evidence, the ids still removed", () => {
     const parsed = { pillars: [{ name: "Team life", description: "The team (P3).", rationale: "r", posts: ["P3"] }], brief: [] };
