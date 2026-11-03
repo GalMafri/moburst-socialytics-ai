@@ -16,6 +16,7 @@
 // be planned with no moments.
 
 import { anthropicMessages } from "../anthropic.ts";
+import { clipText } from "../text/clip.ts";
 import { collectOwnedCompetitive } from "../competitive/ownedSource.ts";
 import { activeTerms } from "../trends/profile.ts";
 import { strategyBlock } from "../strategy/prompt.ts";
@@ -44,7 +45,7 @@ const DAY = 86400_000;
 const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * DAY).toISOString().slice(0, 10);
 const isDay = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
-const str = (v: unknown, n = 4000) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, n) : "");
+const str = (v: unknown, n = 4000) => (typeof v === "string" ? clipText(v.replace(/\s+/g, " ").trim(), n) : "");
 
 function apiKey(): string {
   const key = Deno.env.get("ANTHROPIC_API_KEY");

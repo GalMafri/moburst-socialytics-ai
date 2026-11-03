@@ -17,6 +17,8 @@
 // is folded into the user turn as an instruction and the call retried, and
 // every text block is read. None of it depends on which model is current.
 
+import { wellFormedDeep } from "./text/clip.ts";
+
 /** Parameters the request cannot lose. Anything else is negotiable. */
 const ESSENTIAL = new Set(["model", "messages", "system", "max_tokens", "tools", "tool_choice"]);
 
@@ -97,7 +99,8 @@ export async function anthropicMessages(args: {
         "x-api-key": args.apiKey,
         "anthropic-version": "2023-06-01",
       },
-      body: JSON.stringify(body),
+      // Half of an emoji anywhere in the prompt is refused; it is dropped here for every caller.
+      body: JSON.stringify(wellFormedDeep(body)),
       ...(args.signal ? { signal: args.signal } : {}),
     });
 

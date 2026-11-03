@@ -32,6 +32,7 @@ import { INSTAGRAM_PROFILE_ACTOR } from "../apify/instagramProfile.ts";
 import { isFinalRunStatus, type ApifyClient } from "../apify/client.ts";
 import { textHash } from "../lifecycle/names.ts";
 import { desiredProfiles, profileInputs, syncProfiles } from "./profiles.ts";
+import { clipWithEllipsis } from "../text/clip.ts";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -97,7 +98,7 @@ const iso = (v: unknown): string | null => {
   const d = typeof v === "number" ? new Date(v < 1e12 ? v * 1000 : v) : new Date(String(v));
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 };
-const clipText = (s: string) => (s.length > TEXT_CHARS ? `${s.slice(0, TEXT_CHARS - 1)}…` : s);
+const clipPost = (s: string) => clipWithEllipsis(s, TEXT_CHARS);
 
 /** The latest posts the Instagram profile actor answers with. */
 export const INSTAGRAM_LATEST = 12;
@@ -129,7 +130,7 @@ export const PUBLIC_READERS: Record<string, Reader> = {
       const image = row.postImages?.[0]?.url || row.document || row.postVideo || row.article;
       return [{
         company: target.company, client: target.client, platform: "LinkedIn", id: `linkedin:${text(row.id) || link}`, publishedAt: at,
-        text: clipText(text(row.content)), link, format: row.document ? "carousel" : row.postVideo ? "video" : row.article ? "link" : image ? "image" : "text",
+        text: clipPost(text(row.content)), link, format: row.document ? "carousel" : row.postVideo ? "video" : row.article ? "link" : image ? "image" : "text",
         engagement: (counts as number[]).reduce((s, n) => s + n, 0), views: null, followers: null, boosted: false, source: "apify", capped: LINKEDIN_MAX_POSTS,
       }];
     },
@@ -153,7 +154,7 @@ export const PUBLIC_READERS: Record<string, Reader> = {
         const kind = text(p?.type).toLowerCase();
         return [{
           company: target.company, client: target.client, platform: "Instagram", id: `instagram:${text(p?.id) || text(p?.shortCode) || link}`, publishedAt: at,
-          text: clipText(text(p?.caption)), link, format: kind === "sidecar" ? "carousel" : kind === "video" ? "video" : "image",
+          text: clipPost(text(p?.caption)), link, format: kind === "sidecar" ? "carousel" : kind === "video" ? "video" : "image",
           engagement: (num(p?.likesCount) ?? 0) + (num(p?.commentsCount) ?? 0), views: num(p?.videoViewCount), followers, boosted: false, source: "apify", capped: INSTAGRAM_LATEST,
         }];
       });
@@ -178,7 +179,7 @@ export const PUBLIC_READERS: Record<string, Reader> = {
       const shares = num(row.shares ?? row.shareCount) ?? 0;
       return [{
         company: target.company, client: target.client, platform: "TikTok", id: `tiktok:${text(row.id) || link}`, publishedAt: at,
-        text: clipText(text(row.title) || text(row.text)), link, format: "short_video", engagement: likes + comments + shares,
+        text: clipPost(text(row.title) || text(row.text)), link, format: "short_video", engagement: likes + comments + shares,
         views: num(row.views ?? row.playCount), followers: num(row.channel?.followers ?? row.authorMeta?.fans), boosted: false, source: "apify", capped: TIKTOK_MAX_PER_PROFILE,
       }];
     },
@@ -198,7 +199,7 @@ export function feedPosts(snapshots: Array<{ payload: Any }>, clientName: string
       const client = isClientPost(p, clientCompany, clientName);
       out.set(id, {
         company: client ? clientName : String(p?.companyName ?? ""), client, platform, id, publishedAt: at,
-        text: clipText(String(p?.message ?? "")), link: p?.postLink ?? null, format: String(p?.type || "unknown"),
+        text: clipPost(String(p?.message ?? "")), link: p?.postLink ?? null, format: String(p?.type || "unknown"),
         engagement: Number(p?.engagementTotal) || 0, views: num(p?.tiktokViews ?? p?.youtubeViews ?? p?.views),
         followers: num(p?.presenceReach), boosted: isBoosted(p?.facebookLikelyBoosted), source: "feed",
       });

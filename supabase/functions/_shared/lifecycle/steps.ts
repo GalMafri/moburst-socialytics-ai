@@ -60,6 +60,7 @@ import { advancePublicRead, POLL_MINUTES } from "../strategy/publicRead.ts";
 import { desiredProfiles, profileInputs, profilesKey } from "../strategy/profiles.ts";
 import { apifyClient, APIFY_TOKEN_ENV } from "../apify/client.ts";
 import type { StepOutcome, StepPolicy, StepRow } from "./policy.ts";
+import { clipText } from "../text/clip.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -480,7 +481,7 @@ export const STEPS: Record<string, StepDef> = {
         if (siteText.length < 80) siteText = await deps.fetchSiteText(String(client.website_url));
       }
       if (wantBrief && brief !== "from_doc" && siteText.length >= 80) {
-        const body = siteText.slice(0, 2500);
+        const body = clipText(siteText, 2500);
         const current = str(client.brief_text);
         if (!current.endsWith(body)) {
           fields.brief_text = `Drafted from the website on ${day(deps.now())}:\n\n${body}`;

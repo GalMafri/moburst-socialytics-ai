@@ -41,6 +41,7 @@ import { countryCode, followersZone, regionsFor, replacesLocation, resolveSocial
 import { lifecycleMayWrite, setBy, sourceOf, writeClientFields } from "./fields.ts";
 import { textHash } from "./names.ts";
 import type { StepOutcome, StepRow } from "./policy.ts";
+import { clipText } from "../text/clip.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -337,7 +338,7 @@ export function evidencePosts(top: Array<{ post: SocialPost; multiple: number }>
   const taken = new Set<string>();
   const add = (p: SocialPost, label: string | null) => {
     taken.add(p.id);
-    out.push({ id: `P${out.length + 1}`, platform: p.platform, format: p.format, date: p.publishedAt.slice(0, 10), text: plainTextKeepLinks(p.text).slice(0, 500), label, top: label !== null });
+    out.push({ id: `P${out.length + 1}`, platform: p.platform, format: p.format, date: p.publishedAt.slice(0, 10), text: clipText(plainTextKeepLinks(p.text), 500), label, top: label !== null });
   };
   for (const t of top.filter((t) => t.post.hasText).slice(0, TOP_POSTS)) add(t.post, multipleLabel(t.multiple, t.post.format));
   for (const p of textPosts(posts).filter((p) => !taken.has(p.id)).slice(0, NEWEST_POSTS)) add(p, null);

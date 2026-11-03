@@ -27,6 +27,7 @@
 import { clientFit } from "./reasonText.ts";
 import { median, ratio, MIN_SAMPLE, type EvidenceItem, type OwnPost } from "./evidence.ts";
 import { countryCode } from "../lifecycle/location.ts";
+import { clipText, clipWithEllipsis } from "../text/clip.ts";
 
 export const MOMENT_CATEGORIES = [
   "public_holiday", "cultural_commercial", "awareness_day", "sports", "civic_political", "religious", "remembrance_tragedy", "conflict_disaster",
@@ -71,7 +72,7 @@ export interface Moment {
 const DAY_MS = 86400_000;
 const isDay = (s: unknown): s is string => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && Number.isFinite(Date.parse(`${s}T00:00:00Z`));
 const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
-const str = (x: unknown, n = 200) => (typeof x === "string" ? x.replace(/\s+/g, " ").trim().slice(0, n) : "");
+const str = (x: unknown, n = 200) => (typeof x === "string" ? clipText(x.replace(/\s+/g, " ").trim(), n) : "");
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
 function jsonObject(text: string): Record<string, unknown> | null {
@@ -345,7 +346,7 @@ export const JUDGE_SCHEMA = {
   },
 } as const;
 
-const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+const clip = (s: string, n: number) => clipWithEllipsis(s, n);
 
 export function judgePrompt(c: JudgeInput): string {
   const block = (title: string, body: string) => (body.trim() ? `${title}:\n${body.trim()}` : "");
