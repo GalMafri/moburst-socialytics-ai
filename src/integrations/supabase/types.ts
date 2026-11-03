@@ -4110,6 +4110,7 @@ export type Database = {
           id: string
           input_tokens: number | null
           model: string | null
+          moments: Json | null
           output_tokens: number | null
           pending_revision: Json | null
           ready_at: string | null
@@ -4146,6 +4147,7 @@ export type Database = {
           id: string
           input_tokens: number | null
           model: string | null
+          moments: Json | null
           output_tokens: number | null
           pending_revision: Json | null
           ready_at: string | null
@@ -4177,6 +4179,7 @@ export type Database = {
           id: string
           input_tokens: number | null
           model: string | null
+          moments: Json | null
           output_tokens: number | null
           pending_revision: Json | null
           ready_at: string | null
