@@ -133,6 +133,15 @@ describe("socialytics_note_save", () => {
     expect(r.ok && r.target).not.toContain("cheap");
   });
 
+  it("refuses an empty note, a date it cannot use and a note over 20,000 characters, in plain words", async () => {
+    const { deps, w } = world();
+    expect(plain(await save("socialytics_note_save", { ...bader, text: " \n " }, deps))).toBe("The note is empty.");
+    expect(plain(await save("socialytics_note_save", { ...bader, text: "x", date: "2026-12-25" }, deps))).toBe("The date must be a real day, no later than tomorrow, as yyyy-mm-dd.");
+    expect(plain(await save("socialytics_note_save", { ...bader, text: "x", date: "Oct 28" }, deps))).toBe("The date must be a real day, no later than tomorrow, as yyyy-mm-dd.");
+    expect(plain(await save("socialytics_note_save", { ...bader, text: "x".repeat(20_001) }, deps))).toBe("A note holds at most 20,000 characters.");
+    expect(w.notes).toEqual([]);
+  });
+
   it("keeps the same text once, and says who saved it and when", async () => {
     const { deps, w } = world();
     await save("socialytics_note_save", { ...bader, text: "Launch on Dec 1." }, deps);
@@ -194,6 +203,14 @@ describe("socialytics_post_copy_save", () => {
     const [sentence, current] = r.text.split("\n");
     expect(sentence).toBe("This post changed in Socialytics after you read it. Show the person the copy below and ask again.");
     expect(JSON.parse(current)).toEqual({ current: { post_key: KEY, copy: "Hurt in a crash? Call us.", hashtags: ["injurylaw"], cta: "Call now", updated_at: AT } });
+    expect(w.iterations).toEqual([]);
+  });
+
+  it("refuses empty copy, copy over 10,000 characters and a save with no updated_at read", async () => {
+    const { deps, w } = world();
+    expect(plain(await save("socialytics_post_copy_save", { ...args, copy: "  " }, deps))).toBe("The copy is empty.");
+    expect(plain(await save("socialytics_post_copy_save", { ...args, copy: "x".repeat(10_001) }, deps))).toBe("Copy holds at most 10,000 characters.");
+    expect(plain(await save("socialytics_post_copy_save", { ...args, based_on: "yesterday" }, deps))).toBe("Give based_on as the updated_at you read for this post.");
     expect(w.iterations).toEqual([]);
   });
 
@@ -314,6 +331,7 @@ describe("socialytics_report_deck_save", () => {
       [{ report_id: REPORT, title: "t", link: "https://x.com", deck_id: deck }, "Give either deck_id or link, not both."],
       [{ report_id: REPORT, title: "t" }, "Give the deck_id from the upload, or a link."],
       [{ report_id: REPORT, title: "  ", link: "https://x.com" }, "The deck needs a title."],
+      [{ report_id: REPORT, title: "t".repeat(201), link: "https://x.com" }, "A deck title holds at most 200 characters."],
       [{ report_id: CALM_REPORT, title: "t", link: "https://x.com" }, "No report with that id for this client."],
       [{ report_id: REPORT, title: "t", deck_id: "not-an-id" }, "No deck with that id."],
     ] as const) expect(plain(await save("socialytics_report_deck_save", { ...bader, ...args }, deps)), JSON.stringify(args)).toBe(says);

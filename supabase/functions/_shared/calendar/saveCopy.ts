@@ -127,7 +127,7 @@ export async function saveCopy(w: CopyWrites, a: SaveCopy, learn?: (signal: Copy
   }
 
   if (!copy) return { ok: false, status: 400, error: "The copy is empty." };
-  if (copy.length > COPY_MAX) return { ok: false, status: 400, error: `Copy holds at most ${COPY_MAX} characters.` };
+  if (copy.length > COPY_MAX) return { ok: false, status: 400, error: `Copy holds at most ${COPY_MAX.toLocaleString("en-US")} characters.` };
   let hashtags: string[] | null = null;
   if (a.hashtags !== undefined && a.hashtags !== null) {
     if (!Array.isArray(a.hashtags) || a.hashtags.length > HASHTAGS_MAX || a.hashtags.some((h) => typeof h !== "string")) return { ok: false, status: 400, error: `hashtags must be a list of at most ${HASHTAGS_MAX} hashtags.` };
@@ -135,7 +135,7 @@ export async function saveCopy(w: CopyWrites, a: SaveCopy, learn?: (signal: Copy
   }
   const cta = a.cta === undefined || a.cta === null ? null : String(a.cta).trim();
   if (cta && cta.length > CTA_MAX) return { ok: false, status: 400, error: `The call to action holds at most ${CTA_MAX} characters.` };
-  if (!instant(a.basedOn)) return { ok: false, status: 400, error: "based_on must be the updated_at you read for this post." };
+  if (!instant(a.basedOn)) return { ok: false, status: 400, error: "Give based_on as the updated_at you read for this post." };
 
   const post = await w.post(a.clientId, a.key);
   if (!post) return { ok: false, status: 404, error: "No post with that key in this client's calendar." };

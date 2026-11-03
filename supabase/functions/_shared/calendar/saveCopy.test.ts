@@ -128,8 +128,8 @@ describe("saveCopy from Claude", () => {
     expect(await saveCopy(w, claude())).toEqual({ ok: false, status: 404, error: "No post with that key in this client's calendar." });
     const { w: w2, iterations } = writes(POST);
     expect(await saveCopy(w2, claude({ copy: "" }))).toEqual({ ok: false, status: 400, error: "The copy is empty." });
-    expect(await saveCopy(w2, claude({ copy: "x".repeat(10_001) }))).toEqual({ ok: false, status: 400, error: "Copy holds at most 10000 characters." });
-    expect(await saveCopy(w2, claude({ basedOn: "" }))).toEqual({ ok: false, status: 400, error: "based_on must be the updated_at you read for this post." });
+    expect(await saveCopy(w2, claude({ copy: "x".repeat(10_001) }))).toEqual({ ok: false, status: 400, error: "Copy holds at most 10,000 characters." });
+    expect(await saveCopy(w2, claude({ basedOn: "" }))).toEqual({ ok: false, status: 400, error: "Give based_on as the updated_at you read for this post." });
     expect(await saveCopy(w2, claude({ hashtags: "law" }))).toEqual({ ok: false, status: 400, error: "hashtags must be a list of at most 30 hashtags." });
     expect(await saveCopy(w2, claude({ cta: "x".repeat(301) }))).toEqual({ ok: false, status: 400, error: "The call to action holds at most 300 characters." });
     expect(iterations).toEqual([]);
