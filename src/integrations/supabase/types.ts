@@ -105,6 +105,7 @@ export type Database = {
           oauth_client_id: string | null
           path: string
           status: number
+          target: string | null
           user_id: string | null
         }
         Insert: {
@@ -120,6 +121,7 @@ export type Database = {
           oauth_client_id?: string | null
           path: string
           status: number
+          target?: string | null
           user_id?: string | null
         }
         Update: {
@@ -135,6 +137,7 @@ export type Database = {
           oauth_client_id?: string | null
           path?: string
           status?: number
+          target?: string | null
           user_id?: string | null
         }
         Relationships: [
@@ -870,9 +873,11 @@ export type Database = {
           output_tokens: number
           parts_done: number
           read_at: string | null
+          source: string
           state: string
           text: string | null
           text_chars: number | null
+          text_hash: string | null
           title: string
           updated_at: string
         }
@@ -891,9 +896,11 @@ export type Database = {
           output_tokens?: number
           parts_done?: number
           read_at?: string | null
+          source?: string
           state?: string
           text?: string | null
           text_chars?: number | null
+          text_hash?: string | null
           title?: string
           updated_at?: string
         }
@@ -912,9 +919,11 @@ export type Database = {
           output_tokens?: number
           parts_done?: number
           read_at?: string | null
+          source?: string
           state?: string
           text?: string | null
           text_chars?: number | null
+          text_hash?: string | null
           title?: string
           updated_at?: string
         }
@@ -1563,6 +1572,7 @@ export type Database = {
           edited_by: string | null
           editor_name: string
           section_key: string
+          source: string
           text: string
         }
         Insert: {
@@ -1571,6 +1581,7 @@ export type Database = {
           edited_by?: string | null
           editor_name?: string
           section_key: string
+          source?: string
           text: string
         }
         Update: {
@@ -1579,6 +1590,7 @@ export type Database = {
           edited_by?: string | null
           editor_name?: string
           section_key?: string
+          source?: string
           text?: string
         }
         Relationships: [
@@ -2622,6 +2634,73 @@ export type Database = {
           key?: string
         }
         Relationships: []
+      }
+      report_decks: {
+        Row: {
+          added_by: string | null
+          added_by_name: string | null
+          client_id: string
+          competitive_report_id: string | null
+          created_at: string
+          file_path: string | null
+          id: string
+          kind: string
+          link: string | null
+          report_id: string | null
+          source: string
+          title: string
+        }
+        Insert: {
+          added_by?: string | null
+          added_by_name?: string | null
+          client_id: string
+          competitive_report_id?: string | null
+          created_at?: string
+          file_path?: string | null
+          id: string
+          kind: string
+          link?: string | null
+          report_id?: string | null
+          source?: string
+          title: string
+        }
+        Update: {
+          added_by?: string | null
+          added_by_name?: string | null
+          client_id?: string
+          competitive_report_id?: string | null
+          created_at?: string
+          file_path?: string | null
+          id?: string
+          kind?: string
+          link?: string | null
+          report_id?: string | null
+          source?: string
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "report_decks_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "report_decks_competitive_report_id_fkey"
+            columns: ["competitive_report_id"]
+            isOneToOne: false
+            referencedRelation: "competitive_reports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "report_decks_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       report_engines: {
         Row: {
@@ -4384,6 +4463,16 @@ export type Database = {
       }
       strategy_section_save: {
         Args: { p_client: string; p_key: string; p_text: string }
+        Returns: Json
+      }
+      strategy_section_save_as: {
+        Args: {
+          p_client: string
+          p_key: string
+          p_source: string
+          p_text: string
+          p_user: string
+        }
         Returns: Json
       }
       trend_measures: {
