@@ -48,6 +48,8 @@ export interface StrategyEdit {
   value?: unknown;
   editor_name: string;
   edited_at: string;
+  /** claude when the person saved it from Claude (two-way sync). */
+  source?: string | null;
 }
 
 const DAY = 86_400_000;
@@ -87,10 +89,11 @@ export function originLine(writtenAt: string, sources: string[]): string {
   return `Written ${dayWords(isoDay(writtenAt)).replace(/ \d{4}$/, "")}${from ? ` from ${from}` : ""}`;
 }
 
-/** "Edited by Neria, 4 Nov": the chip on a card a person changed. */
-export function editedChip(edit: Pick<StrategyEdit, "editor_name" | "edited_at">): string {
+/** The chip on a card a person changed: "Edited by Neria, 4 Nov", or "From Claude, by Sinead, 3 Nov" for a version saved from Claude. */
+export function editedChip(edit: Pick<StrategyEdit, "editor_name" | "edited_at" | "source">): string {
   const first = String(edit.editor_name ?? "").trim().split(/\s+/)[0] || "your team";
-  return `Edited by ${first}, ${dayWords(isoDay(edit.edited_at)).replace(/ \d{4}$/, "")}`;
+  const by = edit.source === "claude" ? `From Claude, by ${first}` : `Edited by ${first}`;
+  return `${by}, ${dayWords(isoDay(edit.edited_at)).replace(/ \d{4}$/, "")}`;
 }
 
 /** The data line, from each platform's basis; "" for a strategy written before platforms had one. */

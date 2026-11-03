@@ -49,7 +49,7 @@ vi.mock('@/integrations/supabase/client', () => ({ supabase: {
     if (!error && name === 'strategy_section_save') {
       f.edits = f.edits.filter((e) => e.section_key !== args.p_key);
       if (args.p_text.trim() || args.p_value) {
-        data = { section_key: args.p_key, text: args.p_text.trim(), value: args.p_value ?? null, editor_name: 'Neria Cohen', edited_at: '2026-11-04T09:00:00Z' };
+        data = { section_key: args.p_key, text: args.p_text.trim(), value: args.p_value ?? null, editor_name: 'Neria Cohen', edited_at: '2026-11-04T09:00:00Z', source: 'app' };
         f.edits.push(data);
       }
     }
@@ -222,6 +222,20 @@ describe('a client strategy', () => {
     expect(sendQuietly).toHaveBeenCalled();
     const sent = { name: 'strategy_section_save', p_client: 'c1', p_key: 'positioning', p_text: 'Payments and roster in one place.\n- vs BenchApp: BenchApp posts memes; we post checklists.', p_value: { statement: 'Payments and roster in one place.', points: [{ vs: 'BenchApp', point: 'BenchApp posts memes; we post checklists.' }] } };
     expect(f.rpcs).toEqual([sent, sent]);
+  });
+
+  it("shows a version saved from Claude as its text with its chip, and a page save after it as the person's own", async () => {
+    f.edits = [{ section_key: 'positioning', text: 'Payments first, memes never.', value: null, editor_name: 'Sinead Cronin', edited_at: '2026-11-03T15:00:00Z', source: 'claude' }];
+    mount();
+    const card = within(await screen.findByTestId('strategy-positioning'));
+    expect(card.getByText('Payments first, memes never.')).toBeInTheDocument();
+    expect(card.getByText('From Claude, by Sinead, 3 Nov')).toBeInTheDocument();
+    fireEvent.click(card.getByRole('button', { name: 'Edit our position' }));
+    const sheet = within(await screen.findByRole('dialog'));
+    expect(sheet.getByText('The version saved from Claude')).toBeInTheDocument();
+    fireEvent.click(sheet.getByRole('button', { name: 'Save' }));
+    expect(await card.findByText('Edited by Neria, 4 Nov')).toBeInTheDocument();
+    expect(card.queryByText(/From Claude/)).toBeNull();
   });
 
   it("moves a 2 Nov text edit to the new form from the sheet, and hands a card back with Use the product's version", async () => {

@@ -811,6 +811,8 @@ export async function saveStrategy(db: Db, clientId: string, out: Extract<PhaseO
     client_id: clientId,
     shape: STRATEGY_SHAPE,
     sections: out.value.sections,
+    // Each section as the lines the page shows: the text Claude reads and every save checks its version against.
+    section_texts: Object.fromEntries(Object.entries(out.value.sections).map(([k, v]) => [k, sectionLines(k, v)])),
     platforms: out.value.platforms,
     pillars: out.evidence.pillars,
     sources: out.evidence.sources,

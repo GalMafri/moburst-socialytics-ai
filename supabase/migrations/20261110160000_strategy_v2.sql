@@ -5,13 +5,24 @@
 -- Google token lives in Vault and no function a person can call returns it.
 --
 --   1. content_strategies: the shape of the stored sections (1 = the 2 Nov
---      text sections, 2 = fields), and the public read the strategy was
---      written from (reused for 7 days).
---   2. content_strategy_edits.value: a person's version in the v2 fields,
---      beside its text (the same version as plain lines, which the writer and
---      the calendar planner read). strategy_section_save(p_client, p_key,
---      p_text, p_value) saves it; the 2 Nov three-argument save stays as it
---      is, so a 2 Nov text edit and an open old tab keep working.
+--      text sections, 2 = fields), each section as the plain lines the page
+--      shows (section_texts, so the database, the connector and the page
+--      read the same text), and the public read the strategy was written
+--      from (reused for 7 days).
+--   2. One section save for the page and for Claude: strategy_section_save_as
+--      (20261110150000_claude_sync.sql) now also takes the section's fields
+--      (p_value) and writes text, fields and source together, under the
+--      locks it takes before reading. Its version check reads the text the
+--      page shows: a person's version, else the product's text, or the
+--      product's lines for a strategy written as fields. A save from Claude
+--      is plain text: it clears any fields, so the page shows Claude's text
+--      in the card with its chip, until someone saves the card's fields. The
+--      page saves fields with strategy_section_save(p_client, p_key, p_text,
+--      p_value); the three-argument save from Claude sync stays. Both refuse
+--      an OAuth session and anyone but staff with access, then call save_as
+--      for the signed-in person with source app. save_as's earlier signature
+--      (without p_value) is dropped so the name has one signature; every
+--      named-argument call to it (the connector's) still resolves.
 --   3. client_public_profiles: the client's own public profiles, from
 --      RivalIQ's record, the client's homepage and people. A person's entry
 --      is never overwritten and a profile a person removed never comes back
@@ -32,27 +43,40 @@
 -- (the Claude connector) reads and never writes: every new table has the three
 -- restrictive "OAuth sessions cannot ..." policies and every new function a
 -- person can call refuses an OAuth session first.
--- Additive and safe to run again.
+-- Additive and safe to run again: nothing is dropped but save_as's earlier
+-- signature, replaced in the same transaction.
 
 -- ── 1. The stored strategy ──────────────────────────────────────────────────
 
 alter table public.content_strategies add column if not exists shape smallint not null default 1;
+alter table public.content_strategies add column if not exists section_texts jsonb not null default '{}'::jsonb;
 alter table public.content_strategies add column if not exists public_read jsonb;
 alter table public.content_strategies add column if not exists public_read_at timestamptz;
 comment on column public.content_strategies.shape is 'How sections are stored: 1 = text per section (2 Nov), 2 = fields per section (3 Nov, strategy v2).';
+comment on column public.content_strategies.section_texts is 'For a strategy written as fields (shape 2): each section as the plain lines the Strategy page and the connector show (strategy/sections.ts sectionLines), by key. A section''s version is the hash of its shown text.';
 comment on column public.content_strategies.public_read is 'The 90-day public read the strategy was written from: per company and platform, posts, posts a week, median engagement, rate per view where public views exist, followers; with its sources and window.';
 comment on column public.content_strategies.public_read_at is 'When the public read was made; reused for 7 days.';
 
--- ── 2. People's versions in the new fields ──────────────────────────────────
+-- ── 2. One section save, for the page and for Claude ────────────────────────
 
 alter table public.content_strategy_edits add column if not exists value jsonb;
-comment on column public.content_strategy_edits.value is 'A person''s version in the v2 fields of its section (null for a 2 Nov text edit, which keeps showing as text). text holds the same version as plain lines.';
+comment on column public.content_strategy_edits.value is 'A person''s version in the v2 fields of its section; null for a version that is only text (a 2 Nov edit, or a save from Claude), which the page shows as text. text holds the version as the plain lines the page shows.';
 
--- A person saves their version of one section, as fields (p_value) and as
--- plain lines (p_text). Empty text with no fields, or the product's own
--- version, hands the section back and returns null. The editor's name is
--- read here, never sent by the page.
-create or replace function public.strategy_section_save(p_client uuid, p_key text, p_text text, p_value jsonb)
+-- The section save for a named person, for the page and for Claude alike:
+-- 20261110150000_claude_sync.sql's save, which also takes the section's
+-- fields. p_value is the section's fields (an object) or null for plain
+-- text; text, fields and source are written together. A save from Claude
+-- is plain text, so its fields are null: the page shows its text.
+--
+-- The text the page shows, which the version is the hash of: a person's
+-- version, else the product's own: its text for a strategy written on
+-- 2 Nov, its lines (section_texts) for one written as fields.
+--
+-- Handing back (the app only; a save from Claude never does): no text and
+-- no fields, the product's own fields, or text with no fields equal to the
+-- product's shown text.
+drop function if exists public.strategy_section_save_as(uuid, uuid, text, text, text, text);
+create or replace function public.strategy_section_save_as(p_user uuid, p_client uuid, p_key text, p_text text, p_source text, p_expected text default null, p_value jsonb default null)
 returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare
@@ -60,14 +84,21 @@ declare
   v_text text := btrim(coalesce(p_text, ''));
   v_value jsonb := case when jsonb_typeof(p_value) = 'object' then p_value else null end;
   v_product jsonb;
+  v_product_text text;
+  v_edit text;
+  v_shown text;
+  v_version text;
   v_name text;
   v_row public.content_strategy_edits%rowtype;
 begin
   if public.is_oauth_session() then
     raise exception 'Connected apps can read Socialytics but cannot change it.' using errcode = '42501';
   end if;
-  if not (public.is_moburst_staff() and public.can_access_client(p_client)) then
-    raise exception 'Only Moburst staff can change the content strategy.' using errcode = '42501';
+  if p_user is null then
+    raise exception 'A person is required.' using errcode = '22023';
+  end if;
+  if coalesce(p_source, '') not in ('app', 'claude') then
+    raise exception 'Unknown source.' using errcode = '22023';
   end if;
   if v_key !~ '^(goals|audience|positioning|not_now|avoid|measures|pillar:.+|platform:[a-z0-9]+:(posting|new))$' then
     raise exception 'Unknown strategy section.' using errcode = '22023';
@@ -78,31 +109,93 @@ begin
   if p_value is not null and v_value is null then
     raise exception 'A section''s fields are one object.' using errcode = '22023';
   end if;
-  select s.sections -> v_key into v_product from public.content_strategies s where s.client_id = p_client;
+  -- A save from Claude is plain text.
+  if p_source = 'claude' then
+    v_value := null;
+  end if;
+  -- One save of this section at a time, and no rewrite of the strategy
+  -- under it, from here until the call's transaction ends.
+  perform pg_advisory_xact_lock(hashtextextended('strategy_section:' || p_client::text || ':' || v_key, 0));
+  perform 1 from public.content_strategies s where s.client_id = p_client for update;
+  perform 1 from public.content_strategy_edits e where e.client_id = p_client and e.section_key = v_key for update;
+  select s.sections -> v_key,
+         case when jsonb_typeof(s.sections -> v_key) = 'string' then s.sections ->> v_key else s.section_texts ->> v_key end
+    into v_product, v_product_text
+    from public.content_strategies s where s.client_id = p_client;
+  select e.text into v_edit
+    from public.content_strategy_edits e where e.client_id = p_client and e.section_key = v_key;
+  if p_expected is not null then
+    v_shown := coalesce(v_edit, v_product_text, '');
+    v_version := left(encode(sha256(convert_to(v_shown, 'UTF8')), 'hex'), 16);
+    if v_version <> btrim(p_expected) then
+      return jsonb_build_object('conflict', true, 'section_key', v_key, 'text', v_shown, 'version', v_version);
+    end if;
+  end if;
+  v_product_text := btrim(coalesce(v_product_text, ''));
   if (v_text = '' and v_value is null)
      or (v_value is not null and v_value = v_product)
-     or (v_value is null and jsonb_typeof(v_product) = 'string' and v_text = btrim(v_product #>> '{}')) then
+     or (v_value is null and v_text = v_product_text) then
+    if p_source = 'claude' then
+      raise exception 'A section saved from Claude is never handed back.' using errcode = '22023';
+    end if;
     delete from public.content_strategy_edits where client_id = p_client and section_key = v_key;
     return null;
   end if;
   if v_text = '' then
     raise exception 'A section needs its text.' using errcode = '22023';
   end if;
+  -- The name people know the editor by: the profile's display name, else the
+  -- part of the email before the @.
   select nullif(btrim(split_part(coalesce(nullif(btrim(pr.display_name), ''), nullif(btrim(pr.email), ''), u.email::text, ''), '@', 1)), '')
     into v_name
     from auth.users u
     left join public.profiles pr on pr.user_id = u.id
-   where u.id = auth.uid();
-  insert into public.content_strategy_edits as e (client_id, section_key, text, value, edited_by, editor_name, edited_at)
-  values (p_client, v_key, v_text, v_value, auth.uid(), coalesce(v_name, ''), now())
+   where u.id = p_user;
+  insert into public.content_strategy_edits as e (client_id, section_key, text, value, edited_by, editor_name, edited_at, source)
+  values (p_client, v_key, v_text, v_value, p_user, coalesce(v_name, ''), now(), p_source)
   on conflict (client_id, section_key) do update
-    set text = excluded.text, value = excluded.value, edited_by = excluded.edited_by, editor_name = excluded.editor_name, edited_at = excluded.edited_at
+    set text = excluded.text, value = excluded.value, edited_by = excluded.edited_by, editor_name = excluded.editor_name, edited_at = excluded.edited_at, source = excluded.source
   returning e.* into v_row;
-  return jsonb_build_object('section_key', v_row.section_key, 'text', v_row.text, 'value', v_row.value, 'editor_name', v_row.editor_name, 'edited_at', v_row.edited_at);
+  return jsonb_build_object('section_key', v_row.section_key, 'text', v_row.text, 'value', v_row.value, 'editor_name', v_row.editor_name, 'edited_at', v_row.edited_at, 'source', v_row.source);
+end $$;
+
+revoke all on function public.strategy_section_save_as(uuid, uuid, text, text, text, text, jsonb) from public, anon, authenticated;
+grant execute on function public.strategy_section_save_as(uuid, uuid, text, text, text, text, jsonb) to service_role;
+
+-- The Strategy page's saves: the same guards, first, then the one save for
+-- the signed-in person. The page saves a card's fields and its lines; the
+-- three-argument save (text only, from 20261110150000_claude_sync.sql) stays
+-- for a tab opened before this release.
+create or replace function public.strategy_section_save(p_client uuid, p_key text, p_text text, p_value jsonb)
+returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  if public.is_oauth_session() then
+    raise exception 'Connected apps can read Socialytics but cannot change it.' using errcode = '42501';
+  end if;
+  if not (public.is_moburst_staff() and public.can_access_client(p_client)) then
+    raise exception 'Only Moburst staff can change the content strategy.' using errcode = '42501';
+  end if;
+  return public.strategy_section_save_as(auth.uid(), p_client, p_key, p_text, 'app', null, p_value);
+end $$;
+
+create or replace function public.strategy_section_save(p_client uuid, p_key text, p_text text)
+returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  if public.is_oauth_session() then
+    raise exception 'Connected apps can read Socialytics but cannot change it.' using errcode = '42501';
+  end if;
+  if not (public.is_moburst_staff() and public.can_access_client(p_client)) then
+    raise exception 'Only Moburst staff can change the content strategy.' using errcode = '42501';
+  end if;
+  return public.strategy_section_save_as(auth.uid(), p_client, p_key, p_text, 'app', null, null);
 end $$;
 
 revoke all on function public.strategy_section_save(uuid, text, text, jsonb) from public, anon;
 grant execute on function public.strategy_section_save(uuid, text, text, jsonb) to authenticated;
+revoke all on function public.strategy_section_save(uuid, text, text) from public, anon;
+grant execute on function public.strategy_section_save(uuid, text, text) to authenticated;
 
 -- ── 3. The client's own public profiles ─────────────────────────────────────
 

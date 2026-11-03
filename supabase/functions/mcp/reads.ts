@@ -59,7 +59,12 @@ export interface WrittenPlatformRow {
 
 export interface StrategyRows {
   /** content_strategies; null, or written_at null, while there is no strategy yet. */
-  row: { written_at: string | null; sections: Record<string, string>; platforms: WrittenPlatformRow[]; pillars: Array<{ name: string }> } | null;
+  /**
+   * sections holds text per section (a strategy written on 2 Nov) or fields
+   * per section (written as fields since 3 Nov); section_texts then holds
+   * each section as the lines the Strategy page shows.
+   */
+  row: { written_at: string | null; sections: Record<string, unknown>; section_texts?: Record<string, string> | null; platforms: WrittenPlatformRow[]; pillars: Array<{ name: string }> } | null;
   edits: StrategyEditRow[];
 }
 
@@ -163,7 +168,9 @@ export function strategySections(rows: StrategyRows): ShownSection[] {
   for (const [key, title] of keyed) {
     if (seen.has(key)) continue;
     seen.add(key);
-    const product = String(sections[key] ?? "");
+    // The product's text as the page shows it, as strategy_section_save_as reads it for the version.
+    const own = sections[key];
+    const product = typeof own === "string" ? own : String(row.section_texts?.[key] ?? "");
     const edit = edits.get(key) ?? null;
     out.push({ key, title, text: edit?.text ?? product, product, edit });
   }
@@ -294,7 +301,7 @@ export function personReads(db: Db): PersonReads {
     worked: async (clientId, p) => !!(await must(db.rpc("calendar_post_worked", { p_client: clientId, p_key: p.post_key, p_platform: p.platform, p_copy: p.copy ?? "", p_touched: p.touched_at }))),
     strategy: async (clientId) => {
       const [row, edits] = await Promise.all([
-        must<StrategyRows["row"]>(db.from("content_strategies").select("written_at, sections, platforms, pillars").eq("client_id", clientId).maybeSingle()),
+        must<StrategyRows["row"]>(db.from("content_strategies").select("written_at, sections, section_texts, platforms, pillars").eq("client_id", clientId).maybeSingle()),
         must<StrategyEditRow[] | null>(db.from("content_strategy_edits").select("section_key, text, editor_name, edited_at, source").eq("client_id", clientId)),
       ]);
       return { row: row ?? null, edits: edits ?? [] };

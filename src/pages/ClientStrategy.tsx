@@ -151,7 +151,7 @@ export default function ClientStrategy() {
     queryKey: ["content-strategy-edits", id],
     enabled: !!id,
     queryFn: async () => {
-      const { data, error } = await supabase.from("content_strategy_edits").select("section_key, text, value, editor_name, edited_at").eq("client_id", id!);
+      const { data, error } = await supabase.from("content_strategy_edits").select("section_key, text, value, editor_name, edited_at, source").eq("client_id", id!);
       if (error) throw error;
       return (data ?? []) as StrategyEdit[];
     },

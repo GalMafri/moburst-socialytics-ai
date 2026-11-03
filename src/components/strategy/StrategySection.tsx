@@ -4,7 +4,9 @@
  * person's version wherever one exists, with an "Edited by" chip; its pencil
  * opens a sheet with the card's fields. A save goes through
  * strategy_section_save with the fields and the same version as plain lines,
- * and is sent again quietly when it does not get through. "Use the product's
+ * the one section save the connector uses too (strategy_section_save_as),
+ * and is sent again quietly when it does not get through. A version saved
+ * from Claude is plain text: the card shows it with a "From Claude" chip. "Use the product's
  * version" hands the section back. Nothing here reports a failure: a save that
  * does not get through keeps the form open and says it is not saved yet.
  */
@@ -19,6 +21,7 @@ import { fieldsOf, fromForm, toForm, type Form } from "@/lib/strategyForms";
 import { sectionLines } from "../../../supabase/functions/_shared/strategy/sections";
 
 export type { StrategyEdit };
+export { editedChip };
 
 /** One section's place in the strategy: what a card needs to show and save it. */
 export interface SectionProps {
@@ -68,8 +71,9 @@ export function useSectionEdit({ clientId, sectionKey, product, edit, onSaved }:
 
   return {
     current, shown, fields, form, open, saving, notSaved, base,
-    /** A 2 Nov text edit, shown in the sheet beside the fields that replace it. */
+    /** A version that is only text (a 2 Nov edit, or one saved from Claude), shown in the sheet beside the fields that replace it. */
     earlierText: !textMode && typeof current?.text === "string" && !(current?.value && typeof current.value === "object") ? current.text : null,
+    earlierFromClaude: current?.source === "claude",
     setField: (name: string, v: string) => setForm((f) => ({ ...f, [name]: v })),
     start: () => { setForm(textMode ? { text: typeof shown === "string" ? shown : "" } : toForm(sectionKey, base)); setNotSaved(false); setOpen(true); },
     cancel: () => { setNotSaved(false); setOpen(false); },

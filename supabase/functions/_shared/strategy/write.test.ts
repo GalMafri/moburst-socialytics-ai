@@ -15,6 +15,7 @@ import {
 import type { StrategyPlatform } from "./platforms";
 import type { PlatformFigures } from "./basis";
 import { fakeDb } from "../lifecycle/fakeDb";
+import { sectionLines } from "./sections";
 
 const NOW = new Date("2026-11-02T10:00:00.000Z");
 
@@ -472,6 +473,11 @@ describe("keeping a write between runs, and saving it", () => {
       models: { writer: STRATEGY_MODEL, checker: CHECK_MODEL }, usage: out.usage, shape: 2,
     });
     expect(db.tables.content_strategies[0].sections.goals.items[0].title).toBe(draft().goals[0].title);
+    // Each section also as the lines the page shows, which Claude reads and every save versions.
+    const texts = db.tables.content_strategies[0].section_texts;
+    expect(Object.keys(texts).sort()).toEqual(Object.keys(db.tables.content_strategies[0].sections).sort());
+    expect(texts.avoid).toBe("- Office photos with no captain in them\n- Job ads");
+    expect(texts["pillar:Captain Life"]).toBe(sectionLines("pillar:Captain Life", db.tables.content_strategies[0].sections["pillar:Captain Life"]));
     expect(db.tables.content_strategy_edits).toEqual([{ client_id: "c1", section_key: "goals", text: "Ours." }]);
   });
 });

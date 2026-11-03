@@ -1566,6 +1566,7 @@ export type Database = {
           platforms: Json
           public_read: Json | null
           public_read_at: string | null
+          section_texts: Json
           sections: Json
           shape: number
           sources: Json
@@ -1582,6 +1583,7 @@ export type Database = {
           platforms?: Json
           public_read?: Json | null
           public_read_at?: string | null
+          section_texts?: Json
           sections?: Json
           shape?: number
           sources?: Json
@@ -1598,6 +1600,7 @@ export type Database = {
           platforms?: Json
           public_read?: Json | null
           public_read_at?: string | null
+          section_texts?: Json
           sections?: Json
           shape?: number
           sources?: Json

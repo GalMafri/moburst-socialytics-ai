@@ -25,7 +25,7 @@ export function EditSheet({ e, title }: { e: SectionEditor; title: string }) {
         </SheetHeader>
         {e.earlierText && (
           <div className="glass-inner p-inner space-y-1.5">
-            <p className="t-subhead">Your team's earlier version</p>
+            <p className="t-subhead">{e.earlierFromClaude ? "The version saved from Claude" : "Your team's earlier version"}</p>
             <p className="t-read whitespace-pre-line">{e.earlierText}</p>
           </div>
         )}
