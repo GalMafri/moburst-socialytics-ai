@@ -636,6 +636,28 @@ export function noteStateLine(state: string | null | undefined, points: number):
   return "Nothing in this note for the copy";
 }
 
+/**
+ * Who added a client note, and from where: "Added by Sinead on Oct 28, 2026",
+ * or for a note a person saved from Claude (client_notes.source claude)
+ * "From Claude, by Sinead on Nov 3, 2026".
+ */
+export function noteAddedLine(note: { added_by_name?: string | null; created_at?: string | null; source?: string | null }, timeZone?: string): string {
+  const on = formatDate(note.created_at, { timeZone });
+  const by = String(note.added_by_name ?? "").trim();
+  if (note.source === "claude") return by ? `From Claude, by ${by} on ${on}` : `From Claude on ${on}`;
+  return by ? `Added by ${by} on ${on}` : `Added on ${on}`;
+}
+
+/**
+ * A deck on a report (report_decks). Staff see who saved it from Claude:
+ * "From Claude, by Sinead on Nov 3, 2026"; everyone else sees when it was
+ * added: "Added on Nov 3, 2026".
+ */
+export function deckAddedLine(deck: { added_by_name?: string | null; created_at?: string | null; source?: string | null }, opts: { staff: boolean; timeZone?: string }): string {
+  const on = formatDate(deck.created_at, { timeZone: opts.timeZone });
+  return opts.staff ? noteAddedLine(deck, opts.timeZone) : `Added on ${on}`;
+}
+
 /** For a file longer than one note reads (client_notes.text_chars), how much of it was read; empty otherwise. */
 export function noteReadLine(textChars: number | null | undefined, max: number): string {
   const n = Number(textChars);

@@ -27,6 +27,8 @@ export interface StrategyEdit {
   text: string;
   editor_name: string;
   edited_at: string;
+  /** claude when the person saved it from Claude. */
+  source?: string | null;
 }
 
 /** When the product's version was written, and from what. */
@@ -66,7 +68,8 @@ export function writtenFrom(sources: string[]): string {
 export function originLine(edit: StrategyEdit | undefined, written: Written): string {
   if (edit) {
     const first = String(edit.editor_name ?? "").trim().split(/\s+/)[0] || "your team";
-    return `Edited by ${first} on ${formatDate(edit.edited_at, { year: false })}. Kept when the strategy is rewritten.`;
+    const by = edit.source === "claude" ? `From Claude, by ${first}` : `Edited by ${first}`;
+    return `${by} on ${formatDate(edit.edited_at, { year: false })}. Kept when the strategy is rewritten.`;
   }
   const from = writtenFrom(written.sources);
   return `Written on ${formatDate(written.at, { year: false })}${from ? ` from ${from}` : ""}.`;
