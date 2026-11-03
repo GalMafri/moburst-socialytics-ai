@@ -338,10 +338,11 @@ export function postsInWeek(rate: number, monday: string): number {
 }
 
 /**
- * How many Stories a week gets (Stories design, 2 Nov 2026): the client's own
- * Instagram Stories per week over the last 90 days, turned into this week's
- * count with postsInWeek, as a feed platform's rate is. No setting: a client
- * that posted no Story in 90 days gets none.
+ * The client's own Instagram Story rate (Stories design, 2 Nov 2026): its
+ * Stories per week over the last 90 days, turned into this week's count with
+ * postsInWeek, as a feed platform's rate is. No setting. A client with no
+ * Story in 90 days gets one with each Instagram post instead (weekPlan.ts
+ * storyPlan, Lital 3 Nov 2026).
  */
 export function storyRhythm(storyDates: string[], now: Date, monday: string): { stories: number; average: number; perWeek: number } {
   const from = now.getTime() - OWN_DAYS * DAY_MS;

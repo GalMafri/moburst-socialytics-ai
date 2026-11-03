@@ -8,7 +8,8 @@
 // reaches every post without rewriting stored rows. The week planner and the
 // app both import this file, so it imports nothing.
 
-export type ReasonType = "performance" | "competitor" | "trend" | "seasonal" | "test";
+/** story: a Story the planner added with a feed post; its label says where the week's count of Stories came from. */
+export type ReasonType = "performance" | "competitor" | "trend" | "seasonal" | "test" | "story";
 
 /** A piece of evidence as a post's reason keeps it (the planner's EvidenceItem). */
 export interface EvidenceRef {
