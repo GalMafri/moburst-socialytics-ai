@@ -40,6 +40,14 @@ describe("runLifecycleStep", () => {
     expect(d.tables.clients[0].company_slug).toBe("pay-the-pyper");
     expect(d.tables.scheduled_jobs).toMatchObject([{ kind: "lifecycle", client_id: "c1" }]);
   });
+  it("looks again after a step that finishes in the same minute as a look that already ran", async () => {
+    // Yangra, 3 Nov: brand_read finished 9 seconds after the look that left brief_pillars waiting for it.
+    const d = db();
+    const minute = new Date().toISOString().slice(0, 16);
+    d.tables.scheduled_jobs.push({ kind: "lifecycle", client_id: "c1", dedupe_key: `lifecycle:c1:${minute}`, available_at: new Date().toISOString(), status: "done" });
+    await runLifecycleStep(d, { id: "j", client_id: "c1", payload: { step: "access" } }, NOW);
+    expect(d.tables.scheduled_jobs.filter((j) => j.kind === "lifecycle").map((j) => j.status)).toEqual(["done", "queued"]);
+  });
   it("looks again when a wait or a retry is due, not before", () => {
     const at = new Date("2026-10-19T10:00:00Z");
     const waiting = rowAfter(null, { client_id: "c1", step: "tracking", inputs_key: "k" }, { status: "waiting", reason: "in_progress", recheckMinutes: 5 }, at);
