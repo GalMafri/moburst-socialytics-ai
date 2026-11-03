@@ -23,6 +23,8 @@ export interface CustomerProfile {
   status: string;
   /** The Sprout groups the profile is in, by group id. */
   groups: string[];
+  /** Sprout's network_metadata, when it gives one (an address for a Google Business Profile, Yelp or Tripadvisor profile). */
+  network_metadata?: Record<string, unknown>;
 }
 
 /** A Sprout group: how the account sorts its profiles, one group per brand as the team keeps it. */
@@ -72,6 +74,7 @@ export async function listCustomerProfiles(customerId: string = defaultSproutCus
     native_link: String(p.native_link || ""),
     status: String(p.status || "active"),
     groups: Array.isArray(p.groups) ? p.groups.map(String) : [],
+    ...(p.network_metadata && typeof p.network_metadata === "object" ? { network_metadata: p.network_metadata as Record<string, unknown> } : {}),
   }));
 }
 

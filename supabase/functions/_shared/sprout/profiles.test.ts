@@ -32,6 +32,12 @@ describe("listCustomerProfiles", () => {
       { id: "493", name: "Solo", native_name: "solo", network_type: "facebook", native_link: "", status: "active", groups: [] },
     ]);
   });
+  it("keeps the network metadata Sprout gives a local profile, such as its address", async () => {
+    const { fetchImpl } = sprout({ "/metadata/customer": { body: { data: [
+      { customer_profile_id: 501, network_type: "google_my_business", name: "Olo Austin", native_name: "olo-austin", network_metadata: { address: "12 Main Street, Austin, TX 78701" } },
+    ] } } });
+    expect((await listCustomerProfiles("1676448", fetchImpl))[0].network_metadata).toEqual({ address: "12 Main Street, Austin, TX 78701" });
+  });
 });
 
 describe("listCustomerGroups", () => {

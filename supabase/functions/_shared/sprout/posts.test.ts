@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { listBrandPosts, SproutPostsError } from "./posts";
+import { listBrandPosts, listOwnedPostRows, OWNED_POST_FIELDS, SproutPostsError } from "./posts";
 
 const SINCE = new Date("2026-08-04T06:00:00Z");
 const UNTIL = new Date("2026-11-02T06:00:00Z");
@@ -51,5 +51,30 @@ describe("listBrandPosts", () => {
     expect(err).toBeInstanceOf(SproutPostsError);
     expect(err).toMatchObject({ status: 429 });
     expect(err.detail).not.toMatch(/abc\.def/);
+  });
+});
+
+describe("a longer window", () => {
+  it("reads every page Sprout returns when asked for more pages, up to the cap given", async () => {
+    const page = { data: [{ text: "x" }], paging: { current_page: 1, total_pages: 5 } };
+    const { calls, fetchImpl } = sprout([page, page, page, page, page]);
+    expect(await listBrandPosts(["7"], { since: SINCE, until: UNTIL, pages: 40, fetchImpl, token: async () => "t", sleep: async () => {} })).toHaveLength(5);
+    expect(calls).toHaveLength(5);
+  });
+});
+
+describe("listOwnedPostRows", () => {
+  it("asks for the fields and metrics the owned source asks for, plus each post's profile picture, newest first", async () => {
+    const row = { guid: "ig:1", customer_profile_id: 7, network: "INSTAGRAM", created_time: "2026-10-01T10:00:00Z", text: "Hi", from: { profile_picture: "https://cdn/p.jpg" }, metrics: { "lifetime.likes": 4 } };
+    const { calls, fetchImpl } = sprout([{ data: [row], paging: { current_page: 1, total_pages: 1 } }]);
+    const rows = await listOwnedPostRows(["7"], { since: SINCE, until: UNTIL, customerId: "1676448", fetchImpl, token: async () => "tok", sleep: async () => {} });
+    expect(rows).toEqual([row]);
+    expect(OWNED_POST_FIELDS).toEqual(expect.arrayContaining(["guid", "customer_profile_id", "network", "created_time", "perma_link", "text", "post_type", "content_category", "visual_media", "is_boosted", "from.profile_picture"]));
+    expect(calls[0].body).toMatchObject({
+      filters: ["customer_profile_id.eq(7)", "created_time.in(2026-08-04T00:00:00...2026-11-02T23:59:59)"],
+      fields: OWNED_POST_FIELDS,
+      metrics: expect.arrayContaining(["lifetime.reactions", "lifetime.likes", "lifetime.comments_count", "lifetime.shares_count", "lifetime.impressions", "lifetime.video_views"]),
+      sort: ["created_time:desc"], timezone: "UTC", page: 1,
+    });
   });
 });
