@@ -13,7 +13,13 @@
 //     never shrinks the library below 3: an old post leaves only when a newer
 //     one replaces it;
 //   * 3 designed posts across the client to learn its look, 4 on one platform
-//     before that platform gets rules of its own.
+//     before that platform gets rules of its own;
+//   * inside each platform's slots, kept posts first, then posts at or above
+//     the platform's median by the calendar's score (the social read's
+//     multiples), newest first, then the rest, newest first; a platform the
+//     content strategy marks "not now" lends posts but gets no rules of its
+//     own (docs/superpowers/specs/2026-11-03-onboarding-complete-design.md,
+//     section 5).
 // Also what to review next (only what could reach the library) and when the
 // look is learned again. Free of Deno and network imports so it can be tested.
 
@@ -70,6 +76,8 @@ export interface StoredEntry {
   content_hash?: string | null;
   kept?: true;
   upload?: true;
+  /** The post's multiple of its platform's median, when the social read scored it. */
+  multiple?: number;
 }
 
 export interface CorpusInput {
@@ -86,6 +94,10 @@ export interface CorpusInput {
   lookSince?: string | null;
   /** The platforms of the client's assigned accounts, so a platform with no designed posts is still listed. */
   profilePlatforms?: string[];
+  /** Each post's multiple of its platform's median, by Sprout guid (the social read's). */
+  multiples?: Record<string, number>;
+  /** Platforms the content strategy marks "not now": they lend posts but get no rules of their own. */
+  notNow?: string[];
   now: Date;
 }
 
@@ -106,6 +118,11 @@ export interface Selection {
 
 const at = (iso: string | null | undefined) => String(iso ?? "");
 const newestFirst = (a: { posted_at?: string | null }, b: { posted_at?: string | null }) => at(b.posted_at).localeCompare(at(a.posted_at));
+/** Posts at or above the platform's median first, newest first, then the rest, newest first. Without scores, newest first. */
+const byPerformance = (multiples: Record<string, number> | undefined) => (a: { posted_at?: string | null; source_post_id?: string | null }, b: { posted_at?: string | null; source_post_id?: string | null }) => {
+  const up = (x: { source_post_id?: string | null }) => ((multiples?.[String(x.source_post_id ?? "")] ?? 0) >= 1 ? 0 : 1);
+  return up(a) - up(b) || newestFirst(a, b);
+};
 const before = (iso: string | null | undefined, since: string | null | undefined) => !!since && !!iso && at(iso).slice(0, 10) < since.slice(0, 10);
 
 function fromReview(r: Review, c?: Candidate): StoredEntry {
@@ -172,7 +189,7 @@ export function reviewQueue(i: CorpusInput, batch = REVIEW_BATCH): Candidate[] {
   const queues = platformOrder(usable).map((platform) => {
     let slots = PER_PLATFORM - (keptOn.get(platform) ?? 0);
     const out: Candidate[] = [];
-    for (const c of usable.filter((x) => x.platform === platform)) {
+    for (const c of usable.filter((x) => x.platform === platform).sort(byPerformance(i.multiples))) {
       if (slots <= 0) break;
       const r = byId.get(c.source_post_id);
       if (needsReview(r, i.now)) {
@@ -208,13 +225,17 @@ export function selectLibrary(i: CorpusInput): Selection {
     else if (p) pool.set(path, p);
   }
   const posts = [...pool.values()].filter((e) => !left.has(e.path) && !!e.platform);
-  for (const e of posts) if (kept.has(e.path)) e.kept = true;
+  for (const e of posts) {
+    if (kept.has(e.path)) e.kept = true;
+    const m = i.multiples?.[String(e.source_post_id ?? "")];
+    if (typeof m === "number") e.multiple = m;
+  }
   const current = posts.filter((e) => e.kept || !before(e.posted_at, i.lookSince));
 
   const lists = new Map<string, StoredEntry[]>();
   for (const platform of platformOrder(current)) {
     const mine = current.filter((e) => e.platform === platform);
-    lists.set(platform, [...mine.filter((e) => e.kept).sort(newestFirst), ...mine.filter((e) => !e.kept).sort(newestFirst)].slice(0, PER_PLATFORM));
+    lists.set(platform, [...mine.filter((e) => e.kept).sort(newestFirst), ...mine.filter((e) => !e.kept).sort(byPerformance(i.multiples))].slice(0, PER_PLATFORM));
   }
 
   const uploads: StoredEntry[] = [...new Set(i.uploads.filter((u) => typeof u === "string" && u && !left.has(u)))].map((path) => ({ path, upload: true, kept: true }));
@@ -237,9 +258,10 @@ export function selectLibrary(i: CorpusInput): Selection {
     }
   }
 
+  const notNow = new Set((i.notNow ?? []).map((p) => platformName(p)));
   const platforms: Record<string, PlatformLine> = {};
   for (const [platform, list] of lists) {
-    platforms[platform] = { posts: list.length, newest: list.map((e) => at(e.posted_at)).sort().pop() || null, own_rules: list.length >= PLATFORM_RULES_MIN };
+    platforms[platform] = { posts: list.length, newest: list.map((e) => at(e.posted_at)).sort().pop() || null, own_rules: list.length >= PLATFORM_RULES_MIN && !notNow.has(platform) };
   }
   for (const raw of i.profilePlatforms ?? []) {
     const p = platformName(raw);
