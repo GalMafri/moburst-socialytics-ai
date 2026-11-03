@@ -70,21 +70,23 @@ describe("website", () => {
     expect(await STEPS.website.inputs(db, client(), new Map())).toBeNull();
     expect(await STEPS.website.inputs(db, olo({ field_sources: person("website_url") }), new Map())).toBeNull();
     expect(await STEPS.website.inputs(dbWith({ sprout_profiles: [] }), olo(), new Map())).toBeNull();
-    expect(await STEPS.website.inputs(db, olo(), new Map())).toBe("profiles:7,8");
+    expect(await STEPS.website.inputs(db, olo(), new Map())).toBe("profiles:7,8|name:olo");
   });
   it("writes the website its posts confirm, as the lifecycle's, so brand_read gets its input", async () => {
     const c = olo();
     const db = dbWith({ clients: [c], sprout_profiles: profiles() });
     deps.now = () => new Date(T);
     let asked: unknown = null;
-    deps.listBrandPosts = (async (ids: string[], o: { since: Date; until: Date }) => {
-      asked = { ids, since: o.since.toISOString(), until: o.until.toISOString() };
+    deps.listBrandPosts = (async (ids: string[], o: { since: Date; until: Date; pages?: number }) => {
+      asked = { ids, since: o.since.toISOString(), until: o.until.toISOString(), pages: o.pages };
       return [{ text: "Order ahead at https://www.olo.com/order", created_time: T, perma_link: null, profile_id: "7" }];
     }) as never;
     deps.siteReader = site({ "olo.com": `<a href="https://www.instagram.com/olo.hq/">ig</a>` }) as never;
+    deps.searchWeb = fail("the web search");
     const out = await STEPS.website.run(db, c, ctx());
-    expect(asked).toEqual({ ids: ["7", "8"], since: "2026-07-21T10:00:00.000Z", until: T });
-    expect(out).toMatchObject({ status: "done", result: { website: "https://www.olo.com", confirmed_by: "profile_link", written: ["website_url"] } });
+    // 12 months, every page Sprout returns (up to the cap).
+    expect(asked).toEqual({ ids: ["7", "8"], since: "2025-10-19T10:00:00.000Z", until: T, pages: 40 });
+    expect(out).toMatchObject({ status: "done", result: { website: "https://www.olo.com", confirmed_by: "profile_link", linked_network: "fb_instagram_account", posts: 1, months: 12, written: ["website_url"] } });
     expect(c.website_url).toBe("https://www.olo.com");
     expect(c.field_sources.website_url).toMatchObject({ by: "lifecycle" });
     expect(await STEPS.brand_read.inputs(db, c, new Map())).toBe("olo.com");
@@ -781,5 +783,210 @@ describe("design_refs (references that refresh themselves)", () => {
     expect(c.harvested_design_references).toBe(before);
     expect(libraryWrites).toEqual([]);
     expect(db.tables.design_reference_reviews).toEqual([]);
+  });
+});
+
+describe("a client with profiles and no website (onboarding from social profiles)", () => {
+  const NOW = "2026-11-03T10:00:00.000Z";
+  const PROFILES = () => [
+    { client_id: "c1", sprout_profile_id: 7, profile_name: "Olo", native_name: "olo", network_type: "linkedin_company", native_link: "", is_active: true },
+    { client_id: "c1", sprout_profile_id: 8, profile_name: "Olo", native_name: "olo.hq", network_type: "fb_instagram_account", native_link: "", is_active: true },
+  ];
+  const olo = (over: Record<string, unknown> = {}) => client({ name: "Olo", website_url: null, brief_text: "", geo: "", language: "", ...over });
+  const POSTS = [
+    { id: "P1", platform: "Instagram", format: "carousel", date: "2026-10-20", text: "Skip the line: order ahead in two taps", label: "2.4x its platform's median for carousels", top: true },
+    { id: "P2", platform: "LinkedIn", format: "image", date: "2026-10-25", text: "Restaurants grow digital orders with Olo", label: null, top: false },
+  ];
+  const social = (over: Record<string, unknown> = {}) => row("social_read", { result: {
+    checked_at: NOW, version: 1, window_days: 90, text_posts: 12, enough: true, posts: POSTS, multiples: { g1: 2.4 },
+    follower_countries: [{ country: "US", followers: 70, share: 0.7 }, { country: "GB", followers: 30, share: 0.3 }],
+    instagram: { handle: "olo.hq", bio: { biography: "Order ahead. Austin, TX", links: ["https://olo.com/start"] } }, ...over,
+  } });
+
+  it("reads the profiles weekly, keyed on the profiles and the look", async () => {
+    const db = dbWith({ sprout_profiles: PROFILES() });
+    expect(STEPS.social_read.policy).toEqual({ refreshDays: 7, recheckDays: 7 });
+    expect(await STEPS.social_read.inputs(db, olo(), new Map())).toBe("profiles:7,8|look:");
+    expect(await STEPS.social_read.inputs(db, olo({ look_since: "2026-10-20" }), new Map())).toBe("profiles:7,8|look:2026-10-20");
+    expect(await STEPS.social_read.inputs(dbWith({ sprout_profiles: [] }), olo(), new Map())).toBeNull();
+  });
+
+  it("confirms the website by the Instagram bio link, else searches the name monthly, a site counting only when it links to a profile", async () => {
+    deps.now = () => new Date(NOW);
+    deps.listBrandPosts = (async () => [{ text: "No links here", created_time: NOW, perma_link: null, profile_id: "7" }]) as never;
+    deps.siteReader = (() => ({
+      resolve: async (u: string) => u,
+      homepage: async (u: string) => (new URL(u).hostname === "olo.com" ? { html: `<a href="https://www.linkedin.com/company/olo/">in</a>`, url: "https://www.olo.com/" } : null),
+    })) as never;
+    deps.searchWeb = fail("the web search");
+    const c = olo();
+    const db = dbWith({ clients: [c], sprout_profiles: PROFILES() });
+    const rows = rowsOf(social());
+    expect(await STEPS.website.inputs(db, c, rows)).toMatch(/^profiles:7,8\|name:olo\|bio:[0-9a-f]{8}$/);
+    expect(await STEPS.website.run(db, c, ctx({ rows }))).toMatchObject({ status: "done", result: { website: "https://www.olo.com", confirmed_by: "bio_profile_link", linked_network: "linkedin_company" } });
+
+    // No bio link: the name is searched, once a month while no website is found.
+    const d = olo();
+    const db2 = dbWith({ clients: [d], sprout_profiles: PROFILES() });
+    const searches: string[] = [];
+    deps.searchWeb = async (q: string) => { searches.push(q); return ["https://olo-dining.example", "https://www.instagram.com/olo"]; };
+    const first = await STEPS.website.run(db2, d, ctx());
+    expect(first).toMatchObject({ status: "waiting", reason: "website", recheckDays: 7, result: { posts: 1, months: 12, searched_at: NOW, queries: ["Olo", "olo.hq"] } });
+    expect(searches).toEqual(["Olo", "olo.hq"]);
+    const previous = row("website", { status: "waiting", result: (first as { result: Record<string, unknown> }).result });
+    await STEPS.website.run(db2, d, ctx({ previous }));
+    expect(searches).toHaveLength(2);
+    deps.now = () => new Date(Date.parse(NOW) + 31 * 86_400_000);
+    await STEPS.website.run(db2, d, ctx({ previous }));
+    expect(searches).toHaveLength(4);
+  });
+
+  it("writes the brief and pillars from the posts, as the lifecycle's, once the social read has them", async () => {
+    const c = olo();
+    const db = dbWith({ clients: [c], sprout_profiles: PROFILES() });
+    expect(await STEPS.brief_pillars.inputs(db, c, new Map())).toBeNull();
+    const rows = rowsOf(social());
+    expect(await STEPS.brief_pillars.inputs(db, c, rows)).toMatch(/\|social:1$/);
+    deps.now = () => new Date(NOW);
+    deps.anthropicKey = async () => "key";
+    deps.scrapeMarkdown = fail("the scrape");
+    let opts: Record<string, unknown> = {};
+    deps.derivePillars = (async (_db: unknown, _c: unknown, _k: string, o: Record<string, unknown>) => {
+      opts = o;
+      return { pillars: [{ name: "Order ahead", description: "d", rationale: "r" }], keywords: ["online ordering"], notes: "", sources: ["social_posts"], source: "social_posts", derived_at: NOW, brief: "Olo sells online ordering to restaurants." };
+    }) as never;
+    const out = await STEPS.brief_pillars.run(db, c, ctx({ rows }));
+    expect(opts).toMatchObject({ posts: POSTS, briefFromPosts: true, bio: "Order ahead. Austin, TX", siteText: null });
+    expect(out).toMatchObject({ status: "done", result: { brief: "from_posts", pillars: "derived", posts: 2 } });
+    expect(c.brief_text).toBe("Drafted from the client's posts on 2026-11-03:\n\nOlo sells online ordering to restaurants.");
+    expect(c.field_sources).toMatchObject({ brief_text: { by: "lifecycle", from: "posts" }, content_pillars: { by: "lifecycle" } });
+    // The brief it drafted is no input: writing it never runs the step again.
+    expect(await STEPS.brief_pillars.inputs(db, c, rows)).toBe(await STEPS.brief_pillars.inputs(db, olo(), rows));
+  });
+
+  it("waits a week with 3 posts with text, and says how many it has", async () => {
+    const c = olo();
+    deps.derivePillars = fail("the derivation");
+    const out = await STEPS.brief_pillars.run(dbWith({ clients: [c], sprout_profiles: PROFILES() }), c, ctx({ rows: rowsOf(social({ text_posts: 3, enough: false, window_days: 365 })) }));
+    expect(out).toEqual({ status: "waiting", reason: "posts", recheckDays: 7, result: { text_posts: 3, window_days: 365 } });
+  });
+
+  it("identifies competitors from the top posts and the followers' countries once the pillars are written, and confirms them as the system", async () => {
+    const pillars = [{ name: "Order ahead", description: "d" }];
+    const db = dbWith({ competitor_sets: [], competitors: [], sprout_profiles: PROFILES() });
+    const rows = rowsOf(row("brief_pillars"), social());
+    expect(await STEPS.competitors.inputs(db, olo(), rows)).toBeNull();
+    expect(await STEPS.competitors.inputs(db, olo({ content_pillars: pillars }), rows)).toMatch(/^site:\|notes:/);
+    deps.anthropicKey = async () => "key";
+    let asked: { geo?: unknown; postsText?: unknown } = {};
+    deps.identifyCompetitors = (async (d: typeof db, cl: { geo: string }, _k: string, o: { postsText?: string }) => {
+      asked = { geo: cl.geo, postsText: o.postsText };
+      d.tables.competitor_sets.push({ id: "draft1", client_id: "c1", status: "draft", created_at: T });
+      for (const [i, n] of ["Toast", "ChowNow", "Square"].entries()) d.tables.competitors.push({ id: `k${i}`, set_id: "draft1", client_id: "c1", name: n, website_url: `https://${n.toLowerCase()}.com`, similarity_score: 0.9 - i * 0.1, is_selected: false, selected_rank: null });
+      return { set_id: "draft1", competitors: d.tables.competitors, rejected: [] };
+    }) as never;
+    const first = await STEPS.competitors.run(db, olo({ content_pillars: pillars }), ctx({ rows }));
+    expect(first).toMatchObject({ status: "waiting", reason: "in_progress" });
+    expect(asked.geo).toBe("US,GB");
+    expect(asked.postsText).toContain("[Instagram, 2.4x its platform's median for carousels] Skip the line");
+    deps.detectCompetitorHandles = (async () => ({ results: [], writeErrors: [] })) as never;
+    let notes = "";
+    deps.confirmDraftSet = (async (_d: unknown, id: string, o: { notes: string }) => { notes = o.notes; db.tables.competitor_sets.find((x) => x.id === id)!.status = "confirmed"; return { confirmed: true, selected: [] }; }) as never;
+    const previous = row("competitors", { status: "waiting", result: (first as { result: Record<string, unknown> }).result });
+    const second = await STEPS.competitors.run(db, olo({ content_pillars: pillars }), ctx({ previous, rows }));
+    expect(second).toMatchObject({ status: "done", result: { set_id: "draft1", chosen_from: "posts", selected: ["Toast", "ChowNow", "Square"] } });
+    expect(notes).toBe("Chosen automatically from the client's posts: the three closest competitors with a website.");
+  });
+
+  it("identifies a set chosen from posts once more when a website is found, if it is untouched and was never tracked; tracking waits for it", async () => {
+    const set = { id: "s1", client_id: "c1", status: "confirmed", confirmed_at: T, created_at: T, confirmed_by: null, rivaliq_landscape_id: null, tracking_check: null };
+    const comps = ["Toast", "ChowNow", "Square"].map((name, i) => ({ id: `k${i}`, set_id: "s1", client_id: "c1", name, website_url: `https://${name}.com`, is_selected: true, selected_rank: i + 1 }));
+    const chosen = row("competitors", { result: { set_id: "s1", chosen_from: "posts", selected: ["Toast", "ChowNow", "Square"] } });
+    const withSite = olo({ website_url: "https://www.olo.com", content_pillars: [{ name: "Order ahead" }] });
+    const db = dbWith({ competitor_sets: [{ ...set }], competitors: comps.map((c) => ({ ...c })), rivaliq_setup_jobs: [] });
+    expect(await STEPS.competitors.inputs(db, withSite, rowsOf(chosen))).toBe("again:s1|site:olo.com");
+    expect(await STEPS.tracking.inputs(db, withSite, rowsOf(chosen))).toBeNull();
+    // Without the website, or once a person changed or confirmed it, or once it was tracked: the set stays.
+    expect(await STEPS.competitors.inputs(db, olo({ content_pillars: [{ name: "x" }] }), rowsOf(chosen))).toBe("existing:s1");
+    expect(await STEPS.competitors.inputs(dbWith({ competitor_sets: [{ ...set, confirmed_by: "person-1" }], competitors: comps }), withSite, rowsOf(chosen))).toBe("existing:s1");
+    expect(await STEPS.competitors.inputs(dbWith({ competitor_sets: [{ ...set }], competitors: comps, rivaliq_setup_jobs: [{ set_id: "s1" }] }), withSite, rowsOf(chosen))).toBe("existing:s1");
+    const swapped = comps.map((c) => (c.name === "Square" ? { ...c, name: "Lunchbox" } : c));
+    expect(await STEPS.competitors.inputs(dbWith({ competitor_sets: [{ ...set }], competitors: swapped }), withSite, rowsOf(chosen))).toBe("existing:s1");
+    // The identification keeps saying it replaces the set chosen from posts, so the pick a minute later still runs.
+    deps.anthropicKey = async () => "key";
+    deps.identifyCompetitors = (async () => ({ set_id: "draft2", competitors: [1, 2, 3], rejected: [] })) as never;
+    const first = await STEPS.competitors.run(db, withSite, ctx({ rows: rowsOf(chosen) }));
+    expect(first).toMatchObject({ status: "waiting", result: { draft_set_id: "draft2", chosen_from: "posts", set_id: "s1" } });
+    const carried = row("competitors", { status: "waiting", result: (first as { result: Record<string, unknown> }).result });
+    expect(await STEPS.competitors.inputs(db, withSite, rowsOf(carried))).toBe("again:s1|site:olo.com");
+  });
+
+  it("holds the trend profile until competitors are settled, and keys the strategy on each version", async () => {
+    const pillars = [{ name: "Order ahead", description: "d" }];
+    deps.trendIO = () => ({ ownPosts: async () => ({ posts: [] }), feedSnapshots: async () => [], competitorSet: async () => [], siteText: async () => "" }) as never;
+    const db = dbWith({ clients: [{ id: "c1", brand_book_text: "" }] });
+    expect(await STEPS.trend_profile.inputs(db, olo({ content_pillars: pillars }), rowsOf(row("brief_pillars")))).toBeNull();
+    expect(await STEPS.trend_profile.inputs(db, olo({ content_pillars: pillars }), rowsOf(row("brief_pillars"), row("competitors")))).toMatch(/^profile:/);
+    const tables = { clients: [{ id: "c1", brand_book_text: "" }], trend_profiles: [{ client_id: "c1", written_at: "2026-11-01T08:00:00.000Z" }], sprout_profiles: PROFILES() };
+    const c = olo({ content_pillars: pillars, brief_text: "Drafted from the client's posts on 2026-11-03:\n\nOlo", field_sources: { brief_text: { by: "lifecycle", from: "posts" } } });
+    const base = rowsOf(row("brief_pillars"), row("competitors"));
+    const key = await STEPS.trend_profile.inputs(dbWith(tables), c, base);
+    const rows = rowsOf(row("brief_pillars"), row("competitors"), row("trend_profile", { inputs_key: key }), social({ version: 1 }));
+    expect(await STEPS.content_strategy.inputs(dbWith(tables), c, rows)).toMatch(/\|social:1$/);
+    const moved = rowsOf(row("brief_pillars"), row("competitors"), row("trend_profile", { inputs_key: key }), social({ version: 2 }));
+    expect(await STEPS.content_strategy.inputs(dbWith(tables), c, moved)).toMatch(/\|social:2$/);
+    // A client with a website keys on the posts only from their first move.
+    const site = { ...c, website_url: "https://olo.com" };
+    const siteKeyed = await STEPS.trend_profile.inputs(dbWith(tables), site, base);
+    const siteRows = rowsOf(row("brief_pillars"), row("competitors"), row("trend_profile", { inputs_key: siteKeyed }), social({ version: 1 }));
+    expect(await STEPS.content_strategy.inputs(dbWith(tables), site, siteRows)).not.toMatch(/social:/);
+  });
+
+  it("reaches the first output with the brief drafted from the posts", async () => {
+    const db = dbWith({ calendar_plans: [], reports: [], report_schedules: [{ client_id: "c1", id: "s" }] });
+    deps.now = () => new Date(NOW);
+    const c = olo({ brief_text: "Drafted from the client's posts on 2026-11-03:\n\nOlo", timezone: "America/Chicago" });
+    expect(await STEPS.first_output.inputs(db, c, rowsOf(row("brief_pillars"), row("accounts")))).toMatch(/^week:2026-11-02\|/);
+  });
+
+  it("waits to track without a website, asking RivalIQ nothing, and waits for a free place when the plan is full, never failing", async () => {
+    const { FollowFailure } = await import("../competitive/rivaliqFollowFailure");
+    const set = { id: "s1", client_id: "c1", status: "confirmed", confirmed_at: T, created_at: T, rivaliq_landscape_id: null, tracking_check: null };
+    deps.rivaliqKey = () => null;
+    deps.advanceSetupOnServer = fail("the setup");
+    expect(await STEPS.tracking.run(dbWith({ competitor_sets: [set] }), olo(), ctx())).toEqual({ status: "waiting", reason: "client_website", result: { set_id: "s1" } });
+    deps.rivaliqKey = () => "rk";
+    deps.rivalIqApi = (() => async () => ({})) as never;
+    deps.advanceSetupOnServer = async () => { throw new FollowFailure("RivalIQ's plan tracks 40 distinct companies and 40 are in use, so Olo could not be added.", true); };
+    expect(await STEPS.tracking.run(dbWith({ competitor_sets: [set] }), olo({ website_url: "https://olo.com" }), ctx())).toEqual({ status: "waiting", reason: "rivaliq_full", recheckDays: 1, result: { set_id: "s1" } });
+  });
+
+  it("takes the website's values once it is found only where the site ranks higher, and keeps a person's", async () => {
+    const PICTURE = "https://project.test/storage/v1/object/public/generated-media/c1/brand/logo-profile-linkedin-0123456789abcdef.png";
+    const c = client({
+      name: "Olo", website_url: "https://www.olo.com/", logo_url: PICTURE, timezone: "America/Chicago", language: "en,es", geo: "US,GB",
+      location: { source: "post_text", website: null, timezone: "America/Chicago" },
+      field_sources: { logo_url: { by: "lifecycle", from: "profile_picture:linkedin" }, timezone: { by: "lifecycle", from: "post_text" }, language: { by: "lifecycle", from: "posts" }, geo: { by: "lifecycle", from: "followers" }, brand_identity: { by: "person" } },
+      brand_identity: BRAND,
+    });
+    const db = dbWith({ clients: [c] });
+    deps.fetchSiteHtml = async () => ({ html: FOOTER_SITE.replace("<body>", '<body><header><img class="logo" src="/logo.png"></header>'), via: "direct" as const });
+    deps.openaiKey = async () => "sk";
+    deps.researchBrand = fail("the brand read");
+    await STEPS.brand_read.run(db, c, ctx({ rows: rowsOf(social()) }));
+    // The site's footer address (rank 2) beats an address in posts (rank 3); its logo replaces the profile picture.
+    expect(c).toMatchObject({ timezone: "America/New_York", location: { source: "page_footer", website: "olo.com" }, logo_url: "https://www.olo.com/logo.png" });
+    expect(c.field_sources).toMatchObject({ logo_url: { by: "lifecycle", from: "website" }, timezone: { from: "page_footer" } });
+    // The posts' languages outrank the site's language tag, and the regions keep the followers' countries.
+    expect(c).toMatchObject({ language: "en,es", geo: "US,GB" });
+    expect(c.brand_identity).toBe(BRAND);
+
+    // A Google Business Profile address (rank 1) stays when the site has only text addresses.
+    const d = client({ website_url: "https://www.olo.com/", location: { source: "profile_address", website: null, timezone: "America/Denver" }, timezone: "America/Denver",
+      field_sources: { timezone: { by: "lifecycle", from: "profile_address" }, brand_identity: { by: "person" }, logo_url: { by: "person" } }, brand_identity: BRAND, logo_url: "https://x/mine.png" });
+    const db2 = dbWith({ clients: [d] });
+    deps.fetchSiteHtml = async () => ({ html: '<html lang="en"><body><main>Visit 1250 Broadway, New York, NY 10001</main></body></html>', via: "direct" as const });
+    await STEPS.brand_read.run(db2, d, ctx());
+    expect(d).toMatchObject({ timezone: "America/Denver", location: { source: "profile_address" }, logo_url: "https://x/mine.png" });
   });
 });

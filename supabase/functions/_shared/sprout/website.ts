@@ -223,6 +223,8 @@ export interface NameSearch {
   confirmed_by: "profile_link" | null;
   queries: string[];
   tried: Array<{ domain: string; read: boolean; linked: boolean }>;
+  /** The profile keys the confirmed homepage links to. */
+  site_profiles: string[];
 }
 
 /** The brand's website searched by name: the first new domain whose homepage links to one of the brand's profiles. */
@@ -247,11 +249,11 @@ export async function searchWebsiteByName(brand: BrandLike, engine: SearchEngine
       try {
         if (page && !sharedPlatformKind(page.url)) website = new URL(page.url).origin;
       } catch { /* the domain itself */ }
-      return { website, confirmed_by: "profile_link", queries: asked, tried };
+      return { website, confirmed_by: "profile_link", queries: asked, tried, site_profiles: siteProfileLinks(page!.html) };
     }
     if (tried.length >= MAX_SEARCHED_SITES) break;
   }
-  return { website: null, confirmed_by: null, queries: asked, tried };
+  return { website: null, confirmed_by: null, queries: asked, tried, site_profiles: [] };
 }
 
 /**
