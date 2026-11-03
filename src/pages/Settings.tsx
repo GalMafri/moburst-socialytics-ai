@@ -12,6 +12,7 @@ import { Navigate, useSearchParams } from "react-router-dom";
 import { CheckCircle2, Save, Loader2 } from "lucide-react";
 import { HubCompanySync } from "@/components/HubCompanySync";
 import { HiggsfieldConnection } from "@/components/settings/HiggsfieldConnection";
+import { GoogleSlidesConnection } from "@/components/settings/GoogleSlidesConnection";
 import { ApiAccessCard } from "@/components/settings/ApiAccessCard";
 import { fetchActiveClients } from "@/lib/activeClients";
 import { sendQuietly, writeResendable } from "@/lib/quietSend";
@@ -42,6 +43,19 @@ export default function Settings() {
     next.delete("reason");
     setSearchParams(next, { replace: true });
   }, [higgsfieldResult, queryClient, searchParams, setSearchParams, toast]);
+
+  // Google's sign-in for strategy decks lands back here the same way.
+  const googleResult = searchParams.get("google");
+  useEffect(() => {
+    if (!googleResult) return;
+    queryClient.invalidateQueries({ queryKey: ["google-status"] });
+    if (googleResult === "connected") toast({ title: "Google Slides connected" });
+    else console.warn("[google sign-in] not connected", searchParams.get("reason") || "no reason given");
+    const next = new URLSearchParams(searchParams);
+    next.delete("google");
+    next.delete("reason");
+    setSearchParams(next, { replace: true });
+  }, [googleResult, queryClient, searchParams, setSearchParams, toast]);
 
   const { data: settings } = useQuery({
     queryKey: ["app-settings"],
@@ -120,6 +134,8 @@ export default function Settings() {
       <HubCompanySync />
 
       <HiggsfieldConnection />
+
+      <GoogleSlidesConnection />
 
       <ApiAccessCard clientSlugs={clientSlugs} />
 

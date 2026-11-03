@@ -49,6 +49,7 @@ import { TrendsWeTrack } from "@/components/clients/TrendsWeTrack";
 import { ClientOrigin } from "@/components/clients/ClientOrigin";
 import { ClientNotes } from "@/components/onboarding/ClientNotes";
 import { ClaudeProject } from "@/components/onboarding/ClaudeProject";
+import { PublicProfiles } from "@/components/clients/PublicProfiles";
 
 const PLATFORMS = ["Instagram", "TikTok", "Facebook", "LinkedIn", "Twitter/X", "YouTube"];
 
@@ -542,6 +543,16 @@ export default function ClientSetup() {
                   <p className="t-secondary">The client's accounts are matched once it is created.</p>
                 )}
             </Section>
+            {clientId && (
+              <Section
+                layout="split"
+                eyebrow="Accounts"
+                title="Public profiles"
+                description="The client's own public profiles, which its strategy reads where Sprout has no account. Found from RivalIQ and the client's website; add or change any here, and a profile you remove stays removed."
+              >
+                <PublicProfiles clientId={clientId} />
+              </Section>
+            )}
           </TabsContent>
 
           <TabsContent value="strategy" className="space-y-section mt-section">
