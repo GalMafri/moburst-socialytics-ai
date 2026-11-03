@@ -30,7 +30,7 @@ export function figuresOf(p: PagePlatform): (PlatformFigures & { known: boolean 
 function Comparison({ client, p, f }: { client: string; p: PagePlatform; f: PlatformFigures }) {
   const comps = p.competitors ?? [];
   if (!comps.length || f.basis === "none") return null;
-  const bars = (title: string, mine: number | null, theirs: (c: (typeof comps)[number]) => number | null) => {
+  const bars = (title: string, mine: number | null, theirs: (c: (typeof comps)[number]) => number | null, legend: boolean) => {
     const rows = [
       ...(mine === null ? [] : [{ key: "brand", label: client, name: client, value: mine, emphasized: true }]),
       ...comps.flatMap((c) => { const v = theirs(c); return v === null ? [] : [{ key: c.company, label: c.company, name: c.company, value: v }]; }),
@@ -39,14 +39,16 @@ function Comparison({ client, p, f }: { client: string; p: PagePlatform; f: Plat
     return (
       <div className="space-y-3 min-w-0">
         <p className="t-subhead">{title}</p>
-        <RankedBars rows={rows} emphasis legend={{ subject: client, others: "Competitors" }} />
+        <RankedBars rows={rows} emphasis legend={legend ? { subject: client, others: "Competitors" } : undefined} />
       </div>
     );
   };
+  const engagement = bars("Engagement per post", f.basis === "thin" ? null : f.median_engagement, (c) => c.median_engagement, true);
   return (
-    <div className="grid gap-6 xl:grid-cols-2" data-testid={`strategy-compare-${p.key}`}>
-      {bars("Posts a week", f.posts_per_week, (c) => c.posts_per_week)}
-      {bars("Engagement per post", f.basis === "thin" ? null : f.median_engagement, (c) => c.median_engagement)}
+    // One measure above the other, the legend once under both: side by side, the bars were too short to compare.
+    <div className="space-y-5" data-testid={`strategy-compare-${p.key}`}>
+      {bars("Posts a week", f.posts_per_week, (c) => c.posts_per_week, !engagement)}
+      {engagement}
     </div>
   );
 }
@@ -60,11 +62,12 @@ export function PlatformStart({ client, p }: { client: string; p: PagePlatform }
         <PlatformBadge platform={p.platform} />
         {f.known && <Badge variant="outline">{basisChip(f.basis)}</Badge>}
       </div>
-      <StatGrid min={140}>
+      {/* Short labels with the measure under the figure, so a tile never cuts its own name off at phone width. */}
+      <StatGrid min={120}>
         <StatCard size="compact" label="Followers" value={figure(f.followers)} />
         <StatCard size="compact" label="Posts a week" value={figure(f.posts_per_week)} />
-        <StatCard size="compact" label="Engagement per post" value={f.basis === "thin" ? "Too few posts" : figure(f.median_engagement)} />
-        {f.rate_kind && <StatCard size="compact" label={rateLabel(f.rate_kind)} value={percentOf(f.rate)} />}
+        <StatCard size="compact" label="Engagement" value={f.basis === "thin" ? "Too few posts" : figure(f.median_engagement)} sub="median per post" />
+        {f.rate_kind && <StatCard size="compact" label="Rate" value={percentOf(f.rate)} sub={rateLabel(f.rate_kind)} />}
       </StatGrid>
       <Comparison client={client} p={p} f={f} />
     </article>

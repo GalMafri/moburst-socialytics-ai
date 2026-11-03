@@ -53,7 +53,8 @@ export function GoalCards(props: SectionProps) {
         <div className="flex items-center gap-2"><EditedChip e={e} /><EditButton e={e} label="the goals" /></div>
       </div>
       {goals ? (
-        <div className="grid gap-inner lg:grid-cols-2 2xl:grid-cols-[repeat(auto-fit,minmax(280px,1fr))]" data-testid="strategy-goals">
+        // Two or four goals pair up; three sit in one row where the width allows.
+        <div className={`grid gap-inner lg:grid-cols-2 ${goals.length === 3 ? "xl:grid-cols-3" : ""}`} data-testid="strategy-goals">
           {goals.map((g, i) => <GoalCard key={i} goal={g} />)}
         </div>
       ) : (

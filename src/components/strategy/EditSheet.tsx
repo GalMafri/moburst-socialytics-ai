@@ -37,6 +37,9 @@ export function EditSheet({ e, title }: { e: SectionEditor; title: string }) {
                 <Label htmlFor={id}>{f.label}</Label>
                 {f.kind === "lines" ? (
                   <Textarea id={id} value={e.form[f.name] ?? ""} onChange={(ev) => e.setField(f.name, ev.target.value)} rows={f.name === "text" ? 12 : 5} className="t-body" />
+                ) : f.kind === "input" && (f.max ?? 0) >= 100 ? (
+                  // A one-line field long enough to wrap shows all of itself; it stays one line.
+                  <Textarea id={id} value={e.form[f.name] ?? ""} onChange={(ev) => e.setField(f.name, ev.target.value.replace(/\s*\n+\s*/g, " "))} rows={2} className="t-body" />
                 ) : (
                   <Input id={id} type={f.kind === "number" ? "number" : "text"} inputMode={f.kind === "number" ? "numeric" : undefined} value={e.form[f.name] ?? ""} onChange={(ev) => e.setField(f.name, ev.target.value)} />
                 )}

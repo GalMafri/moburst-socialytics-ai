@@ -170,10 +170,10 @@ describe('a client strategy', () => {
   it('starts each platform from code numbers, the brand against its competitors, and the measures behind a disclosure', async () => {
     mount();
     const start = within(await screen.findByTestId('strategy-start-instagram'));
-    for (const t of ['From Sprout', 'Followers', '1,800', '2.4', '42', 'Rate per impression', '3.1%']) expect(start.getAllByText(t).length).toBeGreaterThan(0);
+    for (const t of ['From Sprout', 'Followers', '1,800', '2.4', '42', 'Engagement', 'median per post', 'Rate', 'per impression', '3.1%']) expect(start.getAllByText(t).length).toBeGreaterThan(0);
     // The tiles, and the brand against its competitors on the same two measures.
     expect(start.getAllByText('Posts a week')).toHaveLength(2);
-    expect(start.getAllByText('Engagement per post')).toHaveLength(2);
+    expect(start.getByText('Engagement per post')).toBeInTheDocument();
     expect(within(screen.getByTestId('strategy-compare-instagram')).getAllByText('BenchApp').length).toBeGreaterThan(0);
     expect(within(screen.getByTestId('strategy-start-tiktok')).getByText('No public posts found')).toBeInTheDocument();
     const measures = screen.getByTestId('strategy-measures');
@@ -300,7 +300,8 @@ describe('the exports', () => {
     expect(deckState({ connected: true, exports: [done], writtenAt: '2026-11-03T10:00:00Z', newestEdit: '2026-11-04T09:00:00Z' }).kind).toBe('stale');
     expect(deckState({ connected: true, exports: [done], writtenAt: '2026-12-03T10:00:00Z', newestEdit: null }).kind).toBe('stale');
     expect(deckState({ connected: true, exports: [{ ...done, status: 'making' }, done], writtenAt: done.strategy_written_at, newestEdit: null }).kind).toBe('making');
-    expect(deckState({ connected: false, exports: [done], writtenAt: done.strategy_written_at, newestEdit: null }).kind).toBe('not_connected');
+    expect(deckState({ connected: false, exports: [done], writtenAt: done.strategy_written_at, newestEdit: null })).toEqual({ kind: 'not_connected', url: done.url, on: 'made Nov 3' });
+    expect(deckState({ connected: false, exports: [], writtenAt: done.strategy_written_at, newestEdit: null })).toEqual({ kind: 'not_connected' });
     expect(deckState({ connected: true, exports: [{ ...done, status: 'failed', url: null }], writtenAt: done.strategy_written_at, newestEdit: null }).kind).toBe('none');
   });
 });

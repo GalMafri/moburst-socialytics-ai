@@ -30,11 +30,12 @@ export interface DeckExport {
 
 /** What the deck button says and does, from Google's state, the exports and the strategy. */
 export function deckState(a: { connected: boolean | null; exports: DeckExport[]; writtenAt: string; newestEdit: string | null }):
-  | { kind: "not_connected" } | { kind: "making" } | { kind: "made"; url: string; on: string } | { kind: "stale"; url: string; on: string } | { kind: "none" } {
+  | { kind: "not_connected"; url?: string; on?: string } | { kind: "making" } | { kind: "made"; url: string; on: string } | { kind: "stale"; url: string; on: string } | { kind: "none" } {
   const latest = a.exports[0];
   if (latest && (latest.status === "queued" || latest.status === "making")) return { kind: "making" };
-  if (a.connected === false) return { kind: "not_connected" };
   const done = a.exports.find((e) => e.status === "done" && e.url);
+  // A deck made earlier stays in Drive and can still be opened.
+  if (a.connected === false) return done ? { kind: "not_connected", url: done.url as string, on: madeOn(done.made_at ?? done.created_at) } : { kind: "not_connected" };
   if (!done) return { kind: "none" };
   const changed = Date.parse(done.strategy_written_at) !== Date.parse(a.writtenAt) || (!!a.newestEdit && (!done.edits_at || Date.parse(a.newestEdit) > Date.parse(done.edits_at)));
   return { kind: changed ? "stale" : "made", url: done.url as string, on: madeOn(done.made_at ?? done.created_at) };
@@ -94,7 +95,12 @@ export function StrategyExports({ clientId, client, writtenAt, newestEdit, conte
             <a className="t-link inline-flex items-center gap-1" href={state.url} target="_blank" rel="noopener noreferrer">Open the deck {state.on} <ExternalLink className="h-3 w-3" aria-hidden /></a>
           </>
         ) : (
-          <Button size="sm" onClick={() => void ask()} disabled={state.kind === "not_connected"}><Presentation /> Google Slides deck</Button>
+          <>
+            <Button size="sm" onClick={() => void ask()} disabled={state.kind === "not_connected"}><Presentation /> Google Slides deck</Button>
+            {state.kind === "not_connected" && state.url && (
+              <a className="t-link inline-flex items-center gap-1" href={state.url} target="_blank" rel="noopener noreferrer">Open the deck {state.on} <ExternalLink className="h-3 w-3" aria-hidden /></a>
+            )}
+          </>
         )}
       </div>
       {state.kind === "made" && <p className="t-label">Google Slides deck, {state.on}</p>}

@@ -126,8 +126,8 @@ export function cadenceWords(c: Cadence | null | undefined): string {
   return n >= 1 ? `${n} a week` : `1 every ${Math.round(1 / n)} weeks`;
 }
 
-/** The rate tile's label: per impression with Sprout, per view in public. */
-export const rateLabel = (kind: string | null | undefined) => (kind === "view" ? "Rate per view" : "Rate per impression");
+/** What the rate is per: impressions with Sprout, views in public. */
+export const rateLabel = (kind: string | null | undefined) => (kind === "view" ? "per view" : "per impression");
 
 /** A goal's figure today and its line: "42" and "today, above it by 1 Feb 2027". */
 export function goalFigure(g: Goal): { figure: string; line: string } {

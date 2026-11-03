@@ -38,9 +38,9 @@ export function PlatformCard({ p, ...props }: SectionProps & { p: PagePlatform }
       {text ? <ul className="space-y-2">{text.map((l, i) => <li key={i} className="t-read">{l}</li>)}</ul> : (
         <>
           {v.role && <h3 className="t-h3">{v.role}</h3>}
-          <StatGrid min={130}>
+          <StatGrid min={120}>
             <StatCard size="compact" label="Cadence" value={cadence || "None yet"} />
-            <StatCard size="compact" label="Engagement per post" value={f && f.basis !== "thin" ? figure(f.median_engagement) : "None yet"} />
+            <StatCard size="compact" label="Engagement" value={f && f.basis !== "thin" ? figure(f.median_engagement) : "None yet"} sub="median per post" />
             <StatCard size="compact" label="Followers" value={figure(f?.followers ?? null)} />
           </StatGrid>
           {!!v.post?.length && (
