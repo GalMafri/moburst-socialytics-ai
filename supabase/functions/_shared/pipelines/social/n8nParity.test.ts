@@ -8,7 +8,7 @@
 // research (execution 583953).
 import vm from "node:vm";
 import { describe, expect, it } from "vitest";
-import { apidojoSearchFor, MOBURST, mirror, moburstPages, moburstRequest, nodeCode, nodeOf, TRENDS } from "../fixtures/social";
+import { apidojoSearchFor, MOBURST, mirror, moburstPages, moburstRequest, nodeCode, nodeOf, TRENDS } from "../../../../fixtures/pipelines/social";
 import { BRIEF_SYSTEM, PROMPT_EDITS, synthesisSystem, synthesisText } from "./prompt";
 import { sproutRequests } from "./providers";
 import {

@@ -12,7 +12,7 @@
 // the same report, figure for figure.
 import { describe, expect, it } from "vitest";
 import type { ApifyClient } from "../../apify/client";
-import { apidojoSearchFor, MOBURST, moburstPages, moburstRequest, TRENDS } from "../fixtures/social";
+import { apidojoSearchFor, MOBURST, moburstPages, moburstRequest, TRENDS } from "../../../../fixtures/pipelines/social";
 import { makeRegistry } from "../registry";
 import { startReportPipeline } from "../shadow";
 import { makePayloadStore } from "../store";

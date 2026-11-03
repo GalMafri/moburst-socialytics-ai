@@ -10,7 +10,7 @@
 // also read with `deno info --json` and must be exactly the same files, so the
 // reader cannot drift from what Deno resolves.
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
@@ -42,6 +42,24 @@ function localGraph(fn: string): { files: string[]; missing: string[] } {
 
 const outside = (fn: string, files: string[]) => files.filter((f) => !f.startsWith(`${fn}/`) && !f.startsWith("_shared/"));
 
+// A deploy uploads the function's folder and all of _shared, test files
+// included, and refuses an upload over about 4.5 MB (run-scheduled-jobs, mcp
+// and api at 4.6 MB on 3 Nov 2026, from 1.1 MB of fixtures in _shared). Test
+// data lives in supabase/fixtures; the budget leaves room under the limit.
+const UPLOAD_BUDGET = 4_000_000;
+function bytesUnder(dir: string): number {
+  return readdirSync(dir, { withFileTypes: true }).reduce((sum, d) => {
+    const path = join(dir, d.name);
+    return sum + (d.isDirectory() ? bytesUnder(path) : d.isFile() ? statSync(path).size : 0);
+  }, 0);
+}
+function fixtureFolders(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).flatMap((d) => {
+    const path = join(dir, d.name);
+    return d.name === "fixtures" ? [rel(path)] : fixtureFolders(path);
+  });
+}
+
 describe("deploy packaging", () => {
   it("covers every function folder", () => {
     expect(functions.length).toBeGreaterThan(50);
@@ -53,6 +71,16 @@ describe("deploy packaging", () => {
     const { files, missing } = localGraph(fn);
     expect(missing).toEqual([]);
     expect(outside(fn, files)).toEqual([]);
+  });
+
+  it("keeps test data out of the deployed folders", () => {
+    expect(fixtureFolders(functionsDir)).toEqual([]);
+  });
+
+  it("keeps every function's upload under the deploy limit", () => {
+    const shared = bytesUnder(join(functionsDir, "_shared"));
+    const over = functions.map((fn) => ({ fn, bytes: shared + bytesUnder(join(functionsDir, fn)) })).filter((u) => u.bytes > UPLOAD_BUDGET);
+    expect(over).toEqual([]);
   });
 
   const deno = spawnSync("deno", ["--version"], { encoding: "utf8" }).status === 0;

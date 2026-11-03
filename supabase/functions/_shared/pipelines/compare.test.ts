@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { compareResults, flatten, formatComparison } from "./compare";
 
-const fixture = (name: string) => JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "fixtures", name), "utf8"));
+const fixture = (name: string) => JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "fixtures", "pipelines", name), "utf8"));
 const socialReal = fixture("social-real.json");
 const socialShadow = fixture("social-shadow.json");
 const competitiveReal = fixture("competitive-real.json");

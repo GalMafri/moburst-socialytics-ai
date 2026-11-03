@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ApifyClient, ApifyRunStatus } from "../../apify/client.ts";
+import type { ApifyClient, ApifyRunStatus } from "../../functions/_shared/apify/client.ts";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;

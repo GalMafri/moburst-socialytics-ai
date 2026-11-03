@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { FX } from "../fixtures/moburst";
+import { FX } from "../../../../fixtures/pipelines/moburst";
 import { analysisProblems, analysisRequest, ANALYSIS_EXAMPLE, ANALYSIS_INTRO, ANALYSIS_MODEL, FORMAT_INSTRUCTIONS, parseAnswer, preferencesAppendix, repairRequest } from "./analysis";
 import { ANALYSIS_SYSTEM_PROMPT, PROMPT_EDITS } from "./prompt";
 

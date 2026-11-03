@@ -1,7 +1,7 @@
 // @vitest-environment node
 // The social analyses' requests and checks, and the two provider clients.
 import { describe, expect, it } from "vitest";
-import { MOBURST, TRENDS } from "../fixtures/social";
+import { MOBURST, TRENDS } from "../../../../fixtures/pipelines/social";
 import { BRIEF_SCHEMA, briefAnswer, briefRequest, repairRequest, SYNTHESIS_SCHEMA, synthesisProblems, synthesisRequest } from "./analysis";
 import { gammaClient, GAMMA_TEMPLATE_ID, sproutReader } from "./providers";
 import { COMPARED_RATE, SPROUT_RATE, synthesisText } from "./prompt";

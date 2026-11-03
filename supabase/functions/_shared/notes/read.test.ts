@@ -14,7 +14,7 @@ import { docxText } from "./docx";
 import { xlsxSheets } from "./xlsx";
 
 const PDF_TEXT = "Meeting notes, Oct 28: never say cheap. They asked for shorter captions on Instagram and no puns anywhere.";
-const fixture = (name: string) => new Uint8Array(readFileSync(join(__dirname, "fixtures", name)));
+const fixture = (name: string) => new Uint8Array(readFileSync(join(__dirname, "..", "..", "..", "fixtures", "notes", name)));
 const startsWith = (bytes: Uint8Array, magic: string) => new TextDecoder("latin1").decode(bytes.slice(0, magic.length)) === magic;
 
 /** The real DOCX and XLSX readers, and a PDF parser that answers as unpdf does and fails the test when handed anything but a PDF. */

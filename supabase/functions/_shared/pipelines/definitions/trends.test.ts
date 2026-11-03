@@ -18,7 +18,7 @@ import { TRENDS_PIPELINE, trendsPipeline, type TrendsDeps } from "./trends";
 type Any = any;
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fixture = (p: TrendPlatform): Any[] => JSON.parse(readFileSync(join(here, "..", "..", "trends", "fixtures", `${p}.json`), "utf8"));
+const fixture = (p: TrendPlatform): Any[] => JSON.parse(readFileSync(join(here, "..", "..", "..", "..", "fixtures", "trends", `${p}.json`), "utf8"));
 const ENV = (n: string) => ({ ANTHROPIC_API_KEY: "ak", APIFY_API_TOKEN: "ap" } as Record<string, string>)[n];
 const NOW = "2026-11-01T10:00:00.000Z";
 

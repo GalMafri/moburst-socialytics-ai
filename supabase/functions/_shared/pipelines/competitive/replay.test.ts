@@ -21,7 +21,7 @@ import { pickReplaySnapshots, replayAttempt } from "./replay";
 
 const here = dirname(fileURLToPath(import.meta.url));
 // deno-lint-ignore no-explicit-any
-const FX: any = JSON.parse(readFileSync(join(here, "..", "fixtures", "competitive-replay-moburst-2026-09.json"), "utf8"));
+const FX: any = JSON.parse(readFileSync(join(here, "..", "..", "..", "..", "fixtures", "pipelines", "competitive-replay-moburst-2026-09.json"), "utf8"));
 const MOBURST = FX.report.client_id;
 const REPORT = FX.report.id;
 // deno-lint-ignore no-explicit-any
