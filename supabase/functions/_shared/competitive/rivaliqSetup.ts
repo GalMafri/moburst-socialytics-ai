@@ -1,4 +1,4 @@
-import { describeFollowFailure } from './rivaliqFollowFailure.ts';
+import { followFailure } from './rivaliqFollowFailure.ts';
 // API-only setup, with each non-idempotent request recorded before dispatch.
 // A lost POST response is reconciled by reads; it is never blindly retried.
 export type SetupCompany = { id: string; name: string; url: string };
@@ -81,7 +81,7 @@ export async function advanceRivalIqSetup(job: SetupJob, api: Api, save: Save): 
         });
       await update({ phase: 'following_failed' });
       // Per-company answers become one plain sentence (plan capacity, a website that refused the visit, the provider's own words).
-      if (failures.length) throw new Error(describeFollowFailure(failures));
+      if (failures.length) throw followFailure(failures);
       const detail = (typeof pending.error === 'string' ? pending.error : JSON.stringify(pending.error || 'Check account capacity and company URLs.')).slice(0, 300);
       throw new Error(`RivalIQ could not finish tracking every reviewed website. ${detail}`);
     }

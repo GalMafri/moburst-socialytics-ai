@@ -44,3 +44,19 @@ export function describeFollowFailure(failures: Array<{ name: string; result: Fo
   }
   return parts.join(" ") || "RivalIQ could not start tracking the reviewed websites.";
 }
+
+/**
+ * The follow's failure as an error the server's tracking step can read:
+ * planFull when RivalIQ answered that the plan's company allowance is used
+ * up, so tracking waits for a free place as a plain fact instead of failing.
+ */
+export class FollowFailure extends Error {
+  constructor(message: string, public planFull: boolean) {
+    super(message);
+    this.name = "FollowFailure";
+  }
+}
+
+export function followFailure(failures: Array<{ name: string; result: FollowUrlResult }>): FollowFailure {
+  return new FollowFailure(describeFollowFailure(failures), failures.some((f) => !!asCredits(f.result.error)));
+}
