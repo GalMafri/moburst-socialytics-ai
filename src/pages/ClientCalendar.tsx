@@ -7,12 +7,18 @@
  * posts at any time, and each post's design is prepared and can be
  * regenerated from the post's current copy. Once a week's plan is ready,
  * staff can design the whole week with one press (DesignWeekBand, 2 Nov).
+ *
+ * The week band shows its plan as the server has it (WeekPlanBand, 3 Nov):
+ * being planned or revised and where it stands, planned, or stopped. While
+ * any week is on its way the page looks again every ten seconds, quietly: a
+ * look that does not answer keeps what the page already shows. Another week
+ * on its way is named in the band, one press from it.
  */
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { CalendarDays } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { CalendarDays, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -23,10 +29,11 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ContentIdeasTab } from "@/components/reports/calendar/ContentIdeasTab";
 import { NewPostDialog } from "@/components/calendar/NewPostDialog";
 import { ClientPicker, WeekNav } from "@/components/calendar/CalendarHeaderControls";
-import { PlanNextWeekButton, ReviseWeekButton, WeekPlanStatus } from "@/components/calendar/WeekPlanControls";
+import { PlanNextWeekButton, WeekPlanBand } from "@/components/calendar/WeekPlanControls";
 import { DesignWeekBand } from "@/components/calendar/DesignWeekButton";
 import { CLIENT_CONTEXT_COLUMNS, buildClientContext } from "@/lib/clientContext";
-import { addDays, canRevise, mondayOf, nextPlannableWeek, shortDate, weekBoard, type CalendarPlanRow, type CalendarPostRow } from "@/lib/calendarPosts";
+import { addDays, mergePlan, mondayOf, nextPlannableWeek, shortDate, weekBoard, type CalendarPlanRow, type CalendarPostRow } from "@/lib/calendarPosts";
+import { weekPlanView } from "@/lib/weekPlanStatus";
 import { thisWeek as thisWeekWindow, weekOf } from "@/lib/weekWindow";
 
 const DEFAULT_PLATFORMS = ["Instagram", "LinkedIn", "TikTok", "Facebook", "X"];
@@ -37,6 +44,7 @@ export default function ClientCalendar() {
   const { id } = useParams();
   const [params, setParams] = useSearchParams();
   const { isMoburstStaff } = useAuth();
+  const qc = useQueryClient();
 
   const client = useQuery({
     queryKey: ["calendar-client", id],
@@ -55,7 +63,7 @@ export default function ClientCalendar() {
     queryFn: async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data, error } = await (supabase.from("calendar_plans" as never) as any)
-        .select("id, client_id, week_start, status, trigger, error, pending_revision, revisions, ready_at, created_at")
+        .select("id, client_id, week_start, status, trigger, error, pending_revision, revisions, ready_at, created_at, claimed_at, canceled_at")
         .eq("client_id", id)
         .order("week_start");
       if (error) throw error;
@@ -78,6 +86,14 @@ export default function ClientCalendar() {
       return (data || []) as CalendarPostRow[];
     },
   });
+
+  // A plan that changes state (its posts written, a revision done, a plan stopped) has the week's posts read again at once.
+  const planStates = (plans.data ?? []).map((p) => `${p.id}:${p.status}:${p.pending_revision ? 1 : 0}:${p.revisions?.length ?? 0}`).join("|");
+  const seenStates = useRef<string | null>(null);
+  useEffect(() => {
+    if (seenStates.current !== null && seenStates.current !== planStates) void qc.invalidateQueries({ queryKey: ["calendar-posts", id] });
+    seenStates.current = planStates;
+  }, [planStates, qc, id]);
 
   const clientContext = buildClientContext(client.data as Record<string, unknown> | null, id);
   // "This week" is Monday to Sunday in the client's time zone, the one
@@ -103,13 +119,24 @@ export default function ClientCalendar() {
   const planOnItsWay = !!weekPlan && (weekPlan.status === "queued" || weekPlan.status === "planning");
   const nextWeek = plans.data ? nextPlannableWeek(plans.data, today) : null;
   const refresh = () => { void plans.refetch(); void posts.refetch(); };
+  // The plan the server answered with goes on screen at once, then everything is read again.
+  const planChanged = (plan: CalendarPlanRow | null) => {
+    if (plan) qc.setQueryData<CalendarPlanRow[]>(["calendar-plans", id], (old) => mergePlan(old, plan));
+    refresh();
+  };
   // Every client that isn't archived can be planned and revised, by staff and by the client's own users.
   const active = !!client.data && !(client.data as { archived_at?: string | null }).archived_at;
-  const planButton = id && active ? <PlanNextWeekButton clientId={id} week={nextWeek} onRequested={(w) => { if (w) goTo(w); refresh(); }} /> : null;
-  const revisable = active && canRevise(weekPlan, today);
-  const showPlanBar = !!weekPlan && (inFlight(weekPlan) || revisable);
+  const planButton = id && active ? <PlanNextWeekButton clientId={id} week={nextWeek} onRequested={(w, plan) => { if (w) goTo(w); planChanged(plan); }} /> : null;
+  const planView = weekPlanView(weekPlan, today);
+  const showPlanBand = !!weekPlan && !!planView && (weekPlan.status !== "canceled" || inWeek.length > 0);
+  // A week planned or revised while another is shown.
+  const elsewhere = (plans.data ?? []).filter((p) => p.week_start !== week && inFlight(p));
+  // A week whose plan was stopped or removed says so while it is empty, and offers planning it again.
+  const stoppedLine = weekPlan?.status === "canceled" ? planView?.line ?? null : null;
   // The week's posts can be designed with one press once its plan is ready.
   const designable = !!id && active && weekPlan?.status === "ready";
+  // A look again that did not answer keeps what the page already shows; only a first read that did not answer waits on it.
+  const unread = [client, posts, plans].find((q) => q.isError && q.data === undefined);
 
   return (
     <AppLayout
@@ -125,16 +152,21 @@ export default function ClientCalendar() {
     >
       {client.isLoading || posts.isLoading || plans.isLoading ? (
         <Loading label="Loading the calendar" />
-      ) : client.isError || posts.isError || plans.isError ? (
-        <LoadRetry context="calendar" error={client.error || posts.error || plans.error} onRetry={() => { void client.refetch(); refresh(); }} />
+      ) : unread ? (
+        <LoadRetry context="calendar" error={unread.error} onRetry={() => { void client.refetch(); refresh(); }} />
       ) : (
         <div className="space-y-section">
           <WeekNav week={week} thisWeek={thisWeek} count={inWeek.length} onGo={goTo}>
-            {(showPlanBar || designable) && (
+            {(showPlanBand || designable || elsewhere.length > 0) && (
               <>
-                {showPlanBar && weekPlan && <WeekPlanStatus plan={weekPlan} />}
-                {showPlanBar && weekPlan && revisable && <ReviseWeekButton plan={weekPlan} onRequested={refresh} />}
+                {showPlanBand && <WeekPlanBand plan={weekPlan!} today={today} canAct={active} hasPosts={inWeek.length > 0} onChanged={planChanged} />}
                 {designable && <DesignWeekBand clientId={id!} clientName={clientContext.client_name ?? null} week={week} />}
+                {elsewhere.map((p) => (
+                  <Button key={p.id} size="sm" variant="ghost" onClick={() => goTo(p.week_start)}>
+                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" aria-hidden />
+                    {weekPlanView(p, today)?.line}
+                  </Button>
+                ))}
               </>
             )}
           </WeekNav>
@@ -145,9 +177,11 @@ export default function ClientCalendar() {
               title="No posts planned for this week"
               description={planOnItsWay
                 ? "This week's plan is on its way."
-                : nextWeek === week && planButton
-                  ? "Each week is planned on the Monday before it. You can plan this one now."
-                  : nextPlanned ? "The next planned posts are in a later week." : "Each week is planned on the Monday before it."}
+                : stoppedLine
+                  ? `${stoppedLine}${nextWeek === week && planButton ? " You can plan it again now." : ""}`
+                  : nextWeek === week && planButton
+                    ? "Each week is planned on the Monday before it. You can plan this one now."
+                    : nextPlanned ? "The next planned posts are in a later week." : "Each week is planned on the Monday before it."}
               action={!planOnItsWay && nextWeek === week && planButton ? planButton : nextPlanned ? (
                 <Button size="sm" variant="outline" onClick={() => goTo(mondayOf(nextPlanned.post_date))}>
                   Go to the week of {shortDate(mondayOf(nextPlanned.post_date))}
