@@ -44,6 +44,7 @@ import { AutomaticBrandReferences } from "@/components/onboarding/AutomaticBrand
 import { LogoFileField } from "@/components/onboarding/LogoFileField";
 import { DesignSynthesisCard } from "@/components/onboarding/DesignSynthesisCard";
 import { DesignSettingsCard } from "@/components/onboarding/DesignSettingsCard";
+import { LearnedDesignPreferences } from "@/components/onboarding/LearnedDesignPreferences";
 import { TrendsWeTrack } from "@/components/clients/TrendsWeTrack";
 import { ClientOrigin } from "@/components/clients/ClientOrigin";
 import { ClientNotes } from "@/components/onboarding/ClientNotes";
@@ -703,7 +704,7 @@ export default function ClientSetup() {
                 layout="split"
                 eyebrow="Voice"
                 title="Learned writing preferences"
-                description={'Learned from copy edits and "Revise this week" notes. Every post written for this client follows these first, then the voice of its own published posts.'}
+                description={'Learned from copy edits, notes left on Regenerate and "Revise this week" notes. Every post written for this client follows these first, then the voice of its own published posts.'}
               >
                   <div className="space-y-3">
                     {voiceLearnings.map((learning) => (
@@ -714,7 +715,7 @@ export default function ClientSetup() {
                             <span className="t-secondary">
                               {learning.times_confirmed > 1 ? `Confirmed ${learning.times_confirmed} times` : "Seen once"}
                               {" · "}
-                              {learning.source === "revise_note" ? "From a revise note" : "From a copy edit"}
+                              {learning.source === "revise_note" ? "From a revise note" : learning.source === "rewrite_note" ? "From a rewrite note" : "From a copy edit"}
                             </span>
                           </div>
                           <p className="t-body">{learning.pattern_description}</p>
@@ -737,6 +738,7 @@ export default function ClientSetup() {
           {clientId && (
             <TabsContent value="designs" className="space-y-section mt-section">
               <DesignSettingsCard clientId={clientId} />
+              <LearnedDesignPreferences clientId={clientId} />
             </TabsContent>
           )}
 
