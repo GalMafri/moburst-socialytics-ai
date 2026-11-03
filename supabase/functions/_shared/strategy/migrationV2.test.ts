@@ -11,19 +11,19 @@ import { describe, expect, it } from "vitest";
 import { pillarSectionKey, platformSectionKey } from "./platforms";
 import { FIXED_SECTIONS } from "./write";
 
-const raw = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "migrations", "20261110160000_strategy_v2.sql"), "utf8");
+const raw = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "migrations", "20261110170000_strategy_v2.sql"), "utf8");
 const sql = raw.replace(/--[^\n]*/g, "").replace(/\s+/g, " ").trim();
 const body = (fn: string) => {
   const at = sql.indexOf(`create or replace function public.${fn}(`);
   return sql.slice(at, sql.indexOf("end $$;", at));
 };
 
-describe("20261110160000_strategy_v2.sql", () => {
+describe("20261110170000_strategy_v2.sql", () => {
   it("is additive and safe to run again, and sorts after the migrations already applied", () => {
     expect(sql).not.toMatch(/\bdrop table\b|\bdrop column\b|\btruncate\b/i);
     // The only function it drops is save_as's earlier signature, which it replaces.
     expect([...sql.matchAll(/drop function [^;]+;/g)].map((m) => m[0])).toEqual(["drop function if exists public.strategy_section_save_as(uuid, uuid, text, text, text, text);"]);
-    expect("20261110160000_strategy_v2.sql" > "20261110150000_claude_sync.sql").toBe(true);
+    expect("20261110170000_strategy_v2.sql" > "20261110150000_claude_sync.sql").toBe(true);
     for (const m of sql.matchAll(/create table (\S+)/g)) expect(m[1]).toBe("if");
     for (const m of sql.matchAll(/alter table public\.\w+ add column (\S+)/g)) expect(m[1]).toBe("if");
     expect(sql).toContain("alter table public.content_strategy_edits add column if not exists value jsonb;");
