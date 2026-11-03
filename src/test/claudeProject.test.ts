@@ -1,16 +1,14 @@
 // @vitest-environment node
 // The text the team puts into Claude (src/lib/claudeProject.ts): Client setup
 // fills in the client's name and id, the team setup guide shows the same
-// text with placeholders, and every Socialytics tool it names is one the
-// connector offers.
+// text with placeholders. That every tool it names is one the connector
+// offers is checked beside the connector (supabase/functions/mcp/
+// project-text.test.ts), so the app's typecheck never reads edge code.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { DECK_SKILL_SECTION, knowledgePrompt, PLACEHOLDER_CLIENT, projectInstruction, SOCIALYTICS_HOST } from "@/lib/claudeProject";
-import { TOOLS } from "../../supabase/functions/mcp/tools";
-import { READ_TOOLS } from "../../supabase/functions/mcp/reads";
-import { WRITE_TOOLS } from "../../supabase/functions/mcp/writes";
 
 const BADER = { name: "Bader Law", id: "00000000-0000-4000-8000-000000000001" };
 const guide = readFileSync(join(__dirname, "..", "..", "docs", "superpowers", "specs", "2026-11-03-claude-sync-team-setup.md"), "utf8");
@@ -29,13 +27,6 @@ describe("the Claude project text", () => {
     const shown = [projectInstruction(PLACEHOLDER_CLIENT), knowledgePrompt(PLACEHOLDER_CLIENT), DECK_SKILL_SECTION];
     expect(blocks(guide)).toEqual(shown);
     expect(blocks(design)).toEqual(shown);
-  });
-
-  it("names only tools the connector offers", () => {
-    const offered = new Set([...TOOLS, ...READ_TOOLS, ...WRITE_TOOLS].map((t) => t.name));
-    const named = new Set(texts.join("\n").match(/socialytics_\w+/g));
-    expect(named.size).toBeGreaterThan(8);
-    for (const n of named) expect(offered.has(n), n).toBe(true);
   });
 
   it("reads plainly: no dashes as punctuation", () => {
