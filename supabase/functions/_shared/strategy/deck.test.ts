@@ -37,14 +37,14 @@ const archetypesOf = (slides: Array<{ archetype: string }>) => slides.map((s) =>
 describe("the slides", () => {
   it("follows the plan: cover, the plan, where we start, audience, pillars with the mix, each platform, each launch, what we avoid, the close", () => {
     const plan = planDeck(input(3, 3), measure);
-    expect(archetypesOf(plan.slides)).toEqual(["cover", "cards-2", "start", "cards-2", "chart-cards-3", "cards-3", "cards-3", "flow", "cards-3", "cards-2", "close"]);
+    expect(archetypesOf(plan.slides)).toEqual(["cover-2", "divider", "cards-2", "start", "cards-2", "chart-cards-3", "cards-3", "cards-3", "flow", "cards-3", "cards-2", "close"]);
     expect(plan.slides.map((s) => s.text.title).filter(Boolean)).toEqual([
       "Strategy | The Plan", "Strategy | Where We Start", "Strategy | Audience and Positioning", "Strategy | Content Pillars",
       "Platforms | Instagram", "Platforms | TikTok", "Platforms | First 30 Days", "Platforms | LinkedIn", "Strategy | What We Avoid",
     ]);
     expect(plan.slides[0].text).toEqual({ client_title: "Acme | Social Strategy", period: "Our plan for 3 Nov 2026 to 1 Feb 2027" });
-    expect(plan.slides[1].text.c1_body).toBe("Instagram median engagement per post: 42 today, above it by 1 Feb 2027\n\nWhy: Carousels beat the usual 2.7x.");
-    expect(plan.slides[2].text.data_line).toBe("Based on public posts from 5 Aug to 3 Nov 2026");
+    expect(plan.slides[2].text.c1_body).toBe("Instagram median engagement per post: 42 today, above it by 1 Feb 2027\n\nWhy: Carousels beat the usual 2.7x.");
+    expect(plan.slides[3].text.data_line).toBe("Based on public posts from 5 Aug to 3 Nov 2026");
     expect(Object.keys(plan.charts).sort()).toEqual(["mix", "start"]);
     expect(plan.over).toEqual([]);
   });
@@ -54,7 +54,7 @@ describe("the slides", () => {
       const plan = planDeck(input(1, n), measure);
       expect(plan.slides.filter((s) => s.text.title === "Strategy | Content Pillars").map((s) => s.archetype), String(n)).toEqual(want);
     }
-    expect(archetypesOf(planDeck(input(1, 2), measure).slides)).toEqual(["cover", "cards-2", "start", "cards-2", "chart-cards-2", "cards-3", "cards-2", "close"]);
+    expect(archetypesOf(planDeck(input(1, 2), measure).slides)).toEqual(["cover-2", "divider", "cards-2", "start", "cards-2", "chart-cards-2", "cards-3", "cards-2", "close"]);
     const six = planDeck(input(6, 3), measure);
     expect(six.slides.filter((s) => s.text.title?.startsWith("Platforms | ") && s.text.title !== "Platforms | First 30 Days")).toHaveLength(6);
   });
@@ -69,7 +69,7 @@ describe("the slides", () => {
     expect(rows(measure, cards.map((c) => ({ ...c, body: "Short." })), DECK_LAYOUT.cards.h).map((r) => r.length)).toEqual([4]);
     // A goal title over two lines at four across moves the plan to two slides.
     const plan = planDeck(input(1, 2, { sections: { ...input(1, 2).sections, goals: { items: Array.from({ length: 4 }, () => goal("Instagram", "Grow engagement per post on Instagram with carousels")) } } }), measure);
-    expect(archetypesOf(plan.slides).slice(1, 3)).toEqual(["cards-2", "cards-2"]);
+    expect(archetypesOf(plan.slides).slice(2, 4)).toEqual(["cards-2", "cards-2"]);
   });
 
   it("shows people's versions, a 2 Nov text edit as text in its card", () => {
@@ -83,6 +83,13 @@ describe("the slides", () => {
     expect(avoid.text).toMatchObject({ c1_label: "TEAM", c1_body: "Memes about other apps" });
   });
 
+  it("keeps the cover title to two lines of 40pt, the name alone when the full title is longer", () => {
+    expect(planDeck(input(1, 2, { client: "Ab" }), (t, size) => t.length * 0.3 * size).slides[0].archetype).toBe("cover-1");
+    expect(planDeck(input(1, 2, { client: "Pay The Pyper" }), measure).slides[0]).toMatchObject({ archetype: "cover-2", text: { client_title: "Pay The Pyper | Social Strategy" } });
+    const long = planDeck(input(1, 2, { client: "The Very Long Brand Name Company" }), measure).slides[0];
+    expect(long).toMatchObject({ archetype: "cover-2", text: { client_title: "The Very Long Brand Name Company", period: "Social Strategy | Our plan for 3 Nov 2026 to 1 Feb 2027" } });
+  });
+
   it("names the copy for the client and the month", () => {
     expect(deckName("Acme", "2026-11-03T10:00:00.000Z")).toBe("Acme | Social Strategy | Nov 2026");
   });
@@ -90,12 +97,12 @@ describe("the slides", () => {
 
 describe("the requests", () => {
   const el = (id: string, text: string) => ({ objectId: id, shape: { text: { textElements: [{ startIndex: 0, endIndex: text.length, textRun: { content: text, style: { fontFamily: "Geist Light" } } }] } } });
-  const template = { slides: ["cover", "cards-2", "cards-3", "chart-cards-2", "chart-cards-3", "start", "flow", "close"].map((a, i) => ({ objectId: `s${i}`, pageElements: [el(`m${i}`, `{{a:${a}}}`), el(`t${i}`, "{{title}}")] })) };
+  const template = { slides: ["cover-2", "divider", "cards-2", "cards-3", "chart-cards-2", "chart-cards-3", "start", "flow", "close"].map((a, i) => ({ objectId: `s${i}`, pageElements: [el(`m${i}`, `{{a:${a}}}`), el(`t${i}`, "{{title}}")] })) };
 
   it("duplicates each slide's archetype with ids set by code, scopes every replace to its slide, orders the slides and deletes the archetypes", () => {
     const plan = planDeck(input(1, 2), measure);
     const arch = findArchetypes(template);
-    expect(arch["cards-2"]).toEqual({ slideId: "s1", elementIds: ["m1", "t1"] });
+    expect(arch["cards-2"]).toEqual({ slideId: "s2", elementIds: ["m2", "t2"] });
     const { requests, required } = deckRequests(plan, arch, { start: "https://signed/start.png", mix: "https://signed/mix.png", logo: "https://signed/logo.png" });
     const dups = requests.filter((r) => r.duplicateObject);
     expect(dups).toHaveLength(plan.slides.length);
@@ -105,8 +112,8 @@ describe("the requests", () => {
     expect(replaces.filter((r) => r.replaceAllShapesWithImage).map((r) => r.replaceAllShapesWithImage.imageUrl)).toEqual(["https://signed/logo.png", "https://signed/start.png", "https://signed/mix.png"]);
     expect(replaces.find((r) => r.replaceAllShapesWithImage)).toMatchObject({ replaceAllShapesWithImage: { imageReplaceMethod: "CENTER_INSIDE", containsText: { text: "{{logo}}", matchCase: true } } });
     expect(required).toHaveLength(replaces.length);
-    expect(requests.at(-9)).toEqual({ updateSlidesPosition: { slideObjectIds: plan.slides.map((_, i) => `deck_${String(i + 1).padStart(2, "0")}`), insertionIndex: 0 } });
-    expect(requests.slice(-8).map((r) => r.deleteObject.objectId)).toEqual(["s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7"]);
+    expect(requests.at(-10)).toEqual({ updateSlidesPosition: { slideObjectIds: plan.slides.map((_, i) => `deck_${String(i + 1).padStart(2, "0")}`), insertionIndex: 0 } });
+    expect(requests.slice(-9).map((r) => r.deleteObject.objectId)).toEqual(["s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8"]);
   });
 
   it("finds a token a copy did not fill, so the copy goes to the trash", () => {
@@ -132,5 +139,28 @@ describe("the requests", () => {
   it("draws the template from the same geometry it is measured against", () => {
     const json = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "assets", "strategy-deck", "layout.json"), "utf8"));
     expect(json).toEqual(JSON.parse(JSON.stringify(DECK_LAYOUT)));
+  });
+});
+
+describe("the template", () => {
+  it("holds every archetype the plan can ask for, each with the tokens the plan fills", async () => {
+    const { unzipSync, strFromU8 } = await import("fflate");
+    const pptx = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "assets", "strategy-deck", "template.pptx"));
+    const files = unzipSync(new Uint8Array(pptx));
+    const slides = Object.keys(files).filter((f) => /^ppt\/slides\/slide\d+\.xml$/.test(f)).map((f) => strFromU8(files[f]).replace(/<[^>]+>/g, " "));
+    const byName = new Map(slides.map((x) => [/\{\{a:([a-z0-9-]+)\}\}/.exec(x)?.[1] ?? "", x]));
+    const want = ["cover-1", "cover-2", "divider", ...[1, 2, 3, 4, 5].flatMap((n) => [`cards-${n}`, `chart-cards-${n}`]), "start", "flow", "close"];
+    expect([...byName.keys()].sort()).toEqual(want.sort());
+    for (let n = 1; n <= 5; n++) {
+      for (const name of [`cards-${n}`, `chart-cards-${n}`]) {
+        const tokens = [...byName.get(name)!.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]);
+        expect(tokens.sort(), name).toEqual(["title", "intro", ...(name.startsWith("chart") ? ["chart"] : []), ...Array.from({ length: n }, (_, i) => [`c${i + 1}_label`, `c${i + 1}_body`]).flat()].sort());
+      }
+    }
+    // Every token a plan fills is on its archetype, so no copy is trashed for a template gap.
+    const plan = planDeck(input(3, 6), measure);
+    for (const s of plan.slides) {
+      for (const token of [...Object.keys(s.text), ...Object.keys(s.images)]) expect(byName.get(s.archetype), `${s.archetype} {{${token}}}`).toContain(`{{${token}}}`);
+    }
   });
 });

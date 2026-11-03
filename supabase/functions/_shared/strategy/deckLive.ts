@@ -33,8 +33,8 @@ export function liveDeckDeps(env: (k: string) => string | undefined): DeckJobDep
       // deno-lint-ignore no-explicit-any
       const parse = ((opentype as any).parse ?? (opentype as any).default?.parse) as (b: ArrayBuffer) => { getAdvanceWidth(t: string, s: number): number };
       const face = async (w: number) => { const b = await fontBytes(db, "Geist", w); return parse(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer); };
-      const [light, medium] = await Promise.all([face(300), face(500)]);
-      return (text, size, weight) => (weight === "Medium" ? medium : light).getAdvanceWidth(text, size);
+      const [light, medium, bold] = await Promise.all([face(300), face(500), face(700)]);
+      return (text, size, weight) => (weight === "Bold" ? bold : weight === "Medium" ? medium : light).getAdvanceWidth(text, size);
     },
     async png(db, svg, width) {
       const fonts = await Promise.all([300, 400, 500].map((w) => fontBytes(db, "Geist", w)));

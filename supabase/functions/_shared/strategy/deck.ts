@@ -9,9 +9,9 @@
 // never touched.
 //
 // The template (assets/strategy-deck/build_template.py) holds one archetype
-// slide per layout, each marked by a {{a:<name>}} text: the cover, card rows
-// of 1 to 5 with and without a chart strip, "Where we start", the four-week
-// flow and the close. Card text follows the system's line budgets: code
+// slide per layout, each marked by a {{a:<name>}} text: the cover (for a one-
+// or two-line title), the Strategy divider, card rows of 1 to 5 with and
+// without a chart strip, "Where we start", the four-week flow and the close. Card text follows the system's line budgets: code
 // measures every field with Geist's metrics, and a row whose fields do not fit
 // its cards is spread over more slides of wider cards, never set in a smaller
 // font. People's versions of sections win, as on the page.
@@ -26,7 +26,7 @@ import type { CompanyFigures } from "./publicRead.ts";
 // deno-lint-ignore no-explicit-any
 type Any = any;
 
-export type Weight = "Light" | "Medium";
+export type Weight = "Light" | "Medium" | "Bold";
 /** Width in points of a text at a size and Geist weight. */
 export type Measure = (text: string, size: number, weight: Weight) => number;
 
@@ -167,8 +167,15 @@ export function planDeck(input: DeckInput, measure: Measure): DeckPlan {
   };
   const asCards = (v: unknown, label: string, make: () => Card[]): Card[] => (typeof v === "string" ? (v ? [{ label, body: v }] : []) : make());
 
-  // 1. Cover.
-  slides.push({ archetype: "cover", text: { client_title: `${input.client} | Social Strategy`, period: `Our plan for ${dayWords(from)} to ${dayWords(to)}` }, images: { logo: input.logo ? "logo" : "" } });
+  // 1. Cover, the title on one or two lines of 40pt Bold (a longer name keeps the cover to the name), and the divider.
+  const C = L.cover.title;
+  const coverLines = (t: string) => linesOf(measure, t, C.size, "Bold", C.w);
+  const full = `${input.client} | Social Strategy`;
+  const period = `Our plan for ${dayWords(from)} to ${dayWords(to)}`;
+  const cover = coverLines(full) <= C.lines ? { title: full, period } : { title: input.client, period: `Social Strategy | ${period}` };
+  if (coverLines(cover.title) > C.lines) over.push(`Cover: ${cover.title}`);
+  slides.push({ archetype: `cover-${Math.min(coverLines(cover.title), C.lines)}`, text: { client_title: cover.title, period: cover.period }, images: { logo: input.logo ? "logo" : "" } });
+  slides.push({ archetype: "divider", text: { divider_line: `Our social strategy for ${input.client}` }, images: {} });
 
   // 2. The plan.
   const goals = shown("goals");

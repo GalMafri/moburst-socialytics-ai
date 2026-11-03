@@ -12,7 +12,7 @@ import type { GoogleApi } from "../google/api";
 import type { ScheduledJob } from "../scheduled-jobs/types";
 
 const NOW = new Date("2026-11-03T10:00:00.000Z");
-const ARCHETYPES = ["cover", "cards-1", "cards-2", "cards-3", "cards-4", "cards-5", "chart-cards-1", "chart-cards-2", "chart-cards-3", "chart-cards-4", "chart-cards-5", "start", "flow", "close"];
+const ARCHETYPES = ["cover-1", "cover-2", "divider", "cards-1", "cards-2", "cards-3", "cards-4", "cards-5", "chart-cards-1", "chart-cards-2", "chart-cards-3", "chart-cards-4", "chart-cards-5", "start", "flow", "close"];
 const job = (over: Partial<ScheduledJob> = {}) => ({ id: "j1", kind: "strategy_deck", client_id: "c1", payload: { export_id: "e1" }, attempts: 1, max_attempts: 3, ...over }) as ScheduledJob;
 
 function google(opts: { fill?: number } = {}) {

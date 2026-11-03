@@ -24,8 +24,9 @@ export const DECK_LAYOUT = {
   cards: { y: 100, h: 268 },
   chartCards: { y: 178, h: 190, chart: { x: 36.7, y: 92, w: 646.6, h: 78 } },
   start: { rows: { x: 36.7, y: 100, w: 290, lines: 15 }, chart: { x: 340, y: 96, w: 343.3, h: 246 }, footer: { y: 356 } },
-  flow: { chip: { w: 120.5, h: 55.6, x: 79.2, pitch: 147, y: 104, textY: 20.6 }, body: { y: 176, lines: 13 } },
-  cover: { logo: { x: 560, y: 80, w: 120, h: 64 } },
+  flow: { chip: { w: 120.5, h: 55.6, x: 79.2, pitch: 147, y: 138.5, textY: 20.6 }, body: { y: 210, lines: 12 } },
+  cover: { title: { x: 46.7, y: 149.41, w: 320, size: 40, leading: 48, lines: 2 }, logo: { x: 540, y: 80, w: 140, h: 70 } },
+  divider: { subtitle: { x: 160, y: 268.3, w: 400, size: 12, leading: 16.2 } },
   maxCards: 5,
 } as const;
 
