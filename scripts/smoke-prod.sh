@@ -38,7 +38,8 @@ else
 fi
 
 # 4. The Claude connector (mcp): closed without a token, pointing at its metadata, which
-#    names this endpoint and Supabase Auth's OAuth server; the consent page is served.
+#    names this endpoint and Supabase Auth's OAuth server; the consent page is served
+#    with what staff can save, and deck files are not public.
 MCP="$FN/mcp"
 AUTH="https://rwouwxqggjjacbpbhqsn.supabase.co/.well-known/oauth-authorization-server/auth/v1"
 field() { node -e 'let s="";process.stdin.on("data",(d)=>s+=d).on("end",()=>{let v;try{v=JSON.parse(s)}catch{}for(const k of process.argv[1].split("."))v=v==null?v:v[k];console.log(Array.isArray(v)?v.join(" "):v==null?"":v)})' "$1"; }
@@ -52,5 +53,8 @@ check "auth server allows dynamic registration" yes "$([ -n "$(printf '%s' "$DIS
 check "auth server takes PKCE S256" yes "$(printf '%s' "$DISCOVERY" | field code_challenge_methods_supported | grep -qw S256 && echo yes || echo no)"
 check "consent page served on socialytics.moburst.ai" 200 "$(code https://socialytics.moburst.ai/oauth/consent)"
 check "bundle carries the consent page" 1 "$(curl -s -m 30 "$APP$BUNDLE" | grep -c 'Connect Claude to Socialytics' | sed 's/^[2-9].*/1/')"
+check "bundle carries the consent page's save wording" 1 "$(curl -s -m 30 "$APP$BUNDLE" | grep -c 'Staff can also save client notes, approved copy, strategy edits and finished decks' | sed 's/^[2-9].*/1/')"
+# Deck files are private: no public URL serves the report-decks bucket.
+check "report-decks bucket is not public" 1 "$(code "https://rwouwxqggjjacbpbhqsn.supabase.co/storage/v1/object/public/report-decks/x.pptx" | grep -cE '^(400|404)$')"
 
 echo "----"; echo "$pass passed, $fail failed"; [ "$fail" -eq 0 ]
