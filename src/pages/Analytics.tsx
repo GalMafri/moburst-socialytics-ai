@@ -46,6 +46,8 @@ import { Loading } from "@/components/ui/loading";
 import { LoadRetry } from "@/components/ui/load-error";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { reportsMeasure } from "@/lib/platformMeasures";
+import { useReportInsights } from "@/hooks/useReportInsights";
+import { socialInsights } from "@/lib/reportInsights";
 
 type TimeRange = "7d" | "30d" | "90d" | "all" | "custom";
 type AnalyticsView = "performance" | "trends";
@@ -252,8 +254,13 @@ export default function Analytics() {
     }));
   }, [latestRd]);
 
+  // The latest report's insights, worked out from its figures (report_insights); its own summary otherwise.
+  const { data: latestInsightsRow } = useReportInsights("reports", (latestReport as { id?: string } | null)?.id);
+  const latestInsightSummary = socialInsights(latestInsightsRow)?.summary?.text ?? null;
+
   // Extract AI summary from latest report for "Key Takeaway" card
   const latestAISummary = useMemo(() => {
+    if (latestInsightSummary) return latestInsightSummary;
     if (!latestRd) return null;
     const ai = latestRd.ai_analysis || {};
     // Try multiple paths where the AI summary might live
@@ -265,7 +272,7 @@ export default function Analytics() {
       null;
     if (!summary || (typeof summary === "string" && summary.trim().length === 0)) return null;
     return typeof summary === "string" ? summary : JSON.stringify(summary);
-  }, [latestRd]);
+  }, [latestRd, latestInsightSummary]);
 
   // Extract top-performing content insight
   const topContentInsight = useMemo(() => {

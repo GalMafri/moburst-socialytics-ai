@@ -32,7 +32,9 @@ import { watchExpired, watchInterval } from "@/lib/runWatch";
 import { useToast } from "@/hooks/use-toast";
 import { PostVisual, usePostPreviews, normalizePlatform, platformLabel } from "@/components/competitive/PostVisual";
 import { PlatformIcon } from "@/lib/platform-config";
-import { partitionGaps, useCompetitiveLearnings, useInsightFeedback } from "@/hooks/useInsightFeedback";
+import { gapId, partitionGaps, useCompetitiveLearnings, useInsightFeedback } from "@/hooks/useInsightFeedback";
+import { useReportInsights } from "@/hooks/useReportInsights";
+import { competitiveInsights } from "@/lib/reportInsights";
 import { toast as sonnerToast } from "sonner";
 import { formatRange } from "@/lib/dateRange";
 import { ReportActions } from "@/components/reports/ReportActions";
@@ -289,6 +291,9 @@ export default function CompetitiveReportView() {
   });
 
   const rd: any = useMemo(() => withCompetitiveEvidenceLimits(normalizedCompetitiveMetrics(report?.report_data)), [report?.report_data]);
+  // The report's insights, worked out from its figures (report_insights), in place of the model-written summary and gaps.
+  const { data: insightsRow } = useReportInsights("competitive_reports", report?.id);
+  const fromInsights = competitiveInsights(insightsRow);
   useEffect(() => {
     if (!report || !['failed', 'running'].includes(report.status)) return;
     const timer = setInterval(() => setNow(Date.now()), 15000);
@@ -397,7 +402,7 @@ export default function CompetitiveReportView() {
   const clientName = client?.name || rd.aggregates?.client_name || "Client";
   const ordered = [...(me ? [me] : []), ...rivals];
 
-  const gapsForPlatform = (ai.gaps_for_client || []).filter((g: any) => effectivePlat === "all" || !g.platform || g.platform === "all" || normalizePlatform(g.platform) === effectivePlat);
+  const gapsForPlatform = (fromInsights?.gaps ?? ai.gaps_for_client ?? []).filter((g: any) => effectivePlat === "all" || !g.platform || g.platform === "all" || normalizePlatform(g.platform) === effectivePlat);
   const { visible: gaps, hidden: hiddenGaps } = partitionGaps<any>(gapsForPlatform, feedback);
   const schedule = ai.recommended_schedule;
 
@@ -492,7 +497,7 @@ export default function CompetitiveReportView() {
    * cannot disagree.
    */
   const present: Record<string, boolean> = {
-    summary: !!ai.executive_summary,
+    summary: !!(fromInsights?.summary.length || ai.executive_summary),
     changes: !!previous,
     scorecard: (scorecard?.dimensions?.length || 0) > 0,
     field: companies.length > 0,
@@ -518,10 +523,10 @@ export default function CompetitiveReportView() {
 
   const castVote = async (g: any, verdict: "up" | "down") => {
     try {
-      await vote({ gapText: g.gap, platform: g.platform || null, verdict, reportId: report.id });
-      if (verdict === "down" && verdictFor(g.gap) !== "down") {
+      await vote({ gapText: g.gap, keyText: gapId(g), platform: g.platform || null, verdict, reportId: report.id });
+      if (verdict === "down" && verdictFor(gapId(g)) !== "down") {
         toast({ title: "Suggestion hidden", description: `It will not be proposed again for ${clientName}. Restore it from "hidden suggestions" if you change your mind.` });
-      } else if (verdict === "up" && verdictFor(g.gap) !== "up") {
+      } else if (verdict === "up" && verdictFor(gapId(g)) !== "up") {
         toast({ title: "Marked to implement", description: "The next monthly report and the weekly calendar plans will address this gap." });
       }
     } catch (e: any) {
@@ -726,13 +731,24 @@ export default function CompetitiveReportView() {
 
 
         {/* Executive summary */}
-        {ai.executive_summary && (
+        {(fromInsights?.summary.length || ai.executive_summary) && (
             <Section id="summary" index={num("summary")} style={{ order: orderOf("summary") }} title={<>Executive summary</>} action={acrossAll}>
             {/* Plain card: glass-elevated is the opaque grey surface used for
                 things that float (the user chip, the progress card), and it
                 read as a different material next to every other section. */}
             <Card>
-              <CardContent><Prose text={ai.executive_summary} /></CardContent>
+              <CardContent>
+                {fromInsights?.summary.length ? (
+                  <div className="space-y-3">
+                    {fromInsights.summary.map((p, i) => (
+                      <div key={i} className="space-y-1">
+                        <Prose text={p.text} />
+                        {p.basedOn && <p className="t-secondary">Based on {p.basedOn}.</p>}
+                      </div>
+                    ))}
+                  </div>
+                ) : <Prose text={ai.executive_summary} />}
+              </CardContent>
             </Card>
             </Section>
         )}
@@ -1052,9 +1068,9 @@ export default function CompetitiveReportView() {
             {gaps.length === 0 && <EmptyState compact icon={Crosshair} title="No suggestions shown" description="Every suggestion for this view has been hidden by the team." />}
             <div className="grid gap-4 md:grid-cols-2">
               {gaps.map((g: any, i: number) => {
-                const v = verdictFor(g.gap);
-                // The team's edit, if any, in place of the report's wording; votes stay keyed on the original.
-                const shown = editedSuggestion(g, editFor(g.gap));
+                const v = verdictFor(gapId(g));
+                // The team's edit, if any, in place of the report's wording; votes stay keyed on the original (or on its facts).
+                const shown = editedSuggestion(g, editFor(gapId(g)));
                 return (
                   <Card key={i} className={v === "up" ? "glass-accent" : ""}>
                     <CardContent className="pt-5 space-y-3">
@@ -1075,6 +1091,7 @@ export default function CompetitiveReportView() {
                           <span className="font-semibold">Proposed test: </span>{nameifyDomains(shown.suggested_play)}
                         </div>
                       )}
+                      {g.basedOn && <p className="t-secondary">Based on {g.basedOn}.</p>}
                       {isMoburstStaff && (
                         <div data-print="hide" className="flex items-center gap-2 pt-1">
                           <Button size="sm" variant={v === "up" ? "default" : "outline"} onClick={() => castVote(g, "up")} aria-pressed={v === "up"}>
@@ -1089,10 +1106,10 @@ export default function CompetitiveReportView() {
                             shown={{ gap: shown.gap || "", why_it_matters: shown.why_it_matters || "", suggested_play: shown.suggested_play || "" }}
                             edited={shown.edited}
                             onSave={async (edit, fb) => {
-                              const learned = await saveEdit({ gapText: g.gap, platform: g.platform ?? null, reportId: report.id, edit, feedback: fb, before: { gap: shown.gap, why_it_matters: shown.why_it_matters, suggested_play: shown.suggested_play } });
+                              const learned = await saveEdit({ gapText: g.gap, keyText: gapId(g), platform: g.platform ?? null, reportId: report.id, edit, feedback: fb, before: { gap: shown.gap, why_it_matters: shown.why_it_matters, suggested_play: shown.suggested_play } });
                               if (learned.length) sonnerToast.success(`Learned for ${clientName}`, { description: learned.map((l) => l.text).join(" ") });
                             }}
-                            onReset={() => resetEdit(g.gap)}
+                            onReset={() => resetEdit(gapId(g))}
                           />
                         </div>
                       )}
@@ -1124,7 +1141,7 @@ export default function CompetitiveReportView() {
                   <CardContent className="space-y-2">
                     {hiddenGaps.map((g: any, i: number) => (
                       <div key={i} className="flex items-center justify-between gap-3 t-body">
-                        <span className="text-muted-foreground line-through">{editedSuggestion(g, editFor(g.gap)).gap}</span>
+                        <span className="text-muted-foreground line-through">{editedSuggestion(g, editFor(gapId(g))).gap}</span>
                         <Button size="sm" variant="ghost" onClick={() => castVote(g, "down")}><RotateCcw className="h-3.5 w-3.5 mr-1" /> Restore</Button>
                       </div>
                     ))}

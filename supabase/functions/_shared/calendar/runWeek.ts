@@ -35,6 +35,7 @@ import { voicePromptBlock, voiceReady } from "../voice/voice.ts";
 import { activeTerms } from "../trends/profile.ts";
 import { HASHTAG_PLATFORMS, type HashtagPlatform } from "../trends/types.ts";
 import { strategyPromptBlock } from "../strategy/prompt.ts";
+import { insightFindings } from "../reports/insights.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -271,7 +272,9 @@ export async function gatherEvidence(admin: Db, client: Record<string, any>, now
   const rd = Array.isArray(report?.report_data) ? report.report_data[0] : report?.report_data;
   const ai = rd?.ai_analysis ?? {};
   const perf = ai.sprout_performance_analysis ?? {};
-  const findings = [...strings(perf.key_insights), ...strings(perf.pillar_alignment?.recommendations), ...strings(ai.competitive_takeaways)];
+  // A report from go-live on is read through its insights (report_insights), worked out from its figures; an older one through its own fields.
+  const findings = (report?.id ? await insightFindings(admin, report.id) : null)
+    ?? [...strings(perf.key_insights), ...strings(perf.pillar_alignment?.recommendations), ...strings(ai.competitive_takeaways)];
 
   // Industry trends come from the newest finished weekly Trends run (its themes staff did not dismiss), not from the report.
   const trends = scoreTrendItems(await latestTrendEvidence(admin, client.id, now));

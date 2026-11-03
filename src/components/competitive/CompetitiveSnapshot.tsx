@@ -17,7 +17,9 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadRetry } from "@/components/ui/load-error";
 import { Loading } from "@/components/ui/loading";
-import { insightKey, partitionGaps, useInsightFeedback, type InsightFeedbackRow } from "@/hooks/useInsightFeedback";
+import { gapId, insightKey, partitionGaps, useInsightFeedback, type InsightFeedbackRow } from "@/hooks/useInsightFeedback";
+import { useReportInsights } from "@/hooks/useReportInsights";
+import { competitiveInsights } from "@/lib/reportInsights";
 import { firstRunSentence, formatDate, formatRange, platformName } from "@/lib/display";
 import { useNextRun } from "@/lib/nextRun";
 import { Prose } from "@/components/ui/prose";
@@ -67,6 +69,9 @@ export function CompetitiveSnapshot({
     enabled: !!clientId,
   });
   const nextRun = useNextRun(clientId, "competitive", !isLoading && !latest);
+  // The report's insights, worked out from its figures (report_insights), in place of the model-written summary and gaps.
+  const { data: insightsRow } = useReportInsights("competitive_reports", latest?.id);
+  const fromInsights = competitiveInsights(insightsRow);
 
   if (isLoading) return <Loading label="Loading competitive analysis" />;
   if (isError) return <LoadRetry context="competitive snapshot" error={error} onRetry={() => refetch()} />;
@@ -90,7 +95,7 @@ export function CompetitiveSnapshot({
   const avg = (f: (c: any) => number) => { const values = active.map(f).filter(n => typeof n === "number" && Number.isFinite(n)); return values.length ? values.reduce((a, b) => a + b, 0) / values.length : null; };
   const totalPosts = companies.reduce((s, c) => s + (c.post_count || 0), 0);
   const share = me && totalPosts ? Math.round((me.post_count / totalPosts) * 100) : null;
-  const { visible } = partitionGaps<any>(ai.gaps_for_client || [], feedback);
+  const { visible } = partitionGaps<any>(fromInsights?.gaps ?? ai.gaps_for_client ?? [], feedback);
   const gaps = visible.slice(0, 3);
   const period = rd.period?.start ? formatRange(rd.period) : latest.date_range_start ? formatRange({ start: latest.date_range_start, end: latest.date_range_end }) : "";
 
@@ -131,7 +136,16 @@ export function CompetitiveSnapshot({
         </StatGrid></div>
       )}
 
-      {ai.executive_summary && (
+      {fromInsights?.summary.length ? (
+        <Card id="snapshot-summary" className="scroll-mt-[156px]"><CardContent className="pt-5 space-y-3">
+          {fromInsights.summary.map((p, i) => (
+            <div key={i} className="space-y-1">
+              <Prose text={p.text} />
+              {p.basedOn && <p className="t-secondary">Based on {p.basedOn}.</p>}
+            </div>
+          ))}
+        </CardContent></Card>
+      ) : ai.executive_summary && (
         <Card id="snapshot-summary" className="scroll-mt-[156px]"><CardContent className="pt-5"><Prose text={ai.executive_summary} /></CardContent></Card>
       )}
 
@@ -153,10 +167,10 @@ export function CompetitiveSnapshot({
               <div key={i} className="glass-inner p-inner space-y-2">
                 <div className="flex gap-1.5 flex-wrap">
                   {g.platform && g.platform !== "all" && <Badge variant="outline">{platformName(g.platform)}</Badge>}
-                  {verdictFor(g.gap) === "up" && <Badge className="gap-1"><ThumbsUp className="h-3 w-3" /> in the calendar brief</Badge>}
+                  {verdictFor(gapId(g)) === "up" && <Badge className="gap-1"><ThumbsUp className="h-3 w-3" /> in the calendar brief</Badge>}
                 </div>
-                <p className="t-body font-medium">{editedSuggestion(g, editFor(g.gap)).gap}</p>
-                {editedSuggestion(g, editFor(g.gap)).suggested_play && <p className="t-body"><span className="text-[#b9e045] font-semibold">Play: </span>{editedSuggestion(g, editFor(g.gap)).suggested_play}</p>}
+                <p className="t-body font-medium">{editedSuggestion(g, editFor(gapId(g))).gap}</p>
+                {editedSuggestion(g, editFor(gapId(g))).suggested_play && <p className="t-body"><span className="text-[#b9e045] font-semibold">Play: </span>{editedSuggestion(g, editFor(gapId(g))).suggested_play}</p>}
               </div>
             ))}
           </div>

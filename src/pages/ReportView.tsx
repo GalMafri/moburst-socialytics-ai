@@ -5,6 +5,8 @@ import { reportsMeasure } from "@/lib/platformMeasures";
 import { reportCounts, sproutEngagementRate, sproutEngagements } from "@/lib/reportFigures";
 import { StatCard } from "@/components/ui/stat-card";
 import { useQuery } from "@tanstack/react-query";
+import { useReportInsights } from "@/hooks/useReportInsights";
+import { socialInsights } from "@/lib/reportInsights";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { StatGrid } from "@/components/ui/stat-card";
@@ -127,6 +129,10 @@ export default function ReportView() {
     refetchInterval: (query) => query.state.data?.status === "running" ? 5000 : false,
     refetchIntervalInBackground: true,
   });
+
+  // The report's insights, worked out from its figures (report_insights), in place of the model-written ones.
+  const { data: insightsRow } = useReportInsights("reports", reportId);
+  const fromInsights = socialInsights(insightsRow);
 
   const overviewPostUrls = useMemo(() => {
     const rawRd = (report as any)?.report_data;
@@ -275,7 +281,8 @@ export default function ReportView() {
     ? ((latestCompetitive.report_data as any)?.ai_analysis?.gaps_for_client || []).filter((g: any) => verdictFor(g.gap) === "up")
     : [];
   const competitiveTakeaways: string[] = Array.isArray(aiAnalysis?.competitive_takeaways) ? aiAnalysis.competitive_takeaways : [];
-  const pillarRecs: string[] = aiAnalysis?.sprout_performance_analysis?.pillar_alignment?.recommendations || [];
+  const pillarRecs: string[] = fromInsights?.recommendations ? fromInsights.recommendations.map((r) => r.text) : aiAnalysis?.sprout_performance_analysis?.pillar_alignment?.recommendations || [];
+  const pillarRecsBasis = fromInsights?.recommendations?.map((r) => r.basedOn);
   const trendOpportunities: string[] = [
     ...(aiAnalysis?.tiktok_trends_analysis?.opportunities_for_client || []),
     ...(aiAnalysis?.instagram_trends_analysis?.opportunities_for_client || []),
@@ -342,8 +349,10 @@ export default function ReportView() {
     if (a.tab) return setTab(a.tab);
     if (a.anchor) document.getElementById(`report-${a.anchor}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
-  const insights: string[] = aiAnalysis?.sprout_performance_analysis?.key_insights || [];
-  const summary: string | null = aiAnalysis?.sprout_performance_analysis?.month_over_month_summary || null;
+  const insights: string[] = fromInsights ? fromInsights.insights.map((i) => i.text) : aiAnalysis?.sprout_performance_analysis?.key_insights || [];
+  const insightsBasis = fromInsights?.insights.map((i) => i.basedOn);
+  const summary: string | null = fromInsights ? fromInsights.summary?.text ?? null : aiAnalysis?.sprout_performance_analysis?.month_over_month_summary || null;
+  const summaryBasis = fromInsights?.summary?.basedOn;
   const pillars = aiAnalysis?.sprout_performance_analysis?.pillar_alignment;
   const pillarsLine = pillars
     ? `${(pillars.well_represented || []).length} pillars well represented, ${(pillars.underrepresented || []).length} need attention, ${pillarRecs.length} recommendations.`
@@ -460,11 +469,16 @@ export default function ReportView() {
                             <p className="t-body">{hero.label} vs the previous period</p>
                           </div>
                         )}
-                        {summary && <Prose text={formatNumbersInText(summary)} className="t-secondary" />}
+                        {summary && (
+                          <div className="space-y-1">
+                            <Prose text={formatNumbersInText(summary)} className="t-secondary" />
+                            {summaryBasis && <p className="t-secondary">Based on {summaryBasis}.</p>}
+                          </div>
+                        )}
                       </div>
                     )}
                     {insights.length > 0 && (
-                    <InsightGrid items={insights.map((t) => formatNumbersInText(t))} />
+                    <InsightGrid items={insights.map((t) => formatNumbersInText(t))} basedOn={insightsBasis} />
                     )}
                     {aiAnalysis?.sprout_performance_analysis?.top_performing_content?.length > 0 && (
                       <div className="pt-4 border-t border-white/[0.06] space-y-2">
@@ -581,7 +595,12 @@ export default function ReportView() {
                         <div className="pt-4 border-t border-white/[0.06] space-y-2">
                           <p className="t-subhead">Recommendations</p>
                           <ul className="space-y-2">
-                            {pillarRecs.map((r, i) => <li key={i} className="t-body flex gap-2"><span className="text-primary">•</span><span>{r}</span></li>)}
+                            {pillarRecs.map((r, i) => (
+                              <li key={i} className="t-body flex gap-2">
+                                <span className="text-primary">•</span>
+                                <span>{r}{pillarRecsBasis?.[i] && <span className="block t-secondary">Based on {pillarRecsBasis[i]}.</span>}</span>
+                              </li>
+                            ))}
                           </ul>
                         </div>
                       )}
