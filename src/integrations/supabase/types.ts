@@ -4388,7 +4388,7 @@ export type Database = {
       is_moburst_staff: { Args: never; Returns: boolean }
       is_oauth_session: { Args: never; Returns: boolean }
       lifecycle_enqueue: {
-        Args: { p_client: string; p_priority?: number }
+        Args: { p_at?: string; p_client: string; p_priority?: number }
         Returns: undefined
       }
       lifecycle_first_output: {

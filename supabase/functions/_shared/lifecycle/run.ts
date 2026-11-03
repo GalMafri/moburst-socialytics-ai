@@ -73,12 +73,14 @@ async function saveRow(db: Db, row: StepRow): Promise<void> {
   if (error) throw new Error(`Could not save the lifecycle step: ${error.message}`);
 }
 
-/** Look at the client again at this time. One look per client per minute, however many steps ask. */
+/**
+ * Look at the client again at this time, through lifecycle_enqueue
+ * (20261110160000_lifecycle_looks.sql): skipped only when a look that has not
+ * started yet covers it, so a step that finishes just after a look still gets
+ * the next one.
+ */
 export async function queueLook(db: Db, clientId: string, at: Date): Promise<void> {
-  const minute = at.toISOString().slice(0, 16);
-  const { error } = await db.from("scheduled_jobs").upsert({
-    kind: "lifecycle", client_id: clientId, dedupe_key: `lifecycle:${clientId}:${minute}`, priority: 30, available_at: at.toISOString(),
-  }, { onConflict: "dedupe_key", ignoreDuplicates: true });
+  const { error } = await db.rpc("lifecycle_enqueue", { p_client: clientId, p_priority: 30, p_at: at.toISOString() });
   if (error) console.warn("[lifecycle] could not queue the next look:", error.message);
 }
 

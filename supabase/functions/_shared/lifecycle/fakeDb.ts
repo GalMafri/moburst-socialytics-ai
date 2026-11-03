@@ -28,7 +28,26 @@ const field = (r: Row, c: string) => {
   return key === undefined ? r[col] : r[col]?.[key];
 };
 
-export function fakeDb(tables: Record<string, Row[]> = {}, rpcs: Record<string, (args: Row, db: FakeDb) => unknown> = {}): FakeDb {
+/**
+ * lifecycle_enqueue as 20261110160000_lifecycle_looks.sql has it: a look at
+ * p_at, unless a look not yet started is queued for that minute or, for a
+ * request due now, is already due. Every fakeDb has it unless a test gives its own.
+ */
+export function lookRpc(args: Row, db: FakeDb): null {
+  const at = new Date(String(args.p_at ?? new Date().toISOString()));
+  const minute = at.toISOString().slice(0, 16);
+  const now = Date.now();
+  const jobs = (db.tables.scheduled_jobs ??= []);
+  const covered = jobs.some((j) => j.kind === "lifecycle" && same(j.client_id, args.p_client) && (j.status ?? "queued") === "queued" &&
+    (String(j.available_at ?? "").slice(0, 16) === minute || (at.getTime() <= now && Date.parse(String(j.available_at)) <= now)));
+  if (!covered) {
+    jobs.push({ kind: "lifecycle", client_id: args.p_client, dedupe_key: `lifecycle:${args.p_client}:${minute}:${jobs.length}`, priority: args.p_priority ?? 30, available_at: at.toISOString(), status: "queued" });
+  }
+  return null;
+}
+
+export function fakeDb(tables: Record<string, Row[]> = {}, given: Record<string, (args: Row, db: FakeDb) => unknown> = {}): FakeDb {
+  const rpcs: Record<string, (args: Row, db: FakeDb) => unknown> = { lifecycle_enqueue: lookRpc, ...given };
   const db: FakeDb = {
     tables,
     rpcCalls: [],
