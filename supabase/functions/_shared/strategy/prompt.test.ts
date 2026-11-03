@@ -54,6 +54,28 @@ describe("the strategy block", () => {
     expect(block.endsWith("days.")).toBe(true);
   });
 
+  it("reads a version 2 strategy's fields as lines, people's versions by their fields, under the same cap", () => {
+    const v2 = stored({
+      sections: {
+        goals: { items: [{ title: "Grow engagement per post", why: "Carousels beat the usual.", platform: "Instagram", metric: "median_engagement", direction: "above", baseline: 42, by: "2027-02-01" }] },
+        audience: { who: "Rec league captains.", wants: ["Less chasing", "Fair splits", "Time back"], where: ["Instagram"] },
+        positioning: { statement: "Built around the captain's week.", points: [{ vs: "BenchApp", point: "Useful over funny." }] },
+        "pillar:Beer League Truths": { purpose: "Make captains laugh.", formats: ["carousel"], planned_share: 60, ideas: [] },
+        "pillar:Captain Life": { purpose: "Save captains time.", formats: ["reel"], planned_share: 40, ideas: [] },
+        "platform:instagram:posting": { role: "Our home base.", post: ["Checklists", "Truths", "Reminders"], worked: [], checks: { day_30: "a", day_90: "b" } },
+        "platform:tiktok:new": { role: "Reach new captains.", post: ["Skits"], worked: [], first_30: ["w1"], checks: { day_30: "a", day_90: "b" } },
+        avoid: { items: [{ pattern: "Office photos", source: "posts" }] },
+      },
+    });
+    const block = strategyBlock(v2, [{ section_key: "avoid", text: "- Memes about other apps", value: { items: [{ pattern: "Memes about other apps", source: "team" }] } }]);
+    for (const part of ["- Grow engagement per post (Instagram median engagement per post: 42 today, above it by 1 Feb 2027). Why: Carousels beat the usual.", "Rec league captains.", "- vs BenchApp: Useful over funny.", "- Beer League Truths: Make captains laugh. Formats: carousel Planned share: 60%", "- Instagram: Our home base. What we post: - Checklists", "- Memes about other apps"]) {
+      expect(block).toContain(part);
+    }
+    expect(block).not.toContain("Office photos");
+    expect(block).not.toContain("Reach new captains.");
+    expect(block.length).toBeLessThanOrEqual(STRATEGY_BLOCK_CHARS);
+  });
+
   it("is empty for a client with no strategy, and reads people's versions with the stored one", async () => {
     expect(await strategyPromptBlock(fakeDb({}), "c1")).toBe("");
     // A row that holds only a write under way is no strategy yet.

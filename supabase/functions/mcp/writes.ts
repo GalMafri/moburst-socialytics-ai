@@ -369,7 +369,7 @@ export function makeServiceWriter(db: Db): ServiceWriter {
     learn: (clientId, signal) => learnFromSignal(db, clientId, signal),
     strategy: async (clientId) => {
       const [row, edits] = await Promise.all([
-        must<StrategyRows["row"]>(db.from("content_strategies").select("written_at, sections, platforms, pillars").eq("client_id", clientId).maybeSingle(), "Could not read the strategy"),
+        must<StrategyRows["row"]>(db.from("content_strategies").select("written_at, sections, section_texts, platforms, pillars").eq("client_id", clientId).maybeSingle(), "Could not read the strategy"),
         must<StrategyRows["edits"] | null>(db.from("content_strategy_edits").select("section_key, text, editor_name, edited_at, source").eq("client_id", clientId), "Could not read the strategy"),
       ]);
       return { row: row ?? null, edits: edits ?? [] };

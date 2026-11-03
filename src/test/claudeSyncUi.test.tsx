@@ -27,7 +27,7 @@ vi.mock('@/integrations/supabase/client', () => ({ supabase: {
 
 import { ClaudeProject } from '@/components/onboarding/ClaudeProject';
 import { openDeck, ReportDecks } from '@/components/reports/ReportDecks';
-import { originLine } from '@/components/strategy/StrategySection';
+import { editedChip } from '@/components/strategy/StrategySection';
 import { knowledgePrompt, projectInstruction } from '@/lib/claudeProject';
 import { deckAddedLine, noteAddedLine } from '@/lib/display';
 
@@ -124,8 +124,7 @@ describe('where a note, a section or a deck came from', () => {
     expect(noteAddedLine({ added_by_name: '', created_at: '2026-10-28T12:00:00Z' })).toBe('Added on Oct 28, 2026');
     expect(deckAddedLine({ added_by_name: 'Sinead', created_at: '2026-11-03T12:00:00Z', source: 'claude' }, { staff: true })).toBe('From Claude, by Sinead on Nov 3, 2026');
     expect(deckAddedLine({ added_by_name: 'Sinead', created_at: '2026-11-03T12:00:00Z', source: 'claude' }, { staff: false })).toBe('Added on Nov 3, 2026');
-    const written = { at: '2026-11-01T00:00:00Z', sources: [] };
-    expect(originLine({ section_key: 'goals', text: 't', editor_name: 'Sinead Cronin', edited_at: '2026-11-03T12:00:00Z', source: 'claude' }, written)).toBe('From Claude, by Sinead on Nov 3. Kept when the strategy is rewritten.');
-    expect(originLine({ section_key: 'goals', text: 't', editor_name: 'Neria', edited_at: '2026-11-03T12:00:00Z', source: 'app' }, written)).toBe('Edited by Neria on Nov 3. Kept when the strategy is rewritten.');
+    expect(editedChip({ editor_name: 'Sinead Cronin', edited_at: '2026-11-03T12:00:00Z', source: 'claude' })).toBe('From Claude, by Sinead, 3 Nov');
+    expect(editedChip({ editor_name: 'Neria', edited_at: '2026-11-03T12:00:00Z', source: 'app' })).toBe('Edited by Neria, 3 Nov');
   });
 });

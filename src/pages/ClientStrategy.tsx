@@ -1,107 +1,139 @@
 /**
- * A client's content strategy (spec: docs/superpowers/specs/2026-11-02-
- * content-strategy-tab-design.md). The lifecycle writes it from the brief, the
- * trend profile, the competitors and the client's own posts, and writes it
- * again when those change and once a month; nobody has to start it. People may
- * edit any section, and a person's version is kept whenever the strategy is
- * rewritten. Staff only: the team asked for it as their own working draft.
+ * A client's social strategy (spec: docs/superpowers/specs/2026-11-03-
+ * strategy-v2-design.md). The lifecycle writes it from the brief, the trend
+ * profile, the competitors and the client's own posts (Sprout where profiles
+ * are assigned, public posts everywhere else), and writes it again when those
+ * change and once a month; nobody has to start it. It reads as cards, lists
+ * and numbers in six band sections; each card's pencil opens its fields, and
+ * a person's version is kept whenever the strategy is rewritten. Staff only;
+ * the client gets the PDF or the Google Slides deck.
  */
 
+import { useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Compass } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useActiveClients } from "@/lib/activeClients";
-import { formatDate } from "@/lib/display";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Section, SectionNav } from "@/components/ui/section";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Loading } from "@/components/ui/loading";
 import { LoadRetry } from "@/components/ui/load-error";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { PlatformBadge } from "@/lib/platform-config";
-import { StrategyCard, StrategySection, type StrategyEdit, type Written } from "@/components/strategy/StrategySection";
-import { StrategyPlatforms } from "@/components/strategy/StrategyPlatforms";
-import { pillarSectionKey, type WrittenPlatform } from "../../supabase/functions/_shared/strategy/platforms";
+import { newestEdit, type PageStrategy, type StrategyEdit } from "@/lib/strategyView";
+import { StrategyHeader } from "@/components/strategy/StrategyHeader";
+import { GoalCards, PlanTiles } from "@/components/strategy/GoalCards";
+import { Measures, PlatformStart } from "@/components/strategy/Baseline";
+import { AudienceCard, PositioningCard } from "@/components/strategy/AudiencePosition";
+import { MixChart, PillarCard } from "@/components/strategy/PillarMix";
+import { NotNow, PlatformCard } from "@/components/strategy/PlatformCard";
+import { AvoidList } from "@/components/strategy/AvoidList";
+import { StrategyExports } from "@/components/strategy/StrategyExports";
+import { pillarSectionKey, platformSectionKey } from "../../supabase/functions/_shared/strategy/platforms";
+import type { Goal } from "../../supabase/functions/_shared/strategy/sections";
 
 const NAV = [
-  { id: "strategy-goals", label: "Goals" },
-  { id: "strategy-audience", label: "Audience" },
-  { id: "strategy-positioning", label: "Positioning" },
+  { id: "strategy-plan", label: "The plan" },
+  { id: "strategy-start", label: "Where we start" },
+  { id: "strategy-audience", label: "Audience and positioning" },
   { id: "strategy-pillars", label: "Pillars" },
   { id: "strategy-platforms", label: "Platforms" },
-  { id: "strategy-avoid", label: "What to avoid" },
-  { id: "strategy-measures", label: "Measures" },
+  { id: "strategy-avoid", label: "What we avoid" },
 ];
-
-interface StoredStrategy {
-  sections: Record<string, string>;
-  platforms: WrittenPlatform[];
-  /** Each pillar's share of the client's calendar posts over the last 8 weeks; null with no posts then. */
-  pillars: Array<{ name: string; share: number | null }>;
-  sources: string[];
-  /** Null while the row holds only the first write under way. */
-  written_at: string | null;
-}
-
-const none = "None yet";
-const number = (n: number | null | undefined) => (n === null || n === undefined ? none : Number(n).toLocaleString("en-US"));
-const percent = (r: number | null | undefined) => (r === null || r === undefined ? none : `${Math.round(r * 1000) / 10}%`);
 
 /** Another client's strategy, from the active clients. */
 function ClientSwitcher({ value }: { value: string }) {
   const navigate = useNavigate();
   const { data: clients = [] } = useActiveClients("id, name");
   return (
-    <Select value={value} onValueChange={(v) => navigate(`/clients/${v}/strategy`)}>
-      <SelectTrigger className="w-[220px]" aria-label="Client"><SelectValue placeholder="Client" /></SelectTrigger>
-      <SelectContent>
-        {clients.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-      </SelectContent>
-    </Select>
+    <div data-print="hide">
+      <Select value={value} onValueChange={(v) => navigate(`/clients/${v}/strategy`)}>
+        <SelectTrigger className="w-[220px]" aria-label="Client"><SelectValue placeholder="Client" /></SelectTrigger>
+        <SelectContent>
+          {clients.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+        </SelectContent>
+      </Select>
+    </div>
   );
 }
 
-/** The 90-day baselines code measured for each platform posting now. */
-function Baselines({ platforms }: { platforms: WrittenPlatform[] }) {
-  const rows = platforms.filter((p) => p.state === "posting" && p.baseline);
-  if (!rows.length) return null;
+/** The strategy's six sections, from the stored strategy and people's versions. */
+export function StrategyBody({ clientId, client, logo, strategy, edits, onSaved }: {
+  clientId: string;
+  client: string;
+  logo: string | null;
+  strategy: PageStrategy;
+  edits: StrategyEdit[];
+  onSaved: () => unknown;
+}) {
+  const byKey = new Map(edits.map((e) => [e.section_key, e]));
+  const sections = strategy.sections ?? {};
+  const section = (key: string) => ({ clientId, sectionKey: key, product: sections[key] ?? "", edit: byKey.get(key), onSaved });
+  const platforms = Array.isArray(strategy.platforms) ? strategy.platforms : [];
+  const live = platforms.filter((p) => p.state !== "not_now");
+  const pillars = Array.isArray(strategy.pillars) ? strategy.pillars : [];
+  const goalsValue = byKey.get("goals")?.value ?? sections.goals;
+  const goals = goalsValue && typeof goalsValue === "object" && Array.isArray((goalsValue as { items?: unknown }).items) ? (goalsValue as { items: Goal[] }).items : [];
+  const hasNotNow = platforms.some((p) => p.state === "not_now") || byKey.has("not_now") || !!sections.not_now;
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Platform</TableHead>
-          <TableHead className="text-right">Posts a week</TableHead>
-          <TableHead className="text-right">Median engagement per post</TableHead>
-          <TableHead className="text-right">Engagement rate per impression</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rows.map((p) => (
-          <TableRow key={p.key}>
-            <TableCell><PlatformBadge platform={p.platform} size="sm" /></TableCell>
-            <TableCell className="text-right tabular-nums">{number(p.baseline!.posts_per_week)}</TableCell>
-            <TableCell className="text-right tabular-nums">{number(p.baseline!.median_engagement)}</TableCell>
-            <TableCell className="text-right tabular-nums">{percent(p.baseline!.engagement_rate)}</TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+    <>
+      <StrategyHeader client={client} logo={logo} writtenAt={strategy.written_at} sources={Array.isArray(strategy.sources) ? strategy.sources : []} platforms={platforms} />
+
+      <Section index={1} id="strategy-plan" title="The plan">
+        <PlanTiles platforms={platforms} pillars={pillars.length} />
+        <GoalCards {...section("goals")} />
+      </Section>
+
+      <Section index={2} id="strategy-start" title="Where we start">
+        <div className="grid gap-inner lg:grid-cols-2">
+          {live.map((p) => <PlatformStart key={p.key} client={client} p={p} />)}
+        </div>
+        <Measures {...section("measures")} platforms={platforms} goals={goals} />
+      </Section>
+
+      <Section index={3} id="strategy-audience" title="Audience and positioning">
+        <div className="grid gap-inner lg:grid-cols-2">
+          <AudienceCard {...section("audience")} />
+          <PositioningCard {...section("positioning")} />
+        </div>
+      </Section>
+
+      <Section index={4} id="strategy-pillars" title="Pillars">
+        <MixChart pillars={pillars} sections={sections} edits={byKey} />
+        <div className="grid gap-inner lg:grid-cols-2" data-testid="strategy-pillars-grid">
+          {pillars.map((p) => <PillarCard key={p.name} name={p.name} {...section(pillarSectionKey(p.name))} />)}
+        </div>
+      </Section>
+
+      <Section index={5} id="strategy-platforms" title="Platforms">
+        <div className="grid gap-inner lg:grid-cols-2">
+          {live.map((p) => {
+            const key = platformSectionKey(p.platform, p.state === "posting" ? "posting" : "new");
+            return <PlatformCard key={key} p={p} {...section(key)} />;
+          })}
+        </div>
+        {hasNotNow && <NotNow {...section("not_now")} />}
+      </Section>
+
+      <Section index={6} id="strategy-avoid" title="What we avoid">
+        <AvoidList {...section("avoid")} />
+      </Section>
+    </>
   );
 }
 
 export default function ClientStrategy() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const contentRef = useRef<HTMLDivElement>(null);
 
   const client = useQuery({
     queryKey: ["strategy-client", id],
     enabled: !!id,
     queryFn: async () => {
-      const { data, error } = await supabase.from("clients").select("id, name").eq("id", id!).maybeSingle();
+      const { data, error } = await supabase.from("clients").select("id, name, logo_url").eq("id", id!).maybeSingle();
       if (error) throw error;
       return data;
     },
@@ -110,16 +142,16 @@ export default function ClientStrategy() {
     queryKey: ["content-strategy", id],
     enabled: !!id,
     queryFn: async () => {
-      const { data, error } = await supabase.from("content_strategies").select("sections, platforms, pillars, sources, written_at").eq("client_id", id!).maybeSingle();
+      const { data, error } = await supabase.from("content_strategies").select("shape, sections, platforms, pillars, sources, written_at").eq("client_id", id!).maybeSingle();
       if (error) throw error;
-      return data as unknown as StoredStrategy | null;
+      return data as unknown as PageStrategy | null;
     },
   });
   const edits = useQuery({
     queryKey: ["content-strategy-edits", id],
     enabled: !!id,
     queryFn: async () => {
-      const { data, error } = await supabase.from("content_strategy_edits").select("section_key, text, editor_name, edited_at, source").eq("client_id", id!);
+      const { data, error } = await supabase.from("content_strategy_edits").select("section_key, text, value, editor_name, edited_at, source").eq("client_id", id!);
       if (error) throw error;
       return (data ?? []) as StrategyEdit[];
     },
@@ -127,24 +159,24 @@ export default function ClientStrategy() {
 
   // A row that holds only a write under way is no strategy yet.
   const s = strategy.data?.written_at ? strategy.data : null;
-  const byKey = new Map((edits.data ?? []).map((e) => [e.section_key, e]));
-  const written: Written = { at: s?.written_at ?? "", sources: Array.isArray(s?.sources) ? s.sources : [] };
-  const sections = s?.sections ?? {};
-  const common = { clientId: id!, written, onSaved: () => edits.refetch() };
-  const section = (key: string) => ({ ...common, sectionKey: key, product: sections[key] ?? "", edit: byKey.get(key) });
+  const name = client.data?.name ?? "";
+  const logo = typeof client.data?.logo_url === "string" && /^https:\/\//.test(client.data.logo_url) ? client.data.logo_url : null;
 
   return (
     <AppLayout
       nav={<SectionNav items={NAV} />}
-      title={client.data?.name ?? "Content strategy"}
-      description="The content strategy, written from the brief, the trend profile, the competitors and the client's own posts. Edit any section; your version is kept when the strategy is rewritten."
+      title={name || "Social strategy"}
       back={
-        <Button variant="ghost" size="sm" className="-ml-2 border-0 bg-transparent" onClick={() => navigate(`/clients/${id}/setup`)}>
+        <Button variant="ghost" size="sm" className="-ml-2 border-0 bg-transparent" onClick={() => navigate(`/clients/${id}/setup`)} data-print="hide">
           <ArrowLeft /> Back to client
         </Button>
       }
-      actions={id ? <ClientSwitcher value={id} /> : undefined}
-      meta={s?.written_at ? <Badge variant="outline">Written on {formatDate(s.written_at)}</Badge> : undefined}
+      actions={id ? (
+        <div className="flex flex-wrap items-start gap-2">
+          <ClientSwitcher value={id} />
+          {s && <StrategyExports clientId={id} client={name} writtenAt={s.written_at} newestEdit={newestEdit(edits.data ?? [])} contentRef={contentRef} />}
+        </div>
+      ) : undefined}
     >
       {strategy.isLoading || edits.isLoading ? (
         <Loading label="Loading the strategy" />
@@ -153,34 +185,9 @@ export default function ClientStrategy() {
       ) : !s ? (
         <EmptyState icon={Compass} title="No strategy yet" description="Written once the client's brief and trend profile are ready." />
       ) : (
-        <>
-          <StrategySection id="strategy-goals" title="Goals" {...section("goals")} />
-          <StrategySection id="strategy-audience" title="Audience" {...section("audience")} />
-          <StrategySection id="strategy-positioning" title="Positioning" {...section("positioning")} />
-
-          <Section id="strategy-pillars" title="Pillars" description="One per content pillar from Client setup, with the formats that worked, two post ideas, and its share of the client's calendar posts over the last 8 weeks.">
-            <div className="grid gap-inner lg:grid-cols-2" data-testid="strategy-pillars-grid">
-              {(s.pillars ?? []).map((p) => (
-                <StrategyCard
-                  key={p.name}
-                  {...section(pillarSectionKey(p.name))}
-                  label={p.name}
-                  title={p.name}
-                  facts={p.share === null || p.share === undefined ? undefined : <p className="t-label">{p.share}% of calendar posts in the last 8 weeks</p>}
-                />
-              ))}
-            </div>
-          </Section>
-
-          <Section id="strategy-platforms" title="Platforms" description="Each platform's state comes from the client's own posts, its accounts and where the industry's audience is active.">
-            <StrategyPlatforms clientId={id!} platforms={s.platforms ?? []} sections={sections} edits={byKey} written={written} onSaved={common.onSaved} />
-          </Section>
-
-          <StrategySection id="strategy-avoid" title="What to avoid" {...section("avoid")} />
-          <StrategySection id="strategy-measures" title="Measures" {...section("measures")}>
-            <Baselines platforms={s.platforms ?? []} />
-          </StrategySection>
-        </>
+        <div ref={contentRef} className="space-y-section">
+          <StrategyBody clientId={id!} client={name} logo={logo} strategy={s} edits={edits.data ?? []} onSaved={() => edits.refetch()} />
+        </div>
       )}
     </AppLayout>
   );
