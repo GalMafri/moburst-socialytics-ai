@@ -940,38 +940,6 @@ export type Database = {
           },
         ]
       }
-      client_users: {
-        Row: {
-          client_id: string
-          created_at: string | null
-          id: string
-          role: string | null
-          user_id: string
-        }
-        Insert: {
-          client_id: string
-          created_at?: string | null
-          id?: string
-          role?: string | null
-          user_id: string
-        }
-        Update: {
-          client_id?: string
-          created_at?: string | null
-          id?: string
-          role?: string | null
-          user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "client_users_client_id_fkey"
-            columns: ["client_id"]
-            isOneToOne: false
-            referencedRelation: "clients"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       client_public_profiles: {
         Row: {
           client_id: string
@@ -1003,6 +971,38 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "client_public_profiles_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      client_users: {
+        Row: {
+          client_id: string
+          created_at: string | null
+          id: string
+          role: string | null
+          user_id: string
+        }
+        Insert: {
+          client_id: string
+          created_at?: string | null
+          id?: string
+          role?: string | null
+          user_id: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string | null
+          id?: string
+          role?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_users_client_id_fkey"
             columns: ["client_id"]
             isOneToOne: false
             referencedRelation: "clients"
@@ -2336,6 +2336,48 @@ export type Database = {
           },
         ]
       }
+      google_connection: {
+        Row: {
+          account_email: string | null
+          connected_at: string | null
+          folder_id: string | null
+          id: boolean
+          last_used_at: string | null
+          pending_started_at: string | null
+          pending_state: string | null
+          pending_verifier: string | null
+          template_id: string | null
+          template_version: string | null
+          updated_at: string
+        }
+        Insert: {
+          account_email?: string | null
+          connected_at?: string | null
+          folder_id?: string | null
+          id?: boolean
+          last_used_at?: string | null
+          pending_started_at?: string | null
+          pending_state?: string | null
+          pending_verifier?: string | null
+          template_id?: string | null
+          template_version?: string | null
+          updated_at?: string
+        }
+        Update: {
+          account_email?: string | null
+          connected_at?: string | null
+          folder_id?: string | null
+          id?: boolean
+          last_used_at?: string | null
+          pending_started_at?: string | null
+          pending_state?: string | null
+          pending_verifier?: string | null
+          template_id?: string | null
+          template_version?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       gos_usage_snapshot: {
         Row: {
           company_slug: string | null
@@ -2378,48 +2420,6 @@ export type Database = {
           tool?: string
           tool_opens?: number
           user_email?: string | null
-        }
-        Relationships: []
-      }
-      google_connection: {
-        Row: {
-          account_email: string | null
-          connected_at: string | null
-          folder_id: string | null
-          id: boolean
-          last_used_at: string | null
-          pending_started_at: string | null
-          pending_state: string | null
-          pending_verifier: string | null
-          template_id: string | null
-          template_version: string | null
-          updated_at: string
-        }
-        Insert: {
-          account_email?: string | null
-          connected_at?: string | null
-          folder_id?: string | null
-          id?: boolean
-          last_used_at?: string | null
-          pending_started_at?: string | null
-          pending_state?: string | null
-          pending_verifier?: string | null
-          template_id?: string | null
-          template_version?: string | null
-          updated_at?: string
-        }
-        Update: {
-          account_email?: string | null
-          connected_at?: string | null
-          folder_id?: string | null
-          id?: boolean
-          last_used_at?: string | null
-          pending_started_at?: string | null
-          pending_state?: string | null
-          pending_verifier?: string | null
-          template_id?: string | null
-          template_version?: string | null
-          updated_at?: string
         }
         Relationships: []
       }
@@ -4365,15 +4365,20 @@ export type Database = {
         Args: { p_client: string }
         Returns: undefined
       }
+      client_notes_queue_waiting: { Args: never; Returns: number }
       client_public_profile_remove: {
         Args: { p_client: string; p_platform: string }
         Returns: boolean
       }
       client_public_profile_set: {
-        Args: { p_client: string; p_handle: string; p_platform: string; p_url: string }
+        Args: {
+          p_client: string
+          p_handle: string
+          p_platform: string
+          p_url: string
+        }
         Returns: Json
       }
-      client_notes_queue_waiting: { Args: never; Returns: number }
       client_value_is_set: {
         Args: { p_field: string; p_value: Json }
         Returns: boolean
@@ -4438,9 +4443,6 @@ export type Database = {
           status: string
         }[]
       }
-      google_token_clear: { Args: never; Returns: undefined }
-      google_token_read: { Args: never; Returns: string }
-      google_token_save: { Args: { p_token: string }; Returns: undefined }
       get_ai_quality: {
         Args: { days?: number }
         Returns: {
@@ -4543,6 +4545,9 @@ export type Database = {
           status: string
         }[]
       }
+      google_token_clear: { Args: never; Returns: undefined }
+      google_token_read: { Args: never; Returns: string }
+      google_token_save: { Args: { p_token: string }; Returns: undefined }
       is_admin: { Args: never; Returns: boolean }
       is_client_member: { Args: { _client_id: string }; Returns: boolean }
       is_company_restricted: { Args: never; Returns: boolean }
@@ -4770,7 +4775,12 @@ export type Database = {
             Returns: Json
           }
         | {
-            Args: { p_client: string; p_key: string; p_text: string; p_value: Json }
+            Args: {
+              p_client: string
+              p_key: string
+              p_text: string
+              p_value: Json
+            }
             Returns: Json
           }
       strategy_section_save_as: {
