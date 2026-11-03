@@ -20,7 +20,9 @@
 //        a member of the client or staff: save a copy edit (a revision row
 //        without media) and update the calendar post; a person's edit
 //        teaches the client's preference memory, and a regeneration teaches
-//        only through the note left on it, answering what it learned (copy.ts)
+//        only through the note left on it, answering what it learned
+//        (_shared/calendar/saveCopy.ts, the one copy save the Claude
+//        connector also runs)
 //   POST {action:"undo_note", client_id, changes}
 //        a member of the client or staff: take back what a note taught
 //   POST {action:"preview_evidence", client_id, week?}
@@ -38,7 +40,7 @@ import { requireMember } from "../_shared/auth/requireMember.ts";
 import { learnFromSignal, undoLearning } from "../_shared/voice/load.ts";
 import { CLIENT_COLUMNS, gatherEvidence } from "../_shared/calendar/runWeek.ts";
 import { plannable } from "../_shared/calendar/planState.ts";
-import { type CopyDeps, saveCopy, undoNote } from "./copy.ts";
+import { type CopyDeps, saveCopyAction, undoNote } from "../_shared/calendar/saveCopy.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
@@ -120,7 +122,7 @@ Deno.serve(async (req) => {
 
     if (body?.action === "save_copy" || body?.action === "undo_note") {
       const deps = copyDeps(admin, req);
-      const answer = body.action === "save_copy" ? await saveCopy(deps, body) : await undoNote(deps, body);
+      const answer = body.action === "save_copy" ? await saveCopyAction(deps, body) : await undoNote(deps, body);
       return json(answer.body, answer.status ?? 200);
     }
 
@@ -145,7 +147,7 @@ Deno.serve(async (req) => {
   }
 });
 
-/** What the copy actions (copy.ts) need from this function. */
+/** What the copy actions (_shared/calendar/saveCopy.ts) need from this function. */
 function copyDeps(admin: ReturnType<typeof service>, req: Request): CopyDeps {
   return {
     db: admin,

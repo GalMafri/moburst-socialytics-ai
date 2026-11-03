@@ -21,10 +21,11 @@
  */
 import { z } from "npm:zod@4.6.7";
 import { ApiError } from "../_shared/api/errors.ts";
-import { copyWrites, saveCopy, type CopySignal, type CopyWrites } from "../_shared/calendar/saveCopy.ts";
+import { copyWrites, saveCopy, type CopyMemory, type CopyWrites } from "../_shared/calendar/saveCopy.ts";
 import { addTextNote, noteWrites, type NoteWrites } from "../_shared/notes/add.ts";
 import { NOTE_TEXT_MAX } from "../_shared/notes/notes.ts";
 import { learnFromSignal } from "../_shared/voice/load.ts";
+import type { LearnedChange, MemorySignal } from "../_shared/voice/voice.ts";
 import type { Person } from "./access.ts";
 import { sectionVersion, strategySections, type Annotations, type StrategyRows } from "./reads.ts";
 import { failure, sentence, type ToolResult } from "./tools.ts";
@@ -64,7 +65,7 @@ export interface ServiceWriter {
   notes: NoteWrites;
   copy: CopyWrites;
   /** Teaches the client's preference memory from a copy edit, as the app's save does. */
-  learn(clientId: string, signal: CopySignal): Promise<unknown>;
+  learn(clientId: string, signal: MemorySignal): Promise<{ changes: LearnedChange[] }>;
   strategy(clientId: string): Promise<StrategyRows>;
   saveSection(userId: string, clientId: string, key: string, text: string): Promise<void>;
   report(reportId: string): Promise<{ id: string; client_id: string; kind: "social" | "competitive" } | null>;
@@ -177,11 +178,14 @@ export const WRITE_TOOLS: WriteSpec[] = [
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     run: async (a, at) => {
       const key = String(a.post_key ?? "");
-      const learn = (signal: CopySignal) => {
-        const p = at.deps.writer.learn(at.client.id, signal).catch((e) => console.warn("mcp memory:", e instanceof Error ? e.message : String(e)));
-        at.deps.waitUntil?.(p);
+      const memory: CopyMemory = {
+        learn: (signal) => at.deps.writer.learn(at.client.id, signal),
+        background: (work, label) => {
+          const p = work.catch((e) => console.warn(`mcp ${label}:`, e instanceof Error ? e.message : String(e)));
+          at.deps.waitUntil?.(p);
+        },
       };
-      const r = await saveCopy(at.deps.writer.copy, { clientId: at.client.id, key, copy: a.copy, hashtags: a.hashtags, cta: a.cta, source: "claude", userId: at.person.userId, now: at.now, basedOn: a.based_on }, learn);
+      const r = await saveCopy(at.deps.writer.copy, { clientId: at.client.id, key, copy: a.copy, hashtags: a.hashtags, cta: a.cta, source: "claude", userId: at.person.userId, now: at.now, basedOn: a.based_on }, memory);
       if (!r.ok && r.status === 409 && r.current) {
         return stale("This post changed in Socialytics after you read it. Show the person the copy below and ask again", { post_key: key, copy: r.current.copy, hashtags: r.current.hashtags ?? [], cta: r.current.cta, updated_at: r.current.updated_at });
       }

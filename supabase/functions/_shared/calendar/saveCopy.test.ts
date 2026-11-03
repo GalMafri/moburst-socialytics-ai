@@ -1,12 +1,20 @@
-// Saving a calendar post's copy, the one path for the calendar's Save
-// (calendar-posts save_copy) and for copy approved in Claude (the
-// connector's socialytics_post_copy_save). The calendar's rows are the rows
-// it wrote before the move; a save from Claude carries the updated_at it
-// read and is refused, with the current copy, when the post changed since.
+// Saving a calendar post's copy, the one path for the calendar's Save and
+// Regenerate (calendar-posts save_copy and undo_note) and for copy approved
+// in Claude (the connector's socialytics_post_copy_save). The calendar's rows
+// are the rows it wrote before the move; a person's edit teaches the memory
+// in the background, a regeneration only through the note left on it, and
+// that learning can be taken back. A save from Claude carries the updated_at
+// it read and is refused, with the current copy, when the post changed since.
 
-import { describe, expect, it } from "vitest";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it, vi } from "vitest";
+import { AuthzError } from "../auth/authz";
 import { eqs, fakeDb, op } from "../db.fake";
-import { copyWrites, sameInstant, saveCopy, type CopyPost, type CopyWrites, type IterationRow } from "./saveCopy";
+import { fakeDb as tableDb, type FakeDb } from "../lifecycle/fakeDb";
+import type { LearnedChange, MemorySignal } from "../voice/voice";
+import { copyWrites, sameInstant, saveCopy, saveCopyAction, undoNote, type CopyDeps, type CopyMemory, type CopyPost, type CopyWrites, type IterationRow } from "./saveCopy";
 
 const CLIENT = "00000000-0000-4000-8000-000000000001";
 const PERSON = "00000000-0000-4000-8000-0000000000aa";
@@ -32,7 +40,18 @@ function writes(post: CopyPost | null, over: Partial<CopyWrites> = {}) {
   };
   return { w, iterations, updates, set: (p: CopyPost) => { current = p; } };
 }
-const POST: CopyPost = { copy: "Hurt in a crash? Call us.", hashtags: ["injurylaw"], cta: "Call now", platform: "Instagram", updated_at: AT };
+const POST: CopyPost = { copy: "Hurt in a crash? Call us.", hashtags: ["injurylaw"], cta: "Call now", platform: "Instagram", format: "Single image", updated_at: AT };
+
+/** The memory as a test sees it: what it was taught, and the work left to run after the answer. */
+function memory(changes: LearnedChange[] = []) {
+  const taught: MemorySignal[] = [];
+  const later: Array<Promise<unknown>> = [];
+  const m: CopyMemory = {
+    learn: vi.fn(async (signal: MemorySignal) => { taught.push(signal); return { changes }; }),
+    background: vi.fn((work: Promise<unknown>) => { later.push(work); }),
+  };
+  return { m, taught, later };
+}
 
 describe("sameInstant", () => {
   it("compares two timestamps to the microsecond, whatever their zone is written as", () => {
@@ -49,27 +68,40 @@ describe("sameInstant", () => {
 describe("saveCopy from the calendar", () => {
   it("writes the revision row and the post's copy as calendar-posts did, and teaches the memory from a person's edit", async () => {
     const { w, iterations, updates } = writes(POST);
-    const learned: unknown[] = [];
+    const { m, taught, later } = memory();
     const r = await saveCopy(w, {
       clientId: CLIENT, key: KEY, copy: "  Hurt in a crash? We answer 24/7. ", hashtags: ["injurylaw", 7], cta: "Call", reportId: "r1", version: "3",
       platform: "instagram", concept: "c", visualDirection: "v", format: "reel", source: "calendar", userId: PERSON, now: NOW,
-    }, (s) => learned.push(s));
+    }, m);
     expect(r).toMatchObject({ ok: true, changed: true });
     expect(iterations).toEqual([{
       client_id: CLIENT, report_id: "r1", calendar_post_key: KEY, version: 3, platform: "instagram", post_copy: "Hurt in a crash? We answer 24/7.",
       hashtags: ["injurylaw", "7"], cta: "Call", concept: "c", visual_direction: "v", format: "reel", source: "calendar", created_by: PERSON,
     }]);
     expect(updates).toEqual([{ fields: { copy: "Hurt in a crash? We answer 24/7.", touched_at: NOW.toISOString(), hashtags: ["injurylaw", "7"], cta: "Call" }, unchangedSince: undefined }]);
-    expect(learned).toEqual([{ kind: "copy_edit", before: POST.copy, after: "Hurt in a crash? We answer 24/7.", platform: "Instagram" }]);
+    // In the background: the answer does not wait for the memory.
+    expect(taught).toEqual([{ kind: "copy_edit", before: POST.copy, after: "Hurt in a crash? We answer 24/7.", platform: "Instagram" }]);
+    expect(later).toHaveLength(1);
+    expect(r).toEqual({ ok: true, changed: true, updatedAt: "2026-11-03T12:00:00.5+00:00" });
   });
 
-  it("keeps the calendar's defaults: version 1, no hashtags or CTA left untouched, a regeneration teaches nothing", async () => {
+  it("keeps the calendar's defaults: version 1, no hashtags or CTA left untouched, a regeneration without a note teaches nothing", async () => {
     const { w, iterations, updates } = writes(null);
-    const learned: unknown[] = [];
-    await saveCopy(w, { clientId: CLIENT, key: KEY, copy: "New", source: "regeneration", userId: PERSON, now: NOW }, (s) => learned.push(s));
+    const { m, taught } = memory();
+    await saveCopy(w, { clientId: CLIENT, key: KEY, copy: "New", source: "regeneration", userId: PERSON, now: NOW }, m);
     expect(iterations[0]).toMatchObject({ version: 1, report_id: null, platform: null, hashtags: null, cta: null, concept: null, visual_direction: null, format: null, source: "regeneration" });
     expect(updates[0].fields).toEqual({ copy: "New", touched_at: NOW.toISOString() });
-    expect(learned).toEqual([]);
+    expect(taught).toEqual([]);
+  });
+
+  it("teaches a regeneration's note, waiting for it, and answers what it learned", async () => {
+    const CHANGES: LearnedChange[] = [{ op: "add", id: "pref-1", description: "Never use exclamation marks.", platform: null }];
+    const { w } = writes({ ...POST, format: "Story" });
+    const { m, taught, later } = memory(CHANGES);
+    const r = await saveCopy(w, { clientId: CLIENT, key: KEY, copy: "Hurt in a crash? Call.", source: "regeneration", note: "  No exclamation marks ", userId: PERSON, now: NOW }, m);
+    expect(taught).toEqual([{ kind: "rewrite_note", note: "No exclamation marks", before: POST.copy, after: "Hurt in a crash? Call.", platform: "Instagram", story: true }]);
+    expect(later).toEqual([]);
+    expect(r).toMatchObject({ ok: true, changed: true, learned: { changes: CHANGES } });
   });
 
   it("refuses empty copy", async () => {
@@ -84,22 +116,23 @@ describe("saveCopy from Claude", () => {
 
   it("saves only while the post is as Claude read it, then writes a revision from Claude after the latest one", async () => {
     const { w, iterations, updates } = writes(POST);
-    const learned: unknown[] = [];
-    const r = await saveCopy(w, claude({ hashtags: ["#injurylaw", " ", "#queens"], cta: "Call today" }), (s) => learned.push(s));
+    const { m, taught, later } = memory();
+    const r = await saveCopy(w, claude({ hashtags: ["#injurylaw", " ", "#queens"], cta: "Call today" }), m);
     expect(r).toEqual({ ok: true, changed: true, updatedAt: "2026-11-03T12:00:00.5+00:00" });
     expect(updates).toEqual([{ fields: { copy: "Hurt in a crash? We answer 24/7.", touched_at: NOW.toISOString(), hashtags: ["#injurylaw", "#queens"], cta: "Call today" }, unchangedSince: AT }]);
     expect(iterations).toEqual([{
       client_id: CLIENT, report_id: null, calendar_post_key: KEY, version: 3, platform: "Instagram", post_copy: "Hurt in a crash? We answer 24/7.",
       hashtags: ["#injurylaw", "#queens"], cta: "Call today", concept: null, visual_direction: null, format: null, source: "claude", created_by: PERSON,
     }]);
-    expect(learned).toEqual([{ kind: "copy_edit", before: POST.copy, after: "Hurt in a crash? We answer 24/7.", platform: "Instagram" }]);
+    expect(taught).toEqual([{ kind: "copy_edit", before: POST.copy, after: "Hurt in a crash? We answer 24/7.", platform: "Instagram" }]);
+    expect(later).toHaveLength(1);
   });
 
   it("refuses a save based on an older read, and answers with the copy as it is now", async () => {
     const { w, iterations, updates } = writes({ ...POST, copy: "Edited in the app", updated_at: "2026-11-03T11:00:00.000001+00:00" });
     expect(await saveCopy(w, claude())).toEqual({
       ok: false, status: 409, error: "This post changed in Socialytics after you read it.",
-      current: { copy: "Edited in the app", hashtags: ["injurylaw"], cta: "Call now", platform: "Instagram", updated_at: "2026-11-03T11:00:00.000001+00:00" },
+      current: { copy: "Edited in the app", hashtags: ["injurylaw"], cta: "Call now", platform: "Instagram", format: "Single image", updated_at: "2026-11-03T11:00:00.000001+00:00" },
     });
     expect(updates).toEqual([]);
     expect(iterations).toEqual([]);
@@ -162,5 +195,131 @@ describe("copyWrites", () => {
     await expect(copyWrites(db).insertIteration({} as IterationRow)).rejects.toThrow("Could not save the copy: boom");
     expect(await copyWrites(db).post(CLIENT, KEY)).toBeNull();
     expect(await copyWrites(db).updatePost(CLIENT, KEY, { copy: "x" }, AT)).toBeNull();
+  });
+});
+
+// The calendar's own actions, as calendar-posts/copy.ts had them (notes on
+// regenerate, Lital 3 Nov 2026), against an in-memory database: save_copy
+// checks membership and teaches as above; undo_note takes a note's learning
+// back.
+describe("the calendar's save_copy and undo_note", () => {
+  type Row = Record<string, unknown>;
+  const CHANGES = [{ op: "add" as const, id: "pref-1", description: "Never use exclamation marks.", platform: null }];
+  const world = (post: Row = {}): FakeDb => tableDb({
+    calendar_posts: [{ client_id: "c1", post_key: "post:p1", copy: "Join us Friday!", platform: "Instagram", format: "Single image", ...post }],
+    post_iterations: [],
+  });
+  function deps(db: FakeDb, over: Partial<CopyDeps> = {}) {
+    const d = {
+      db,
+      requireMember: vi.fn(async () => "person-1"),
+      learn: vi.fn(async () => ({ ops: 1, changes: CHANGES })),
+      undo: vi.fn(async () => 1),
+      background: vi.fn(),
+      ...over,
+    };
+    return d as typeof d & CopyDeps;
+  }
+  const regenerated = (over: Row = {}) => ({ client_id: "c1", calendar_post_key: "post:p1", post_copy: "Join us Friday.", platform: "Instagram", version: 2, source: "regeneration", ...over });
+
+  it("teaches the memory through the note on a regeneration, with the copy before and after, and answers what it learned", async () => {
+    const db = world();
+    const d = deps(db);
+    const r = await saveCopyAction(d, regenerated({ note: "  Never use exclamation marks  " }));
+    expect(r.status ?? 200).toBe(200);
+    expect(d.learn).toHaveBeenCalledWith("c1", { kind: "rewrite_note", note: "Never use exclamation marks", before: "Join us Friday!", after: "Join us Friday.", platform: "Instagram", story: false });
+    expect(r.body).toEqual({ ok: true, learned: { changes: CHANGES } });
+    expect(d.background).not.toHaveBeenCalled();
+    expect(db.tables.post_iterations[0]).toMatchObject({ source: "regeneration", post_copy: "Join us Friday.", created_by: "person-1" });
+    expect(db.tables.calendar_posts[0].copy).toBe("Join us Friday.");
+  });
+
+  it("never teaches from a regeneration without a note", async () => {
+    const d = deps(world());
+    const r = await saveCopyAction(d, regenerated());
+    expect(r.body).toEqual({ ok: true });
+    expect(d.learn).not.toHaveBeenCalled();
+    expect(d.background).not.toHaveBeenCalled();
+  });
+
+  it("tells the memory a Story's message is a Story's", async () => {
+    const d = deps(world({ format: "Story" }));
+    await saveCopyAction(d, regenerated({ note: "Punchier" }));
+    expect(d.learn.mock.calls[0][1]).toMatchObject({ kind: "rewrite_note", story: true });
+  });
+
+  it("learns from the copy the screen rewrote when a report's own post has no calendar row", async () => {
+    const d = deps(tableDb({ calendar_posts: [], post_iterations: [] }));
+    await saveCopyAction(d, regenerated({ note: "Shorter", previous_copy: " Join us this Friday! " }));
+    expect(d.learn.mock.calls[0][1]).toMatchObject({ kind: "rewrite_note", before: "Join us this Friday!", after: "Join us Friday.", platform: "Instagram" });
+  });
+
+  it("saves the rewrite and answers with nothing learned when the learning does not finish", async () => {
+    const db = world();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const d = deps(db, { learn: vi.fn(async () => { throw new Error("model busy"); }) });
+    const r = await saveCopyAction(d, regenerated({ note: "Shorter" }));
+    expect(r.body).toEqual({ ok: true });
+    expect(db.tables.calendar_posts[0].copy).toBe("Join us Friday.");
+    warn.mockRestore();
+  });
+
+  it("still teaches from a person's own edit in the background, as before, and a note there changes nothing", async () => {
+    const d = deps(world());
+    const r = await saveCopyAction(d, regenerated({ source: "calendar", post_copy: "Join us on Friday.", note: "ignored" }));
+    expect(r.body).toEqual({ ok: true });
+    expect(d.learn).toHaveBeenCalledWith("c1", { kind: "copy_edit", before: "Join us Friday!", after: "Join us on Friday.", platform: "Instagram" });
+    expect(d.background).toHaveBeenCalledTimes(1);
+  });
+
+  it("checks membership before anything is written", async () => {
+    const db = world();
+    const d = deps(db, { requireMember: vi.fn(async () => { throw new AuthzError(403, "You do not have access to this client."); }) });
+    await expect(saveCopyAction(d, regenerated({ note: "x" }))).rejects.toThrow(AuthzError);
+    expect(db.tables.post_iterations).toEqual([]);
+    expect(d.learn).not.toHaveBeenCalled();
+  });
+
+  it("asks for the post and its copy", async () => {
+    expect((await saveCopyAction(deps(world()), { client_id: "c1", calendar_post_key: "post:p1" })).status).toBe(400);
+  });
+
+  it("takes back what a note taught, for a member of the client", async () => {
+    const d = deps(world());
+    const r = await undoNote(d, { client_id: "c1", changes: CHANGES });
+    expect(d.requireMember).toHaveBeenCalledWith("c1");
+    expect(d.undo).toHaveBeenCalledWith("c1", CHANGES);
+    expect(r.body).toEqual({ ok: true, undone: 1 });
+  });
+
+  it("passes on only well-formed additions and replacements, at most three", async () => {
+    const d = deps(world());
+    await undoNote(d, { client_id: "c1", changes: [
+      { op: "confirm", id: "p2", description: "x", platform: null },
+      { op: "add", id: 7 },
+      { op: "replace", id: "n1", description: "New.", platform: "LinkedIn", added: true, replaced: { id: "o1", description: "Old." } },
+      "nonsense",
+      ...CHANGES, ...CHANGES, ...CHANGES,
+    ] });
+    expect(d.undo.mock.calls[0][1]).toEqual([
+      { op: "replace", id: "n1", description: "New.", platform: "LinkedIn", added: true, replaced: { id: "o1", description: "Old." } },
+      CHANGES[0], CHANGES[0],
+    ]);
+  });
+
+  it("asks for the client", async () => {
+    expect((await undoNote(deps(world()), { changes: CHANGES })).status).toBe(400);
+  });
+});
+
+describe("one path", () => {
+  const functions = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const code = (f: string) => readFileSync(join(functions, f), "utf8");
+
+  it("is this module for both the calendar and the connector, and calendar-posts keeps no copy save of its own", () => {
+    expect(existsSync(join(functions, "calendar-posts", "copy.ts"))).toBe(false);
+    expect(code("calendar-posts/index.ts")).toMatch(/from "\.\.\/_shared\/calendar\/saveCopy\.ts"/);
+    expect(code("calendar-posts/index.ts")).not.toMatch(/from\("post_iterations"\)|\.from\("calendar_posts"\)\.update/);
+    expect(code("mcp/writes.ts")).toMatch(/import \{[^}]*\bsaveCopy\b[^}]*\} from "\.\.\/_shared\/calendar\/saveCopy\.ts"/);
   });
 });

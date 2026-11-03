@@ -74,7 +74,7 @@ function world(over: { staff?: boolean; canWrite?: string[]; writes?: number; st
     client: async (id) => (id === BADER ? { id, name: "Bader Law" } : id === CALM ? { id, name: "Calm" } : null),
     writesSince: async (_c, since) => { w.calls.push(`since ${since.toISOString()}`); return w.writes; },
     notes, copy,
-    learn: async (c, s) => { w.learned.push([c, s]); },
+    learn: async (c, s) => { w.learned.push([c, s]); return { changes: [] }; },
     strategy: async (c) => (c === BADER ? over.strategy ?? STRATEGY : { row: null, edits: [] }),
     saveSection: async (u, c, k, t) => { w.sections.push([u, c, k, t]); },
     report: async (id) => (id === REPORT ? { id, client_id: BADER, kind: "social" } : id === COMPETITIVE ? { id, client_id: BADER, kind: "competitive" } : id === CALM_REPORT ? { id, client_id: CALM, kind: "social" } : null),
