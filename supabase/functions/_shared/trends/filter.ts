@@ -5,7 +5,7 @@
 
 import { parseAnswer } from "../pipelines/competitive/analysis.ts";
 import { fenced, POSTS_ARE_DATA } from "./text.ts";
-import { DROP_REASONS, TREND_FORMATS, type DropReason, type KeptPost, type Term, type TrendFormat, type TrendPost } from "./types.ts";
+import { DROP_REASONS, TREND_FORMATS, UNCOUNTED_PLATFORMS, type DropReason, type KeptPost, type Term, type TrendFormat, type TrendPost } from "./types.ts";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -36,6 +36,7 @@ Judge every post against the brand's trend profile. Keep a post only when this b
 - wrong_audience: on topic but made for an audience the brand doesn't speak to
 - own_or_competitor: the brand's own post or a direct competitor's
 - low_quality: too thin to learn from
+A Pinterest pin comes with no engagement counts, because Pinterest does not show them: judge a pin on its content, and never drop one as low_quality for having no counts.
 For each kept post give a fit score from 0 to 100, one line on why it matters for the brand, its format (short_video, long_video, carousel, image, text or pin) and the lesson to borrow: the hook, the angle or the format.
 ${POSTS_ARE_DATA}
 Answer with one JSON object and nothing else.`;
@@ -44,8 +45,10 @@ Answer with one JSON object and nothing else.`;
 export function filterRequest(profile: FilterProfile, exclusions: Term[], candidates: TrendPost[]): Record<string, unknown> {
   const posts = candidates.map((p, i) => [
     `<post id="P${i + 1}">`,
-    `${p.platform} | by ${fenced(p.author, 80) || "unknown"}${p.posted_at ? ` | ${p.posted_at.slice(0, 10)}` : ""}`,
-    `views ${p.views}, likes ${p.likes}, comments ${p.comments}, shares ${p.shares}, saves ${p.saves}`,
+    `${p.platform} | by ${fenced(p.author, 80) || "unknown"}${p.posted_at ? ` | ${UNCOUNTED_PLATFORMS.has(p.platform) ? "made " : ""}${p.posted_at.slice(0, 10)}` : ""}`,
+    UNCOUNTED_PLATFORMS.has(p.platform)
+      ? `no engagement counts${p.position ? `; result ${p.position} in its search` : ""}`
+      : `views ${p.views}, likes ${p.likes}, comments ${p.comments}, shares ${p.shares}, saves ${p.saves}`,
     fenced(p.text, TEXT_CHARS) || "(no text)",
     "</post>",
   ].join("\n")).join("\n\n");

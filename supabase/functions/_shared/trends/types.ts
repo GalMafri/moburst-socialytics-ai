@@ -13,8 +13,18 @@ export const HASHTAG_PLATFORMS: readonly HashtagPlatform[] = ["instagram", "tikt
 export type TrendFormat = "short_video" | "long_video" | "carousel" | "image" | "text" | "pin";
 export const TREND_FORMATS: readonly TrendFormat[] = ["short_video", "long_video", "carousel", "image", "text", "pin"];
 
+/**
+ * Platforms whose results carry no engagement counts (Pinterest's list results
+ * have none, 3 Nov 2026). Their posts are ranked by the search's own order,
+ * newer first among equals; dated by when they were made, kept up to
+ * UNCOUNTED_MAX_AGE_DAYS old instead of the week's window, and never offered
+ * again once a week kept them; and judged on their content alone.
+ */
+export const UNCOUNTED_PLATFORMS: ReadonlySet<TrendPlatform> = new Set<TrendPlatform>(["pinterest"]);
+export const UNCOUNTED_MAX_AGE_DAYS = 90;
+
 /** Why the rules in code left a post out, before Claude reads anything. */
-export type RuleDrop = "duplicate" | "outside_window" | "language" | "own_or_competitor" | "over_cap";
+export type RuleDrop = "duplicate" | "outside_window" | "language" | "own_or_competitor" | "over_cap" | "kept_before";
 
 /** Why Claude's filter left a post out. */
 export type DropReason = "off_topic" | "scheme_or_spam" | "job_ad" | "giveaway" | "wrong_audience" | "own_or_competitor" | "low_quality";
@@ -26,7 +36,7 @@ export interface TrendPost {
   url: string;
   author: string;
   text: string;
-  /** ISO time; null where the source gives no reliable date (Pinterest). */
+  /** ISO time; null where the source gives none. For a Pinterest pin, when the pin was made. */
   posted_at: string | null;
   format: TrendFormat | null;
   views: number;
@@ -39,6 +49,8 @@ export interface TrendPost {
   search: string;
   /** The author's handle, where the source gives one beside a display name; only for telling tracked accounts apart, never saved. */
   handle?: string;
+  /** Where it came in its search's results, from 1, for a platform with no engagement counts (UNCOUNTED_PLATFORMS); never saved. */
+  position?: number;
 }
 
 /** A topic, hashtag or exclusion, always with the reason it is there. */

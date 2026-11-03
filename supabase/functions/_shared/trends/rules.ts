@@ -6,7 +6,7 @@
 // decision can be checked.
 
 import { SPAM_SIGNALS } from "../pipelines/social/nodes.ts";
-import type { RuleDrop, TrendPlatform, TrendPost } from "./types.ts";
+import { UNCOUNTED_MAX_AGE_DAYS, UNCOUNTED_PLATFORMS, type RuleDrop, type TrendPlatform, type TrendPost } from "./types.ts";
 
 /** At most this many candidates per platform reach Claude's filter. */
 export const CANDIDATES_PER_PLATFORM = 60;
@@ -50,6 +50,21 @@ export interface RuleOptions {
   competitorHandles: string[];
   competitorNames: string[];
   capPerPlatform?: number;
+  /** Links of posts a week before this one kept, from platforms with no engagement counts: never offered again. */
+  keptBefore?: string[];
+}
+
+const DAY_MS = 86_400_000;
+const madeAt = (p: TrendPost): number => (p.posted_at ? Date.parse(p.posted_at) || 0 : 0);
+
+/**
+ * The order a platform's posts take their turns in. Posts with counts: most
+ * engaged first. Posts without (UNCOUNTED_PLATFORMS): the search's own order,
+ * then the newer first.
+ */
+function better(platform: TrendPlatform): (a: TrendPost, b: TrendPost) => number {
+  if (!UNCOUNTED_PLATFORMS.has(platform)) return (a, b) => b.engagement - a.engagement;
+  return (a, b) => (a.position ?? Infinity) - (b.position ?? Infinity) || madeAt(b) - madeAt(a);
 }
 
 const squash = (s: string): string => s.toLowerCase().replace(/[^\p{L}0-9]+/gu, "");
@@ -81,6 +96,7 @@ export function ruleFilter(posts: TrendPost[], o: RuleOptions): { candidates: Tr
   const end = Date.parse(o.windowEnd);
   const ours = new Set([...o.ownHandles, ...o.ownNames, ...o.competitorHandles, ...o.competitorNames].map(squash).filter(Boolean));
   const seen = new Set<string>();
+  const keptBefore = new Set((o.keptBefore ?? []).map(urlKey));
   const kept: TrendPost[] = [];
 
   for (const p of posts) {
@@ -90,9 +106,16 @@ export function ruleFilter(posts: TrendPost[], o: RuleOptions): { candidates: Tr
       continue;
     }
     seen.add(key);
+    const uncounted = UNCOUNTED_PLATFORMS.has(p.platform);
+    if (uncounted && keptBefore.has(key)) {
+      dropped.push({ post: p, reason: "kept_before" });
+      continue;
+    }
     if (p.posted_at) {
       const at = Date.parse(p.posted_at);
-      if (!Number.isNaN(at) && (at < start || at > end)) {
+      // A pin lasts: it is kept up to its maximum age, not only in the week's window.
+      const from = uncounted ? end - UNCOUNTED_MAX_AGE_DAYS * DAY_MS : start;
+      if (!Number.isNaN(at) && (at < from || at > end)) {
         dropped.push({ post: p, reason: "outside_window" });
         continue;
       }
@@ -112,14 +135,15 @@ export function ruleFilter(posts: TrendPost[], o: RuleOptions): { candidates: Tr
   const byPlatform = new Map<TrendPlatform, TrendPost[]>();
   for (const p of kept) byPlatform.set(p.platform, [...(byPlatform.get(p.platform) ?? []), p]);
   const candidates: TrendPost[] = [];
-  for (const list of byPlatform.values()) {
-    // Each search's most engaged post first, then each one's second, and so on: a loose
+  for (const [platform, list] of byPlatform) {
+    // Each search's best post first, then each one's second, and so on: a loose
     // search that brings back many viral posts cannot take every place from the others.
+    const order = better(platform);
     const bySearch = new Map<string, TrendPost[]>();
     for (const p of list) bySearch.set(p.search, [...(bySearch.get(p.search) ?? []), p]);
     const turn = new Map<TrendPost, number>();
-    for (const group of bySearch.values()) [...group].sort((a, b) => b.engagement - a.engagement).forEach((p, i) => turn.set(p, i));
-    const ranked = [...list].sort((a, b) => turn.get(a)! - turn.get(b)! || b.engagement - a.engagement);
+    for (const group of bySearch.values()) [...group].sort(order).forEach((p, i) => turn.set(p, i));
+    const ranked = [...list].sort((a, b) => turn.get(a)! - turn.get(b)! || (UNCOUNTED_PLATFORMS.has(platform) ? madeAt(b) - madeAt(a) : order(a, b)));
     candidates.push(...ranked.slice(0, cap));
     for (const p of ranked.slice(cap)) dropped.push({ post: p, reason: "over_cap" });
   }

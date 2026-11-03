@@ -37,7 +37,7 @@ import { fillAfter, MAX_SEARCHES, personSearches, searchesFor, TREND_SOURCES } f
 import { ruleFilter, tripwire } from "../../trends/rules.ts";
 import { filterRequest, parseFilter, pickKept, TREND_FILTER_MODEL, type FilterProfile } from "../../trends/filter.ts";
 import { parseThemes, themesRequest, themesWanted, TREND_THEMES_MODEL } from "../../trends/themes.ts";
-import { TREND_PLATFORMS, type DropReason, type KeptPost, type RuleDrop, type Term, type Theme, type TrendPlatform, type TrendPost } from "../../trends/types.ts";
+import { TREND_PLATFORMS, UNCOUNTED_PLATFORMS, type DropReason, type KeptPost, type RuleDrop, type Term, type Theme, type TrendPlatform, type TrendPost } from "../../trends/types.ts";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -78,6 +78,8 @@ interface Plan {
   own: { handles: string[]; names: string[] };
   competitorHandles: string[];
   window: { start: string; end: string };
+  /** The Monday of the week collected; a replay keeps the week it replays. */
+  weekStart?: string;
   platforms: TrendPlatform[];
   searches: Partial<Record<TrendPlatform, string[]>>;
   profile: FilterProfile;
@@ -108,6 +110,28 @@ interface TrendState {
 }
 
 type Judged = { post: TrendPost | KeptPost; reason: DropReason | "below_cut" };
+
+/**
+ * Links of the posts the client's earlier weeks kept from platforms with no
+ * engagement counts (UNCOUNTED_PLATFORMS): a pin lasts, so one a week kept is
+ * not offered again. Weeks before `weekStart` only, so a replay of a week
+ * does not count its own posts. A failed read leaves nothing out.
+ */
+async function keptBefore(db: Any, clientId: string, weekStart: string): Promise<string[]> {
+  const { data: weeks, error } = await db.from("trend_weeks").select("id").eq("client_id", clientId).lt("week_start", weekStart);
+  if (error) {
+    console.warn("[trends] the earlier weeks' pins were not read:", error.message);
+    return [];
+  }
+  const ids = (weeks ?? []).map((w: { id: string }) => w.id);
+  if (!ids.length) return [];
+  const { data: posts, error: postsError } = await db.from("trend_posts").select("url").in("week_id", ids).eq("kept", true).in("platform", [...UNCOUNTED_PLATFORMS]);
+  if (postsError) {
+    console.warn("[trends] the earlier weeks' pins were not read:", postsError.message);
+    return [];
+  }
+  return (posts ?? []).map((p: { url: string }) => String(p.url));
+}
 
 async function need<T = Any>(ctx: StepContext, key: string): Promise<T> {
   const value = await ctx.payloads.get<T>(key);
@@ -180,7 +204,7 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
         detail = { ...detail, apify_run_id: actor.runId, rows: rows.length };
       }
       if (rows) {
-        const found = rows.map((r) => TREND_SOURCES[platform].normalize(r, run.search)).filter((p): p is TrendPost => p !== null);
+        const found = rows.map((r, i) => TREND_SOURCES[platform].normalize(r, run.search, i + 1)).filter((p): p is TrendPost => p !== null);
         const sofar = (await ctx.payloads.get<TrendPost[]>(`posts.${platform}`)) ?? [];
         await ctx.payloads.put(`posts.${platform}`, [...sofar, ...found]);
         prog.rows += found.length;
@@ -335,6 +359,7 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
           own: { handles: own.map((r) => String(r.native_name ?? "")).filter(Boolean), names: own.map((r) => String(r.profile_name ?? "")).filter(Boolean) },
           competitorHandles: rivals.map((r) => String(r.handle ?? "")).filter(Boolean),
           window: { start: new Date(end.getTime() - WINDOW_DAYS * 86_400_000).toISOString(), end: end.toISOString() },
+          weekStart,
           platforms,
           searches,
           profile: { audience: String(profile.audience), fit_rubric: String(profile.fit_rubric), topics: terms.topics, brand: String(client.name ?? ""), competitors: competitorNames },
@@ -384,9 +409,11 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
         const plan = await need<Plan>(ctx, "plan");
         const all: TrendPost[] = [];
         for (const p of TREND_PLATFORMS) all.push(...((await ctx.payloads.get<TrendPost[]>(`posts.${p}`)) ?? []));
+        const weekStart = plan.weekStart ?? String(ctx.run.input?.week_start ?? plan.window.end.slice(0, 10));
         const { candidates, dropped } = ruleFilter(all, {
           windowStart: plan.window.start, windowEnd: plan.window.end, languages: plan.client.languages,
           ownHandles: plan.own.handles, ownNames: [plan.client.name, ...plan.own.names], competitorHandles: plan.competitorHandles, competitorNames: plan.competitors,
+          keptBefore: await keptBefore(ctx.db, ctx.run.client_id, weekStart),
         });
         await ctx.payloads.put("candidates", candidates);
         await ctx.payloads.put("rule_dropped", dropped);

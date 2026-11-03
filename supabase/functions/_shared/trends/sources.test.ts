@@ -64,10 +64,16 @@ describe("each source's answer in the shared post shape", () => {
     expect(short).toMatchObject({ format: "short_video", url: "https://www.youtube.com/shorts/Zq9x1shortAA", views: 18400 });
   });
 
-  it("gives a pin no date and counts its saves", () => {
+  it("dates a pin by when it was made, keeps its place in the search, and counts saves where a row has them", () => {
     const pin = read("pinterest")[1]!;
-    expect(pin).toMatchObject({ posted_at: null, saves: 312, likes: 4, format: "pin", author: "UnitedIncome", search: "marketing tips" });
+    expect(pin).toMatchObject({ posted_at: "2026-10-19T13:45:05.000Z", saves: 312, likes: 4, format: "pin", author: "UnitedIncome", search: "marketing tips" });
     expect(pin.text).toContain("45 Marketing Tips");
+    expect(pin.position).toBeUndefined();
+    // Places count every row of the run's results, including one that is not a pin (the third here).
+    const placed = rows("pinterest").map((r, i) => TREND_SOURCES.pinterest.normalize(r, "run search", i + 1));
+    expect(placed.map((p) => p?.position ?? null)).toEqual([1, 2, null]);
+    // A post from a source with counts never carries a place.
+    expect(TREND_SOURCES.tiktok.normalize(rows("tiktok")[0], "run search", 1)?.position).toBeUndefined();
   });
 
   it("reads a Facebook post's time, reactions and kind", () => {
