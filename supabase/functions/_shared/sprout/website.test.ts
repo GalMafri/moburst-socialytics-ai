@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { confirmingFact, domainLabel, linkedDomains, nameLabels, postLinks, searchWebsite, siteNameOf, webReader, websiteJoins, type SiteReader } from "./website";
+import { confirmingFact, domainLabel, linkedDomains, MAX_NAME_SEARCHES, nameLabels, nameQueries, postLinks, searchWebsite, searchWebsiteByName, siteNameOf, webReader, websiteJoins, type SiteReader } from "./website";
 import { groupBrands } from "./brands";
 import type { SproutProfile } from "../lifecycle/accounts";
 
@@ -152,5 +152,30 @@ describe("webReader", () => {
     expect(await r.homepage("https://olo.com")).toBeNull();
     const down = webReader({ fetchImpl: (async () => { throw new Error("down"); }) as typeof fetch });
     expect(await down.resolve("https://olo.com")).toBeNull();
+  });
+});
+
+describe("the website searched by name (onboarding from social profiles, section 4)", () => {
+  const engine = (answers: Record<string, string[]>) => {
+    const asked: string[] = [];
+    return { asked, async search(q: string) { asked.push(q); return answers[q] ?? []; } };
+  };
+  it("searches the name and each distinct handle, at most three searches", () => {
+    expect(nameQueries("Olo", ["olo", "olo.hq", "olo_eats", "olo-four"])).toEqual(["Olo", "olo.hq", "olo_eats"]);
+    expect(nameQueries("Olo", ["Olo"]).length).toBeLessThanOrEqual(MAX_NAME_SEARCHES);
+  });
+  it("counts a searched domain only when its homepage links to one of the client's own profiles; a name match alone does not", async () => {
+    const e = engine({ Olo: ["https://www.instagram.com/olo", "https://olo.co/", "https://www.olo.com/about"] });
+    const r = reader({}, { "olo.co": "<title>Olo</title><meta property=\"og:site_name\" content=\"Olo\">", "olo.com": `<a href="https://www.linkedin.com/company/olo/">in</a>` });
+    expect(await searchWebsiteByName(OLO, e, r)).toMatchObject({ website: "https://www.olo.com", confirmed_by: "profile_link", queries: ["Olo"] });
+    expect(r.read).toEqual(["https://olo.co", "https://olo.com"]);
+  });
+  it("drops shared platforms and the domains the post search already tried, and reads three new domains at most", async () => {
+    // The handle "olo" is the name again: it is not searched twice.
+    const e = engine({ Olo: ["https://a.example", "https://b.example", "https://linktr.ee/olo"], "olo.hq": ["https://c.example", "https://d.example", "https://e.example"] });
+    const r = reader({}, {});
+    const out = await searchWebsiteByName(OLO, e, r, { skip: ["a.example"] });
+    expect(out).toMatchObject({ website: null, confirmed_by: null, queries: ["Olo", "olo.hq"] });
+    expect(r.read).toEqual(["https://b.example", "https://c.example", "https://d.example"]);
   });
 });
