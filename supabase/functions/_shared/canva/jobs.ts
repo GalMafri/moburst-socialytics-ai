@@ -40,6 +40,8 @@ export interface DesignRequest {
   on_camera?: string | null;
   /** 'posts': a generated video in the look of the client's static posts, chosen instead of filming. */
   video_route?: string | null;
+  /** The note the person left on Regenerate: its planner and every design job follow it. */
+  note?: string | null;
 }
 
 /** A PNG's pixel size from its header. */
@@ -88,6 +90,8 @@ export async function startOption(admin: any, req: DesignRequest, settings: Sett
       generate: {
         brand_name: brandName, platform: req.platform ?? "social", concept: slide.picture, background: settings.background, refs: brief.refs?.length ? brief.refs : settings.reference_paths.slice(0, 3),
         ...(story ? { size: { ...STORY_PAGE }, surface: STORY_SURFACE } : {}),
+        // The person's note, so the image model sees it and a retry of the job keeps it.
+        ...(req.note?.trim() ? { note: req.note.trim() } : {}),
       },
     },
   }));
