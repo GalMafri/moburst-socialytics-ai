@@ -161,6 +161,10 @@ verify_jwt = false
 [functions.higgsfield-auth]
 verify_jwt = false
 
+# Google sends the browser back here with no JWT; the stored state is the proof.
+[functions.google-auth]
+verify_jwt = false
+
 [functions.media-job-status]
 verify_jwt = false
 

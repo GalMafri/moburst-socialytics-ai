@@ -292,6 +292,11 @@
   /* Long-form AI passages: bigger, looser, capped at a readable measure. */
   .t-prose { font-size: 15px; line-height: 25px; letter-spacing: -0.1px; }
   :where(.t-prose) { max-width: 72ch; }
+  /* Content a person reads in a card (the strategy's fields): a size up from
+     body, looser, white, capped at a reading measure. t-label stays for chips,
+     dates and sources, never for content. */
+  .t-read { font-size: 16px; line-height: 26px; letter-spacing: -0.15px; }
+  :where(.t-read) { color: #ffffff; max-width: 68ch; }
   :where(.t-stat, .t-h1, .t-h2, .t-h3, .t-h4, .t-prose) { color: #ffffff; }
   /* Secondary sentences stay light (#d1d5db, 12.6:1). Grey (#b1b7c1, 9.6:1) is for short labels only. */
   :where(.t-secondary) { color: #ffffff; }

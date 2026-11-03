@@ -972,6 +972,44 @@ export type Database = {
           },
         ]
       }
+      client_public_profiles: {
+        Row: {
+          client_id: string
+          handle: string
+          platform: string
+          source: string
+          updated_at: string
+          updated_by: string | null
+          url: string | null
+        }
+        Insert: {
+          client_id: string
+          handle: string
+          platform: string
+          source: string
+          updated_at?: string
+          updated_by?: string | null
+          url?: string | null
+        }
+        Update: {
+          client_id?: string
+          handle?: string
+          platform?: string
+          source?: string
+          updated_at?: string
+          updated_by?: string | null
+          url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_public_profiles_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       clients: {
         Row: {
           archived_at: string | null
@@ -1526,7 +1564,11 @@ export type Database = {
           pending: Json | null
           pillars: Json
           platforms: Json
+          public_read: Json | null
+          public_read_at: string | null
+          section_texts: Json
           sections: Json
+          shape: number
           sources: Json
           updated_at: string
           usage: Json
@@ -1539,7 +1581,11 @@ export type Database = {
           pending?: Json | null
           pillars?: Json
           platforms?: Json
+          public_read?: Json | null
+          public_read_at?: string | null
+          section_texts?: Json
           sections?: Json
+          shape?: number
           sources?: Json
           updated_at?: string
           usage?: Json
@@ -1552,7 +1598,11 @@ export type Database = {
           pending?: Json | null
           pillars?: Json
           platforms?: Json
+          public_read?: Json | null
+          public_read_at?: string | null
+          section_texts?: Json
           sections?: Json
+          shape?: number
           sources?: Json
           updated_at?: string
           usage?: Json
@@ -1577,6 +1627,7 @@ export type Database = {
           section_key: string
           source: string
           text: string
+          value: Json | null
         }
         Insert: {
           client_id: string
@@ -1586,6 +1637,7 @@ export type Database = {
           section_key: string
           source?: string
           text: string
+          value?: Json | null
         }
         Update: {
           client_id?: string
@@ -1595,10 +1647,67 @@ export type Database = {
           section_key?: string
           source?: string
           text?: string
+          value?: Json | null
         }
         Relationships: [
           {
             foreignKeyName: "content_strategy_edits_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      content_strategy_exports: {
+        Row: {
+          client_id: string
+          created_at: string
+          edits_at: string | null
+          file_id: string | null
+          id: string
+          kind: string
+          made_at: string | null
+          requested_by: string | null
+          requester_name: string
+          status: string
+          strategy_written_at: string
+          updated_at: string
+          url: string | null
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          edits_at?: string | null
+          file_id?: string | null
+          id?: string
+          kind?: string
+          made_at?: string | null
+          requested_by?: string | null
+          requester_name?: string
+          status?: string
+          strategy_written_at: string
+          updated_at?: string
+          url?: string | null
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          edits_at?: string | null
+          file_id?: string | null
+          id?: string
+          kind?: string
+          made_at?: string | null
+          requested_by?: string | null
+          requester_name?: string
+          status?: string
+          strategy_written_at?: string
+          updated_at?: string
+          url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "content_strategy_exports_client_id_fkey"
             columns: ["client_id"]
             isOneToOne: false
             referencedRelation: "clients"
@@ -2269,6 +2378,48 @@ export type Database = {
           tool?: string
           tool_opens?: number
           user_email?: string | null
+        }
+        Relationships: []
+      }
+      google_connection: {
+        Row: {
+          account_email: string | null
+          connected_at: string | null
+          folder_id: string | null
+          id: boolean
+          last_used_at: string | null
+          pending_started_at: string | null
+          pending_state: string | null
+          pending_verifier: string | null
+          template_id: string | null
+          template_version: string | null
+          updated_at: string
+        }
+        Insert: {
+          account_email?: string | null
+          connected_at?: string | null
+          folder_id?: string | null
+          id?: boolean
+          last_used_at?: string | null
+          pending_started_at?: string | null
+          pending_state?: string | null
+          pending_verifier?: string | null
+          template_id?: string | null
+          template_version?: string | null
+          updated_at?: string
+        }
+        Update: {
+          account_email?: string | null
+          connected_at?: string | null
+          folder_id?: string | null
+          id?: boolean
+          last_used_at?: string | null
+          pending_started_at?: string | null
+          pending_state?: string | null
+          pending_verifier?: string | null
+          template_id?: string | null
+          template_version?: string | null
+          updated_at?: string
         }
         Relationships: []
       }
@@ -4110,6 +4261,7 @@ export type Database = {
           id: string
           input_tokens: number | null
           model: string | null
+          moments: Json | null
           output_tokens: number | null
           pending_revision: Json | null
           ready_at: string | null
@@ -4146,6 +4298,7 @@ export type Database = {
           id: string
           input_tokens: number | null
           model: string | null
+          moments: Json | null
           output_tokens: number | null
           pending_revision: Json | null
           ready_at: string | null
@@ -4177,6 +4330,7 @@ export type Database = {
           id: string
           input_tokens: number | null
           model: string | null
+          moments: Json | null
           output_tokens: number | null
           pending_revision: Json | null
           ready_at: string | null
@@ -4210,6 +4364,14 @@ export type Database = {
       client_notes_queue_read: {
         Args: { p_client: string }
         Returns: undefined
+      }
+      client_public_profile_remove: {
+        Args: { p_client: string; p_platform: string }
+        Returns: boolean
+      }
+      client_public_profile_set: {
+        Args: { p_client: string; p_handle: string; p_platform: string; p_url: string }
+        Returns: Json
       }
       client_notes_queue_waiting: { Args: never; Returns: number }
       client_value_is_set: {
@@ -4276,6 +4438,9 @@ export type Database = {
           status: string
         }[]
       }
+      google_token_clear: { Args: never; Returns: undefined }
+      google_token_read: { Args: never; Returns: string }
+      google_token_save: { Args: { p_token: string }; Returns: undefined }
       get_ai_quality: {
         Args: { days?: number }
         Returns: {
@@ -4598,10 +4763,16 @@ export type Database = {
         }
         Returns: Json
       }
-      strategy_section_save: {
-        Args: { p_client: string; p_key: string; p_text: string }
-        Returns: Json
-      }
+      strategy_deck_request: { Args: { p_client: string }; Returns: Json }
+      strategy_section_save:
+        | {
+            Args: { p_client: string; p_key: string; p_text: string }
+            Returns: Json
+          }
+        | {
+            Args: { p_client: string; p_key: string; p_text: string; p_value: Json }
+            Returns: Json
+          }
       strategy_section_save_as: {
         Args: {
           p_client: string
@@ -4610,6 +4781,7 @@ export type Database = {
           p_source: string
           p_text: string
           p_user: string
+          p_value?: Json
         }
         Returns: Json
       }

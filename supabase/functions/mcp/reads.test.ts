@@ -130,6 +130,18 @@ describe("socialytics_strategy_get", () => {
     expect(await call("socialytics_strategy_get", { client_id: BADER }, CLIENT_USER)).toEqual({ ok: false, status: 404, code: "not_found", text: "No client with that id among the clients you can see." });
   });
 
+  it("reads a strategy written as fields by the lines the page shows, the same text the save versions", () => {
+    const goals = { items: [{ title: "Grow leads", why: "Calls.", platform: "Instagram", metric: "posts_per_week", direction: "above", baseline: 2, by: "2027-02-01" }] };
+    const rows: StrategyRows = {
+      row: { written_at: "2026-11-03T08:00:00+00:00", sections: { goals, audience: { who: "Drivers", wants: [], where: [] } }, section_texts: { goals: "- Grow leads (Instagram posts a week: 2 today, above it by 1 Feb 2027). Why: Calls.", audience: "Drivers" }, platforms: [], pillars: [] },
+      edits: [{ section_key: "audience", text: "Drivers hurt in Queens", editor_name: "Neria", edited_at: "2026-11-03T09:00:00+00:00", source: "app" }],
+    };
+    const shown = strategySections(rows);
+    expect(shown[0]).toMatchObject({ key: "goals", text: "- Grow leads (Instagram posts a week: 2 today, above it by 1 Feb 2027). Why: Calls.", product: "- Grow leads (Instagram posts a week: 2 today, above it by 1 Feb 2027). Why: Calls." });
+    expect(shown[1]).toMatchObject({ key: "audience", text: "Drivers hurt in Queens", product: "Drivers" });
+    expect(JSON.stringify(shown)).not.toContain("[object Object]");
+  });
+
   it("makes a version that changes with the text and nothing else", async () => {
     expect(await sectionVersion("a")).toMatch(/^[0-9a-f]{16}$/);
     expect(await sectionVersion("a")).toBe(await sectionVersion("a"));
@@ -194,6 +206,7 @@ describe("personReads", () => {
     expect(op(byTable("calendar_posts")[0], "lte")).toEqual(["post_date", "2026-11-30"]);
     expect(op(byTable("rpc:calendar_post_worked")[0], "rpc")).toEqual([{ p_client: BADER, p_key: POSTS[0].post_key, p_platform: "Instagram", p_copy: "Hurt in a crash?", p_touched: null }]);
     expect(eqs(byTable("content_strategy_edits")[0])).toEqual({ client_id: BADER });
+    expect(String(op(byTable("content_strategies")[0], "select")?.[0])).toContain("section_texts");
     expect(byTable("client_notes").length).toBe(2);
     expect(String(op(byTable("client_notes")[0], "select")?.[0])).toContain("source");
   });
