@@ -174,6 +174,14 @@ async function storedMoments(admin: Db, countries: string[], week: string): Prom
 }
 
 /**
+ * The filter for posts with a seasonal reason, as JSON text: given an array,
+ * supabase-js writes a Postgres array literal ({...}), which a jsonb column
+ * refuses ("invalid input syntax for type json"); every week_moments job
+ * failed on it on 3 Nov 2026.
+ */
+export const SEASONAL_REASON = JSON.stringify([{ type: "seasonal" }]);
+
+/**
  * What the client's removals say (decision 2): the moment keys it removed,
  * and the categories two removals blocked, unless a planned seasonal post of
  * that category stayed on the calendar through its week.
@@ -182,7 +190,7 @@ async function removalsOf(admin: Db, clientId: string, today: string): Promise<{
   const { data: removals, error } = await admin.from("moment_removals").select("moment_key, category").eq("client_id", clientId);
   if (error) throw new Error(`Could not read the client's removed moments: ${error.message}`);
   const { data: posts, error: postsError } = await admin.from("calendar_posts").select("post_date, reasons, plan_id")
-    .eq("client_id", clientId).not("plan_id", "is", null).lt("post_date", mondayOf(today)).contains("reasons", [{ type: "seasonal" }]);
+    .eq("client_id", clientId).not("plan_id", "is", null).lt("post_date", mondayOf(today)).contains("reasons", SEASONAL_REASON);
   if (postsError) throw new Error(`Could not read the client's seasonal posts: ${postsError.message}`);
   const kept = ((posts ?? []) as Any[])
     .filter((p) => p.plan_id && String(p.post_date) < mondayOf(today))
