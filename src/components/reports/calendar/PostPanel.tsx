@@ -218,7 +218,7 @@ export function PostPanel({
   // only ever produced stills, so clicking it on a video recommendation handed
   // back the wrong asset with nothing to say so.
   const plannedVideo = isVideoFormat(post?.format, post?.platform);
-  // A Story is posted by hand: its panel has Message and Design, no Schedule and no Video (StoryLinks.tsx).
+  // A Story is posted by hand: its panel has Message and Design, no Schedule and no Video; its header links it to its post (StoryLinks.tsx).
   const story = isStoryPost(post);
   const [tab, setTab] = useState<string>("copy");
   // A video post's one media tab becomes Video once its design settings load;
@@ -269,6 +269,8 @@ export function PostPanel({
                   {post.posting_time}
                 </span>
               )}
+              {/* Add a Story, open the post's Story, or open a Story's post: on every tab, for staff and the client's users. */}
+              <StoryLinks post={post} clientId={clientId} />
               {isMoburstStaff && post._calendarPostId && (
                 <span className="ml-auto mr-6">
                   <CalendarPostActions postId={post._calendarPostId} clientId={clientId} date={String(post.date_label || "")} onDone={() => onOpenChange(false)} />
@@ -355,7 +357,6 @@ export function PostPanel({
                     waitingForCopy={!postCopyOf(post).trim()}
                     storyFileName={story ? storyFileName(clientContext?.client_name, String(post.date_label || "")) : null}
                   />
-                  <StoryLinks post={post} clientId={clientId} />
                   {!isClient && otherTiles.length > 0 && (
                     <div className="space-y-2 pt-2">
                       <p className="t-label">Other media for this post</p>

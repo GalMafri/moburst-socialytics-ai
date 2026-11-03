@@ -2,6 +2,9 @@
  * Add a post to the calendar at any time (Lital, 12 Oct: "the team might want
  * to produce a post ad-hoc"). The post is written in the client's voice from
  * the idea, lands on its date, and gets its design like every other post.
+ * Its format is a row of choices; Story is always one of them when the client
+ * has Instagram or Facebook, and choosing it narrows the platforms to those,
+ * picking the only one when there is one (3 Nov 2026).
  */
 
 import { useState, type ReactNode } from "react";
@@ -18,6 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { mondayOf } from "@/lib/calendarPosts";
 import { canBeStory } from "@/lib/platform";
+import { FormatChoices } from "./FormatChoices";
 
 const weekOf = (date: string) => mondayOf(date);
 
@@ -29,14 +33,21 @@ const FORMATS = [
   { value: "Story", label: "Story" },
 ];
 
-/** The formats a new post can take on a platform: a Story only on Instagram or Facebook. */
-export function formatChoices(platform: string | null | undefined) {
-  return FORMATS.filter((f) => f.value !== "Story" || canBeStory(platform));
+/** The formats a new post can take for a client with these platforms: Story whenever it has Instagram or Facebook. */
+export function formatChoices(platforms: string[]) {
+  return FORMATS.filter((f) => f.value !== "Story" || platforms.some(canBeStory));
 }
 
-/** The chosen format once the platform changes: Best fit when the new platform does not offer it. */
-export function formatOnPlatform(format: string, platform: string | null | undefined): string {
-  return formatChoices(platform).some((f) => f.value === format) ? format : "auto";
+/** The platforms a post of this format can go to: a Story only to Instagram or Facebook. */
+export function platformChoices(platforms: string[], format: string): string[] {
+  return format === "Story" ? platforms.filter(canBeStory) : platforms;
+}
+
+/** The chosen platform once the format changes: kept when it still fits, else the only one that fits, else none. */
+export function platformOnFormat(platform: string, format: string, platforms: string[]): string {
+  const fits = platformChoices(platforms, format);
+  if (platform && fits.includes(platform)) return platform;
+  return fits.length === 1 ? fits[0] : "";
 }
 
 /** Why a post is planned: an insight from a report, or (by default) the idea someone typed. */
@@ -137,22 +148,17 @@ export function NewPostDialog({ clientId, platforms, defaultDate, onCreated, ini
             </div>
             <div className="space-y-1.5">
               <Label>Platform</Label>
-              <Select value={platform} onValueChange={(p) => { setPlatform(p); setFormat((f) => formatOnPlatform(f, p)); }}>
-                <SelectTrigger><SelectValue placeholder="Choose" /></SelectTrigger>
+              <Select value={platform} onValueChange={setPlatform}>
+                <SelectTrigger aria-label="Platform"><SelectValue placeholder="Choose" /></SelectTrigger>
                 <SelectContent>
-                  {platforms.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                  {platformChoices(platforms, format).map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
           </div>
           <div className="space-y-1.5">
             <Label>Format</Label>
-            <Select value={format} onValueChange={setFormat}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {formatChoices(platform).map((f) => <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <FormatChoices choices={formatChoices(platforms)} value={format} onChange={(f) => { setFormat(f); setPlatform((p) => platformOnFormat(p, f, platforms)); }} />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="new-post-idea">Idea</Label>
