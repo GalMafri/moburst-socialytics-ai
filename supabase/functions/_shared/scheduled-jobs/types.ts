@@ -7,10 +7,13 @@ export type JobStatus = "queued" | "running" | "waiting" | "blocked" | "done" | 
 /** One step of an in-app report pipeline (_shared/pipelines/runner.ts), run in its own lane of the worker. */
 export type PipelineJobKind = "report_pipeline";
 
+/** A finished report's insights, worked out from its figures (_shared/reports/insights.ts). */
+export type InsightsJobKind = "report_insights";
+
 /** A row of public.scheduled_jobs. */
 export interface ScheduledJob {
   id: string;
-  kind: JobKind | PipelineJobKind;
+  kind: JobKind | PipelineJobKind | InsightsJobKind;
   /**
    * Every kind but two belongs to a client and is typed as such. A
    * sprout_onboarding job and a country's moments_list belong to none (null;

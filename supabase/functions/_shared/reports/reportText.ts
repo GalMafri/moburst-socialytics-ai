@@ -181,7 +181,7 @@ function num(v: unknown): number | null {
 export type Claim = { text: string; value: number; tolerance: number; kind: FigureKind; start: number; end: number };
 
 /** Every number in a text, with the tolerance its written precision allows. */
-function numbersIn(text: string): Array<{ text: string; value: number; tolerance: number; start: number; end: number; percent: boolean }> {
+export function numbersIn(text: string): Array<{ text: string; value: number; tolerance: number; start: number; end: number; percent: boolean }> {
   const out: Array<{ text: string; value: number; tolerance: number; start: number; end: number; percent: boolean }> = [];
   const re = /(?<![\w.$/:])(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)(\s?[KkMmBb](?![a-zA-Z]))?(\s?%|\s?percent\b)?/g;
   for (const m of text.matchAll(re)) {

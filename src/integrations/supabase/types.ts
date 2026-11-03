@@ -3025,6 +3025,68 @@ export type Database = {
           },
         ]
       }
+      report_insights: {
+        Row: {
+          client_id: string
+          created_at: string
+          facts: Json
+          fields: Json
+          id: string
+          input_hash: string
+          input_tokens: number
+          kind: string
+          model: string | null
+          output_tokens: number
+          problems: Json
+          prompt_version: number
+          report_id: string
+          report_table: string
+          source: string
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          facts: Json
+          fields: Json
+          id?: string
+          input_hash: string
+          input_tokens?: number
+          kind: string
+          model?: string | null
+          output_tokens?: number
+          problems?: Json
+          prompt_version: number
+          report_id: string
+          report_table: string
+          source: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          facts?: Json
+          fields?: Json
+          id?: string
+          input_hash?: string
+          input_tokens?: number
+          kind?: string
+          model?: string | null
+          output_tokens?: number
+          problems?: Json
+          prompt_version?: number
+          report_id?: string
+          report_table?: string
+          source?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "report_insights_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       report_pipeline_runs: {
         Row: {
           app_capable: boolean
