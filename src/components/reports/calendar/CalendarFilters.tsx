@@ -14,6 +14,9 @@ interface Props {
   onChange: (next: CalendarFilterState) => void;
   availablePlatforms: string[];
   availableLanguages: string[];
+  /** The posts the board shows under these filters, and the week's posts; said beside the filters while one is on. */
+  shown?: number;
+  total?: number;
 }
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -32,7 +35,7 @@ const DEFAULT_FILTERS: CalendarFilterState = {
   language: "all",
 };
 
-export function CalendarFilters({ filters, onChange, availablePlatforms, availableLanguages }: Props) {
+export function CalendarFilters({ filters, onChange, availablePlatforms, availableLanguages, shown, total }: Props) {
   const hasActive =
     filters.day !== "all" ||
     filters.platform !== "all" ||
@@ -111,7 +114,10 @@ export function CalendarFilters({ filters, onChange, availablePlatforms, availab
           </SegmentedGroup>
         )}
 
-        {/* Clear filters action — appears only when filters are active */}
+        {/* What the filters leave on the board, and Clear filters, only while a filter is on */}
+        {hasActive && shown !== undefined && total !== undefined && (
+          <span className="t-label" aria-live="polite">Showing {shown} of {total} post{total === 1 ? "" : "s"}</span>
+        )}
         {hasActive && (
           <Button variant="ghost" size="sm" onClick={() => onChange(DEFAULT_FILTERS)}>
             <X /> Clear filters

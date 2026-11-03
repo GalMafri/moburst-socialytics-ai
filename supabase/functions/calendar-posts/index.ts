@@ -6,7 +6,13 @@
 //
 //   POST {action:"plan_next_week", client_id}
 //        a member of the client or staff: plan the earliest week without a
-//        plan, from this week up to four weeks ahead
+//        plan (or whose plan a person stopped or removed), from this week up
+//        to four weeks ahead
+//   POST {action:"stop_plan", plan_id}
+//        a member of the client or staff: stop a plan that is queued or being
+//        written, or remove a finished one while its week has days to come.
+//        The posts nobody worked on leave the calendar; the rest stay
+//        (calendar_stop_plan decides; Lital, 3 Nov 2026)
 //   POST {action:"revise_week", plan_id, note}
 //        a member of the client or staff: rewrite the week's posts nobody
 //        worked on, following the note (the note also teaches the memory)
@@ -28,6 +34,7 @@ import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { requireMember } from "../_shared/auth/requireMember.ts";
 import { learnFromSignal } from "../_shared/voice/load.ts";
 import { CLIENT_COLUMNS, gatherEvidence } from "../_shared/calendar/runWeek.ts";
+import { plannable } from "../_shared/calendar/planState.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
@@ -74,11 +81,22 @@ Deno.serve(async (req) => {
       const weeks = Array.from({ length: WEEKS_AHEAD + 1 }, (_, i) => addDays(thisWeek, i * 7)).filter((w) => addDays(w, 6) >= tomorrow);
       const { data: plans } = await admin.from("calendar_plans").select("week_start, status").eq("client_id", clientId).in("week_start", weeks);
       const held = new Map((plans ?? []).map((p: { week_start: string; status: string }) => [p.week_start, p.status]));
-      const week = weeks.find((w) => !held.has(w) || held.get(w) === "failed");
+      const week = weeks.find((w) => plannable(held.get(w)));
       if (!week) return json({ error: "The next four weeks are already planned." }, 409);
       const { data: plan, error } = await admin.rpc("calendar_request_week", { p_client: clientId, p_week: week, p_trigger: "button", p_user: userId });
       if (error) return json({ error: error.message }, 409);
       return json({ plan, week }, 202);
+    }
+
+    if (body?.action === "stop_plan") {
+      const planId = String(body.plan_id || "");
+      if (!planId) return json({ error: "plan_id is required." }, 400);
+      const { data: found } = await admin.from("calendar_plans").select("id, client_id").eq("id", planId).maybeSingle();
+      if (!found) return json({ error: "No such plan." }, 404);
+      const userId = await requireMember(req, found.client_id);
+      const { data: plan, error } = await admin.rpc("calendar_stop_plan", { p_plan: planId, p_user: userId });
+      if (error) return json({ error: error.message }, 409);
+      return json({ plan });
     }
 
     if (body?.action === "revise_week") {

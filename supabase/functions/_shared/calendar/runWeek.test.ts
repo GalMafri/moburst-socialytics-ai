@@ -253,6 +253,99 @@ describe("runWeekPlan", () => {
   });
 });
 
+// "Stop planning" (Lital, 3 Nov 2026): once a person stops a week's plan
+// (calendar_stop_plan sets it canceled), its run asks nothing more of the
+// model and writes nothing, however far it got. The database also refuses
+// posts for a stopped plan (calendar_posts_plan_open), for a run that is
+// between its check and its write.
+describe("a plan a person stopped", () => {
+  const PLANNED = { text: JSON.stringify({ posts: [{ date: "2026-10-27", platform: "Instagram", copy: "Captains, this one is for you.", reason_type: "seasonal", moment: "Playoffs start Oct 27", evidence_ids: [] }] }), raw: {} };
+  const planWrites = (db: ReturnType<typeof fakeDb>) => db.writes.filter((w) => w.table === "calendar_plans").map((w) => w.value as Record<string, unknown>);
+  const postInserts = (db: ReturnType<typeof fakeDb>) => db.writes.filter((w) => w.table === "calendar_posts" && w.op === "insert");
+
+  it("is skipped by its job with no model call and no write", async () => {
+    const db = fakeDb({ calendar_plans: [{ ...plan, status: "canceled" }], clients: [CLIENT] });
+    expect(await runWeekPlan(db, job(), NOW)).toEqual({ status: "skipped", reason: "A person stopped this week's plan." });
+    expect(m.anthropic).not.toHaveBeenCalled();
+    expect(db.writes).toEqual([]);
+  });
+
+  it("starts no model call when it was stopped while the run gathered the evidence", async () => {
+    const stopped = { ...plan };
+    m.owned.mockImplementation(async () => { stopped.status = "canceled"; return { coverage: "not_connected", profiles: [], posts: [] }; });
+    m.anthropic.mockResolvedValue(PLANNED);
+    const db = fakeDb({ calendar_plans: [stopped], clients: [CLIENT] });
+    expect((await runWeekPlan(db, job(), NOW)).status).toBe("skipped");
+    expect(m.anthropic).not.toHaveBeenCalled();
+    expect(postInserts(db)).toEqual([]);
+    expect(planWrites(db).some((v) => v.status === "ready" || v.status === "queued")).toBe(false);
+  });
+
+  it("writes nothing when it was stopped during the model call", async () => {
+    m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
+    const stopped = { ...plan };
+    m.anthropic.mockImplementation(async () => { stopped.status = "canceled"; return PLANNED; });
+    const db = fakeDb({ calendar_plans: [stopped], clients: [CLIENT] });
+    expect(await runWeekPlan(db, job(), NOW)).toEqual({ status: "skipped", reason: "A person stopped this week's plan." });
+    expect(postInserts(db)).toEqual([]);
+    expect(planWrites(db).some((v) => v.status === "ready" || v.status === "queued")).toBe(false);
+  });
+
+  it("is never put back in the queue by a run that fails after the stop", async () => {
+    m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
+    const stopped = { ...plan };
+    m.anthropic.mockImplementation(async () => { stopped.status = "canceled"; throw new Error("Anthropic 500"); });
+    const db = fakeDb({ calendar_plans: [stopped], clients: [CLIENT] });
+    expect((await runWeekPlan(db, job(), NOW)).status).toBe("skipped");
+    expect(planWrites(db).some((v) => v.status === "queued")).toBe(false);
+  });
+
+  it("is never claimed, made ready or put back by a run that started before the stop", async () => {
+    m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
+    m.anthropic.mockResolvedValue(PLANNED);
+    const db = fakeDb({ calendar_plans: [plan], clients: [CLIENT] });
+    const guarded: string[] = [];
+    const from = db.from.bind(db);
+    // Every write to the plan names the stop in its filter, so the database leaves a stopped plan as it is.
+    db.from = (table: string) => {
+      const q = from(table);
+      if (table !== "calendar_plans") return q;
+      const update = q.update;
+      q.update = (value: unknown) => {
+        const chain = update(value);
+        const neq = chain.neq;
+        let named = false;
+        chain.neq = (column: string, v: unknown) => { if (column === "status" && v === "canceled") named = true; return neq(column, v); };
+        const then = chain.then;
+        chain.then = (ok: (v: unknown) => unknown, fail?: (e: unknown) => unknown) => { guarded.push(`${JSON.stringify(Object.keys(value as object))}:${named}`); return then(ok, fail); };
+        return chain;
+      };
+      return q;
+    };
+    expect((await runWeekPlan(db, job(), NOW)).status).toBe("done");
+    expect(guarded.length).toBeGreaterThan(0);
+    expect(guarded.filter((g) => g.endsWith(":false"))).toEqual([]);
+  });
+
+  it("stops a revision waiting on a plan that was removed", async () => {
+    const removed = { ...plan, status: "canceled", revisions: [], pending_revision: { note: "Less formal", by: "u1", at: "2026-10-19T07:00:00Z", scope: "untouched" } };
+    const db = fakeDb({ calendar_plans: [removed], clients: [CLIENT], calendar_posts: [] });
+    expect((await runWeekRevise(db, job({ kind: "week_revise" }), NOW)).status).toBe("skipped");
+    expect(m.anthropic).not.toHaveBeenCalled();
+    expect(db.writes).toEqual([]);
+  });
+
+  it("writes no revision once the plan was removed during the model call", async () => {
+    const ready = { ...plan, status: "ready", revisions: [], pending_revision: { note: "Less formal", by: "u1", at: "2026-10-19T07:00:00Z", scope: "untouched" } };
+    const post = { id: "p1", post_key: "k1", post_date: "2026-10-27", platform: "Instagram", format: "Reel", pillar: null, copy: "Old copy", hashtags: [], cta: null, visual_direction: null, reasons: [], touched_at: null, plan_id: "plan-1" };
+    m.anthropic.mockImplementation(async () => { ready.status = "canceled"; return { text: JSON.stringify({ posts: [{ id: "p1", copy: "New copy" }] }), raw: {} }; });
+    const db = fakeDb({ calendar_plans: [ready], clients: [CLIENT], calendar_posts: [post] });
+    expect((await runWeekRevise(db, job({ kind: "week_revise" }), NOW)).status).toBe("skipped");
+    expect(db.writes.filter((w) => w.table === "calendar_posts")).toEqual([]);
+    expect(planWrites(db).some((v) => "revisions" in v)).toBe(false);
+  });
+});
+
 describe("a week's Stories", () => {
   const DAY = 86400_000;
   const weekly = Array.from({ length: 16 }, (_, i) => ({ postId: `p${i}`, channel: "instagram", type: "photo", publishedAt: new Date(NOW.getTime() - (i * 4 + 3) * DAY).toISOString(), message: "A post", engagementTotal: 3 }));

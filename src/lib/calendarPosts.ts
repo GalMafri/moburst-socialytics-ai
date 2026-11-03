@@ -5,6 +5,7 @@
 
 import type { CalendarPost } from "@/lib/calendarRevision";
 import { evidenceSentence, wordReason } from "../../supabase/functions/_shared/calendar/reasonText";
+import { planInFlight, plannable } from "../../supabase/functions/_shared/calendar/planState";
 
 export { evidenceSentence };
 
@@ -123,14 +124,21 @@ export interface CalendarPlanRow {
   id: string;
   client_id: string;
   week_start: string;
-  /** expired: the week ended before it was planned; failed: only on plans from before 20 Oct 2026. */
-  status: "queued" | "planning" | "ready" | "failed" | "expired";
-  trigger: "monday" | "button" | "cutover";
+  /**
+   * expired: the week ended before it was planned; failed: only on plans from
+   * before 20 Oct 2026; canceled: a person stopped it or removed it, so the
+   * week has no plan (supabase/functions/_shared/calendar/planState.ts).
+   */
+  status: "queued" | "planning" | "ready" | "failed" | "expired" | "canceled";
+  trigger: "monday" | "button" | "cutover" | "lifecycle";
   error: string | null;
   pending_revision: { note: string; at: string } | null;
-  revisions: Array<{ note: string; at: string; done_at?: string; rewritten?: number; kept?: string[]; failed?: boolean }> | null;
+  revisions: Array<{ note: string; at: string; scope?: string; done_at?: string; rewritten?: number; kept?: string[]; failed?: boolean; expired?: boolean }> | null;
   ready_at: string | null;
   created_at: string;
+  /** Set while a run is writing the plan or its revision. */
+  claimed_at?: string | null;
+  canceled_at?: string | null;
 }
 
 /** How far ahead "Plan next week" goes: a month (the same limit calendar-posts applies). */
@@ -138,9 +146,9 @@ export const WEEKS_AHEAD = 4;
 
 /**
  * The week "Plan next week" would plan: the earliest week from this week up
- * to four weeks ahead that still has days to come and no plan, or a plan that
- * failed (the daily run also asks for those again). Null when the month ahead
- * is planned.
+ * to four weeks ahead that still has days to come and no plan, a plan that
+ * failed (the daily run also asks for those again), or a plan a person
+ * stopped or removed. Null when the month ahead is planned.
  */
 export function nextPlannableWeek(plans: Array<Pick<CalendarPlanRow, "week_start" | "status">>, today: string): string | null {
   const tomorrow = addDays(today, 1);
@@ -148,7 +156,7 @@ export function nextPlannableWeek(plans: Array<Pick<CalendarPlanRow, "week_start
   for (let i = 0; i <= WEEKS_AHEAD; i++) {
     const week = addDays(mondayOf(today), i * 7);
     if (addDays(week, 6) < tomorrow) continue;
-    if (!held.has(week) || held.get(week) === "failed") return week;
+    if (plannable(held.get(week))) return week;
   }
   return null;
 }
@@ -156,6 +164,25 @@ export function nextPlannableWeek(plans: Array<Pick<CalendarPlanRow, "week_start
 /** A week someone can still revise: planned, and with days to come. */
 export function canRevise(plan: Pick<CalendarPlanRow, "status" | "week_start" | "pending_revision"> | null | undefined, today: string): boolean {
   return !!plan && plan.status === "ready" && !plan.pending_revision && addDays(plan.week_start, 6) >= today;
+}
+
+/** A plan whose planning can be stopped: queued or being written (Lital, 3 Nov 2026). */
+export function canStop(plan: Pick<CalendarPlanRow, "status"> | null | undefined): boolean {
+  return !!plan && planInFlight(plan.status);
+}
+
+/**
+ * A finished plan someone can remove: its week has days to come and no
+ * revision is running. The server decides again (calendar_stop_plan).
+ */
+export function canRemove(plan: Pick<CalendarPlanRow, "status" | "week_start" | "pending_revision"> | null | undefined, today: string): boolean {
+  return !!plan && plan.status === "ready" && !plan.pending_revision && addDays(plan.week_start, 6) >= today;
+}
+
+/** The client's plans with the one the server just answered with in its place, in week order. */
+export function mergePlan(plans: CalendarPlanRow[] | undefined, plan: CalendarPlanRow | null | undefined): CalendarPlanRow[] {
+  if (!plan) return plans ?? [];
+  return [...(plans ?? []).filter((p) => p.id !== plan.id && p.week_start !== plan.week_start), plan].sort((a, b) => a.week_start.localeCompare(b.week_start));
 }
 
 /** A calendar row as the board's post: the same shape a report's post has, plus its key, date and reasons. */

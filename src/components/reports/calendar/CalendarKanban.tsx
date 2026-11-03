@@ -88,6 +88,44 @@ function matchesFilters(
   return true;
 }
 
+export interface BoardCard {
+  post: CalendarPost;
+  iteration: Iteration | null;
+  status: PostStatus;
+}
+
+/**
+ * What the board shows under the filters (Lital, 3 Nov 2026: a filter hides
+ * what it leaves out). Each day the day filter keeps, with only the posts
+ * the other filters keep; a day left with none is an empty day. `shown`
+ * counts those posts and `total` every post of the week, for the count
+ * beside the filter.
+ */
+export function visibleBoard(
+  contentCalendar: Props["contentCalendar"],
+  postIterations: Iteration[],
+  scheduledPosts: ScheduledPostRef[],
+  filters: CalendarFilterState,
+): { days: Array<{ day: string; date_label?: string; posts: BoardCard[] }>; shown: number; total: number } {
+  const days = DAYS.filter((dayName) => filters.day === "all" || filters.day === dayName).map((dayName) => {
+    const dayEntry = contentCalendar.find((d) => d.day === dayName);
+    const cards = (dayEntry?.posts || []).map((post: CalendarPost): BoardCard => {
+      const iteration = findLatestSelectedIteration(postIterations, post);
+      const status = resolvePostStatus({
+        mediaUrls: iteration?.media_urls || [],
+        isSelectedAny: !!iteration?.is_selected,
+        isApproved: !!iteration?.is_approved,
+        hasScheduledPost: hasMatchingScheduledPost(scheduledPosts, post),
+        story: isStoryPost(post),
+      });
+      return { post, iteration, status };
+    });
+    return { day: dayName, date_label: dayEntry?.date_label, posts: cards.filter((c) => matchesFilters(c.post, c.status, filters)) };
+  });
+  const total = contentCalendar.filter((d) => DAYS.includes(d.day ?? "")).reduce((n, d) => n + (d.posts || []).length, 0);
+  return { days, shown: days.reduce((n, d) => n + d.posts.length, 0), total };
+}
+
 export function CalendarKanban({
   contentCalendar,
   postIterations,
@@ -100,58 +138,36 @@ export function CalendarKanban({
   // allows, each as tall as its own posts. Each day used to be a full-width
   // band over a three-column grid, so a day with one post showed one card at
   // a third of the width and two thirds of empty page beside it, seven times.
+  // A post the filters leave out is not drawn at all.
+  const { days } = visibleBoard(contentCalendar, postIterations, scheduledPosts, filters);
   return (
     <div className="grid gap-inner items-start [grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr))]">
-      {DAYS.map((dayName) => {
-        // If day filter excludes this day, skip rendering entirely.
-        if (filters.day !== "all" && filters.day !== dayName) return null;
-        const dayEntry = contentCalendar.find((d) => d.day === dayName);
-        const posts = dayEntry?.posts || [];
+      {days.map(({ day: dayName, date_label, posts }) => (
+        <section key={dayName} className="glass p-inner space-y-3 min-w-0 animate-slide-up" aria-label={dayName}>
+          <div className="flex items-baseline gap-2 flex-wrap px-1">
+            <h2 className="t-h3">{dayName}</h2>
+            {date_label && <span className="t-label">{date_label}</span>}
+            <span className="t-subhead ml-auto" aria-live="polite">
+              {posts.length === 0 ? "No posts" : `${posts.length} post${posts.length === 1 ? "" : "s"}`}
+            </span>
+          </div>
 
-        return (
-          <section key={dayName} className="glass p-inner space-y-3 min-w-0 animate-slide-up" aria-label={dayName}>
-            <div className="flex items-baseline gap-2 flex-wrap px-1">
-              <h2 className="t-h3">{dayName}</h2>
-              {dayEntry?.date_label && <span className="t-label">{dayEntry.date_label}</span>}
-              <span className="t-subhead ml-auto" aria-live="polite">
-                {posts.length === 0 ? "No posts" : `${posts.length} post${posts.length === 1 ? "" : "s"}`}
-              </span>
+          {posts.length > 0 && (
+            <div className="space-y-3">
+              {posts.map(({ post, iteration, status }, postIdx) => (
+                <PostCard
+                  key={post._calendarPostKey ?? postIdx}
+                  post={post}
+                  iteration={iteration}
+                  status={status}
+                  onOpen={() => onCardClick(post)}
+                  onToggleApproved={iteration?.id ? () => onToggleApproved(iteration.id) : undefined}
+                />
+              ))}
             </div>
-
-            {posts.length > 0 && (
-              <div className="space-y-3">
-                {posts.map((post: any, postIdx: number) => {
-                  const iteration = findLatestSelectedIteration(postIterations, post);
-                  const status = resolvePostStatus({
-                    mediaUrls: iteration?.media_urls || [],
-                    isSelectedAny: !!iteration?.is_selected,
-                    isApproved: !!iteration?.is_approved,
-                    hasScheduledPost: hasMatchingScheduledPost(scheduledPosts, post),
-                    story: isStoryPost(post),
-                  });
-                  if (!matchesFilters(post, status, filters)) {
-                    return (
-                      <div key={postIdx} className="opacity-30 pointer-events-none">
-                        <PostCard post={post} iteration={iteration} status={status} onOpen={() => {}} />
-                      </div>
-                    );
-                  }
-                  return (
-                    <PostCard
-                      key={postIdx}
-                      post={post}
-                      iteration={iteration}
-                      status={status}
-                      onOpen={() => onCardClick(post)}
-                      onToggleApproved={iteration?.id ? () => onToggleApproved(iteration.id) : undefined}
-                    />
-                  );
-                })}
-              </div>
-            )}
-          </section>
-        );
-      })}
+          )}
+        </section>
+      ))}
     </div>
   );
 }
