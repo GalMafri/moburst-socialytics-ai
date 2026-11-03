@@ -7,7 +7,7 @@
 // (src/test/copyWritersUseVoice.test.ts checks this).
 
 import { anthropicMessages } from "../anthropic.ts";
-import { consolidatePrompt, mergePrompt, parseConsolidation, parseMergeOps, parseOverallVoice, parseVoiceProfile, voicePlatforms, voiceProfilePrompt, voiceSample, type ClientVoice, type MemorySignal, type Preference, type SocialVoice } from "./voice.ts";
+import { consolidatePrompt, mergePrompt, parseConsolidation, parseMergeOps, parseOverallVoice, parseVoiceProfile, voicePlatforms, voiceProfilePrompt, voiceSample, type ClientVoice, type LearnedChange, type MemorySignal, type Preference, type SocialVoice } from "./voice.ts";
 import { bestExamples, rhythmFromPosts, scoreOwnPosts, type OwnPost } from "../calendar/evidence.ts";
 import { pointsInUse, readNoteRows, standingNotes, todayIn } from "../notes/notes.ts";
 
@@ -64,51 +64,99 @@ async function mustWrite(p: PromiseLike<{ error: { message: string } | null }>, 
 }
 
 /**
- * Learn from one signal (a copy edit or a Revise note): confirm, replace or
- * add preferences so the list stays short and current.
+ * Learn from one signal (a copy edit, a Revise note or a rewrite note):
+ * confirm, replace or add preferences so the list stays short and current.
+ * Answers what changed, so a rewrite note can show what was learned and take
+ * it back (undoLearning).
  */
-export async function learnFromSignal(admin: Db, clientId: string, signal: MemorySignal): Promise<{ ops: number }> {
-  if (signal.kind === "copy_edit" && signal.before.trim() === signal.after.trim()) return { ops: 0 };
+export async function learnFromSignal(admin: Db, clientId: string, signal: MemorySignal): Promise<{ ops: number; changes: LearnedChange[] }> {
+  if (signal.kind === "copy_edit" && signal.before.trim() === signal.after.trim()) return { ops: 0, changes: [] };
   const [{ data: client }, current] = await Promise.all([
     admin.from("clients").select("name").eq("id", clientId).maybeSingle(),
     activePreferences(admin, clientId),
   ]);
   const result = await anthropicMessages({ apiKey: apiKey(), body: { model: MEMORY_MODEL, max_tokens: 1200, messages: [{ role: "user", content: mergePrompt(String(client?.name ?? "the client"), current, signal) }] } });
   const ops = parseMergeOps(result.text, current.map((p) => p.id));
-  const source = signal.kind === "revise_note" ? "revise_note" : "copy_edit";
-  const evidence = signal.kind === "revise_note" ? excerpt(signal.note) : excerpt(`${signal.before} => ${signal.after}`);
+  const source = signal.kind === "copy_edit" ? "copy_edit" : signal.kind;
+  const evidence = signal.kind === "copy_edit" ? excerpt(`${signal.before} => ${signal.after}`) : excerpt(signal.note);
   const now = new Date().toISOString();
+  const changes: LearnedChange[] = [];
   const confirm = async (p: Preference) => {
     await mustWrite(admin.from("brand_voice_learnings").update({ times_confirmed: p.times_confirmed + 1, last_confirmed_at: now, updated_at: now }).eq("id", p.id).eq("status", "active"), "Could not confirm a preference");
   };
+  const confirmed = (p: Preference): LearnedChange => ({ op: "confirm", id: p.id, description: p.pattern_description, platform: p.platform ?? null });
   // Only one active preference may say a thing for a platform (or for all); the same wording again is a confirmation.
   const sameAs = (type: string, description: string, platform: string | null) => current.find((p) => p.pattern_type === type && (p.platform ?? null) === platform && p.pattern_description.trim().toLowerCase() === description.trim().toLowerCase());
   for (const op of ops) {
     if (op.op === "confirm") {
-      await confirm(current.find((p) => p.id === op.id)!);
+      const p = current.find((x) => x.id === op.id)!;
+      await confirm(p);
+      changes.push(confirmed(p));
       continue;
     }
     const existing = sameAs(op.pattern_type, op.description, op.platform);
-    let keptId: string;
+    let kept: { id: string; description: string; platform: string | null; added: boolean };
     if (existing && existing.id !== (op.op === "replace" ? op.id : "")) {
       await confirm(existing);
-      keptId = existing.id;
+      kept = { id: existing.id, description: existing.pattern_description, platform: existing.platform ?? null, added: false };
+      if (op.op === "add") {
+        changes.push(confirmed(existing));
+        continue;
+      }
     } else if (existing) {
       // Replaced by its own wording: nothing changes but the confirmation.
       await confirm(existing);
+      changes.push(confirmed(existing));
       continue;
     } else {
       const { data: added, error } = await admin.from("brand_voice_learnings")
-        .insert({ client_id: clientId, pattern_type: op.pattern_type, pattern_description: op.description, platform: op.platform, source, evidence, last_confirmed_at: now })
+        .insert({ client_id: clientId, pattern_type: op.pattern_type, pattern_description: op.description, platform: op.platform, source, evidence, status: "active", last_confirmed_at: now })
         .select("id").single();
       if (error) throw new Error(`Could not save a preference: ${error.message}`);
-      keptId = added.id;
+      kept = { id: added.id, description: op.description, platform: op.platform, added: true };
+      if (op.op === "add") {
+        changes.push({ op: "add", id: kept.id, description: kept.description, platform: kept.platform });
+        continue;
+      }
     }
-    if (op.op === "replace") {
-      await mustWrite(admin.from("brand_voice_learnings").update({ status: "replaced", replaced_by: keptId, updated_at: now }).eq("id", op.id).eq("status", "active"), "Could not retire a preference");
+    // A replacement: the preference it replaces is retired, kept for Undo.
+    const old = current.find((p) => p.id === op.id)!;
+    await mustWrite(admin.from("brand_voice_learnings").update({ status: "replaced", replaced_by: kept.id, updated_at: now }).eq("id", op.id).eq("status", "active"), "Could not retire a preference");
+    changes.push({ op: "replace", id: kept.id, description: kept.description, platform: kept.platform, added: kept.added, replaced: { id: old.id, description: old.pattern_description } });
+  }
+  return { ops: ops.length, changes };
+}
+
+/**
+ * Take back what a rewrite note taught (its Undo): a preference it added is
+ * removed, and one it replaced is active again, so the list is as it was
+ * before the note. A confirmation is left as it is: it added nothing. Only
+ * what a rewrite note wrote for this client is touched, and a replaced
+ * preference returns only while the note's preference still stands in its
+ * place. Answers how many changes were taken back.
+ */
+export async function undoLearning(admin: Db, clientId: string, changes: LearnedChange[]): Promise<number> {
+  const now = new Date().toISOString();
+  const removeAdded = async (id: string) => {
+    const { data, error } = await admin.from("brand_voice_learnings").delete()
+      .eq("id", id).eq("client_id", clientId).eq("source", "rewrite_note").eq("status", "active").select("id");
+    if (error) throw new Error(`Could not take back a preference: ${error.message}`);
+    return (data ?? []).length > 0;
+  };
+  let undone = 0;
+  for (const c of changes.slice(0, 3)) {
+    if (c.op === "add") {
+      if (await removeAdded(String(c.id))) undone++;
+    } else if (c.op === "replace") {
+      const { data, error } = await admin.from("brand_voice_learnings").update({ status: "active", replaced_by: null, updated_at: now })
+        .eq("id", String(c.replaced?.id)).eq("client_id", clientId).eq("replaced_by", String(c.id)).eq("status", "replaced").select("id");
+      if (error) throw new Error(`Could not bring back a preference: ${error.message}`);
+      if (!(data ?? []).length) continue;
+      if (c.added) await removeAdded(String(c.id));
+      undone++;
     }
   }
-  return { ops: ops.length };
+  return undone;
 }
 
 /**
