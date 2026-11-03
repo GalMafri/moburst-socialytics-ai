@@ -10,10 +10,13 @@
 //   POST {action:"revise_week", plan_id, note}
 //        a member of the client or staff: rewrite the week's posts nobody
 //        worked on, following the note (the note also teaches the memory)
-//   POST {action:"save_copy", client_id, calendar_post_key, post_copy, ...}
+//   POST {action:"save_copy", client_id, calendar_post_key, post_copy, source?, note?, ...}
 //        a member of the client or staff: save a copy edit (a revision row
 //        without media) and update the calendar post; a person's edit
-//        teaches the client's preference memory
+//        teaches the client's preference memory, and a regeneration teaches
+//        only through the note left on it, answering what it learned (copy.ts)
+//   POST {action:"undo_note", client_id, changes}
+//        a member of the client or staff: take back what a note taught
 //   POST {action:"preview_evidence", client_id, week?}
 //        staff with write access: what the planner would see for this client
 //        now (rhythm and where it came from, scored evidence, thin data), with
@@ -26,8 +29,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { requireMember } from "../_shared/auth/requireMember.ts";
-import { learnFromSignal } from "../_shared/voice/load.ts";
+import { learnFromSignal, undoLearning } from "../_shared/voice/load.ts";
 import { CLIENT_COLUMNS, gatherEvidence } from "../_shared/calendar/runWeek.ts";
+import { type CopyDeps, saveCopy, undoNote } from "./copy.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
@@ -96,30 +100,10 @@ Deno.serve(async (req) => {
       return json({ plan }, 202);
     }
 
-    if (body?.action === "save_copy") {
-      const clientId = String(body.client_id || "");
-      const key = String(body.calendar_post_key || "");
-      const copy = String(body.post_copy || "").trim();
-      if (!clientId || !key || !copy) return json({ error: "client_id, calendar_post_key and post_copy are required." }, 400);
-      const userId = await requireMember(req, clientId);
-      const hashtags = Array.isArray(body.hashtags) ? body.hashtags.map(String).slice(0, 30) : null;
-      const { data: before } = await admin.from("calendar_posts").select("copy, platform").eq("client_id", clientId).eq("post_key", key).maybeSingle();
-      const { error } = await admin.from("post_iterations").insert({
-        client_id: clientId, report_id: body.report_id || null, calendar_post_key: key,
-        version: Number(body.version) || 1, platform: body.platform || null, post_copy: copy,
-        hashtags, cta: body.cta || null, concept: body.concept || null, visual_direction: body.visual_direction || null,
-        format: body.format || null, source: body.source === "regeneration" ? "regeneration" : "calendar", created_by: userId,
-      });
-      if (error) throw new Error(`Could not save the copy: ${error.message}`);
-      // The calendar post holds the current copy too, for every view that reads it directly.
-      await admin.from("calendar_posts").update({ copy, touched_at: new Date().toISOString(), ...(hashtags ? { hashtags } : {}), ...(body.cta ? { cta: String(body.cta) } : {}) })
-        .eq("client_id", clientId).eq("post_key", key);
-      // A person's edit says how they want copy written; a regeneration doesn't.
-      const previous = String(before?.copy || "").trim();
-      if (body.source !== "regeneration" && previous && previous !== copy) {
-        background(learnFromSignal(admin, clientId, { kind: "copy_edit", before: previous, after: copy, platform: before?.platform ?? body.platform ?? null }), "memory");
-      }
-      return json({ ok: true });
+    if (body?.action === "save_copy" || body?.action === "undo_note") {
+      const deps = copyDeps(admin, req);
+      const answer = body.action === "save_copy" ? await saveCopy(deps, body) : await undoNote(deps, body);
+      return json(answer.body, answer.status ?? 200);
     }
 
     if (body?.action === "preview_evidence") {
@@ -142,6 +126,17 @@ Deno.serve(async (req) => {
     return json({ error: msg }, 500);
   }
 });
+
+/** What the copy actions (copy.ts) need from this function. */
+function copyDeps(admin: ReturnType<typeof service>, req: Request): CopyDeps {
+  return {
+    db: admin,
+    requireMember: (clientId) => requireMember(req, clientId),
+    learn: (clientId, signal) => learnFromSignal(admin, clientId, signal),
+    undo: (clientId, changes) => undoLearning(admin, clientId, changes),
+    background,
+  };
+}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
