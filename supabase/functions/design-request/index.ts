@@ -10,8 +10,9 @@
 //        followed by every option, and teaches the brand's design memory
 //        only when it is lasting (note.ts).
 //   POST {action:"story", client_id, calendar_post_key}
-//        "Design as a Story" on a Facebook or Instagram post: one Story post
-//        linked to it, designed like the post's own design (story.ts).
+//        "Add a Story" on a Facebook or Instagram post: one Story post linked
+//        to it, designed like the post's own design once the brand's designs
+//        are set up (story.ts).
 //   POST {action:"close_filming"}   (operational secret, as the system) filming
 //        requests closed when their footage arrived or cannot come in time; spends nothing
 //   POST {action:"week_preview"|"week_start"|"week_stop"|"week_continue", ...}
@@ -103,7 +104,7 @@ Deno.serve(async (req) => {
       return json({ request });
     }
 
-    // "Design as a Story": whoever can work on the client's posts, as create (story.ts).
+    // "Add a Story": whoever can work on the client's posts, as create (story.ts).
     if (body?.action === "story") {
       const answer = await designStory({
         db: admin,
