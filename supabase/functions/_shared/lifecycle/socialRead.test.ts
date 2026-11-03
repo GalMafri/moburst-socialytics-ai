@@ -263,6 +263,13 @@ describe("runSocialRead", () => {
     expect(e).toMatchObject({ timezone: "UTC", location: null });
   });
 
+  it("takes a Google Business Profile's address first, and says which profile gave it", async () => {
+    const c = oloClient();
+    const { fake } = io({ customerProfiles: async () => [{ id: "7", name: "Olo", native_name: "olo", network_type: "google_my_business", native_link: "", status: "active", groups: [], network_metadata: { address: { city: "Denver", state: "CO", country: "US" } } }] });
+    await runSocialRead(world(c), c, { rows: new Map() }, fake);
+    expect(c).toMatchObject({ timezone: "America/Denver", location: { source: "profile_address", via: "google_my_business", locality: "Denver" } });
+  });
+
   it("waits for the client's social accounts", async () => {
     const c = oloClient();
     const db = fakeDb({ clients: [c], sprout_profiles: [] }, { lifecycle_write_client: writeClientRpc });

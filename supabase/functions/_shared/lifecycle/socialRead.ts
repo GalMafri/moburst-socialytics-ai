@@ -37,7 +37,7 @@ import type { CustomerProfile } from "../sprout/profiles.ts";
 import { defaultSproutCustomerId } from "../sprout/customer.ts";
 import type { BioRead, InstagramBio } from "../apify/instagramProfile.ts";
 import type { SocialBrandInput, SocialBrandRead } from "../brand/research.ts";
-import { countryCode, followersZone, regionsFor, replacesLocation, resolveSocialLocation, SOURCE_RANK, type Address, type Headquarters, type LocationSource } from "./location.ts";
+import { countryCode, followersZone, regionsFor, replacesLocation, resolveSocialLocation, SOURCE_RANK, zoneOf, type Address, type Headquarters, type LocationSource } from "./location.ts";
 import { lifecycleMayWrite, setBy, sourceOf, writeClientFields } from "./fields.ts";
 import { textHash } from "./names.ts";
 import type { StepOutcome, StepRow } from "./policy.ts";
@@ -495,7 +495,9 @@ export async function runSocialRead(db: Db, client: Row, ctx: { rows: Map<string
   const audience: FollowerLocations = await io.followers(ids, new Date(now.getTime() - 3 * DAY), now, customer).then(followerLocations)
     .catch((e) => { console.warn("[social_read] follower locations not read:", e instanceof Error ? e.message : String(e)); return { countries: [], cities: [] }; });
   const meta = await io.customerProfiles(customer).catch(() => [] as CustomerProfile[]);
-  const profileAddresses = meta.filter((p) => ids.includes(String(p.id))).map((p) => profileAddress(p.network_metadata)).filter((a): a is Address => !!a);
+  const local = meta.filter((p) => ids.includes(String(p.id))).map((p) => ({ address: profileAddress(p.network_metadata), network: p.network_type }))
+    .filter((x): x is { address: Address; network: string } => !!x.address);
+  const profileAddresses = local.map((x) => x.address);
   const instagram = await readBio(profiles, pictures, (prev?.instagram ?? null) as InstagramState | null, io, now);
   const langs = languageCounts(posts);
   const snapshot = snapshotOf(posts, now, {
@@ -561,7 +563,9 @@ export async function runSocialRead(db: Db, client: Row, ctx: { rows: Map<string
   const followers = followersZone(audience.cities);
   const location = resolveSocialLocation({ profileAddresses, postTexts, stated, followers, countries: audience.countries.map((c) => c.country) });
   if (location.source && replacesLocation(stored, { source: location.source, website: null })) {
-    fields.location = { ...location, website: null, read_at: now.toISOString() };
+    // A local profile's address names the profile it came from (a Google Business Profile, Yelp or Tripadvisor page).
+    const via = location.source === "profile_address" ? (local.find((x) => zoneOf(x.address)?.zone === location.timezone) ?? local[0])?.network ?? null : null;
+    fields.location = { ...location, website: null, ...(via ? { via } : {}), read_at: now.toISOString() };
     if (location.timezone && may("timezone") && (location.timezone !== str(client.timezone) || sourceOf(fs, "timezone") !== location.source)) {
       fields.timezone = location.timezone;
       from.timezone = location.source;

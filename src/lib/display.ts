@@ -446,11 +446,149 @@ const LOCATION_SOURCES: Record<string, string> = {
   page_text: "an address on the website",
   site_read: "where the website says the business is based",
   country: "the main time zone of the business's country",
+  profile_address: "the address on the client's local business profile",
+  post_text: "an address in the client's posts",
+  post_read: "where the client's posts say the business is based",
+  followers: "where most of the client's followers are",
 };
 
 /** Where the client's time zone was read from (clients.location.source), as words. */
 export function locationSourceWords(source: string | null | undefined): string {
   return LOCATION_SOURCES[String(source ?? "")] ?? "";
+}
+
+const LOCAL_PROFILES: Record<string, string> = { google_my_business: "Google Business Profile", yelp: "Yelp page", tripadvisor: "Tripadvisor page" };
+
+/** Where the client's time zone was read from, with the profile or the followers' city it names. */
+export function locationOrigin(location: { source?: string | null; via?: string | null; locality?: string | null } | null | undefined): string {
+  const source = String(location?.source ?? "");
+  if (source === "profile_address" && LOCAL_PROFILES[String(location?.via ?? "")]) return `the address on the client's ${LOCAL_PROFILES[String(location!.via)]}`;
+  if (source === "followers" && location?.locality) return `${LOCATION_SOURCES.followers} (${location.locality})`;
+  return locationSourceWords(source);
+}
+
+// ── What the product read from a client's social profiles ──────────────────
+
+/** A client lifecycle step as the setup page reads it. */
+export interface OnboardingStep {
+  step: string;
+  status?: string | null;
+  done_at?: string | null;
+  result?: Record<string, unknown> | null;
+}
+
+export interface OnboardingFacts {
+  website: string;
+  logo: string;
+  timezone: string;
+  regions: string;
+  languages: string;
+  brief: string;
+  competitors: { names: string[]; tracking: string };
+}
+
+/** The value's record in field_sources: who set it, when, and where the lifecycle's value came from. */
+function sourceEntry(fieldSources: unknown, field: string): { by: string; at: string; from: string } {
+  const e = fieldSources && typeof fieldSources === "object" ? (fieldSources as Record<string, unknown>)[field] : null;
+  const o = e && typeof e === "object" ? (e as Record<string, unknown>) : {};
+  return { by: String(o.by ?? ""), at: String(o.at ?? ""), from: String(o.from ?? "") };
+}
+
+const SITE_FOUND: Record<string, string> = {
+  domain_name: "the site's domain is the brand's name",
+  site_name: "the site gives the brand's name as its own",
+};
+
+/**
+ * Each line the setup page shows about what the product read from the
+ * client's Sprout profiles and posts (spec: docs/superpowers/specs/2026-11-03-
+ * onboarding-complete-design.md, section 6): facts with a date or a count,
+ * never a step name, a status or an error. An empty line shows nothing.
+ */
+export function onboardingFacts(client: Record<string, unknown> | null | undefined, steps: OnboardingStep[] | null | undefined): OnboardingFacts {
+  const c = client ?? {};
+  const fs = c.field_sources;
+  const by = (step: string) => (steps ?? []).find((s) => s.step === step) ?? null;
+  const result = (step: string) => (by(step)?.result ?? {}) as Record<string, unknown>;
+  const waitingFor = (step: string) => (by(step)?.status === "waiting" ? String(result(step).waiting_for ?? "") : "");
+  const hasSite = !!String(c.website_url ?? "").trim();
+  const social = by("social_read")?.result ? result("social_read") : null;
+
+  // The website.
+  let website = "";
+  const site = result("website");
+  const siteSource = sourceEntry(fs, "website_url");
+  if (!hasSite && by("website") && Number.isFinite(Number(site.posts))) {
+    const span = Number(site.months) === 12 ? "the last 12 months" : "the last 90 days";
+    const searched = formatDate(site.searched_at as string | undefined);
+    website = `No website found yet. Looked through ${Number(site.posts)} ${Number(site.posts) === 1 ? "post" : "posts"} from ${span}${searched ? ` and searched the web for ${String(c.name ?? "the brand")} on ${searched}` : ""}.`;
+  } else if (hasSite && siteSource.by === "lifecycle" && site.website && site.found_at) {
+    const how = String(site.confirmed_by ?? "");
+    const network = platformName(site.linked_network as string | undefined);
+    const what = how.startsWith("bio_") ? "the client's Instagram bio links to it"
+      : how.endsWith("profile_link") ? `the site links to the client's ${network || "profiles"}`
+      : SITE_FOUND[how] ?? "";
+    if (what) website = `Found on ${formatDate(site.found_at as string)}: ${what}.`;
+  }
+
+  // The logo.
+  let logo = "";
+  const logoSource = sourceEntry(fs, "logo_url");
+  if (logoSource.by === "lifecycle" && logoSource.from.startsWith("profile_picture:")) {
+    const network = platformName(logoSource.from.slice("profile_picture:".length)) || "social";
+    const on = formatDate(logoSource.at);
+    logo = `From the client's ${network} profile picture${on ? `, ${on}` : ""}. ${hasSite ? "A logo you upload is kept." : "The website's logo replaces it once the website is found; a logo you upload is kept."}`;
+  }
+
+  // The time zone.
+  let timezone = "";
+  const zoneSource = sourceEntry(fs, "timezone");
+  const location = (c.location && typeof c.location === "object" ? c.location : null) as { source?: string; via?: string; locality?: string; website?: string | null } | null;
+  if (zoneSource.by !== "person" && social) {
+    const zone = String(c.timezone ?? "").trim();
+    const words = location?.source ? locationOrigin(location) : "";
+    if (words && zone && zone !== "UTC") timezone = `Worked out from ${words}. You can change it here.`;
+    else if (!zone || zone === "UTC") timezone = "Not known yet: no address or location in the client's profiles or posts. Calendar times show in UTC until then.";
+  }
+
+  // Regions and languages.
+  let regions = "";
+  const geoSource = sourceEntry(fs, "geo");
+  const geo = String(c.geo ?? "").split(",").map((g) => g.trim()).filter(Boolean);
+  const countries = (Array.isArray(social?.follower_countries) ? social!.follower_countries : []) as Array<{ country: string; share: number }>;
+  if (geoSource.by === "lifecycle" && geoSource.from === "followers") {
+    const shown = countries.filter((f) => geo.includes(f.country)).map((f) => `${countryNames(f.country)} ${Math.round(f.share * 100)}%`);
+    if (shown.length) regions = `From where the client's followers are: ${shown.join(", ")}.`;
+  } else if (geoSource.by === "lifecycle" && geoSource.from === "posts") {
+    regions = "From where the client's posts say the business is.";
+  }
+  let languages = "";
+  const languageSource = sourceEntry(fs, "language");
+  const counted = (Array.isArray(social?.languages) ? social!.languages : []) as Array<{ language: string; posts: number }>;
+  const total = Number(social?.language_posts) || 0;
+  if (languageSource.by === "lifecycle" && languageSource.from === "posts" && total) {
+    const chosen = String(c.language ?? "").split(",").map((l) => l.trim()).filter(Boolean);
+    const shown = counted.filter((l) => chosen.includes(l.language)).map((l) => `${languageNames(l.language)} in ${l.posts} of ${total}`);
+    if (shown.length) languages = `From the client's posts: ${shown.join(", ")}.`;
+  }
+
+  // The brief and pillars.
+  let brief = "";
+  const briefSource = sourceEntry(fs, "brief_text");
+  if (waitingFor("brief_pillars") === "posts") {
+    brief = `Written once the client has 5 posts with text. It has ${Number(result("brief_pillars").text_posts) || 0}.`;
+  } else if (briefSource.by === "lifecycle" && briefSource.from === "posts") {
+    const on = formatDate(briefSource.at || (result("brief_pillars").drafted_at as string | undefined));
+    brief = `Drafted from the client's posts${on ? ` on ${on}` : ""}.`;
+  }
+
+  // Competitors and tracking.
+  const picked = by("competitors")?.status === "done" && Array.isArray(result("competitors").selected) ? (result("competitors").selected as unknown[]).map(String) : [];
+  const trackingWait = waitingFor("tracking");
+  const tracking = trackingWait === "client_website" ? "RivalIQ follows companies by their website, so tracking starts once the client's website is found."
+    : trackingWait === "rivaliq_full" ? "The RivalIQ plan is full. Tracking starts when a place opens." : "";
+
+  return { website, logo, timezone, regions, languages, brief, competitors: { names: picked, tracking } };
 }
 
 /** "America/New_York" as people say it: "Eastern Time (New York)". */
