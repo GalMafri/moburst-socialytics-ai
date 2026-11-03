@@ -5,7 +5,7 @@ import { sendQuietly, writeResendable } from "@/lib/quietSend";
 import { useToast } from "@/hooks/use-toast";
 import { useRealtimePostIterations } from "@/hooks/useRealtimePostIterations";
 import { CalendarFilters, type CalendarFilterState } from "./CalendarFilters";
-import { CalendarKanban, findLatestSelectedIteration } from "./CalendarKanban";
+import { CalendarKanban, findLatestSelectedIteration, visibleBoard } from "./CalendarKanban";
 import { LoadRetry } from "@/components/ui/load-error";
 import { Loading } from "@/components/ui/loading";
 import { PostPanel } from "./PostPanel";
@@ -149,6 +149,12 @@ export function ContentIdeasTab({
   });
 
   const revisedCalendar = useMemo(() => calendarWithRevisions(contentCalendar, reportId, postIterations), [contentCalendar, reportId, postIterations]);
+  // What the filters leave on the board, counted the way the board draws it, once the board can be drawn.
+  const boardLoaded = !iterationsLoading && !scheduledPostsLoading && !iterationsFailed && !scheduledPostsFailed;
+  const counts = useMemo(
+    () => (boardLoaded ? visibleBoard(revisedCalendar, postIterations, scheduledPosts, filters) : null),
+    [boardLoaded, revisedCalendar, postIterations, scheduledPosts, filters],
+  );
   const currentPost = activePost ? applyCopyRevisions(activePost, postIterations) : null;
   const activeIteration = currentPost
     ? findLatestSelectedIteration(postIterations as any, currentPost)
@@ -251,6 +257,8 @@ export function ContentIdeasTab({
           onChange={setFilters}
           availablePlatforms={availablePlatforms}
           availableLanguages={availableLanguages}
+          shown={counts?.shown}
+          total={counts?.total}
         />
 
         <div id="ideas-calendar" className="scroll-mt-[156px]">
