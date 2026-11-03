@@ -10,6 +10,7 @@
 import type { EvidenceItem, RhythmLine } from "./evidence.ts";
 import { clientFit, fmtMultiple, reasonLabel, type EvidenceRef, type Reason, type ReasonType } from "./reasonText.ts";
 import { STORY_FORMAT, isStoryFormat } from "../design/story.ts";
+import { CATEGORY_WORDS, type MomentCategory } from "./moments.ts";
 import { postInstant } from "../design/requestRules.ts";
 
 export { clientFit, evidenceSentence, fmtMultiple, headline } from "./reasonText.ts";
@@ -78,7 +79,15 @@ export const STRATEGY_PRECEDENCE = "The posting rhythm, the dates and the eviden
 /** The strategy and its precedence line, placed after the pillars; "" for a client with no strategy. */
 const strategySection = (strategy: string | undefined) => (strategy ? `${strategy}\n${STRATEGY_PRECEDENCE}` : "");
 
+/** A dated moment as the planner reads it: its date and kind, the client's own post on it last year, and the judge's sentence on why it fits. */
+function momentLine(e: EvidenceItem): string {
+  const history = e.multiple !== undefined && e.platform ? `the client's ${e.platform} ${e.format ?? "post"} on it last year got ${fmtMultiple(e.multiple)} the client's usual ${e.metric}` : "";
+  const parts = [e.date, CATEGORY_WORDS[e.category as MomentCategory] ?? "", history, e.companies ? `${e.companies} competitor${e.companies === 1 ? "" : "s"} posted about it` : "", e.thin ? "early signal" : ""].filter(Boolean).join(", ");
+  return `${e.id} [${parts}] ${e.text}.${e.fit ? ` Why it fits: ${e.fit}` : ""}`;
+}
+
 function evidenceLine(e: EvidenceItem): string {
+  if (e.kind === "moment") return momentLine(e);
   const where = [e.company, e.platform, e.format].filter(Boolean).join(" ");
   const numbers = e.multiple !== undefined ? `${fmtMultiple(e.multiple)} ${e.kind === "own" ? "the client's" : "their"} usual ${e.metric}` : "";
   const parts = [where, e.date, e.theme ? `theme "${e.theme}"` : "", numbers, e.companies ? `${e.companies} companies` : "", e.thin ? "early signal" : ""].filter(Boolean).join(", ");
@@ -109,6 +118,7 @@ export function weekPrompt(c: WeekContext): string {
     section("Topics several competitors posted about this week:", byKind("topic")),
     section("Industry trends this week, each shown by a real post that fit the client's audience:", byKind("trend")),
     section("Findings from the latest monthly report:", byKind("report")),
+    section("Dated moments this week, each checked against the client (a seasonal post cites one):", byKind("moment")),
     c.avoid.length ? [`${c.brand}'s posts that did worst (don't repeat what they did):`, ...c.avoid.map((a) => `- ${a}`)].join("\n") : "",
     c.competitiveBrief,
     c.thin.length ? ["Where the evidence is thin:", ...c.thin.map((t) => `- ${t}`)].join("\n") : "",
@@ -117,14 +127,16 @@ export function weekPrompt(c: WeekContext): string {
     "Rules:",
     [
       "- Every post acts on the evidence above: list the ids in evidence_ids. Use a competitor's post or topic only when it fits the client's pillars, audience and services, and say how in fit.",
-      "- A holiday, awareness day or industry event that matters in the client's market this week can carry a post instead: reason_type \"seasonal\", the moment and its date in moment, and evidence_ids may be empty.",
+      byKind("moment").length
+        ? "- A post for one of the dated moments above has reason_type \"seasonal\" and its M id in evidence_ids. A seasonal post cites one M id; no other holiday, awareness day or event can carry a post."
+        : "- No dated moment checked out for this client this week, so no post is seasonal: don't plan a post for a holiday, awareness day or event.",
       "- At most one post is a test: something the evidence hasn't proven for this client yet, such as a competitor format it hasn't tried. Mark it \"test\": true.",
       "- copy is the full caption, ready to publish, written the way the voice section says.",
       ...(c.canFilm ? [] : ["- Every post has to be one the team can make without filming: don't plan ideas that need a specific person on camera (a team member, the founder, a customer) or footage only the client could shoot (its office, events, products in use). Videos made from designed scenes, text and motion are fine."]),
       "- Never invent facts: no names, titles, numbers, quotes, client results, launches or claims about people that aren't in the evidence, the pillars or the voice section.",
       "- fit is ONE short sentence (under 20 words) written for the client on why this post suits them. Never mention evidence ids (like P1 or C2), numbers, other posts, or what the post avoids.",
     ].join("\n"),
-    'Reply with JSON only: {"posts":[{"date":"YYYY-MM-DD","platform":"...","format":"...","posting_time":"HH:MM","pillar":"...","copy":"...","hashtags":["..."],"cta":"...","visual_direction":"one sentence on what the visual shows","reason_type":"performance|competitor|trend|seasonal","evidence_ids":["P1"],"fit":"...","moment":"","test":false}]}',
+    'Reply with JSON only: {"posts":[{"date":"YYYY-MM-DD","platform":"...","format":"...","posting_time":"HH:MM","pillar":"...","copy":"...","hashtags":["..."],"cta":"...","visual_direction":"one sentence on what the visual shows","reason_type":"performance|competitor|trend|seasonal","evidence_ids":["P1"],"fit":"...","test":false}]}',
   ].filter(Boolean).join("\n\n");
 }
 
@@ -154,15 +166,36 @@ export function buildReason(input: { type: ReasonType; evidence: EvidenceRef[]; 
   };
 }
 
-function typeFor(evidence: EvidenceRef[], declared: string): Exclude<ReasonType, "test"> {
+/** A post's type, from the evidence it acts on first: a post is seasonal only when it cites a checked moment (moments.ts). */
+function typeFor(evidence: EvidenceRef[]): Exclude<ReasonType, "test"> {
   const kind = evidence[0]?.kind;
-  if (kind === "own" || kind === "report") return "performance";
+  if (kind === "moment") return "seasonal";
   if (kind === "competitor" || kind === "topic") return "competitor";
   if (kind === "trend") return "trend";
-  return declared === "seasonal" ? "seasonal" : "performance";
+  return "performance";
 }
 
 const toRef = (e: EvidenceItem): EvidenceRef => ({ ...e });
+
+/**
+ * The evidence a post's reply cites, at most three, a moment first, and the
+ * sentence on why it fits: for a moment, the judge's, which code checked;
+ * otherwise the planner's. A post names at most one moment.
+ */
+function cited(p: Record<string, unknown>, byId: Map<string, EvidenceItem>): { evidence: EvidenceRef[]; moment: EvidenceItem | undefined; fit: string } {
+  const all = (Array.isArray(p.evidence_ids) ? p.evidence_ids : []).map((id) => byId.get(String(id))).filter((e): e is EvidenceItem => !!e);
+  const moment = all.find((e) => e.kind === "moment");
+  const ordered = moment ? [moment, ...all.filter((e) => e.kind !== "moment")] : all;
+  return { evidence: ordered.slice(0, 3).map(toRef), moment, fit: moment ? moment.fit ?? "" : str(p.fit, 300) };
+}
+
+/** A seasonal post the planner wrote without a checked moment, noted on the plan for staff. */
+export interface DroppedPost {
+  date: string;
+  platform: string;
+  copy: string;
+  why: string;
+}
 
 /**
  * The week's posts from the planner's reply. Posts outside the usable dates,
@@ -171,7 +204,7 @@ const toRef = (e: EvidenceItem): EvidenceRef => ({ ...e });
  * the model set to Story is saved as a single image: Stories are added in
  * code (withStories) and never count toward the rhythm.
  */
-export function parseWeekPlan(text: string, c: Pick<WeekContext, "monday" | "firstDate" | "rhythm" | "evidence" | "existing">): PlannedPost[] {
+export function parseWeekPlan(text: string, c: Pick<WeekContext, "monday" | "firstDate" | "rhythm" | "evidence" | "existing">, opts: { dropped?: DroppedPost[] } = {}): PlannedPost[] {
   const data = jsonObject(text);
   const raw = Array.isArray(data?.posts) ? data!.posts as Array<Record<string, unknown>> : [];
   const dates = new Set(weekDates(c.monday).filter((d) => d >= c.firstDate));
@@ -189,16 +222,21 @@ export function parseWeekPlan(text: string, c: Pick<WeekContext, "monday" | "fir
     const platform = str(p.platform, 40);
     const copy = str(p.copy);
     if (!dates.has(date) || !platform || !copy) continue;
+    // A seasonal post rests on a moment the client's data checked, or it isn't planned.
+    const reasonParts = cited(p, byId);
+    if (!reasonParts.moment && str(p.reason_type) === "seasonal") {
+      opts.dropped?.push({ date, platform, copy: firstLine(copy), why: "seasonal post without a checked moment" });
+      continue;
+    }
     const key = platform.toLowerCase();
     if (cap.size) {
       if (!cap.has(key)) continue;
       if ((used.get(key) ?? 0) >= (cap.get(key) ?? 0)) continue;
     }
     used.set(key, (used.get(key) ?? 0) + 1);
-    const evidence = (Array.isArray(p.evidence_ids) ? p.evidence_ids : []).map((id) => byId.get(String(id))).filter((e): e is EvidenceItem => !!e).slice(0, 3).map(toRef);
     const test = p.test === true && !testTaken;
     if (test) testTaken = true;
-    const reason = buildReason({ type: typeFor(evidence, str(p.reason_type)), evidence, fit: str(p.fit, 300), moment: str(p.moment, 200), test });
+    const reason = buildReason({ type: typeFor(reasonParts.evidence), evidence: reasonParts.evidence, fit: reasonParts.fit, test });
     out.push({
       post_date: date,
       platform,
@@ -307,7 +345,7 @@ export function revisePrompt(c: {
     c.posts.map((p) => `- [${p.id}] ${p.date} ${p.platform}${p.format ? ` ${p.format}` : ""}${p.pillar ? ` (pillar: ${p.pillar})` : ""}${p.copy ? `\n  Current copy: ${p.copy.replace(/\n+/g, " / ")}` : ""}${p.reason ? `\n  Why it's planned: ${p.reason}` : ""}`).join("\n"),
     c.evidence.length ? ["Evidence, by id:", ...c.evidence.map(evidenceLine)].join("\n") : "",
     c.others.length ? ["Other posts this week (don't repeat their topics):", ...c.others.map((p) => `- ${p.date} ${p.platform}: ${firstLine(p.copy)}`)].join("\n") : "",
-    `Reply with JSON only: {"posts":[{"id":"...","pillar":"...","copy":"...","hashtags":["..."],"cta":"...","visual_direction":"..."${c.scope === "empty" ? ',"reason_type":"performance|competitor|trend|seasonal","evidence_ids":["..."],"fit":"...","moment":""' : ""}}]}`,
+    `Reply with JSON only: {"posts":[{"id":"...","pillar":"...","copy":"...","hashtags":["..."],"cta":"...","visual_direction":"..."${c.scope === "empty" ? ',"reason_type":"performance|competitor|trend|seasonal","evidence_ids":["..."],"fit":"..."' : ""}}]}`,
   ].filter(Boolean).join("\n\n");
 }
 
@@ -333,14 +371,14 @@ export function parseRevision(text: string, ids: string[], evidence: EvidenceIte
     const copy = str(p.copy);
     if (!known.has(id) || seen.has(id) || !copy) continue;
     seen.add(id);
-    const refs = withReasons ? (Array.isArray(p.evidence_ids) ? p.evidence_ids : []).map((x) => byId.get(String(x))).filter((e): e is EvidenceItem => !!e).slice(0, 3).map(toRef) : [];
+    const parts = withReasons ? cited(p, byId) : null;
     out.push({
       id, copy,
       pillar: str(p.pillar, 120) || null,
       hashtags: Array.isArray(p.hashtags) ? (p.hashtags as unknown[]).map((h) => str(h, 80)).filter(Boolean).slice(0, 12) : [],
       cta: str(p.cta, 300) || null,
       visual_direction: str(p.visual_direction, 600) || null,
-      ...(withReasons ? { reason: buildReason({ type: typeFor(refs, str(p.reason_type)), evidence: refs, fit: str(p.fit, 300), moment: str(p.moment, 200) }) } : {}),
+      ...(parts ? { reason: buildReason({ type: typeFor(parts.evidence), evidence: parts.evidence, fit: parts.fit }) } : {}),
     });
   }
   return out;

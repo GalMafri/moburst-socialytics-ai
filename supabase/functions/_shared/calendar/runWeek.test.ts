@@ -41,7 +41,9 @@ function fakeDb(tables: Record<string, unknown[]>) {
       let rows = tables[table] ?? [];
       // deno-lint-ignore no-explicit-any
       const q: any = {};
-      for (const name of ["select", "eq", "neq", "in", "gte", "lte", "lt", "order", "limit", "not", "or", "range", "contains"]) q[name] = () => q;
+      for (const name of ["select", "neq", "in", "gte", "lte", "lt", "order", "limit", "not", "or", "range", "contains"]) q[name] = () => q;
+      // An equality filter keeps the rows that have the column and match it; rows without the column stay.
+      q.eq = (column: string, value: unknown) => { rows = rows.filter((r) => !(column in (r as Record<string, unknown>)) || (r as Record<string, unknown>)[column] === value); return q; };
       // A column that must be null drops the rows where it is set (a removed term has removed_at).
       q.is = (column: string, value: unknown) => { if (value === null) rows = rows.filter((r) => (r as Record<string, unknown>)[column] == null); return q; };
       for (const op of ["update", "insert", "upsert", "delete"]) q[op] = (value: unknown) => { writes.push({ table, op, value }); return q; };
@@ -55,7 +57,15 @@ function fakeDb(tables: Record<string, unknown[]>) {
 }
 
 const job = (over: Partial<WeekJob> = {}): WeekJob => ({ id: "j", kind: "week_plan", client_id: "ptp", occurrence: "2026-10-26T00:00:00Z", attempts: 1, max_attempts: 3, ...over });
-const plan = { id: "plan-1", client_id: "ptp", week_start: "2026-10-26", status: "queued", requested_by: null };
+/** A plan whose dated moments were judged (week_moments) and kept none. */
+const plan = { id: "plan-1", client_id: "ptp", week_start: "2026-10-26", status: "queued", requested_by: null, moments: { kept: [], dropped: [] } };
+/** A moment the judge kept and code checked (moments.ts JudgedMoment). */
+const HALLOWEEN = {
+  key: "us:halloween", name: "Halloween", date: "2026-10-31", last_year_date: "2025-10-31", country: "US", category: "cultural_commercial",
+  link: "https://www.timeanddate.com/holidays/us/halloween", hashtags: ["#Halloween"], aliases: [], terms: [],
+  fit: "Costume reels are where captains already show up.", pillars: ["Beer League Truths"], posts: ["ig9"], companies: 0,
+  history: { id: "ig9", platform: "Instagram", format: "reel", date: "2025-10-31", link: null, metric: "engagement", value: 23, median: 10, multiple: 2.1, sample: 6, thin: false },
+};
 
 afterEach(() => { vi.clearAllMocks(); m.social = null; });
 afterAll(() => vi.unstubAllGlobals());
@@ -63,7 +73,7 @@ afterAll(() => vi.unstubAllGlobals());
 describe("runWeekPlan", () => {
   it("plans a client with no posts, no competitors and no setting, and never fails for want of a rhythm", async () => {
     m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
-    m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [{ date: "2026-10-27", platform: "Instagram", copy: "Captains, this one is for you.", reason_type: "seasonal", moment: "Playoffs start Oct 27", evidence_ids: [] }] }), raw: {} });
+    m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [{ date: "2026-10-27", platform: "Instagram", copy: "Captains, this one is for you.", reason_type: "performance", evidence_ids: [] }] }), raw: {} });
     const db = fakeDb({ calendar_plans: [plan], clients: [CLIENT] });
     const out = await runWeekPlan(db, job(), NOW);
     expect(out.reason ?? null).toBeNull();
@@ -71,17 +81,57 @@ describe("runWeekPlan", () => {
     const inserted = db.writes.find((w) => w.table === "calendar_posts" && w.op === "insert")?.value as Array<Record<string, unknown>>;
     // The one Instagram post, and the Story every Instagram post gets when Sprout shows no Story history.
     expect(inserted.map((r) => r.format ?? null)).toEqual([null, "Story"]);
-    expect(inserted[0].reasons).toEqual([expect.objectContaining({ type: "seasonal", moment: "Playoffs start Oct 27", test: false })]);
+    expect(inserted[0].reasons).toEqual([expect.objectContaining({ type: "performance", test: false })]);
     // With no footage uploaded, the planner is told not to plan ideas that need filming.
     expect(m.anthropic.mock.calls[0][0].body.messages[0].content).toContain("don't plan ideas that need a specific person on camera");
     const ready = db.writes.filter((w) => w.table === "calendar_plans" && w.op === "update").map((w) => w.value as Record<string, unknown>).find((v) => v.status === "ready");
     expect(ready?.rhythm).toEqual(expect.objectContaining({ applied: expect.any(Array), learned: expect.any(Array), sources: expect.any(Object) }));
   });
 
+  it("waits for the week's dated moments, queuing them once, and plans without them when their job ended without them", async () => {
+    m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
+    m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [{ date: "2026-10-27", platform: "Instagram", copy: "Captains.", reason_type: "performance", evidence_ids: [] }] }), raw: {} });
+    const unjudged = { ...plan, moments: null };
+    const first = fakeDb({ calendar_plans: [unjudged], clients: [CLIENT] });
+    expect(await runWeekPlan(first, job({ priority: 15 } as Partial<WeekJob>), NOW)).toMatchObject({ status: "queued", deferred: true, reason: "Waiting for the week's dated moments." });
+    expect(first.writes.filter((w) => w.table === "scheduled_jobs")).toEqual([{ table: "scheduled_jobs", op: "upsert", value: expect.objectContaining({ kind: "week_moments", client_id: "ptp", dedupe_key: "week_moments:ptp:2026-10-26", occurrence: "2026-10-26T00:00:00Z", priority: 15 }) }]);
+    expect(m.anthropic).not.toHaveBeenCalled();
+
+    // Still running: wait again, queue nothing.
+    const running = fakeDb({ calendar_plans: [unjudged], clients: [CLIENT], scheduled_jobs: [{ kind: "week_moments", client_id: "ptp", dedupe_key: "week_moments:ptp:2026-10-26", status: "running" }] });
+    expect(await runWeekPlan(running, job(), NOW)).toMatchObject({ status: "queued", deferred: true });
+    expect(running.writes.filter((w) => w.table === "scheduled_jobs")).toEqual([]);
+
+    // Out of tries: the week is planned with no moments, and no seasonal post.
+    const failed = fakeDb({ calendar_plans: [unjudged], clients: [CLIENT], scheduled_jobs: [{ kind: "week_moments", client_id: "ptp", dedupe_key: "week_moments:ptp:2026-10-26", status: "failed" }] });
+    expect((await runWeekPlan(failed, job(), NOW)).status).toBe("done");
+    expect(m.anthropic.mock.calls[0][0].body.messages[0].content).toContain("no post is seasonal");
+  });
+
+  it("cites the moments the week kept as M items, words a seasonal post from them, and notes a seasonal post without one", async () => {
+    m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
+    m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [
+      { date: "2026-10-30", platform: "Instagram", copy: "Costume night on the ice.", reason_type: "seasonal", evidence_ids: ["M1"], fit: "Spooky." },
+      { date: "2026-10-27", platform: "Instagram", copy: "Vote for your captain.", reason_type: "seasonal", evidence_ids: [], moment: "Election Day" },
+    ] }), raw: {} });
+    const db = fakeDb({ calendar_plans: [{ ...plan, moments: { kept: [HALLOWEEN], dropped: [] } }], clients: [CLIENT] });
+    expect((await runWeekPlan(db, job(), NOW)).status).toBe("done");
+    expect(m.anthropic.mock.calls[0][0].body.messages[0].content).toContain("M1 [2026-10-31, cultural or commercial moment");
+    const inserted = db.writes.find((w) => w.table === "calendar_posts" && w.op === "insert")?.value as Array<Record<string, unknown>>;
+    // The seasonal post without a checked moment is dropped; the kept one has its Story beside it.
+    expect(inserted.filter((r) => r.format !== "Story").map((r) => r.copy)).toEqual(["Costume night on the ice."]);
+    expect(inserted[0].reasons).toEqual([expect.objectContaining({
+      type: "seasonal", label: "Halloween, Oct 31. Your Instagram reel for it last year got 2.1x your usual engagement. Costume reels are where captains already show up.",
+      evidence: [expect.objectContaining({ id: "M1", kind: "moment", key: "us:halloween", category: "cultural_commercial" })],
+    })]);
+    const ready = db.writes.filter((w) => w.table === "calendar_plans" && w.op === "update").map((w) => w.value as Record<string, unknown>).find((v) => v.status === "ready");
+    expect((ready?.evidence as Record<string, unknown>).dropped_seasonal).toEqual([expect.objectContaining({ date: "2026-10-27", platform: "Instagram", why: "seasonal post without a checked moment" })]);
+  });
+
   it("queues the voice profile early when a platform that had too few posts for a voice of its own reaches 5", async () => {
     const posts = (channel: string, n: number) => Array.from({ length: n }, (_, i) => ({ postId: `${channel}${i}`, channel, type: "photo", publishedAt: new Date(NOW.getTime() - (i * 5 + 3) * 86400_000).toISOString(), message: "Captains, this one is for you and your whole team.", engagementTotal: 3 }));
     m.owned.mockResolvedValue({ coverage: "complete", profiles: [{ network: "instagram" }, { network: "tiktok" }], posts: [...posts("instagram", 8), ...posts("tiktok", 5)] });
-    m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [{ date: "2026-10-27", platform: "Instagram", copy: "Captains, this one is for you.", reason_type: "seasonal", moment: "Playoffs start Oct 27", evidence_ids: [] }] }), raw: {} });
+    m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [{ date: "2026-10-27", platform: "Instagram", copy: "Captains, this one is for you.", reason_type: "performance", evidence_ids: [] }] }), raw: {} });
     m.social = { built_at: "2026-10-05T00:00:00Z", post_count: 11, platforms: {}, examples: {}, thin: { TikTok: 3 } };
     const db = fakeDb({ calendar_plans: [plan], clients: [CLIENT] });
     expect((await runWeekPlan(db, job(), NOW)).status).toBe("done");
@@ -96,7 +146,7 @@ describe("runWeekPlan", () => {
 
   it("plans the week with no trend evidence when nothing is stored yet, and never reads the monthly report's trend strings", async () => {
     m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
-    m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [{ date: "2026-10-27", platform: "Instagram", copy: "Captains, this one is for you.", reason_type: "seasonal", moment: "Playoffs start Oct 27", evidence_ids: [] }] }), raw: {} });
+    m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [{ date: "2026-10-27", platform: "Instagram", copy: "Captains, this one is for you.", reason_type: "performance", evidence_ids: [] }] }), raw: {} });
     // The latest report still carries the old trend strings; the planner no longer reads them.
     const report = { id: "r1", created_at: "2026-10-01T00:00:00Z", report_data: [{ ai_analysis: { instagram_trends_analysis: { opportunities_for_client: ["Old report trend about carousels"] } } }] };
     const db = fakeDb({ calendar_plans: [plan], clients: [CLIENT], reports: [report] });
@@ -134,7 +184,7 @@ describe("runWeekPlan", () => {
 
   it("suggests the profile's hashtags for the platforms the week posts on, and nothing for a client without a profile", async () => {
     m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
-    m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [{ date: "2026-10-27", platform: "Instagram", copy: "Captains, this one is for you.", reason_type: "seasonal", moment: "Playoffs start Oct 27", evidence_ids: [] }] }), raw: {} });
+    m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [{ date: "2026-10-27", platform: "Instagram", copy: "Captains, this one is for you.", reason_type: "performance", evidence_ids: [] }] }), raw: {} });
     // The team's posting setting puts three platforms in the week's slots.
     const client = { ...CLIENT, primary_platforms: ["Instagram", "TikTok", "LinkedIn"], posting_rhythm: { instagram: 2, tiktok: 1, linkedin: 1 } };
     const tag = (platform: string, term: string, source = "lifecycle") => ({ client_id: "ptp", kind: "hashtag", platform, term, reason: "r", source, removed_at: null });
@@ -163,7 +213,7 @@ describe("runWeekPlan", () => {
 
   it("plans from the client's content strategy, people's versions included, and gives a client without one today's prompt", async () => {
     m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
-    m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [{ date: "2026-10-27", platform: "Instagram", copy: "Captains, this one is for you.", reason_type: "seasonal", moment: "Playoffs start Oct 27", evidence_ids: [] }] }), raw: {} });
+    m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [{ date: "2026-10-27", platform: "Instagram", copy: "Captains, this one is for you.", reason_type: "performance", evidence_ids: [] }] }), raw: {} });
     const strategy = { client_id: "ptp", sections: { goals: "Grow saves on Instagram.", avoid: "Office photos." }, platforms: [], pillars: [], written_at: "2026-11-02T10:00:00Z" };
     await runWeekPlan(fakeDb({ calendar_plans: [plan], clients: [CLIENT], content_strategies: [strategy], content_strategy_edits: [{ client_id: "ptp", section_key: "avoid", text: "Anything that mocks other apps." }] }), job(), NOW);
     const prompt = m.anthropic.mock.calls[0][0].body.messages[0].content as string;
@@ -180,7 +230,7 @@ describe("runWeekPlan", () => {
 
   it("plans as before when the strategy cannot be read", async () => {
     m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
-    m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [{ date: "2026-10-27", platform: "Instagram", copy: "Captains.", reason_type: "seasonal", moment: "Playoffs", evidence_ids: [] }] }), raw: {} });
+    m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [{ date: "2026-10-27", platform: "Instagram", copy: "Captains.", reason_type: "performance", evidence_ids: [] }] }), raw: {} });
     const db = fakeDb({ calendar_plans: [plan], clients: [CLIENT] });
     const from = db.from.bind(db);
     db.from = (table: string) => {
@@ -260,7 +310,7 @@ describe("runWeekPlan", () => {
 // posts for a stopped plan (calendar_posts_plan_open), for a run that is
 // between its check and its write.
 describe("a plan a person stopped", () => {
-  const PLANNED = { text: JSON.stringify({ posts: [{ date: "2026-10-27", platform: "Instagram", copy: "Captains, this one is for you.", reason_type: "seasonal", moment: "Playoffs start Oct 27", evidence_ids: [] }] }), raw: {} };
+  const PLANNED = { text: JSON.stringify({ posts: [{ date: "2026-10-27", platform: "Instagram", copy: "Captains, this one is for you.", reason_type: "performance", evidence_ids: [] }] }), raw: {} };
   const planWrites = (db: ReturnType<typeof fakeDb>) => db.writes.filter((w) => w.table === "calendar_plans").map((w) => w.value as Record<string, unknown>);
   const postInserts = (db: ReturnType<typeof fakeDb>) => db.writes.filter((w) => w.table === "calendar_posts" && w.op === "insert");
 
@@ -354,10 +404,10 @@ describe("a week's Stories", () => {
   const stories = Array.from({ length: 26 }, (_, i) => ({ channel: "instagram", publishedAt: new Date(NOW.getTime() - (1 + i * 3) * DAY).toISOString() }));
   const client = { ...CLIENT, posting_rhythm: { instagram: 3, facebook: 1 } };
   const reply = { posts: [
-    { date: "2026-10-29", platform: "Instagram", format: "Carousel", posting_time: "17:00", copy: "Thursday post", reason_type: "seasonal", moment: "m", evidence_ids: [] },
-    { date: "2026-10-27", platform: "Instagram", format: "Reel", posting_time: "17:00", copy: "Tuesday post", reason_type: "seasonal", moment: "m", evidence_ids: [] },
-    { date: "2026-10-28", platform: "Instagram", format: "Story", posting_time: "12:00", copy: "Wednesday post", reason_type: "seasonal", moment: "m", evidence_ids: [] },
-    { date: "2026-10-26", platform: "Facebook", format: "Image", posting_time: "9:00", copy: "Facebook post", reason_type: "seasonal", moment: "m", evidence_ids: [] },
+    { date: "2026-10-29", platform: "Instagram", format: "Carousel", posting_time: "17:00", copy: "Thursday post", reason_type: "performance", evidence_ids: [] },
+    { date: "2026-10-27", platform: "Instagram", format: "Reel", posting_time: "17:00", copy: "Tuesday post", reason_type: "performance", evidence_ids: [] },
+    { date: "2026-10-28", platform: "Instagram", format: "Story", posting_time: "12:00", copy: "Wednesday post", reason_type: "performance", evidence_ids: [] },
+    { date: "2026-10-26", platform: "Facebook", format: "Image", posting_time: "9:00", copy: "Facebook post", reason_type: "performance", evidence_ids: [] },
   ] };
   const inserted = (db: ReturnType<typeof fakeDb>) => db.writes.find((w) => w.table === "calendar_posts" && w.op === "insert")?.value as Array<Record<string, unknown>>;
 
@@ -396,7 +446,7 @@ describe("a week's Stories", () => {
 
   it("leaves Stories already on the calendar out of the week's feed posts", async () => {
     m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
-    m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [{ date: "2026-10-27", platform: "Instagram", copy: "The one Instagram post", reason_type: "seasonal", moment: "m", evidence_ids: [] }] }), raw: {} });
+    m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [{ date: "2026-10-27", platform: "Instagram", copy: "The one Instagram post", reason_type: "performance", evidence_ids: [] }] }), raw: {} });
     const existingStory = { post_date: "2026-10-27", platform: "Instagram", format: "Story", copy: "A Story someone added", plan_id: null };
     const db = fakeDb({ calendar_plans: [plan], clients: [{ ...CLIENT, posting_rhythm: { instagram: 1, facebook: 0 } }], calendar_posts: [existingStory] });
     // The week has nothing written yet: only the posts around it are read back.

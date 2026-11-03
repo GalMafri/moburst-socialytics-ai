@@ -4,6 +4,8 @@
 //   week_plan      write one week's plan, once, from the freshest evidence
 //   week_revise    rewrite a week's posts nobody worked on, from a note
 //   voice_profile  learn how the client writes from its published posts
+// A week's plan waits for its dated moments (week_moments, runMoments.ts),
+// as it waits for the voice profile, and cites them as evidence M1, M2.
 // Each job is one bounded model call. A plan that already has posts (a run
 // cut off after writing them) is finished rather than written twice. Every
 // active client can be planned: the posting rhythm always resolves
@@ -24,7 +26,8 @@ import {
   resolveRhythm, scoreCompetitorPosts, scoreOwnPosts, scoreTrendItems, storyRhythm, MIN_COMPETITOR_WEEKS, OWN_DAYS,
   type CompetitorPost, type EvidenceItem, type FeedRow, type OwnPost, type RhythmLine, type RhythmSources,
 } from "./evidence.ts";
-import { parseRevision, parseWeekPlan, revisePrompt, storyPlan, weekPrompt, withStories, type Reason, type RevisePost } from "./weekPlan.ts";
+import { parseRevision, parseWeekPlan, revisePrompt, storyPlan, weekPrompt, withStories, type DroppedPost, type Reason, type RevisePost } from "./weekPlan.ts";
+import { momentEvidence, type JudgedMoment } from "./moments.ts";
 import { isStoryPost } from "../design/story.ts";
 import { wordReason } from "./reasonText.ts";
 import { activePreferences, buildVoiceProfile, consolidateMemory, COPY_MODEL, learnFromSignal, loadClientVoice } from "../voice/load.ts";
@@ -43,6 +46,9 @@ export interface WeekJob {
   occurrence: string | null;
   attempts: number;
   max_attempts: number;
+  /** What a job runs on, for the moments' jobs ({ country }, { removal_id }). */
+  payload?: Record<string, unknown> | null;
+  priority?: number;
 }
 
 export interface WeekJobOutcome {
@@ -341,6 +347,37 @@ async function voicePending(admin: Db, clientId: string): Promise<boolean> {
 
 const waitForVoice = (now: Date): WeekJobOutcome => ({ status: "queued", reason: "Waiting for the client's voice profile.", available_at: new Date(now.getTime() + 60_000).toISOString(), deferred: true });
 
+const waitForMoments = (now: Date): WeekJobOutcome => ({ status: "queued", reason: "Waiting for the week's dated moments.", available_at: new Date(now.getTime() + 60_000).toISOString(), deferred: true });
+
+/**
+ * The week's dated moments are judged before it is planned (week_moments,
+ * runMoments.ts): queued here once per week, and waited for while queued or
+ * running. A week whose moments job ended without them, or a queue that
+ * won't take the job, is planned with no moments rather than held.
+ */
+async function momentsPending(admin: Db, job: WeekJob, plan: { moments?: unknown }, week: string, now: Date): Promise<boolean> {
+  if (plan.moments) return false;
+  const key = `week_moments:${job.client_id}:${week}`;
+  const { data, error } = await admin.from("scheduled_jobs").select("dedupe_key, status").eq("dedupe_key", key);
+  if (error) {
+    console.warn("[calendar] the week's moments were left out:", error.message);
+    return false;
+  }
+  const row = (data ?? []).find((r: { dedupe_key?: string }) => r.dedupe_key === key);
+  if (row) return row.status === "queued" || row.status === "running";
+  const { error: queueError } = await admin.from("scheduled_jobs").upsert({
+    kind: "week_moments", client_id: job.client_id, occurrence: `${week}T00:00:00Z`, dedupe_key: key, priority: job.priority ?? 40, available_at: now.toISOString(),
+  }, { onConflict: "dedupe_key", ignoreDuplicates: true });
+  if (queueError) {
+    console.warn("[calendar] the week's moments were left out:", queueError.message);
+    return false;
+  }
+  return true;
+}
+
+/** The moments a plan kept (calendar_plans.moments), as the planner's evidence M1, M2. */
+const planMoments = (plan: { moments?: { kept?: unknown } | null }) => momentEvidence(Array.isArray(plan.moments?.kept) ? plan.moments!.kept as JudgedMoment[] : []);
+
 const busyElsewhere = (now: Date): WeekJobOutcome => ({ status: "queued", reason: "Another run is working on this week.", available_at: new Date(now.getTime() + 2 * 60_000).toISOString(), deferred: true });
 
 /**
@@ -421,6 +458,7 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
       return retryLater(job, "The last run stopped before finishing.", now);
     }
     if (await voicePending(admin, job.client_id)) return waitForVoice(now);
+    if (await momentsPending(admin, job, plan, week, now)) return waitForMoments(now);
     if (!(await claimPlan(admin, plan.id, now))) return (await planStopped(admin, plan.id)) ? STOPPED : busyElsewhere(now);
     claimed = true;
 
@@ -451,7 +489,9 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
 
     const gathered = await gatherEvidence(admin, client, now, { week });
     const rhythm = { applied: gathered.rhythm, learned: gathered.learnedRhythm, sources: gathered.rhythmSources, stories: gathered.stories };
-    const evidence = { items: gathered.evidence, avoid: gathered.avoid, thin: gathered.thin, sources: gathered.sources, first_date: firstDate };
+    // The dated moments the client's data checked: the only moments a seasonal post can rest on.
+    const items = [...gathered.evidence, ...planMoments(plan)];
+    const evidence: Record<string, unknown> = { items, avoid: gathered.avoid, thin: gathered.thin, sources: gathered.sources, first_date: firstDate };
     // A client that posts less than once a week has weeks with nothing to post on any platform.
     if (!gathered.rhythm.length && gathered.learnedRhythm.length) {
       if (!(await markReady({ rhythm, evidence }))) return STOPPED;
@@ -477,7 +517,7 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
       monday: week,
       firstDate,
       rhythm: gathered.rhythm,
-      evidence: gathered.evidence,
+      evidence: items,
       avoid: gathered.avoid,
       competitiveBrief: await competitiveBrief(admin, client.id).catch(() => ""),
       existing,
@@ -489,17 +529,21 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
     };
     let posts: ReturnType<typeof parseWeekPlan> = [];
     const tokens = { input: 0, output: 0 };
+    let dropped: DroppedPost[] = [];
     for (let attempt = 0; attempt < 2 && !posts.length; attempt++) {
       // No model call starts once a person stopped the plan.
       if (await planStopped(admin, plan.id)) return STOPPED;
       const result = await anthropicMessages({ apiKey: apiKey(), body: { model: COPY_MODEL, max_tokens: 16000, messages: [{ role: "user", content: weekPrompt(ctx) }] } });
       const u = usage(result.raw);
       tokens.input += u.input; tokens.output += u.output;
-      posts = parseWeekPlan(result.text, ctx);
+      dropped = [];
+      posts = parseWeekPlan(result.text, ctx, { dropped });
     }
     // Stopped during the model call: the reply is dropped.
     if (await planStopped(admin, plan.id)) return STOPPED;
     if (!posts.length) throw new Error("The planner's reply had no usable posts.");
+    // Seasonal posts the planner wrote without a checked moment, for staff to see on the plan.
+    if (dropped.length) evidence.dropped_seasonal = dropped;
     const finishing = { model: COPY_MODEL, input_tokens: tokens.input, output_tokens: tokens.output, rhythm, evidence };
     // Checked again right before writing: a run that outlived its claim may have written them meanwhile.
     if (await writtenSoFar()) {
@@ -614,6 +658,7 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
 
     const voice = await loadClientVoice(admin, client.id);
     const gathered = pending.scope === "empty" ? await gatherEvidence(admin, client, now, { week }) : null;
+    const reviseEvidence = gathered ? [...gathered.evidence, ...planMoments(plan)] : [];
     const reasonWords = (r: unknown) => (Array.isArray(r) && r[0] ? wordReason(r[0] as Reason) : "");
     const revisePosts: RevisePost[] = targets.map((p) => ({ id: p.id, date: p.post_date, platform: p.platform, format: p.format, pillar: p.pillar, copy: p.copy || "", reason: pending.scope === "empty" ? "" : reasonWords(p.reasons) }));
     const prompt = revisePrompt({
@@ -624,7 +669,7 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
       posts: revisePosts,
       pillars: (Array.isArray(client.content_pillars) ? client.content_pillars : []).map((p: any) => ({ name: String(p?.name ?? p ?? ""), description: p?.description ? String(p.description).slice(0, 240) : undefined })).filter((p: any) => p.name),
       languages: list(client.language),
-      evidence: gathered?.evidence ?? [],
+      evidence: reviseEvidence,
       others: all.filter((p) => !targets.some((t) => t.id === p.id) && p.copy).map((p) => ({ date: p.post_date, platform: p.platform, copy: p.copy })),
       strategy: await clientStrategy(admin, client.id),
     });
@@ -632,7 +677,7 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
     if (await planStopped(admin, plan.id)) return STOPPED;
     const result = await anthropicMessages({ apiKey: apiKey(), body: { model: COPY_MODEL, max_tokens: 12000, messages: [{ role: "user", content: prompt }] } });
     if (await planStopped(admin, plan.id)) return STOPPED;
-    const revised = parseRevision(result.text, targets.map((p) => p.id), gathered?.evidence ?? [], pending.scope === "empty");
+    const revised = parseRevision(result.text, targets.map((p) => p.id), reviseEvidence, pending.scope === "empty");
     if (!revised.length) throw new Error("The rewrite's reply had no usable posts.");
 
     const replaced: Array<Record<string, unknown>> = [];

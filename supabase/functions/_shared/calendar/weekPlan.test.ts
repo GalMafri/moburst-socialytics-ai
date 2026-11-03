@@ -117,6 +117,60 @@ describe("the client's content strategy in the planner's prompts", () => {
   });
 });
 
+/** A moment the judge kept (moments.ts momentEvidence). */
+const M1: EvidenceItem = {
+  id: "M1", kind: "moment", text: "Halloween", key: "us:halloween", category: "cultural_commercial", date: "2026-10-31", link: "https://www.timeanddate.com/holidays/us/halloween",
+  fit: "Costume reels are where your followers already show up.", platform: "Instagram", format: "reel", metric: "engagement", value: 23, median: 10, multiple: 2.3, sample: 8,
+};
+
+describe("dated moments in the plan", () => {
+  it("lists the checked moments by M id and asks every seasonal post to cite one, with no moments of the model's own", () => {
+    const p = weekPrompt({ ...CTX, evidence: [...EVIDENCE, M1] });
+    expect(p).toContain("Dated moments this week, each checked against the client");
+    expect(p).toMatch(/M1 \[2026-10-31, cultural or commercial moment, [^\]]*2\.3x the client's usual engagement[^\]]*\] Halloween/);
+    expect(p).toContain("A seasonal post cites one M id");
+    expect(p).not.toContain("can carry a post instead");
+    expect(p).not.toContain('"moment"');
+  });
+
+  it("tells the planner no post is seasonal in a week with no checked moment", () => {
+    const p = weekPrompt(CTX);
+    expect(p).not.toContain("Dated moments this week");
+    expect(p).toContain("No dated moment checked out for this client this week, so no post is seasonal");
+  });
+
+  it("drops a seasonal post that cites no M id and notes it for staff", () => {
+    const dropped: Array<Record<string, unknown>> = [];
+    const posts = parseWeekPlan(JSON.stringify({ posts: [
+      post({ reason_type: "seasonal", evidence_ids: [], moment: "Election Day on Nov 3", fit: "Ad auctions get pricier." }),
+      post({ reason_type: "seasonal", evidence_ids: ["P1"], moment: "Black Friday", date: "2026-10-29" }),
+      post({ platform: "Facebook", evidence_ids: ["P1"], reason_type: "performance" }),
+    ] }), { ...CTX, evidence: [...EVIDENCE, M1] }, { dropped });
+    expect(posts.map((p) => p.platform)).toEqual(["Facebook"]);
+    expect(dropped).toEqual([
+      expect.objectContaining({ date: "2026-10-27", platform: "Instagram", why: "seasonal post without a checked moment" }),
+      expect.objectContaining({ date: "2026-10-29", platform: "Instagram" }),
+    ]);
+  });
+
+  it("makes a post that cites a moment seasonal, worded from the evidence and the judge's sentence, never the model's moment", () => {
+    const [p] = parseWeekPlan(JSON.stringify({ posts: [post({ reason_type: "performance", evidence_ids: ["P1", "M1"], moment: "Halloween on Oct 30", fit: "Spooky fun for captains." })] }), { ...CTX, evidence: [...EVIDENCE, M1] });
+    expect(p.reasons[0]).toMatchObject({ type: "seasonal", fit: M1.fit, test: false });
+    expect(p.reasons[0].moment).toBeUndefined();
+    expect(p.reasons[0].evidence?.map((e) => e.id)).toEqual(["M1", "P1"]);
+    expect(p.reasons[0].label).toBe("Halloween, Oct 31. Your Instagram reel for it last year got 2.3x your usual engagement. Costume reels are where your followers already show up.");
+    expect(wordReason(p.reasons[0])).toBe(p.reasons[0].label);
+  });
+
+  it("never gives a rewritten empty slot a moment the evidence doesn't have", () => {
+    const [p] = parseRevision(JSON.stringify({ posts: [{ id: "a", copy: "New", reason_type: "seasonal", evidence_ids: [], moment: "Election Day", fit: "Fits" }] }), ["a"], EVIDENCE, true);
+    expect(p.reason).toMatchObject({ type: "performance" });
+    expect(p.reason?.moment).toBeUndefined();
+    const [q] = parseRevision(JSON.stringify({ posts: [{ id: "a", copy: "New", reason_type: "seasonal", evidence_ids: ["M1"], fit: "Fits" }] }), ["a"], [...EVIDENCE, M1], true);
+    expect(q.reason).toMatchObject({ type: "seasonal", fit: M1.fit });
+  });
+});
+
 describe("parseWeekPlan", () => {
   it("keeps a trend's theme on the post's reason and types the post as a trend", () => {
     const trend: EvidenceItem = { id: "N1", kind: "trend", text: "POV: you are the captain", theme: "Captain POV skits", company: "@benchpro", platform: "TikTok", format: "short_video", date: "2026-10-14", link: "https://t/1", metric: "engagement", value: 5400 };
