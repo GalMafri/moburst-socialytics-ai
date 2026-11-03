@@ -64,10 +64,10 @@ async function mustWrite(p: PromiseLike<{ error: { message: string } | null }>, 
 }
 
 /**
- * Learn from one signal (a copy edit, a Revise note or a rewrite note):
- * confirm, replace or add preferences so the list stays short and current.
- * Answers what changed, so a rewrite note can show what was learned and take
- * it back (undoLearning).
+ * Learn from one signal (a copy edit, a Revise note, a rewrite note or a
+ * removed seasonal post): confirm, replace or add preferences so the list
+ * stays short and current. Answers what changed, so a rewrite note can show
+ * what was learned and take it back (undoLearning).
  */
 export async function learnFromSignal(admin: Db, clientId: string, signal: MemorySignal): Promise<{ ops: number; changes: LearnedChange[] }> {
   if (signal.kind === "copy_edit" && signal.before.trim() === signal.after.trim()) return { ops: 0, changes: [] };
@@ -78,7 +78,9 @@ export async function learnFromSignal(admin: Db, clientId: string, signal: Memor
   const result = await anthropicMessages({ apiKey: apiKey(), body: { model: MEMORY_MODEL, max_tokens: 1200, messages: [{ role: "user", content: mergePrompt(String(client?.name ?? "the client"), current, signal) }] } });
   const ops = parseMergeOps(result.text, current.map((p) => p.id));
   const source = signal.kind === "copy_edit" ? "copy_edit" : signal.kind;
-  const evidence = signal.kind === "copy_edit" ? excerpt(`${signal.before} => ${signal.after}`) : excerpt(signal.note);
+  const evidence = signal.kind === "copy_edit" ? excerpt(`${signal.before} => ${signal.after}`)
+    : signal.kind === "moment_removed" ? excerpt(`Removed the planned post for ${signal.moment}${signal.date ? ` on ${signal.date}` : ""}.`)
+    : excerpt(signal.note);
   const now = new Date().toISOString();
   const changes: LearnedChange[] = [];
   const confirm = async (p: Preference) => {

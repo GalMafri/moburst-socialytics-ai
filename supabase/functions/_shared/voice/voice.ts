@@ -25,6 +25,7 @@
 
 import { notesSectionLines, shortDate, type NotesVoice } from "../notes/notes.ts";
 import { platformName } from "../calendar/evidence.ts";
+import { CATEGORY_WORDS, type MomentCategory } from "../calendar/moments.ts";
 
 export const PATTERN_TYPES = ["tone", "length", "emoji_usage", "cta_style", "hashtag_preference", "vocabulary", "structure", "topics", "format", "other"] as const;
 export type PatternType = typeof PATTERN_TYPES[number];
@@ -274,7 +275,9 @@ export type MemorySignal =
   | { kind: "copy_edit"; before: string; after: string; platform?: string | null }
   | { kind: "revise_note"; note: string }
   /** A note left on a post's Regenerate (notes on regenerate, 3 Nov 2026), with the copy before and after the rewrite; story: the post is a Story's message. */
-  | { kind: "rewrite_note"; note: string; before: string; after: string; platform?: string | null; story?: boolean };
+  | { kind: "rewrite_note"; note: string; before: string; after: string; platform?: string | null; story?: boolean }
+  /** A person removed a planned seasonal post (calendar/runMoments.ts moment_feedback). */
+  | { kind: "moment_removed"; moment: string; category: string | null; date: string | null };
 
 /**
  * What one signal changed in the memory, for the line under a rewrite and its
@@ -285,6 +288,15 @@ export type LearnedChange =
   | { op: "add"; id: string; description: string; platform: string | null }
   | { op: "replace"; id: string; description: string; platform: string | null; added: boolean; replaced: { id: string; description: string } }
   | { op: "confirm"; id: string; description: string; platform: string | null };
+
+/** A removed seasonal post, in words: which moment, and what a removal can teach. */
+function momentRemovedText(brand: string, signal: Extract<MemorySignal, { kind: "moment_removed" }>): string {
+  const kind = signal.category ? CATEGORY_WORDS[signal.category as MomentCategory] : null;
+  return [
+    `Someone on ${brand}'s side removed a planned post for ${signal.moment.slice(0, 200)}${signal.date ? ` (${signal.date})` : ""}${kind ? `, a ${kind}` : ""}.`,
+    `A removal says which dated moments ${brand} does not want posts for. If it shows a kind of moment to skip, add or confirm a topics preference such as "Skip civic and political moments."; a single removal of an everyday moment may say nothing general.`,
+  ].join("\n\n");
+}
 
 export type MergeOp =
   | { op: "confirm"; id: string }
@@ -298,7 +310,7 @@ export function mergePrompt(brand: string, current: Preference[], signal: Memory
   const list = current.length
     ? current.map((p) => `- [${p.id}] ${kindOf(p)} ${p.pattern_description}`).join("\n")
     : "- (none yet)";
-  const what = signal.kind === "copy_edit"
+  const what = signal.kind === "moment_removed" ? momentRemovedText(brand, signal) : signal.kind === "copy_edit"
     ? [`Someone on ${brand}'s side edited a post's copy${signal.platform ? ` for ${signal.platform}` : ""}.`, `Before:\n${signal.before.slice(0, 3000)}`, `After:\n${signal.after.slice(0, 3000)}`].join("\n\n")
     : signal.kind === "rewrite_note"
       ? [

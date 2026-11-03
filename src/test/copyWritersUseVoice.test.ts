@@ -48,6 +48,17 @@ describe("copy writers use the client's voice", () => {
     expect(runWeek.text).toContain("loadClientVoice(");
   });
 
+  // Seasonal moments (3 Nov 2026): the judge that decides which dated moments
+  // a week may use reads the same memory, so a removal's lesson ("Skip civic
+  // and political moments") reaches it as it reaches the planner.
+  it("gives the moments' judge the client's voice and the team's preferences", () => {
+    const runMoments = all.find((f) => f.path === "_shared/calendar/runMoments.ts")!;
+    expect(runMoments.text).toContain("loadClientVoice(");
+    expect(runMoments.text).toMatch(/preferences: voice\.preferences/);
+    const moments = all.find((f) => f.path === "_shared/calendar/moments.ts")!;
+    expect(moments.text).toContain("The team's preferences (always follow these)");
+  });
+
   // Client notes (2 Nov 2026): what the client told the team reaches every
   // copy prompt through the same voice, so every writer above gets it.
   it("loads what the client told the team into the voice, and the voice block prints it first", () => {

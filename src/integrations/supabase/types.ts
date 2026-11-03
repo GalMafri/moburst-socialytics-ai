@@ -312,6 +312,7 @@ export type Database = {
           id: string
           input_tokens: number | null
           model: string | null
+          moments: Json | null
           output_tokens: number | null
           pending_revision: Json | null
           ready_at: string | null
@@ -334,6 +335,7 @@ export type Database = {
           id?: string
           input_tokens?: number | null
           model?: string | null
+          moments?: Json | null
           output_tokens?: number | null
           pending_revision?: Json | null
           ready_at?: string | null
@@ -356,6 +358,7 @@ export type Database = {
           id?: string
           input_tokens?: number | null
           model?: string | null
+          moments?: Json | null
           output_tokens?: number | null
           pending_revision?: Json | null
           ready_at?: string | null
@@ -2397,6 +2400,140 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      moment_lists: {
+        Row: {
+          country: string
+          found: number
+          input_tokens: number | null
+          listed_at: string
+          model: string | null
+          output_tokens: number | null
+          searches: number | null
+          through: string
+          week_start: string
+        }
+        Insert: {
+          country: string
+          found?: number
+          input_tokens?: number | null
+          listed_at?: string
+          model?: string | null
+          output_tokens?: number | null
+          searches?: number | null
+          through: string
+          week_start: string
+        }
+        Update: {
+          country?: string
+          found?: number
+          input_tokens?: number | null
+          listed_at?: string
+          model?: string | null
+          output_tokens?: number | null
+          searches?: number | null
+          through?: string
+          week_start?: string
+        }
+        Relationships: []
+      }
+      moment_removals: {
+        Row: {
+          category: string | null
+          client_id: string
+          id: string
+          moment_key: string | null
+          moment_name: string
+          plan_id: string | null
+          post_date: string | null
+          post_key: string | null
+          removed_at: string
+          removed_by: string | null
+        }
+        Insert: {
+          category?: string | null
+          client_id: string
+          id?: string
+          moment_key?: string | null
+          moment_name?: string
+          plan_id?: string | null
+          post_date?: string | null
+          post_key?: string | null
+          removed_at?: string
+          removed_by?: string | null
+        }
+        Update: {
+          category?: string | null
+          client_id?: string
+          id?: string
+          moment_key?: string | null
+          moment_name?: string
+          plan_id?: string | null
+          post_date?: string | null
+          post_key?: string | null
+          removed_at?: string
+          removed_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "moment_removals_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      moments: {
+        Row: {
+          aliases: string[]
+          category: string
+          country: string
+          created_at: string
+          date: string
+          hashtags: string[]
+          id: string
+          key: string
+          last_year_date: string | null
+          link: string
+          listed_for: string
+          name: string
+          terms: string[]
+          updated_at: string
+        }
+        Insert: {
+          aliases?: string[]
+          category: string
+          country: string
+          created_at?: string
+          date: string
+          hashtags?: string[]
+          id?: string
+          key: string
+          last_year_date?: string | null
+          link: string
+          listed_for: string
+          name: string
+          terms?: string[]
+          updated_at?: string
+        }
+        Update: {
+          aliases?: string[]
+          category?: string
+          country?: string
+          created_at?: string
+          date?: string
+          hashtags?: string[]
+          id?: string
+          key?: string
+          last_year_date?: string | null
+          link?: string
+          listed_for?: string
+          name?: string
+          terms?: string[]
+          updated_at?: string
+        }
+        Relationships: []
       }
       pipeline_payloads: {
         Row: {

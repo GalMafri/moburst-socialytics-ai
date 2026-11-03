@@ -161,6 +161,11 @@ describe("the preference memory", () => {
   it("describes an edit or a note against the current list", () => {
     expect(mergePrompt("Moburst", current, { kind: "copy_edit", before: "A. Follow us!", after: "A.", platform: "LinkedIn" })).toContain("for LinkedIn");
     expect(mergePrompt("Moburst", [], { kind: "revise_note", note: "No emojis" })).toContain('"No emojis"');
+    // A removed seasonal post (Lital, 3 Nov 2026) can teach a topics preference about kinds of moment.
+    const removed = mergePrompt("Moburst", [], { kind: "moment_removed", moment: "Election Day", category: "civic_political", date: "2026-11-03" });
+    expect(removed).toContain("removed a planned post for Election Day (2026-11-03), a civic or political moment.");
+    expect(removed).toContain('"Skip civic and political moments."');
+    expect(mergePrompt("Moburst", [], { kind: "moment_removed", moment: "Halloween", category: null, date: null })).toContain("removed a planned post for Halloween.");
   });
 
   it("keeps operations on real preferences, one per preference, at most three", () => {

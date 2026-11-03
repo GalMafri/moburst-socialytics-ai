@@ -17,6 +17,10 @@
 // report_pipeline steps in a lane of their own (worker.ts), and the daily
 // sweep removes expired pipeline payloads and old pipeline runs.
 //
+// Seasonal moments (_shared/calendar/runMoments.ts): moments_list lists a
+// country's dated moments, week_moments judges one client's week before its
+// plan, and moment_feedback teaches the memory from a removed seasonal post.
+//
 // Client notes (_shared/notes/run.ts): a notes_read job reads one part of a
 // client's waiting notes per run; the daily sweep queues one for a client
 // whose notes wait with no job on its way (client_notes_queue_waiting).
@@ -75,6 +79,7 @@ import { checkClientLandscape, recordTrackingCheck, RIVALIQ_UNAVAILABLE, type La
 import { makePoster, runDispatch, type DispatchDeps } from "./dispatch.ts";
 import { runFeedJob } from "./feed.ts";
 import { runVoiceProfile, runWeekPlan, runWeekRevise } from "../_shared/calendar/runWeek.ts";
+import { runMomentFeedback, runMomentsList, runWeekMoments } from "../_shared/calendar/runMoments.ts";
 import { runLifecycle, runLifecycleStep, type LifecycleJob } from "../_shared/lifecycle/run.ts";
 import { LEASE_SECONDS, PIPELINE_CONCURRENCY, repairsFor, summarize, workerTick, type TickResult } from "./worker.ts";
 import { readEngine } from "../_shared/pipelines/engine.ts";
@@ -113,6 +118,9 @@ const JOB_LABELS: Partial<Record<ScheduledJob["kind"], string>> = {
   trend_refresh: "industry trends",
   sprout_onboarding: "Sprout onboarding",
   notes_read: "client notes",
+  moments_list: "dated moments list",
+  week_moments: "week's dated moments",
+  moment_feedback: "removed seasonal post",
 };
 
 Deno.serve(async (req) => {
@@ -189,6 +197,9 @@ Deno.serve(async (req) => {
           case "week_plan": return runWeekPlan(db, job);
           case "week_revise": return runWeekRevise(db, job);
           case "voice_profile": return runVoiceProfile(db, job);
+          case "moments_list": return runMomentsList(db, job);
+          case "week_moments": return runWeekMoments(db, job);
+          case "moment_feedback": return runMomentFeedback(db, job);
           case "lifecycle": return runLifecycle(db, job as unknown as LifecycleJob);
           case "lifecycle_step": return runLifecycleStep(db, job as unknown as LifecycleJob);
           case "report_pipeline": return runPipelineJob(job, pipelineDeps);
