@@ -111,19 +111,27 @@ export function mediaOf(rows: Array<{ variant_angle?: string | null; is_selected
   };
 }
 
-/** What a press would design, by kind (Stories on their own); posts whose copy is not written yet; and video posts left for filming. */
-export function weekCounts(posts: Array<{ post_key: string; copy: string; result: Classified }>): { single: number; story: number; carousel: number; video: number; copy_waits: number; filming: number } {
+/**
+ * What a press would design, by kind (Stories on their own, with the network
+ * they share, if one: "2 Instagram Stories"); posts whose copy is not written
+ * yet; and video posts left for filming.
+ */
+export function weekCounts(posts: Array<{ post_key: string; copy: string; result: Classified; platform?: string | null }>): { single: number; story: number; carousel: number; video: number; copy_waits: number; filming: number; story_platform: string | null } {
   const out = { single: 0, story: 0, carousel: 0, video: 0, copy_waits: 0, filming: 0 };
+  const storyNetworks = new Set<string>();
   for (const p of posts) {
     if (!p.result.in) {
       if (p.result.why === "filming") out.filming++;
       continue;
     }
-    if (p.result.story) out.story++;
-    else out[p.result.kind]++;
+    if (p.result.story) {
+      out.story++;
+      storyNetworks.add(/facebook/i.test(String(p.platform ?? "")) ? "Facebook" : /instagram/i.test(String(p.platform ?? "")) ? "Instagram" : "");
+    } else out[p.result.kind]++;
     if (!p.copy.trim()) out.copy_waits++;
   }
-  return out;
+  const [network] = [...storyNetworks];
+  return { ...out, story_platform: storyNetworks.size === 1 && network ? network : null };
 }
 
 /** One post of a week run (design_week_runs.posts). */

@@ -44,8 +44,12 @@ export interface WeekRun {
   finished_at: string | null;
 }
 
-/** Posts a press would design, by kind; Stories (designed as stills) on their own, absent from a server from before Stories. */
-export interface WeekCounts { single: number; story?: number; carousel: number; video: number; copy_waits: number; filming: number }
+/**
+ * Posts a press would design, by kind; Stories (designed as stills) on their
+ * own, with the network they share when they share one; both absent from a
+ * server from before Stories.
+ */
+export interface WeekCounts { single: number; story?: number; carousel: number; video: number; copy_waits: number; filming: number; story_platform?: string | null }
 
 /** What the client's setup waits for before designs can start (one rule and sentence with the server and the API). */
 export type WeekWaitingFor = DesignWaitingFor;
@@ -120,15 +124,18 @@ export function durationWords(minutes: number): string {
   return `${plural(h, "hour", "hours")}${m ? ` and ${plural(m, "minute", "minutes")}` : ""}`;
 }
 
-/** "9 posts this week have no design yet: 6 designs, 2 Stories, 1 video. About 100 Higgsfield credits and 45 minutes." */
+/** "9 posts this week have no design yet: 6 designs, 1 video and 2 Instagram Stories. About 100 Higgsfield credits and 45 minutes." */
 export function previewLine(c: WeekCounts, credits: number, minutes: number): string {
   const n = postsToDesign(c);
-  const kinds = [
+  const feed = [
     c.single ? plural(c.single, "design", "designs") : "",
-    c.story ? plural(c.story, "Story", "Stories") : "",
     c.carousel ? plural(c.carousel, "carousel", "carousels") : "",
     c.video ? plural(c.video, "video", "videos") : "",
   ].filter(Boolean).join(", ");
+  // Stories are named apart, last, with their network when they share one.
+  const network = c.story_platform === "Instagram" || c.story_platform === "Facebook" ? `${c.story_platform} ` : "";
+  const stories = c.story ? `${c.story} ${network}${c.story === 1 ? "Story" : "Stories"}` : "";
+  const kinds = [feed, stories].filter(Boolean).join(" and ");
   const cost = c.video && credits > 0 ? `About ${Math.round(credits)} Higgsfield credits and ${durationWords(minutes)}.` : `About ${durationWords(minutes)}.`;
   return `${plural(n, "post", "posts")} this week ${n === 1 ? "has" : "have"} no design yet: ${kinds}. ${cost}`;
 }
