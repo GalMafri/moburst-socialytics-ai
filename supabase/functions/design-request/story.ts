@@ -1,14 +1,17 @@
 // supabase/functions/design-request/story.ts
 //
-// "Design as a Story" on a Facebook or Instagram post (Stories for Facebook
-// and Instagram, 2 Nov 2026). Spec:
-// docs/superpowers/specs/2026-11-02-stories-design.md
+// "Add a Story" on a Facebook or Instagram post (Stories for Facebook and
+// Instagram, 2 Nov 2026; Stories you can find, 3 Nov 2026). Specs:
+// docs/superpowers/specs/2026-11-02-stories-design.md and
+// docs/superpowers/specs/2026-11-03-post-notes-stories-design.md
 //
 //   story {client_id, calendar_post_key}   anyone who can work on the
 //        client's posts (as create): adds one Story post linked to the post
 //        (same platform, date and time, story_of = its key, its current copy)
-//        and starts the Story's design through the same request a post's own
-//        "Create design" makes. Pressed again, it answers with the same Story.
+//        and, once the brand's designs are set up, starts the Story's design
+//        through the same request a post's own "Create design" makes. Before
+//        that, the Story is added with its message and no design. Pressed
+//        again, it answers with the same Story.
 //
 // The post keeps its own design and its Schedule tab. Free of Deno and
 // network imports: index.ts hands in the database, the membership check and
@@ -60,10 +63,6 @@ export async function designStory(d: StoryDeps, body: Row): Promise<Answer> {
   const made = await storyOf(d.db, clientId, postKey);
   if (made) return { body: { story: made } };
 
-  // Answered as a 200 so the screen can read the code, as create does.
-  const { data: settings } = await d.db.from("design_brand_settings").select("*").eq("client_id", clientId).maybeSingle();
-  if (!settings?.confirmed_at) return { body: { code: "not_set_up" } };
-
   const copy = await currentCopy(d.db, post);
   if (!copy) return { status: 400, body: { error: "The post has no copy yet." } };
 
@@ -80,6 +79,10 @@ export async function designStory(d: StoryDeps, body: Row): Promise<Answer> {
     if (raced) return { body: { story: raced } };
     throw new Error(`Could not add the Story: ${error?.message ?? "no row"}`);
   }
+
+  // Before the brand's designs are set up, the Story waits with its message; its Create design makes it later.
+  const { data: settings } = await d.db.from("design_brand_settings").select("*").eq("client_id", clientId).maybeSingle();
+  if (!settings?.confirmed_at) return { body: { story, request: null } };
 
   const request = await d.startRequest(settings, {
     clientId, postKey: story.post_key, copy, reportId: null, platform: story.platform, format: STORY_FORMAT, requestedBy: userId,

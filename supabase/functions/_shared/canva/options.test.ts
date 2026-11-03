@@ -154,3 +154,34 @@ describe("posts from other platforms", () => {
     expect(plannerPrompt(args).split("\n")[1]).not.toBe("");
   });
 });
+
+// Notes on regenerate (Lital, 3 Nov 2026): the note a design was asked with
+// reaches every planner, and every option follows it.
+describe("a note on Regenerate", () => {
+  const args = { brand: "Pay The Pyper", platform: "Instagram", copy: "Captains pay last.", voice: null, count: 3, postCount: 8, recent: "" };
+  const line = 'A note from the person who asked for this design: "Show the rink at night, no people". Every option follows it.';
+  const style = { format: "cinematic reels", subjects: "rinks", shots: "fast cuts", camera: "handheld", look: "cold blue", people: "none" as const, on_screen_text: "titles" as const, text_style: "bold white", logo: "shown" as const, sound: "music", other_formats: "" };
+
+  it("is one line in every planner, before the options are described", () => {
+    const note = "Show the rink at night, no people";
+    const prompts = {
+      single: plannerPrompt({ ...args, note }),
+      story: plannerPrompt({ ...args, story: true, note }),
+      carousel: carouselPlannerPrompt({ ...args, slides: 5, note }),
+      video: videoPlannerPrompt({ ...args, note }),
+      videoFromStyle: videoPlannerPrompt({ ...args, style, videos: 3, framesPer: 8, note }),
+      filmed: videoPlannerPrompt({ ...args, filmed: "its founder", note }),
+    };
+    for (const [kind, p] of Object.entries(prompts)) {
+      expect(p.split("\n").filter((l) => l === line), kind).toHaveLength(1);
+      expect(p.indexOf(line), kind).toBeLessThan(p.indexOf("For each option give:"));
+      expect(p.indexOf(line), kind).toBeGreaterThan(p.indexOf('"""Captains pay last."""'));
+    }
+  });
+
+  it("is absent when there is no note", () => {
+    for (const p of [plannerPrompt(args), plannerPrompt({ ...args, note: "" }), carouselPlannerPrompt({ ...args, slides: 5, note: null }), videoPlannerPrompt(args)]) {
+      expect(p).not.toContain("A note from the person");
+    }
+  });
+});

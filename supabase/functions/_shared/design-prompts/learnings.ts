@@ -1,7 +1,11 @@
 // supabase/functions/_shared/design-prompts/learnings.ts
 //
-// What this client's reviewers have rejected before, as rules for the next
-// design. Written by record-design-feedback, read by every generator.
+// What this client's reviewers asked for before, as rules for the next
+// design: from designs turned down with Not right (source "feedback") and
+// from notes left on Regenerate that say something lasting (source
+// "regenerate_note"). Written by feedback.ts (record-design-feedback and
+// design-request), read by every generator. A rule someone took back with
+// Undo, or removed in Client setup > Designs, is gone from the table.
 
 export interface DesignLearnings { avoid: string[]; prefer: string[] }
 

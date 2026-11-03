@@ -31,6 +31,8 @@ export interface GenerateInput {
   video_card?: "cover" | "end";
   /** "story": a Facebook or Instagram Story, seen full screen (_shared/design/story.ts). */
   surface?: typeof STORY_SURFACE;
+  /** The note the person who asked for the design left on Regenerate (design_requests.note). */
+  note?: string | null;
 }
 
 export interface SlideContext {
@@ -41,8 +43,11 @@ export interface SlideContext {
   withCover: boolean;
 }
 
-export function designPrompt(g: Pick<GenerateInput, "brand_name" | "platform" | "concept" | "video_card" | "surface">, copy: string[], refCount: number, slide?: SlideContext): string {
+export function designPrompt(g: Pick<GenerateInput, "brand_name" | "platform" | "concept" | "video_card" | "surface" | "note">, copy: string[], refCount: number, slide?: SlideContext): string {
   const lines = [`Headline, spelled exactly: "${copy[0]}"`, ...copy.slice(1).map((t) => `Second line, spelled exactly: "${t}"`)].join(" ");
+  // The person's note, after the picture; the logo stays the brand's own file in its spot.
+  const note = String(g.note ?? "").trim();
+  const noted = note ? `Follow this note from the person who asked for the design, keeping the logo exactly as it is: "${note}". ` : "";
   const refsWord = refCount === 1 ? "the other image, which is" : `the other ${numberWord(refCount)} images, which are`;
   if (g.video_card) {
     // The cards open and close a vertical video; the end card follows the cover's look.
@@ -53,19 +58,19 @@ export function designPrompt(g: Pick<GenerateInput, "brand_name" | "platform" | 
       : refsWord;
     return `The first image is the canvas for ${which} of a new ${g.brand_name} ${g.platform} vertical video (9:16). Its logo is final: keep it exactly as it is, where it is. ` +
       cover +
-      `Design the card around the logo in the visual language of ${refs} ${g.brand_name}'s own posts, filling the tall frame. The picture shows ${g.concept}. ` +
+      `Design the card around the logo in the visual language of ${refs} ${g.brand_name}'s own posts, filling the tall frame. The picture shows ${g.concept}. ${noted}` +
       `${lines} Add no other text and no other logo. ${SHARP}`;
   }
   if (g.surface === STORY_SURFACE) {
     // Seen full screen for a few seconds: the picture fills the tall frame, the words stay in Meta's band.
     const pct = (n: number) => `${Math.round(n * 100)}%`;
     return `The first image is the canvas for a new ${g.brand_name} ${g.platform} Story (9:16), seen full screen on a phone. Its logo is final: keep it exactly as it is, where it is. ` +
-      `Design the whole Story around it in the visual language of ${refsWord} ${g.brand_name}'s own posts, the picture filling the tall frame from edge to edge. The picture shows ${g.concept}. ` +
+      `Design the whole Story around it in the visual language of ${refsWord} ${g.brand_name}'s own posts, the picture filling the tall frame from edge to edge. The picture shows ${g.concept}. ${noted}` +
       `${lines} Every word sits inside the band that leaves out the top ${pct(STORY_SAFE.top)}, the bottom ${pct(STORY_SAFE.bottom)} and ${pct(STORY_SAFE.left)} at each side of the frame. Add no other text and no other logo. ${SHARP}`;
   }
   if (!slide) {
     return `The first image is the canvas for a new ${g.brand_name} ${g.platform} post (4:5). Its logo is final: keep it exactly as it is, where it is. ` +
-      `Design the whole post around it in the visual language of ${refsWord} ${g.brand_name}'s own posts. The picture shows ${g.concept}. ` +
+      `Design the whole post around it in the visual language of ${refsWord} ${g.brand_name}'s own posts. The picture shows ${g.concept}. ${noted}` +
       `${lines} Add no other text and no other logo. ${SHARP}`;
   }
   const which = slide.index === 0 ? `the cover, slide 1 of ${slide.count}` : `slide ${slide.index + 1} of ${slide.count}`;
@@ -77,7 +82,7 @@ export function designPrompt(g: Pick<GenerateInput, "brand_name" | "platform" | 
     : refsWord;
   return `The first image is the canvas for ${which} of a new ${g.brand_name} ${g.platform} carousel (4:5). Its logo is final: keep it exactly as it is, where it is. ` +
     cover +
-    `Design the slide around the logo in the visual language of ${refs} ${g.brand_name}'s own posts. The picture shows ${g.concept}. ` +
+    `Design the slide around the logo in the visual language of ${refs} ${g.brand_name}'s own posts. The picture shows ${g.concept}. ${noted}` +
     `${lines} Add no other text, no slide numbers and no other logo. ${SHARP}`;
 }
 

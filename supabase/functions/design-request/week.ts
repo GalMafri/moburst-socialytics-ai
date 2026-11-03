@@ -162,7 +162,7 @@ export async function weekPreview(d: WeekDeps, body: Row): Promise<Answer> {
   const running = await runningRun(d.db, clientId, week);
   const queued = new Set(((running?.posts ?? []) as RunPost[]).filter((p) => p.state === "queued").map((p) => p.post_key));
   const posts = (await readWeek(d.db, client, week, d.now())).filter((p) => !queued.has(p.post.post_key));
-  const counts = weekCounts(posts.map((p) => ({ post_key: p.post.post_key, copy: p.facts.copy, result: p.result })));
+  const counts = weekCounts(posts.map((p) => ({ post_key: p.post.post_key, copy: p.facts.copy, result: p.result, platform: p.post.platform })));
   const perClip = await clipCredits(d.db);
   const { data: latest } = await d.db.from("design_week_runs").select("id").eq("client_id", clientId).eq("week_start", week).order("created_at", { ascending: false }).limit(1).maybeSingle();
   return {

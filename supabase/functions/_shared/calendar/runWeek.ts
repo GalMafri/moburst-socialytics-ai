@@ -24,7 +24,7 @@ import {
   resolveRhythm, scoreCompetitorPosts, scoreOwnPosts, scoreTrendItems, storyRhythm, MIN_COMPETITOR_WEEKS, OWN_DAYS,
   type CompetitorPost, type EvidenceItem, type FeedRow, type OwnPost, type RhythmLine, type RhythmSources,
 } from "./evidence.ts";
-import { parseRevision, parseWeekPlan, revisePrompt, weekPrompt, withStories, type Reason, type RevisePost } from "./weekPlan.ts";
+import { parseRevision, parseWeekPlan, revisePrompt, storyPlan, weekPrompt, withStories, type Reason, type RevisePost } from "./weekPlan.ts";
 import { isStoryPost } from "../design/story.ts";
 import { wordReason } from "./reasonText.ts";
 import { activePreferences, buildVoiceProfile, consolidateMemory, COPY_MODEL, learnFromSignal, loadClientVoice } from "../voice/load.ts";
@@ -506,9 +506,10 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
       if (!(await markReady(finishing))) return STOPPED;
       return { status: "done", result: { plan_id: plan.id, finished: true } };
     }
-    // The week's Stories are added in code, with no model call: one for each of the soonest Instagram posts.
+    // The week's Stories are added in code, with no model call: the client's own rate, or one with each Instagram post (storyPlan).
     // A plan stopped after the check above takes none of them (calendar_posts_plan_open).
-    const rows = withStories(posts, gathered.stories.perWeek).map((p) => ({ ...p, client_id: client.id, plan_id: plan.id, created_by: plan.requested_by ?? null }));
+    const stories = storyPlan(gathered.stories, String(client.name ?? ""), posts);
+    const rows = withStories(posts, stories.count, stories.reason).map((p) => ({ ...p, client_id: client.id, plan_id: plan.id, created_by: plan.requested_by ?? null }));
     await must(admin.from("calendar_posts").insert(rows), "Could not add the week's posts");
     if (!(await markReady(finishing))) return STOPPED;
     return { status: "done", result: { plan_id: plan.id, posts: rows.length, input_tokens: tokens.input, output_tokens: tokens.output } };

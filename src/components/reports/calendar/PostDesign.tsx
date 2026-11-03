@@ -2,8 +2,9 @@
  * A post's design, in its Design tab: one design per post (Lital, 13 Oct),
  * shown large. A carousel shows every slide, with arrows, a slide count and
  * a full-screen view. "Regenerate" makes a new design from the post as it is
- * now; the current design stays until the new one is ready, and earlier
- * designs can be put back in use. A Story says it is posted by hand, and its
+ * now, with a note the person can leave in the box it opens (notes on
+ * regenerate, 3 Nov 2026); the current design stays until the new one is
+ * ready, and earlier designs can be put back in use. A Story says it is posted by hand, and its
  * Download saves the PNG under the Story's own name.
  */
 
@@ -17,6 +18,10 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { DesignProgressCard } from "./DesignProgressCard";
+import { DesignNote } from "./DesignNote";
+import { NoteBox } from "./NoteBox";
+import { useDesignRequests } from "./DesignRequestsContext";
+import { NOTE_PLACEHOLDER, notStartedLine } from "@/lib/postNotes";
 import { DESIGN_FEEDBACK_REASONS, currentDesign, isVideoMedia, type DesignRequest, type DesignVersion, type ShotBrief } from "@/lib/designRequests";
 import { STORY_POSTED_BY_HAND, storageDownloadUrl } from "@/lib/story";
 
@@ -29,6 +34,10 @@ interface Props {
   aspect: string;
   filenameStub: string;
   onCreate: () => void;
+  /** Regenerate with the note left in its box: true once the new design has started. */
+  onRegenerate?: (note: string) => Promise<boolean>;
+  /** The brand, for the line that says what a note taught it. */
+  brand?: string | null;
   creating: boolean;
   onUse: (iterationId: string) => void;
   usingId: string | null;
@@ -53,8 +62,22 @@ interface Props {
   storyFileName?: string | null;
 }
 
-export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub, onCreate, creating, onUse, usingId, onFeedback, waitingForCopy, onCamera, textOnly, onUploadClip, uploadingClip, onMakeFromPosts, filmedReason, shotBrief, storyFileName }: Props) {
+export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub, onCreate, onRegenerate, brand, creating, onUse, usingId, onFeedback, waitingForCopy, onCamera, textOnly, onUploadClip, uploadingClip, onMakeFromPosts, filmedReason, shotBrief, storyFileName }: Props) {
   const clipInput = useRef<HTMLInputElement>(null);
+  const requests = useDesignRequests()?.requests;
+  /** Regenerate's note box: open, its note, and whether the last press did not start. */
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [note, setNote] = useState("");
+  const [notStarted, setNotStarted] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const regenerate = async () => {
+    if (!onRegenerate) return onCreate();
+    setRegenerating(true);
+    setNotStarted(false);
+    const started = await onRegenerate(note).catch(() => false);
+    setRegenerating(false);
+    if (started) { setNoteOpen(false); setNote(""); } else setNotStarted(true);
+  };
   const design = currentDesign(versions);
   const earlier = versions.filter((v) => v !== design);
   const [showEarlier, setShowEarlier] = useState(false);
@@ -69,7 +92,7 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
     return (
       <div className="space-y-4">
         {preparing ? (
-          <DesignProgressCard request={preparing} isStaff={isStaff} />
+          <DesignProgressCard request={preparing} isStaff={isStaff} brand={brand} />
         ) : (
           <div className="rounded-[12px] border border-dashed border-white/10 bg-[rgba(255,255,255,0.02)] p-8 text-center space-y-3">
             <Sparkles className="h-6 w-6 mx-auto text-muted-foreground/60" aria-hidden />
@@ -113,9 +136,12 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
     );
   }
 
+  // The request that made this design, for its note.
+  const madeBy = design.requestId ? requests?.find((r) => r.id === design.requestId) ?? null : null;
+
   return (
     <div className="space-y-4">
-      {preparing && <DesignProgressCard request={preparing} isStaff={isStaff} replacing />}
+      {preparing && <DesignProgressCard request={preparing} isStaff={isStaff} replacing brand={brand} />}
 
       {isVideo ? (
         <VideoViewer key={design.iterationId} url={design.urls[0]} />
@@ -139,7 +165,7 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
             Use this {noun}
           </Button>
         )}
-        <Button size="sm" variant="outline" className="h-9" onClick={onCreate} disabled={creating || !!preparing}>
+        <Button size="sm" variant="outline" className="h-9" onClick={() => (onRegenerate ? setNoteOpen(true) : onCreate())} disabled={creating || regenerating || !!preparing || noteOpen}>
           {creating ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5 mr-1.5" />}
           Regenerate
         </Button>
@@ -155,7 +181,19 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
           </Button>
         </div>
       </div>
-      {!preparing && (
+      {noteOpen && !preparing && (
+        <NoteBox
+          value={note}
+          onChange={setNote}
+          onSubmit={() => void regenerate()}
+          onCancel={() => { setNoteOpen(false); setNote(""); setNotStarted(false); }}
+          busy={regenerating || creating}
+          kept={notStarted ? notStartedLine("design", note) : null}
+          placeholder={NOTE_PLACEHOLDER.design}
+        />
+      )}
+      {madeBy && !preparing && <DesignNote request={madeBy} brand={brand} made />}
+      {!preparing && !noteOpen && (
         <p className="t-secondary">Regenerate makes a new {noun} from the post as it is now, including any copy changes. This one stays until the new one is ready.</p>
       )}
       {storyFileName && <p className="t-secondary">{STORY_POSTED_BY_HAND}</p>}

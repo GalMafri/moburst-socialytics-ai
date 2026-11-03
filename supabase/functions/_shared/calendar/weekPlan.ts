@@ -218,19 +218,37 @@ export function parseWeekPlan(text: string, c: Pick<WeekContext, "monday" | "fir
 
 // ── The week's Stories ──────────────────────────────────────────────────────
 
+/** A feed post a Story can be suggested with: on Instagram, and not a Story itself. */
+const instagramFeedPost = (p: PlannedPost) => /instagram/i.test(p.platform) && !isStoryFormat(p.format);
+
+/**
+ * How many Stories the week gets, and the reason each says (Lital, 3 Nov 2026,
+ * decision 3). A client whose own Instagram Stories Sprout shows over the last
+ * 90 days follows its own weekly rate (storyRhythm). Every other Instagram
+ * client gets one Story with each planned Instagram feed post. Facebook gets
+ * none: Sprout reports no Facebook Story type, so a count would not come from
+ * the client's data, and "Add a Story" is one press on any Facebook post.
+ */
+export function storyPlan(history: { stories: number; perWeek: number }, brand: string, posts: PlannedPost[]): { count: number; reason: Reason } {
+  if (history.stories > 0) {
+    return { count: history.perWeek, reason: { type: "story", label: `${brand} posted ${history.stories} Instagram ${history.stories === 1 ? "Story" : "Stories"} in the last 90 days.` } };
+  }
+  return { count: posts.filter(instagramFeedPost).length, reason: { type: "story", label: "One Story with each Instagram post." } };
+}
+
 /**
  * The week's posts with their Stories (Stories design, 2 Nov 2026): one Story
  * for each of the soonest planned Instagram posts, up to the week's count
- * (storyRhythm, from the client's own Instagram Stories). Each Story is dated
- * with its post, carries its copy (the message its frame is written from) and
- * reasons, and names it in story_of. No model call; Facebook Stories are
- * never suggested, as Sprout reports no Facebook Story type. With Stories,
- * every row carries its id and key: a bulk insert sends one set of columns,
- * and a row without an id would be sent with none.
+ * (storyPlan). Each Story is dated with its post, carries its copy (the
+ * message its frame is written from) and the reason that says where the
+ * count came from, and names its post in story_of. No model call, and no
+ * design until a person presses. With Stories, every row carries its id and
+ * key: a bulk insert sends one set of columns, and a row without an id would
+ * be sent with none.
  */
-export function withStories(posts: PlannedPost[], count: number, newId: () => string = () => crypto.randomUUID()): PlannedPost[] {
+export function withStories(posts: PlannedPost[], count: number, reason: Reason, newId: () => string = () => crypto.randomUUID()): PlannedPost[] {
   const at = (p: PlannedPost) => postInstant(p.post_date, p.posting_time, "UTC")?.getTime() ?? Number.MAX_SAFE_INTEGER;
-  const chosen = new Set(posts.filter((p) => /instagram/i.test(p.platform) && !isStoryFormat(p.format)).sort((a, b) => at(a) - at(b)).slice(0, Math.max(0, count)));
+  const chosen = new Set(posts.filter(instagramFeedPost).sort((a, b) => at(a) - at(b)).slice(0, Math.max(0, count)));
   if (!chosen.size) return posts;
   const keyed = (p: PlannedPost): PlannedPost => {
     const id = newId();
@@ -243,7 +261,7 @@ export function withStories(posts: PlannedPost[], count: number, newId: () => st
     if (!chosen.has(p)) continue;
     out.push(keyed({
       post_date: p.post_date, platform: p.platform, format: STORY_FORMAT, posting_time: p.posting_time, pillar: p.pillar, copy: p.copy,
-      hashtags: [], cta: p.cta, visual_direction: null, reasons: p.reasons, source: "plan", story_of: post.post_key,
+      hashtags: [], cta: p.cta, visual_direction: null, reasons: [reason], source: "plan", story_of: post.post_key,
     }));
   }
   return out;

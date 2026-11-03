@@ -127,7 +127,10 @@ describe("week_preview", () => {
   it("counts the week's Stories on their own, as stills that need no credits", async () => {
     const db = world({ calendar_posts: [calendarPost("feed"), calendarPost("story", { format: "Story" }), calendarPost("fb-story", { format: "Story", platform: "Facebook" })] });
     const r = await weekPreview(deps(db), { client_id: "c1", week_start: WEEK });
-    expect(r.body).toMatchObject({ counts: { single: 1, story: 2, carousel: 0, video: 0 }, credits: 0 });
+    expect(r.body).toMatchObject({ counts: { single: 1, story: 2, carousel: 0, video: 0, story_platform: null }, credits: 0 });
+    // Stories on one network are named for it.
+    const ig = world({ calendar_posts: [calendarPost("feed"), calendarPost("story", { format: "Story" })] });
+    expect((await weekPreview(deps(ig), { client_id: "c1", week_start: WEEK })).body).toMatchObject({ counts: { story: 1, story_platform: calendarPost("x").platform } });
   });
 
   it("gives staff the credits a finished week used, from the quote recorded on each clip", async () => {

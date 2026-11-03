@@ -1,12 +1,14 @@
 /**
- * A post and its Story, in the Design tab (Stories for Facebook and
- * Instagram, Lital 2 Nov 2026; spec
- * docs/superpowers/specs/2026-11-02-stories-design.md):
- *   - a Facebook or Instagram post offers "Design as a Story" under its own
- *     design, or opens the Story it has;
- *   - a Story made from a post links back to it.
- * A press that does not finish leaves the button as it was, with a line that
- * says the Story isn't made yet.
+ * A post and its Story, in the post panel's header, which is also the post's
+ * menu (Stories for Facebook and Instagram, Lital 2 Nov 2026; Stories you can
+ * find, 3 Nov 2026; spec docs/superpowers/specs/2026-11-03-post-notes-stories-design.md):
+ *   - every Facebook or Instagram calendar post shows "Add a Story" beside its
+ *     format, on every tab, for staff and the client's own users;
+ *   - a post with a Story shows a "Story" chip that opens it;
+ *   - a Story made from a post shows "Open the post".
+ * Before the brand's designs are set up, the Story is added with its message
+ * and no design. A press that does not finish leaves the button as it was,
+ * with a line that says the Story isn't added yet.
  */
 
 import { useEffect, useState } from "react";
@@ -17,7 +19,6 @@ import { invokeResendable, sendQuietly } from "@/lib/quietSend";
 import { Button } from "@/components/ui/button";
 import { canBeStory, isStoryPost } from "@/lib/platform";
 import { postCopyOf } from "@/lib/postCopy";
-import { platformName } from "@/lib/display";
 import { useDesignRequests } from "./DesignRequestsContext";
 
 interface Props {
@@ -32,11 +33,11 @@ export function StoryLinks({ post, clientId }: Props) {
   const story = isStoryPost(post);
   // Only a post on the calendar (calendar_posts) can have a Story: a report's own board has none.
   const offered = !story && canBeStory(post.platform) && !!clientId && !!key && !!post._calendarPostId;
-  const [making, setMaking] = useState(false);
-  const [notMade, setNotMade] = useState(false);
-  /** A Story just made, opened as soon as the calendar has it. */
+  const [adding, setAdding] = useState(false);
+  const [notAdded, setNotAdded] = useState(false);
+  /** A Story just added, opened as soon as the calendar has it. */
   const [opening, setOpening] = useState<string | null>(null);
-  useEffect(() => { setNotMade(false); setOpening(null); }, [key]);
+  useEffect(() => { setNotAdded(false); setOpening(null); }, [key]);
   useEffect(() => { if (opening) designRequests?.openDesigns(opening); }, [opening, designRequests]);
 
   // The Story this post already has (one per post, calendar_posts.story_of).
@@ -55,24 +56,21 @@ export function StoryLinks({ post, clientId }: Props) {
   if (story) {
     if (!post._storyOf) return null;
     return (
-      <div className="glass-inner p-inner flex items-center justify-between gap-3 flex-wrap">
-        <p className="t-secondary min-w-0">This Story is made from the {platformName(post.platform)} post on the same day.</p>
-        <Button size="sm" variant="outline" className="shrink-0" onClick={() => designRequests?.openDesigns(post._storyOf!)}>Open the post</Button>
-      </div>
+      <Button size="sm" variant="outline" className="h-7 px-2.5" onClick={() => designRequests?.openDesigns(post._storyOf!)}>Open the post</Button>
     );
   }
   if (!offered) return null;
 
-  const makeStory = async () => {
-    setMaking(true);
-    setNotMade(false);
+  const addStory = async () => {
+    setAdding(true);
+    setNotAdded(false);
     try {
       // The server answers with the same Story when the post has one, so sending it again is safe.
       const { data, error } = await sendQuietly(() => supabase.functions.invoke("design-request", {
         body: { action: "story", client_id: clientId, calendar_post_key: key },
       }), { again: (e) => invokeResendable(e, { idempotent: true }) });
       const storyKey = data?.story?.post_key as string | undefined;
-      if (error || !storyKey) throw new Error("not made");
+      if (error || !storyKey) throw new Error("not added");
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["calendar-posts", clientId] }),
         qc.invalidateQueries({ queryKey: ["post-story", clientId, key] }),
@@ -80,30 +78,32 @@ export function StoryLinks({ post, clientId }: Props) {
       designRequests?.refresh();
       setOpening(storyKey);
     } catch {
-      setNotMade(true);
+      setNotAdded(true);
     } finally {
-      setMaking(false);
+      setAdding(false);
     }
   };
 
   const storyKey = made ?? opening;
+  if (storyKey) {
+    return (
+      <button
+        type="button"
+        onClick={() => designRequests?.openDesigns(storyKey)}
+        aria-label="Open the Story"
+        className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full border border-white/15 t-badge text-white hover:border-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      >
+        <Smartphone className="h-3 w-3" aria-hidden />Story
+      </button>
+    );
+  }
   return (
-    <div className="glass-inner p-inner space-y-2">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="min-w-0">
-          <p className="t-h4">Story</p>
-          <p className="t-secondary">{storyKey ? "This post has a Story, designed from its copy." : "A 9:16 Story frame designed from this post's copy, posted by hand."}</p>
-        </div>
-        {storyKey ? (
-          <Button size="sm" variant="outline" className="shrink-0" onClick={() => designRequests?.openDesigns(storyKey)}>Open the Story</Button>
-        ) : (
-          <Button size="sm" variant="outline" className="shrink-0" onClick={() => void makeStory()} disabled={making || !postCopyOf(post).trim()}>
-            {making ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Smartphone className="h-3.5 w-3.5 mr-1.5" />}
-            Design as a Story
-          </Button>
-        )}
-      </div>
-      {notMade && <p role="status" className="t-secondary">The Story isn't made yet.</p>}
-    </div>
+    <span className="inline-flex items-center gap-2">
+      <Button size="sm" variant="outline" className="h-7 px-2.5" onClick={() => void addStory()} disabled={adding || !postCopyOf(post).trim()}>
+        {adding ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Smartphone className="h-3.5 w-3.5 mr-1.5" />}
+        Add a Story
+      </Button>
+      {notAdded && <span role="status" className="t-secondary">The Story isn't added yet.</span>}
+    </span>
   );
 }

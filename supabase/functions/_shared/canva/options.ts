@@ -271,12 +271,22 @@ export function otherPlatformsLine(args: { platform: string; otherPlatforms?: bo
     : "";
 }
 
+/**
+ * The note the person who asked for this design left on Regenerate (notes on
+ * regenerate, Lital 3 Nov 2026), as one line every planner gets; "" without
+ * one. Every option follows it.
+ */
+export function noteLine(note: string | null | undefined): string {
+  const n = String(note ?? "").trim();
+  return n ? `A note from the person who asked for this design: "${n}". Every option follows it.` : "";
+}
+
 const CHOOSE_POSTS = (brand: string) =>
   `- posts: the numbers of one or two of ${brand}'s posts whose layout suits what this post says (a quote suits a quote layout, a comparison or list a comparison or list layout, a product or feature a product layout, a statement a statement layout). When the recent designs were built on a post and another suits the content as well, choose the other.\n` +
   `- layout: a few words naming the layout of the posts you chose.`;
 
 /** The planner's instruction for carousels: every option is a set of slides read in order. */
-export function carouselPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; slides: number; postCount: number; recent: string; guidance?: string; otherPlatforms?: boolean }): string {
+export function carouselPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; slides: number; postCount: number; recent: string; guidance?: string; otherPlatforms?: boolean; note?: string | null }): string {
   return [
     `The images are ${args.brand}'s own published posts, numbered Post 1 to Post ${args.postCount}.`,
     otherPlatformsLine(args),
@@ -285,6 +295,7 @@ export function carouselPlannerPrompt(args: { brand: string; platform: string; c
     `Plan ${args.count} different carousel options for a new ${args.platform} carousel post with this copy:`,
     `"""${args.copy}"""`,
     args.voice ? `${args.brand}'s voice: ${args.voice}` : "",
+    noteLine(args.note),
     `Each option has exactly ${args.slides} slides, read in order. Slide 1 carries the hook. The middle slides each carry one point from the copy, in the copy's order. The last slide closes with the copy's call to action or takeaway.`,
     "For each option give:",
     CHOOSE_POSTS(args.brand),
@@ -525,7 +536,7 @@ export function styleLines(brand: string, s: VideoStyle): string {
  * type of the client's posts, with the client's logo file (13 Oct: video must
  * follow the client's own videos, carry the exact copy and logo, and have sound).
  */
-export function videoPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; visual?: string | null; count: number; postCount: number; recent: string; guidance?: string; filmed?: string | null; style?: VideoStyle | null; videos?: number; framesPer?: number; otherPlatforms?: boolean }): string {
+export function videoPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; visual?: string | null; count: number; postCount: number; recent: string; guidance?: string; filmed?: string | null; style?: VideoStyle | null; videos?: number; framesPer?: number; otherPlatforms?: boolean; note?: string | null }): string {
   if (args.style && !args.filmed) {
     // Planned from the client's own videos (14 Oct: "make videos in a similar
     // style to their VIDEOS, not statics"): the images are stills from them.
@@ -541,6 +552,7 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
       `"""${args.copy}"""`,
       args.visual ? `The post's planned visual: ${args.visual}` : "",
       args.voice ? `${args.brand}'s voice: ${args.voice}` : "",
+      noteLine(args.note),
       `A video model makes the footage, with short clips of these videos as its reference, and with sound; it can cut between shots. The new video looks and moves like ${args.brand}'s own videos: the same kind of subjects, shots, cuts, camera, light and grade.`,
       "For each option give:",
       `- footage: the video for the video model in three to five sentences, shot by shot (two to four shots, each with its seconds), in the style of ${args.brand}'s videos, all in sharp focus. ${sceneLettering(args.brand, s.scene_words)} It shows no screens, dashboards, charts, documents or interfaces (the video model fills those with garbled writing). ${people} It is whole scenes: no band, panel or empty area kept for text.${s.logo === "shown" && s.logo_at === "end" ? ` ${args.brand}'s videos close on their logo, which is laid over the last moments afterwards: the last shot ends the way their videos end before the logo.` : ""}`,
@@ -566,6 +578,7 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
       `"""${args.copy}"""`,
       args.visual ? `The post's planned visual: ${args.visual}` : "",
       args.voice ? `${args.brand}'s voice: ${args.voice}` : "",
+      noteLine(args.note),
       `The footage is ${args.brand}'s own filmed clip (this post was filmed because ${args.filmed}), used as it is with its sound. Over it the hook is set as on-screen text, with ${args.brand}'s logo.`,
       "For each option give:",
       CHOOSE_POSTS(args.brand),
@@ -584,6 +597,7 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
     `"""${args.copy}"""`,
     args.visual ? `The post's planned visual: ${args.visual}` : "",
     args.voice ? `${args.brand}'s voice: ${args.voice}` : "",
+    noteLine(args.note),
     `The video is one continuous shot of footage, made by a video model that is given ${args.brand}'s own published videos as its reference, so it moves and looks like them, with sound. Over it the hook is set as on-screen text, with ${args.brand}'s logo.`,
     "For each option give:",
     CHOOSE_POSTS(args.brand),
@@ -601,7 +615,7 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
  * they are. A Story (story: true) gets one line more; its headline limits are
  * a feed post's.
  */
-export function plannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; postCount: number; recent: string; guidance?: string; story?: boolean; otherPlatforms?: boolean }): string {
+export function plannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; postCount: number; recent: string; guidance?: string; story?: boolean; otherPlatforms?: boolean; note?: string | null }): string {
   return [
     `The images are ${args.brand}'s own published posts, numbered Post 1 to Post ${args.postCount}.`,
     otherPlatformsLine(args),
@@ -611,6 +625,7 @@ export function plannerPrompt(args: { brand: string; platform: string; copy: str
     `"""${args.copy}"""`,
     args.voice ? `${args.brand}'s voice: ${args.voice}` : "",
     args.story ? "This post is a Story: its frame is seen full screen for a few seconds, so the headline carries the message, and a second line may carry the call to action." : "",
+    noteLine(args.note),
     "For each option give:",
     CHOOSE_POSTS(args.brand),
     `- headline: the words that will be set on the design, written in ${args.brand}'s voice from the post's message, in the copy's language. One line of at most 8 words, optionally a second, shorter line.`,

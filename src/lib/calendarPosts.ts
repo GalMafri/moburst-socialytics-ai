@@ -6,6 +6,7 @@
 import type { CalendarPost } from "@/lib/calendarRevision";
 import { evidenceSentence, wordReason } from "../../supabase/functions/_shared/calendar/reasonText";
 import { planInFlight, plannable } from "../../supabase/functions/_shared/calendar/planState";
+import { isStoryPost } from "../../supabase/functions/_shared/design/story";
 
 export { evidenceSentence };
 
@@ -213,11 +214,11 @@ export function boardPost(row: CalendarPostRow): CalendarPost {
 }
 
 /** A day's posts with each Story moved right after the post it was made from, when that post is on the same day. */
-function storiesAfterTheirPosts(rows: CalendarPostRow[]): CalendarPostRow[] {
+export function storiesAfterTheirPosts<T extends Pick<CalendarPostRow, "post_key" | "story_of">>(rows: T[]): T[] {
   const keys = new Set(rows.map((r) => r.post_key));
-  const follows = (r: CalendarPostRow) => !!r.story_of && r.story_of !== r.post_key && keys.has(r.story_of);
-  const out: CalendarPostRow[] = [];
-  const place = (r: CalendarPostRow, seen: Set<string>) => {
+  const follows = (r: T) => !!r.story_of && r.story_of !== r.post_key && keys.has(r.story_of);
+  const out: T[] = [];
+  const place = (r: T, seen: Set<string>) => {
     if (seen.has(r.post_key)) return;
     seen.add(r.post_key);
     out.push(r);
@@ -228,14 +229,40 @@ function storiesAfterTheirPosts(rows: CalendarPostRow[]): CalendarPostRow[] {
   return out;
 }
 
-/** One week of the calendar in the board's shape: Monday to Sunday, each day with its posts. */
+/**
+ * One week of the calendar in the board's shape: Monday to Sunday, each day
+ * with its posts. A post with a Story carries the Story's key (its card shows
+ * a "Story" chip); a Story placed right after its post says so (its card
+ * shows a rail to the post).
+ */
 export function weekBoard(rows: CalendarPostRow[], monday: string): Array<{ day: string; date_label: string; posts: CalendarPost[] }> {
+  const storyOf = new Map(rows.filter((r) => r.story_of).map((r) => [r.story_of as string, r.post_key]));
   return DAYS.map((day, i) => {
     const date = addDays(monday, i);
     const posts = rows
       .filter((r) => r.post_date === date)
       .sort((a, b) => (a.posting_time || "").localeCompare(b.posting_time || "") || a.created_at.localeCompare(b.created_at));
-    return { day, date_label: shortDate(date), posts: storiesAfterTheirPosts(posts).map(boardPost) };
+    const ordered = storiesAfterTheirPosts(posts);
+    return {
+      day, date_label: shortDate(date),
+      posts: ordered.map((r, j) => ({
+        ...boardPost(r),
+        ...(storyOf.has(r.post_key) ? { _storyKey: storyOf.get(r.post_key) } : {}),
+        ...(r.story_of && ordered[j - 1]?.post_key === r.story_of ? { _storyFollows: true } : {}),
+      })),
+    };
   });
+}
+
+/** A day's count, with its Stories apart: "3 posts and 1 Story", "2 posts", "1 Story", "No posts". */
+export function dayCountLabel(posts: Array<{ format?: string | null; platform?: string | null }>): string {
+  const stories = posts.filter((p) => isStoryPost(p)).length;
+  const feed = posts.length - stories;
+  if (!posts.length) return "No posts";
+  const words = [
+    feed ? `${feed} post${feed === 1 ? "" : "s"}` : "",
+    stories ? `${stories} ${stories === 1 ? "Story" : "Stories"}` : "",
+  ].filter(Boolean);
+  return words.join(" and ");
 }
 

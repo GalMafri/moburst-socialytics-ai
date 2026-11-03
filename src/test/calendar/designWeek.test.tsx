@@ -61,8 +61,10 @@ describe('the words', () => {
     expect(previewLine(counts({ single: 6, carousel: 2, video: 1 }), 100, 45)).toBe('9 posts this week have no design yet: 6 designs, 2 carousels, 1 video. About 100 Higgsfield credits and 45 minutes.');
     expect(previewLine(counts({ single: 1 }), 0, 10)).toBe('1 post this week has no design yet: 1 design. About 10 minutes.');
     expect(previewLine(counts({ carousel: 3 }), 0, 75)).toBe('3 posts this week have no design yet: 3 carousels. About 1 hour and 15 minutes.');
-    // Stories are designed like any still and counted on their own.
-    expect(previewLine(counts({ single: 6, story: 2, video: 1 }), 100, 45)).toBe('9 posts this week have no design yet: 6 designs, 2 Stories, 1 video. About 100 Higgsfield credits and 45 minutes.');
+    // Stories are designed like any still and named apart, last, with their network when they share one (3 Nov 2026).
+    expect(previewLine(counts({ single: 6, story: 2, video: 1, story_platform: 'Instagram' }), 100, 45)).toBe('9 posts this week have no design yet: 6 designs, 1 video and 2 Instagram Stories. About 100 Higgsfield credits and 45 minutes.');
+    expect(previewLine(counts({ single: 6, story: 2, carousel: 1 }), 0, 45)).toBe('9 posts this week have no design yet: 6 designs, 1 carousel and 2 Stories. About 45 minutes.');
+    expect(previewLine(counts({ story: 1, story_platform: 'Facebook' }), 0, 10)).toBe('1 post this week has no design yet: 1 Facebook Story. About 10 minutes.');
     expect(previewLine(counts({ story: 1 }), 0, 10)).toBe('1 post this week has no design yet: 1 Story. About 10 minutes.');
     expect(buttonLabel(9)).toBe('Design 9 posts');
     expect(buttonLabel(1)).toBe('Design 1 post');
@@ -108,7 +110,7 @@ describe('the band', () => {
   it('counts the week\'s Stories in what a press designs', async () => {
     f.preview = { client_name: 'Pay The Pyper', week_start: WEEK, counts: counts({ single: 2, story: 2 }), credits: 0, credits_per_clip: 100, run_id: null, credits_used: null };
     band();
-    expect(await screen.findByText('4 posts this week have no design yet: 2 designs, 2 Stories. About 15 minutes.')).toBeInTheDocument();
+    expect(await screen.findByText('4 posts this week have no design yet: 2 designs and 2 Stories. About 15 minutes.')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Design 4 posts' }));
     await waitFor(() => expect(f.invokes.find((i) => i.action === 'week_start')).toBeTruthy());
     expect(f.invokes.find((i) => i.action === 'week_start').estimate).toEqual({ posts: 4, single: 2, story: 2, carousel: 0, video: 0, credits: 0, minutes: 15 });

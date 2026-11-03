@@ -54,6 +54,20 @@ describe("startOption", () => {
     }
   });
 
+  it("hands the note a design was asked with to the job, so the image model sees it and a retry keeps it", async () => {
+    const note = "Show the rink at night, no people";
+    for (const req of [request({ note }), request({ note, format: "Story" }), request({ note, kind: "carousel", briefs: [{ headline: ["A"], picture: "p", slides: [{ headline: ["A"], picture: "p1" }, { headline: ["B"], picture: "p2" }] }] })]) {
+      const db = fakeDb({ canva_finish_jobs: [] });
+      db.uploads.set(`${BUCKET}/${settings.logo_path}`, pngHeader(701, 251));
+      await startOption(db, req, settings, "Pay The Pyper", 0, 0);
+      for (const job of db.tables.canva_finish_jobs) {
+        expect(job.input.generate.note).toBe(note);
+        expect(designPrompt(job.input.generate as GenerateInput, job.input.copy, job.input.generate.refs.length)).toContain(`"${note}"`);
+      }
+    }
+    expect((await started(request())).input.generate.note).toBeUndefined();
+  });
+
   it("keeps a post called Story on another network the way it was made before", async () => {
     const job = await started(request({ format: "Story", platform: "LinkedIn" }));
     expect(job.input.generate.surface).toBeUndefined();

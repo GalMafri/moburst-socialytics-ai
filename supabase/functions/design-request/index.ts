@@ -3,13 +3,16 @@
 // Design options for a calendar post, for staff and for the client's own
 // users.
 //
-//   POST {action:"create", client_id, report_id, calendar_post_key, platform, format, post_copy}
+//   POST {action:"create", client_id, report_id, calendar_post_key, platform, format, post_copy, note?}
 //        Plans the options from the post and the client's own posts, then
 //        starts them. A second call while the post's designs are being
-//        prepared returns the open request.
+//        prepared returns the open request. A note left on Regenerate is
+//        followed by every option, and teaches the brand's design memory
+//        only when it is lasting (note.ts).
 //   POST {action:"story", client_id, calendar_post_key}
-//        "Design as a Story" on a Facebook or Instagram post: one Story post
-//        linked to it, designed like the post's own design (story.ts).
+//        "Add a Story" on a Facebook or Instagram post: one Story post linked
+//        to it, designed like the post's own design once the brand's designs
+//        are set up (story.ts).
 //   POST {action:"close_filming"}   (operational secret, as the system) filming
 //        requests closed when their footage arrived or cannot come in time; spends nothing
 //   POST {action:"week_preview"|"week_start"|"week_stop"|"week_continue", ...}
@@ -17,7 +20,9 @@
 //        never automatically (week.ts).
 //   POST {action:"feedback", iteration_id, verdict:"rejected"|"deleted", reason?, note?, make_new?}
 //        Turns a design down (its reason becomes a rule for the client's next
-//        designs, and a new design is started) or deletes it.
+//        designs, and a new design is started with the note) or deletes it.
+//   POST {action:"undo_note", request_id}
+//        Takes back what a request's note taught the design memory (note.ts).
 //   POST {action:"use", iteration_id}
 //        Puts one finished design in use for its post; every other design of
 //        that post stops being in use.
@@ -36,7 +41,7 @@ import { currentCopyOf, designKind, type PassStart } from "../_shared/design/wee
 import { isStoryPost } from "../_shared/design/story.ts";
 import { wakeWorker, wakeVideoWorker } from "../_shared/canva/worker.ts";
 import { DESIGN_ANGLE } from "../_shared/canva/jobs.ts";
-import { learningLines, recordFeedback } from "../_shared/design-prompts/feedback.ts";
+import { learnFromNote, learningLines, recordFeedback } from "../_shared/design-prompts/feedback.ts";
 import { loadDesignLearnings } from "../_shared/design-prompts/learnings.ts";
 import { discoverVideoReferences } from "../_shared/brand-references/videos.ts";
 import { creditBalance } from "../_shared/higgsfield/generate.ts";
@@ -45,6 +50,8 @@ import { MCP_URL, accessTokenFor } from "../_shared/higgsfield/oauth.ts";
 import { type WeekDeps, weekContinue, weekPreview, weekStart, weekStop } from "./week.ts";
 import { designStory } from "./story.ts";
 import { plannerLibrary } from "./library.ts";
+import { type NoteDeps, type NoteLearned, learnDesignNote, noteLearnedOf, undoDesignNote } from "./note.ts";
+import { cleanNote } from "../_shared/notes/regenerateNote.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -88,13 +95,16 @@ Deno.serve(async (req) => {
           return json({ code: "needs_filming", who: filmed, request });
         }
       }
+      // A note left on Regenerate: every option follows it, and the design memory hears it.
+      const note = cleanNote(body.note);
       const request = await startRequest(admin, settings as Settings, {
         clientId, postKey, copy, reportId: body.report_id || null, platform: body.platform || null, format: body.format || null, requestedBy: userId, visual: visual || null, route,
+        note: note || null, learnNote: true,
       });
       return json({ request });
     }
 
-    // "Design as a Story": whoever can work on the client's posts, as create (story.ts).
+    // "Add a Story": whoever can work on the client's posts, as create (story.ts).
     if (body?.action === "story") {
       const answer = await designStory({
         db: admin,
@@ -233,13 +243,22 @@ Deno.serve(async (req) => {
           if (copy) {
             // Made again the way the turned-down one was made (from the client's posts, say).
             const { data: madeBy } = it.variant_group_id ? await admin.from("design_requests").select("video_route").eq("id", it.variant_group_id).maybeSingle() : { data: null };
+            // The new design follows the note as Regenerate's does; what the feedback taught is already learned, and shown on it.
+            const note = cleanNote(body.note);
             request = await startRequest(admin, settings as Settings, {
               clientId: it.client_id, postKey: it.calendar_post_key, copy, reportId: it.report_id, platform: it.platform, format: it.format, requestedBy: userId, route: madeBy?.video_route ?? null,
+              note: note || null, noteLearned: note ? noteLearnedOf(learnings) : null,
             });
           }
         }
       }
       return json({ ok: true, learnings: learnings.length, request });
+    }
+
+    // Take back what a note taught the brand's design memory (note.ts).
+    if (body?.action === "undo_note") {
+      const answer = await undoDesignNote(noteDeps(admin, req), body);
+      return json(answer.body, answer.status ?? 200);
     }
 
     if (body?.action === "use") {
@@ -329,7 +348,7 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
   const carousel = request.kind === "carousel";
   const video = request.kind === "video";
-  const common = { brand, platform: request.platform ?? "social", copy: request.post_copy, voice, count: BRIEFS_PLANNED, postCount: library.length, recent, guidance, otherPlatforms };
+  const common = { brand, platform: request.platform ?? "social", copy: request.post_copy, voice, count: BRIEFS_PLANNED, postCount: library.length, recent, guidance, otherPlatforms, note: request.note ?? null };
   const filmed = video && request.footage_path ? (request.on_camera || "the speaker") : null;
   const instruction = video ? videoPlannerPrompt({ ...common, visual: (request as any).visual_direction ?? null, filmed, style: videoStyle?.profile ?? null, videos: videoStyle?.videos, framesPer: videoStyle?.frames_per_video }) : carousel ? carouselPlannerPrompt({ ...common, slides: CAROUSEL_SLIDES }) : plannerPrompt({ ...common, story: isStoryPost(request) });
   let briefs = [] as ReturnType<typeof parseBriefs>;
@@ -491,7 +510,7 @@ async function ensureStyleJob(admin: any, clientId: string, brand: string): Prom
  * who asked (design_requests requires it since 2 Nov); a week's post names
  * whoever added it to the week, and carries the week's id.
  */
-async function startRequest(admin: any, settings: Settings, p: { clientId: string; postKey: string; copy: string; reportId: string | null; platform: string | null; format: string | null; requestedBy: string; visual?: string | null; footagePath?: string | null; onCamera?: string | null; route?: string | null; batchId?: string | null }): Promise<DesignRequest> {
+async function startRequest(admin: any, settings: Settings, p: { clientId: string; postKey: string; copy: string; reportId: string | null; platform: string | null; format: string | null; requestedBy: string; visual?: string | null; footagePath?: string | null; onCamera?: string | null; route?: string | null; batchId?: string | null; note?: string | null; learnNote?: boolean; noteLearned?: NoteLearned | null }): Promise<DesignRequest> {
   const { data: open } = await admin.from("design_requests").select("*").eq("client_id", p.clientId).eq("calendar_post_key", p.postKey).eq("status", "preparing").maybeSingle();
   if (open) return open;
 
@@ -499,6 +518,7 @@ async function startRequest(admin: any, settings: Settings, p: { clientId: strin
     client_id: p.clientId, report_id: p.reportId, calendar_post_key: p.postKey,
     platform: p.platform, format: p.format, post_copy: p.copy, requested_by: p.requestedBy, visual_direction: p.visual ?? null,
     footage_path: p.footagePath ?? null, on_camera: p.footagePath ? (p.onCamera ?? null) : null, video_route: p.route ?? null, batch_id: p.batchId ?? null,
+    note: p.note ?? null, note_learned: p.noteLearned ?? null,
     // A LinkedIn document is a deck of slides: it is made like a carousel. A
     // Reel, short or any video post gets a video: footage in the client's own
     // video style with the hook and logo over it.
@@ -510,6 +530,10 @@ async function startRequest(admin: any, settings: Settings, p: { clientId: strin
     if (raced) return raced;
     throw new Error(error.message);
   }
+
+  // The note's lasting part teaches the brand's design memory beside the
+  // planning; the note itself reaches the planner either way.
+  if (p.note && p.learnNote) background(learnDesignNote(noteDeps(admin), created, p.requestedBy));
 
   // Planning takes a few seconds; the caller already has the request and
   // shows it as being prepared while this runs.
@@ -612,6 +636,19 @@ function weekDeps(admin: any, req: Request): WeekDeps {
     wake: () => background(weekContinue({ ...deps, isSystem: async () => true })),
   };
   return deps;
+}
+
+/** What the note's learning and Undo (note.ts) need from this function. */
+function noteDeps(admin: any, req?: Request): NoteDeps {
+  return {
+    db: admin,
+    requireMember: (clientId) => {
+      if (!req) throw new AuthzError(401, "Sign-in required.");
+      return requireMember(req, clientId);
+    },
+    learn: (n) => learnFromNote(admin, n),
+    now: () => new Date(),
+  };
 }
 
 /** Keep work going after the answer is sent. */

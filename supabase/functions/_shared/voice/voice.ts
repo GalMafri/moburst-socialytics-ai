@@ -272,7 +272,19 @@ export function parseOverallVoice(text: string): PlatformVoice | null {
 
 export type MemorySignal =
   | { kind: "copy_edit"; before: string; after: string; platform?: string | null }
-  | { kind: "revise_note"; note: string };
+  | { kind: "revise_note"; note: string }
+  /** A note left on a post's Regenerate (notes on regenerate, 3 Nov 2026), with the copy before and after the rewrite; story: the post is a Story's message. */
+  | { kind: "rewrite_note"; note: string; before: string; after: string; platform?: string | null; story?: boolean };
+
+/**
+ * What one signal changed in the memory, for the line under a rewrite and its
+ * Undo: a preference added, one replaced (by a new one, added: true, or by one
+ * the memory already had), or one confirmed.
+ */
+export type LearnedChange =
+  | { op: "add"; id: string; description: string; platform: string | null }
+  | { op: "replace"; id: string; description: string; platform: string | null; added: boolean; replaced: { id: string; description: string } }
+  | { op: "confirm"; id: string; description: string; platform: string | null };
 
 export type MergeOp =
   | { op: "confirm"; id: string }
@@ -288,7 +300,15 @@ export function mergePrompt(brand: string, current: Preference[], signal: Memory
     : "- (none yet)";
   const what = signal.kind === "copy_edit"
     ? [`Someone on ${brand}'s side edited a post's copy${signal.platform ? ` for ${signal.platform}` : ""}.`, `Before:\n${signal.before.slice(0, 3000)}`, `After:\n${signal.after.slice(0, 3000)}`].join("\n\n")
-    : `Someone on ${brand}'s side asked for a week of posts to be rewritten with this note:\n"${signal.note.slice(0, 2000)}"`;
+    : signal.kind === "rewrite_note"
+      ? [
+          `Someone on ${brand}'s side asked for a post's copy${signal.platform ? ` for ${signal.platform}` : ""} to be rewritten with this note:\n"${signal.note.slice(0, 2000)}"`,
+          `Before:\n${signal.before.slice(0, 3000)}`,
+          `After (the rewrite that followed the note):\n${signal.after.slice(0, 3000)}`,
+          "A note about this post's own topic, offer or date is a one-off: do nothing for that part.",
+          ...(signal.story ? ["This was a Story's message: one or two short sentences seen full screen, with no hashtags. Its length and its lack of hashtags are how Stories are written, never a preference for every post."] : []),
+        ].join("\n\n")
+      : `Someone on ${brand}'s side asked for a week of posts to be rewritten with this note:\n"${signal.note.slice(0, 2000)}"`;
   return [
     `You keep ${brand}'s list of writing preferences short and current.`,
     `The current preferences:\n${list}`,

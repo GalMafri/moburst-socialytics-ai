@@ -101,11 +101,27 @@ describe("the story action", () => {
     expect(stories(db)).toEqual([]);
   });
 
-  it("answers a client whose design settings don't exist yet with a code, writing nothing", async () => {
-    const db = world({ design_brand_settings: [] });
-    const r = await designStory(deps(db), { client_id: "c1", calendar_post_key: "post:p1" });
-    expect(r.body).toEqual({ code: "not_set_up" });
-    expect(stories(db)).toEqual([]);
+  // "Add a Story" (notes and Stories design, 3 Nov 2026): before the brand's designs are set up, the Story is added with its message and no design.
+  it("adds the Story with its message and no design before the client's designs are set up", async () => {
+    for (const settings of [[], [{ client_id: "c1", confirmed_at: null }]]) {
+      const db = world({ design_brand_settings: settings });
+      const d = deps(db);
+      const r = await designStory(d, { client_id: "c1", calendar_post_key: "post:p1" });
+      expect(r.status ?? 200).toBe(200);
+      expect(stories(db)).toHaveLength(1);
+      expect(stories(db)[0]).toMatchObject({ story_of: "post:p1", copy: "Captains pay last. Here is why the beer league runs on it.", created_by: PERSON });
+      expect(r.body).toMatchObject({ story: { story_of: "post:p1" }, request: null });
+      expect(d.startRequest).not.toHaveBeenCalled();
+      expect(db.tables.design_requests).toEqual([]);
+    }
+  });
+
+  it("starts the Story's design with it once the client's designs are set up", async () => {
+    const db = world();
+    const d = deps(db);
+    await designStory(d, { client_id: "c1", calendar_post_key: "post:p1" });
+    expect(d.startRequest).toHaveBeenCalledTimes(1);
+    expect(db.tables.design_requests).toHaveLength(1);
   });
 
   it("answers with the Story another press made at the same moment", async () => {

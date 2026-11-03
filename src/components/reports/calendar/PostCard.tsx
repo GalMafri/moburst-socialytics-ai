@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { isTextOnlyFormat } from "@/lib/platform";
+import { isStoryPost, isTextOnlyFormat } from "@/lib/platform";
 import { Badge } from "@/components/ui/badge";
 import { PlatformBadge } from "@/lib/platform-config";
 import { Clock, ImagePlus, Loader2, Sparkles, Video as VideoIcon } from "lucide-react";
@@ -9,6 +9,7 @@ import { postCopyOf } from "@/lib/postCopy";
 import { useAuth } from "@/hooks/useAuth";
 import { useDesignRequestForPost, useWeekStateForPost } from "./DesignRequestsContext";
 import { isPreparing, stageLine } from "@/lib/designRequests";
+import { StoryCard } from "./StoryCard";
 
 interface Iteration {
   id?: string;
@@ -27,6 +28,10 @@ interface Props {
     copy?: string;
     caption_angle?: string;
     pillar?: string;
+    /** The key of the Story made from this post, when it has one (calendarPosts.ts weekBoard). */
+    _storyKey?: string;
+    /** A Story placed right after its post. */
+    _storyFollows?: boolean;
   };
   iteration: Iteration | null;
   status: PostStatus;
@@ -45,7 +50,12 @@ const REASON_LABELS: Record<string, string> = {
   idea: "Idea",
 };
 
-export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: Props) {
+/** A calendar card: a Story's compact card (StoryCard), or a feed post's. */
+export function PostCard(props: Props) {
+  return isStoryPost(props.post) ? <StoryCard {...props} /> : <FeedPostCard {...props} />;
+}
+
+function FeedPostCard({ post, iteration, status, onOpen, onToggleApproved }: Props) {
   const copy = postCopyOf(post);
   const reasons = Array.isArray((post as { _reasons?: unknown })._reasons) ? ((post as { _reasons: Array<{ type: string; label: string }> })._reasons) : [];
   const thumb = iteration?.media_urls?.[0] || null;
@@ -173,6 +183,10 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
           >
             {post.format}
           </Badge>
+        )}
+        {/* The post has a Story; the card opens the post, whose header opens the Story. */}
+        {post._storyKey && (
+          <span className="inline-flex items-center px-2 py-0.5 rounded-full border border-white/15 t-badge text-white">Story</span>
         )}
         {post.language && (
           <Badge

@@ -5,6 +5,7 @@ import type { CalendarFilterState } from "./CalendarFilters";
 import { postCopyOf } from "@/lib/postCopy";
 import { iterationMatchesPost, type CalendarPost } from "@/lib/calendarRevision";
 import { isStoryPost } from "@/lib/platform";
+import { dayCountLabel } from "@/lib/calendarPosts";
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -148,7 +149,7 @@ export function CalendarKanban({
             <h2 className="t-h3">{dayName}</h2>
             {date_label && <span className="t-label">{date_label}</span>}
             <span className="t-subhead ml-auto" aria-live="polite">
-              {posts.length === 0 ? "No posts" : `${posts.length} post${posts.length === 1 ? "" : "s"}`}
+              {dayCountLabel(posts.map((c) => c.post))}
             </span>
           </div>
 

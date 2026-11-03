@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { buildReason, clientFit, headline, parseRevision, parseWeekPlan, revisePrompt, STRATEGY_PRECEDENCE, weekPrompt, withStories, type PlannedPost, type WeekContext } from "./weekPlan";
+import { buildReason, clientFit, headline, parseRevision, parseWeekPlan, revisePrompt, STRATEGY_PRECEDENCE, storyPlan, weekPrompt, withStories, type PlannedPost, type WeekContext } from "./weekPlan";
+import { wordReason } from "./reasonText";
 import { wordReason } from "./reasonText";
 import type { EvidenceItem } from "./evidence";
 
@@ -233,7 +234,8 @@ describe("a week's Stories", () => {
       planned({ post_date: "2026-10-27", posting_time: "9:00", copy: "Tuesday morning" }),
       planned({ platform: "Facebook", post_date: "2026-10-26", copy: "Facebook" }),
     ];
-    const rows = withStories(posts, 2, ids);
+    const reason = { type: "story" as const, label: "Pay The Pyper posted 26 Instagram Stories in the last 90 days." };
+    const rows = withStories(posts, 2, reason, ids);
     const stories = rows.filter((r) => r.format === "Story");
     // The two Tuesday posts are the soonest; each Story follows its post in the reply's order.
     expect(stories.map((s) => [s.post_date, s.posting_time, s.copy])).toEqual([["2026-10-27", "17:00", "Tuesday evening"], ["2026-10-27", "9:00", "Tuesday morning"]]);
@@ -241,7 +243,7 @@ describe("a week's Stories", () => {
       const source = rows.find((r) => r.post_key === s.story_of)!;
       expect(rows[rows.indexOf(s) - 1]).toBe(source);
       expect(source).toMatchObject({ platform: "Instagram", post_date: s.post_date, copy: s.copy });
-      expect(s).toMatchObject({ platform: "Instagram", hashtags: [], source: "plan", reasons: source.reasons });
+      expect(s).toMatchObject({ platform: "Instagram", hashtags: [], source: "plan", reasons: [reason] });
     }
     // Every row carries its key, so one insert writes the posts and their Stories together.
     expect(rows.every((r) => r.id && r.post_key === `post:${r.id}`)).toBe(true);
@@ -251,8 +253,33 @@ describe("a week's Stories", () => {
   it("is capped by the week's Instagram posts, and adds none on Facebook or without a count", () => {
     n = 0;
     const posts = [planned({ copy: "A" }), planned({ platform: "Facebook", copy: "B" })];
-    expect(withStories(posts, 20, ids).filter((r) => r.format === "Story")).toHaveLength(1);
-    expect(withStories([planned({ platform: "Facebook" })], 3, ids)).toEqual([planned({ platform: "Facebook" })]);
-    expect(withStories(posts, 0, ids)).toEqual(posts);
+    const reason = { type: "story" as const, label: "One Story with each Instagram post." };
+    expect(withStories(posts, 20, reason, ids).filter((r) => r.format === "Story")).toHaveLength(1);
+    expect(withStories([planned({ platform: "Facebook" })], 3, reason, ids)).toEqual([planned({ platform: "Facebook" })]);
+    expect(withStories(posts, 0, reason, ids)).toEqual(posts);
+  });
+
+  // Lital, 3 Nov 2026 (decision 3): every Instagram client gets Stories; one
+  // with its own Story history in Sprout follows its own rate.
+  describe("how many Stories, and why", () => {
+    const ig = (n: number) => Array.from({ length: n }, (_, i) => planned({ copy: `IG ${i}` }));
+    const week = [...ig(3), planned({ platform: "Facebook", copy: "FB" }), planned({ format: "Story", copy: "A Story already" })];
+
+    it("follows the client's own rate when Sprout shows its Instagram Stories, saying how many it posted", () => {
+      const plan = storyPlan({ stories: 26, perWeek: 2 }, "Pay The Pyper", week);
+      expect(plan.count).toBe(2);
+      expect(plan.reason).toEqual({ type: "story", label: "Pay The Pyper posted 26 Instagram Stories in the last 90 days." });
+      expect(wordReason(plan.reason)).toBe("Pay The Pyper posted 26 Instagram Stories in the last 90 days.");
+      expect(storyPlan({ stories: 1, perWeek: 0 }, "Bader Law", week)).toEqual({ count: 0, reason: { type: "story", label: "Bader Law posted 1 Instagram Story in the last 90 days." } });
+    });
+
+    it("gives one Story with each Instagram feed post to a client with no Story history, and none for Facebook", () => {
+      const plan = storyPlan({ stories: 0, perWeek: 0 }, "Pay The Pyper", week);
+      expect(plan).toEqual({ count: 3, reason: { type: "story", label: "One Story with each Instagram post." } });
+      n = 0;
+      const rows = withStories(week, plan.count, plan.reason, ids);
+      expect(rows.filter((r) => r.format === "Story" && r.story_of).map((r) => r.copy)).toEqual(["IG 0", "IG 1", "IG 2"]);
+      expect(rows.filter((r) => r.story_of && r.platform === "Facebook")).toEqual([]);
+    });
   });
 });

@@ -1771,10 +1771,12 @@ export type Database = {
           confidence: number
           created_at: string
           created_by: string | null
+          evidence: string | null
           id: string
           pattern_description: string
           pattern_type: string
           reason: string | null
+          source: string
           source_iteration_id: string | null
         }
         Insert: {
@@ -1782,10 +1784,12 @@ export type Database = {
           confidence?: number
           created_at?: string
           created_by?: string | null
+          evidence?: string | null
           id?: string
           pattern_description: string
           pattern_type: string
           reason?: string | null
+          source?: string
           source_iteration_id?: string | null
         }
         Update: {
@@ -1793,10 +1797,12 @@ export type Database = {
           confidence?: number
           created_at?: string
           created_by?: string | null
+          evidence?: string | null
           id?: string
           pattern_description?: string
           pattern_type?: string
           reason?: string | null
+          source?: string
           source_iteration_id?: string | null
         }
         Relationships: [
@@ -1960,6 +1966,8 @@ export type Database = {
           format: string | null
           id: string
           kind: string
+          note: string | null
+          note_learned: Json | null
           on_camera: string | null
           options_ready: number
           options_wanted: number
@@ -1989,6 +1997,8 @@ export type Database = {
           format?: string | null
           id?: string
           kind?: string
+          note?: string | null
+          note_learned?: Json | null
           on_camera?: string | null
           options_ready?: number
           options_wanted?: number
@@ -2018,6 +2028,8 @@ export type Database = {
           format?: string | null
           id?: string
           kind?: string
+          note?: string | null
+          note_learned?: Json | null
           on_camera?: string | null
           options_ready?: number
           options_wanted?: number

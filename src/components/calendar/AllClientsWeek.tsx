@@ -1,19 +1,20 @@
 /**
  * Every client's posts for one week, side by side (staff). Each card shows the
  * client, platform, time, the post's design and its opening line; opening a
- * card takes you to that client's board with the post open.
+ * card takes you to that client's board with the post open. A Story shows a
+ * "Story" label and a 9:16 frame, right after its post (3 Nov 2026).
  */
 
 import { useMemo } from "react";
 import { isVideoMedia } from "@/lib/designRequests";
-import { isTextOnlyFormat } from "@/lib/platform";
+import { isStoryPost, isTextOnlyFormat } from "@/lib/platform";
 import { platformName } from "@/lib/display";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Clock, ImageOff } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { PlatformBadge } from "@/lib/platform-config";
-import { DAYS, addDays, shortDate, type CalendarPostRow } from "@/lib/calendarPosts";
+import { DAYS, addDays, shortDate, storiesAfterTheirPosts, type CalendarPostRow } from "@/lib/calendarPosts";
 
 export type ClientPost = CalendarPostRow & { client_name: string };
 
@@ -80,7 +81,7 @@ export function AllClientsWeek({ posts, week }: { posts: ClientPost[]; week: str
     <div className="grid gap-3 items-start grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
       {DAYS.map((day, i) => {
         const date = addDays(week, i);
-        const dayPosts = posts.filter((p) => p.post_date === date).sort((a, b) => a.client_name.localeCompare(b.client_name) || (a.posting_time || "").localeCompare(b.posting_time || ""));
+        const dayPosts = storiesAfterTheirPosts(posts.filter((p) => p.post_date === date).sort((a, b) => a.client_name.localeCompare(b.client_name) || (a.posting_time || "").localeCompare(b.posting_time || "")));
         return (
           <section key={day} className="glass p-2.5 space-y-2 min-w-0" aria-label={`${day} ${shortDate(date)}`}>
             <header className="flex items-baseline justify-between gap-1 px-1">
@@ -89,16 +90,18 @@ export function AllClientsWeek({ posts, week }: { posts: ClientPost[]; week: str
             </header>
             {dayPosts.length === 0 ? (
               <p className="t-label px-1">No posts</p>
-            ) : dayPosts.map((p) => (
+            ) : dayPosts.map((p) => {
+              const story = isStoryPost(p);
+              return (
               <button
                 key={p.id}
                 type="button"
                 onClick={() => navigate(`/clients/${p.client_id}/calendar?week=${week}&post=${encodeURIComponent(p.id)}`)}
                 className="w-full text-left glass-inner p-2 space-y-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                aria-label={`Open ${p.client_name}'s ${platformName(p.platform)} post`}
+                aria-label={`Open ${p.client_name}'s ${platformName(p.platform)} ${story ? "Story" : "post"}`}
               >
                 {designs[p.post_key] ? (
-                  <div className="aspect-[4/5] rounded-[8px] overflow-hidden bg-black/60">
+                  <div className={`${story ? "aspect-[9/16] w-2/3 mx-auto" : "aspect-[4/5]"} rounded-[8px] overflow-hidden bg-black/60`}>
                     {/* The whole design, fitted inside the card (smaller when its shape differs), never cropped. */}
                     {isVideoMedia(designs[p.post_key])
                       ? <video src={designs[p.post_key]} muted playsInline preload="metadata" className="w-full h-full object-contain" />
@@ -116,11 +119,13 @@ export function AllClientsWeek({ posts, week }: { posts: ClientPost[]; week: str
                 <p className="t-label font-semibold !text-white truncate">{p.client_name}</p>
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <PlatformBadge platform={p.platform} size="sm" />
+                  {story && <span className="inline-flex items-center px-1.5 py-0.5 rounded-full border border-white/15 t-badge text-white">Story</span>}
                   {p.posting_time && <span className="t-label inline-flex items-center gap-1"><Clock className="h-3 w-3" aria-hidden />{p.posting_time}</span>}
                 </div>
                 <p className="t-label line-clamp-2 !text-[#b1b7c1]">{p.copy.split("\n")[0]}</p>
               </button>
-            ))}
+              );
+            })}
           </section>
         );
       })}

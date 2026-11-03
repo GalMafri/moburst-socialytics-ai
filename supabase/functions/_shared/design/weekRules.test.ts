@@ -80,7 +80,16 @@ describe("a Story in the week", () => {
       classifyPost(facts("s2", { copy: "" }, { format: "Story", platform: "Facebook" }), "UTC", NOW),
       classifyPost(facts("c", {}, { format: "Carousel" }), "UTC", NOW),
     ];
-    expect(weekCounts(keys.map((k, i) => ({ post_key: k, copy: k === "s2" ? "" : "x", result: list[i] })))).toEqual({ single: 1, story: 2, carousel: 1, video: 0, copy_waits: 1, filming: 0 });
+    expect(weekCounts(keys.map((k, i) => ({ post_key: k, copy: k === "s2" ? "" : "x", result: list[i] })))).toEqual({ single: 1, story: 2, carousel: 1, video: 0, copy_waits: 1, filming: 0, story_platform: null });
+  });
+
+  // The week's design line names Stories apart, with their network when they share one (3 Nov 2026).
+  it("names the network the week's Stories share, and none when they are on both", () => {
+    const story = (key: string, platform: string) => ({ post_key: key, copy: "x", platform, result: classifyPost(facts(key, {}, { format: "Story", platform }), "UTC", NOW) });
+    expect(weekCounts([story("s1", "Instagram"), story("s2", "instagram")]).story_platform).toBe("Instagram");
+    expect(weekCounts([story("s1", "Facebook")]).story_platform).toBe("Facebook");
+    expect(weekCounts([story("s1", "Instagram"), story("s2", "Facebook")]).story_platform).toBeNull();
+    expect(weekCounts([{ post_key: "a", copy: "x", platform: "Instagram", result: classifyPost(facts("a"), "UTC", NOW) }]).story_platform).toBeNull();
   });
 });
 
@@ -109,7 +118,7 @@ describe("weekCounts", () => {
     ];
     const copies = new Map([["a", "x"], ["b", ""], ["c", "x"], ["v", "x"], ["f", "x"], ["d", "x"]]);
     const keys = ["a", "b", "c", "v", "f", "d"];
-    expect(weekCounts(keys.map((k, i) => ({ post_key: k, copy: copies.get(k)!, result: list[i] })))).toEqual({ single: 2, story: 0, carousel: 1, video: 1, copy_waits: 1, filming: 1 });
+    expect(weekCounts(keys.map((k, i) => ({ post_key: k, copy: copies.get(k)!, result: list[i] })))).toEqual({ single: 2, story: 0, carousel: 1, video: 1, copy_waits: 1, filming: 1, story_platform: null });
   });
 });
 

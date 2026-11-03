@@ -180,6 +180,20 @@ describe("the preference memory", () => {
     expect(parseMergeOps("not json", ["p1"])).toEqual([]);
   });
 
+  it("describes a rewrite note with the copy before and after, and says a note about this post alone teaches nothing", () => {
+    const prompt = mergePrompt("Moburst", current, { kind: "rewrite_note", note: "Shorter, and mention the Friday webinar", before: "A long post.", after: "Short post. Friday webinar.", platform: "LinkedIn" });
+    expect(prompt).toContain('asked for a post\'s copy for LinkedIn to be rewritten with this note:\n"Shorter, and mention the Friday webinar"');
+    expect(prompt).toContain("Before:\nA long post.");
+    expect(prompt).toContain("After (the rewrite that followed the note):\nShort post. Friday webinar.");
+    expect(prompt).toContain("A note about this post's own topic, offer or date is a one-off: do nothing for that part.");
+    expect(prompt).not.toContain("Story");
+  });
+
+  it("tells the memory a Story's message is short by nature, so its length is no rule for every post", () => {
+    const prompt = mergePrompt("Moburst", [], { kind: "rewrite_note", note: "Punchier", before: "A.", after: "B!", platform: "Instagram", story: true });
+    expect(prompt).toContain("This was a Story's message: one or two short sentences seen full screen, with no hashtags. Its length and its lack of hashtags are how Stories are written, never a preference for every post.");
+  });
+
   it("consolidates an unmerged list, keeping only ids that exist", () => {
     expect(consolidatePrompt("Moburst", current)).toContain("[p1] 2026-08-26 (cta_style)");
     const merged = parseConsolidation(JSON.stringify({ preferences: [{ pattern_type: "cta_style", description: "Direct CTAs.", from: ["p1", "x"] }, { description: "No source", from: [] }] }), ["p1", "p2"]);

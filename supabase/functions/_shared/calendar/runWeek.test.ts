@@ -69,7 +69,8 @@ describe("runWeekPlan", () => {
     expect(out.reason ?? null).toBeNull();
     expect(out.status).toBe("done");
     const inserted = db.writes.find((w) => w.table === "calendar_posts" && w.op === "insert")?.value as Array<Record<string, unknown>>;
-    expect(inserted).toHaveLength(1);
+    // The one Instagram post, and the Story every Instagram post gets when Sprout shows no Story history.
+    expect(inserted.map((r) => r.format ?? null)).toEqual([null, "Story"]);
     expect(inserted[0].reasons).toEqual([expect.objectContaining({ type: "seasonal", moment: "Playoffs start Oct 27", test: false })]);
     // With no footage uploaded, the planner is told not to plan ideas that need filming.
     expect(m.anthropic.mock.calls[0][0].body.messages[0].content).toContain("don't plan ideas that need a specific person on camera");
@@ -374,19 +375,23 @@ describe("a week's Stories", () => {
     expect(rows.find((r) => r.copy === "Wednesday post" && r.format !== "Story")?.format).toBe("Single Image");
     for (const st of made) {
       expect(rows.find((r) => r.post_key === st.story_of)).toMatchObject({ copy: st.copy, post_date: st.post_date, platform: "Instagram" });
-      expect(st).toMatchObject({ plan_id: "plan-1", client_id: "ptp", source: "plan" });
+      expect(st).toMatchObject({ plan_id: "plan-1", client_id: "ptp", source: "plan", reasons: [{ type: "story", label: "Pay The Pyper posted 26 Instagram Stories in the last 90 days." }] });
     }
     const ready = db.writes.filter((w) => w.table === "calendar_plans" && w.op === "update").map((w) => w.value as Record<string, unknown>).find((v) => v.status === "ready");
     expect((ready?.rhythm as Record<string, unknown>).stories).toEqual({ stories: 26, average: 2.02, perWeek: 2 });
   });
 
-  it("suggests none to a client that posted no Story in 90 days, and never on Facebook", async () => {
+  // Lital, 3 Nov 2026 (decision 3): every Instagram client gets Stories; only its own Story history sets another rate.
+  it("gives a client that posted no Story in 90 days one Story with each Instagram post, and never on Facebook", async () => {
     m.owned.mockResolvedValue({ coverage: "complete", profiles: [{ network: "instagram" }], posts: weekly, stories: [] });
     m.anthropic.mockResolvedValue({ text: JSON.stringify(reply), raw: {} });
     const db = fakeDb({ calendar_plans: [plan], clients: [client] });
     await runWeekPlan(db, job(), NOW);
-    expect(inserted(db).filter((r) => r.format === "Story")).toEqual([]);
-    expect(inserted(db).every((r) => !("story_of" in r))).toBe(true);
+    const made = inserted(db).filter((r) => r.format === "Story");
+    expect(made.map((r) => r.copy).sort()).toEqual(["Thursday post", "Tuesday post", "Wednesday post"]);
+    expect(made.every((r) => r.platform === "Instagram")).toBe(true);
+    for (const st of made) expect(st.reasons).toEqual([{ type: "story", label: "One Story with each Instagram post." }]);
+    expect(m.anthropic).toHaveBeenCalledTimes(1);
   });
 
   it("leaves Stories already on the calendar out of the week's feed posts", async () => {
@@ -403,7 +408,9 @@ describe("a week's Stories", () => {
     };
     expect((await runWeekPlan(db, job(), NOW)).status).toBe("done");
     expect(m.anthropic.mock.calls[0][0].body.messages[0].content).not.toContain("A Story someone added");
-    expect(inserted(db).map((r) => r.copy)).toEqual(["The one Instagram post"]);
+    expect(inserted(db).filter((r) => r.format !== "Story").map((r) => r.copy)).toEqual(["The one Instagram post"]);
+    // Sprout does not read this client: its Instagram post gets one Story.
+    expect(inserted(db).filter((r) => r.format === "Story").map((r) => r.copy)).toEqual(["The one Instagram post"]);
   });
 });
 

@@ -127,16 +127,19 @@ export function PostPanel({
     // Written a few seconds after the post is marked as filmed.
     refetchInterval: (query) => (query.state.data ? false : 5000),
   });
-  const startDesigns = async (route?: "posts") => {
-    if (!clientId || !post) return;
+  /** Start the post's design, with the note left on Regenerate; true once it has started. */
+  const startDesigns = async (route?: "posts", note?: string): Promise<boolean> => {
+    if (!clientId || !post) return false;
     setStartingDesigns(true);
     try {
       // A client whose settings are still being worked out gets its design once they are.
-      await createDesigns({ clientId, reportId, post, route: route ?? (filmedReason ? "posts" : undefined) });
+      const started = await createDesigns({ clientId, reportId, post, route: route ?? (filmedReason ? "posts" : undefined), note });
       designRequests?.refresh();
+      return !!started.request;
     } catch {
       // Nothing is shown: the panel shows a design being prepared once one is.
       designRequests?.refresh();
+      return false;
     } finally {
       setStartingDesigns(false);
     }
@@ -215,7 +218,7 @@ export function PostPanel({
   // only ever produced stills, so clicking it on a video recommendation handed
   // back the wrong asset with nothing to say so.
   const plannedVideo = isVideoFormat(post?.format, post?.platform);
-  // A Story is posted by hand: its panel has Message and Design, no Schedule and no Video (StoryLinks.tsx).
+  // A Story is posted by hand: its panel has Message and Design, no Schedule and no Video; its header links it to its post (StoryLinks.tsx).
   const story = isStoryPost(post);
   const [tab, setTab] = useState<string>("copy");
   // A video post's one media tab becomes Video once its design settings load;
@@ -266,6 +269,8 @@ export function PostPanel({
                   {post.posting_time}
                 </span>
               )}
+              {/* Add a Story, open the post's Story, or open a Story's post: on every tab, for staff and the client's users. */}
+              <StoryLinks post={post} clientId={clientId} />
               {isMoburstStaff && post._calendarPostId && (
                 <span className="ml-auto mr-6">
                   <CalendarPostActions postId={post._calendarPostId} clientId={clientId} date={String(post.date_label || "")} onDone={() => onOpenChange(false)} />
@@ -291,7 +296,7 @@ export function PostPanel({
 
             {/* Copy tab */}
             <TabsContent value="copy" className="mt-4">
-              <CopyEditor post={post} clientId={clientId} reportId={reportId} onCopySaved={(updated) => {
+              <CopyEditor post={post} clientId={clientId} reportId={reportId} brand={clientContext?.client_name ?? null} onCopySaved={(updated) => {
                 setEditedPost(updated);
                 onCopySaved?.(updated);
               }} />
@@ -340,6 +345,8 @@ export function PostPanel({
                     aspect={videoDesigns ? "aspect-[9/16]" : tileAspectFor(post) || "aspect-[4/5]"}
                     filenameStub={`design-${post.platform || "post"}`}
                     onCreate={() => void startDesigns()}
+                    onRegenerate={(note) => startDesigns(undefined, note)}
+                    brand={clientContext?.client_name ?? null}
                     onMakeFromPosts={() => void startDesigns("posts")}
                     filmedReason={filmedReason}
                     shotBrief={isMoburstStaff ? shotBrief ?? null : null}
@@ -350,7 +357,6 @@ export function PostPanel({
                     waitingForCopy={!postCopyOf(post).trim()}
                     storyFileName={story ? storyFileName(clientContext?.client_name, String(post.date_label || "")) : null}
                   />
-                  <StoryLinks post={post} clientId={clientId} />
                   {!isClient && otherTiles.length > 0 && (
                     <div className="space-y-2 pt-2">
                       <p className="t-label">Other media for this post</p>
