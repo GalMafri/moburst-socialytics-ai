@@ -78,13 +78,14 @@ describe("a Story's panel", () => {
     expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Message', 'Design']);
   });
 
-  it('shows the message its frame is written from, with no caption to regenerate', async () => {
+  // Notes on regenerate (3 Nov 2026): a Story's Message tab gets the same Regenerate with a note.
+  it('shows the message its frame is written from, with Edit and Regenerate', async () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
     render(<QueryClientProvider client={qc}><PostPanel open onOpenChange={() => {}} post={storyPost()} postIterations={[]} clientId="c1" clientTimezone="UTC" /></QueryClientProvider>);
     expect(await screen.findByText('The words on the Story are written from this message.')).toBeInTheDocument();
     expect(screen.getByText('Captains pay last.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Edit/ })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Regenerate' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Regenerate' })).toBeInTheDocument();
   });
 
   it('says the Story is posted by hand, and downloads its PNG under the Story\'s name', async () => {

@@ -1,7 +1,8 @@
 /**
  * Progress for a post's design, inside its Design tab: three named steps,
  * how long it has been running against how long it usually takes, and a
- * reminder that closing the panel does not stop anything.
+ * reminder that closing the panel does not stop anything. A design asked for
+ * with a note shows the note and what it taught the brand (DesignNote).
  */
 
 import { useEffect, useState } from "react";
@@ -11,8 +12,9 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { stepsFor, cancelDesign, elapsedLabel, progressPercent, stageIndex, typicalMinutes, type DesignRequest } from "@/lib/designRequests";
 import { useDesignRequests } from "./DesignRequestsContext";
+import { DesignNote } from "./DesignNote";
 
-export function DesignProgressCard({ request, replacing = false }: { request: DesignRequest; isStaff: boolean; replacing?: boolean }) {
+export function DesignProgressCard({ request, replacing = false, brand }: { request: DesignRequest; isStaff: boolean; replacing?: boolean; brand?: string | null }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -80,6 +82,7 @@ export function DesignProgressCard({ request, replacing = false }: { request: De
         })}
       </ol>
       <span className="sr-only">{pct}% done</span>
+      <DesignNote request={request} brand={brand} />
     </div>
   );
 }

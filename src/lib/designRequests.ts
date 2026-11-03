@@ -13,6 +13,7 @@ import { describeInvokeError } from "@/lib/invokeError";
 import { invokeResendable, sendQuietly, uploadQuietly } from "@/lib/quietSend";
 import { postCopyOf } from "@/lib/postCopy";
 import type { Iteration } from "@/lib/postMediaTiles";
+import type { NoteLearned } from "@/lib/postNotes";
 
 export type DesignStage = "planning" | "designing" | "finishing" | "ready";
 
@@ -39,6 +40,10 @@ export interface DesignRequest {
   requested_by?: string | null;
   /** The week run (design_week_runs) that started it; null for a post's own button. */
   batch_id?: string | null;
+  /** The note left on Regenerate (or Not right): every option follows it. */
+  note?: string | null;
+  /** What the brand's design memory learned from the note; null while nothing was learned yet. */
+  note_learned?: NoteLearned | null;
   error: string | null;
   created_at: string;
   /** When the current preparation began (a request can prepare again). */
@@ -129,7 +134,7 @@ export function elapsedLabel(fromIso: string, now = Date.now()): string {
   return m > 0 ? `${m}m ${String(s % 60).padStart(2, "0")}s` : `${s}s`;
 }
 
-export async function createDesigns(args: { clientId: string; reportId?: string; post: { _calendarPostKey?: string; platform?: string; format?: string; copy?: string; [k: string]: unknown }; route?: "posts" }): Promise<{ request?: DesignRequest; notSetUp?: boolean; needsFilming?: string }> {
+export async function createDesigns(args: { clientId: string; reportId?: string; post: { _calendarPostKey?: string; platform?: string; format?: string; copy?: string; [k: string]: unknown }; route?: "posts"; note?: string }): Promise<{ request?: DesignRequest; notSetUp?: boolean; needsFilming?: string }> {
   // Sent again quietly when it never reached the server.
   const { data, error } = await sendQuietly(() => supabase.functions.invoke("design-request", {
     body: {
@@ -142,6 +147,7 @@ export async function createDesigns(args: { clientId: string; reportId?: string;
       post_copy: postCopyOf(args.post as any),
       visual_direction: (args.post as any).visual_direction ?? (args.post as any)["Visual Direction"] ?? null,
       ...(args.route ? { route: args.route } : {}),
+      ...(args.note?.trim() ? { note: args.note.trim() } : {}),
     },
   }));
   if (data?.code === "not_set_up") return { notSetUp: true };
@@ -232,13 +238,15 @@ export interface DesignVersion {
   urls: string[];
   isSelected: boolean;
   createdAt: string;
+  /** The design request that made it (its note, and what the note taught). */
+  requestId?: string | null;
 }
 
 /** A post's designs, newest first. */
 export function designVersions(iterations: Iteration[], isImage: (url: string) => boolean): DesignVersion[] {
   return iterations
     .filter((it) => it.id && isDesignOption(it) && (it.media_urls || []).some(isImage))
-    .map((it) => ({ iterationId: it.id!, urls: (it.media_urls || []).filter(isImage), isSelected: !!it.is_selected, createdAt: it.created_at || "" }))
+    .map((it) => ({ iterationId: it.id!, urls: (it.media_urls || []).filter(isImage), isSelected: !!it.is_selected, createdAt: it.created_at || "", requestId: it.variant_group_id ?? null }))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 

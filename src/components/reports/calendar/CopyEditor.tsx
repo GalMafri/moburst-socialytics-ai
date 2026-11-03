@@ -7,22 +7,29 @@ import { invokeResendable, sendQuietly } from "@/lib/quietSend";
 import { toast } from "sonner";
 import { track, editDistancePct } from "@/lib/telemetry";
 import { postCopyOf } from "@/lib/postCopy";
-import { useAuth } from "@/hooks/useAuth";
 import type { CalendarPost } from "@/lib/calendarRevision";
 import { PostReason } from "@/components/calendar/PostReason";
 import type { PostReason as Reason } from "@/lib/calendarPosts";
 import { isStoryPost } from "@/lib/platform";
+import { NOTE_PLACEHOLDER, cleanNote, copyLearnedLine, notStartedLine, undoCopyNote, type LearnedChange } from "@/lib/postNotes";
+import { LearnedNote, NoteBox } from "./NoteBox";
 
 interface Props {
   post: any;
   clientId?: string;
   reportId?: string;
+  /** The brand, for the line that says what a note taught it. */
+  brand?: string | null;
   onCopySaved?: (post: CalendarPost) => void;
 }
 
-export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
-  const { isMoburstStaff } = useAuth();
-  // A Story's copy is the message its frame's words are written from; it has no caption to regenerate.
+/** What the last rewrite with a note taught, for its line and its Undo. */
+interface NoteResult { learned: { changes?: LearnedChange[] } | null; undone: boolean }
+
+export function CopyEditor({ post, clientId, reportId, brand, onCopySaved }: Props) {
+  // A Story's copy is the message its frame's words are written from. Staff
+  // and the client's own users can rewrite it, or a post's copy, with a note
+  // (Lital, 3 Nov 2026, decision 1).
   const story = isStoryPost(post);
   const initialCopy = postCopyOf(post);
   const [isEditing, setIsEditing] = useState(false);
@@ -32,13 +39,25 @@ export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
   const [isRegenerating, setIsRegenerating] = useState(false);
   /** An edit that has not reached the server yet; the editor keeps it open with the person's text. */
   const [notSaved, setNotSaved] = useState(false);
+  /** Regenerate's note box: open, its note, and whether the last press did not start. */
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [note, setNote] = useState("");
+  const [notRewritten, setNotRewritten] = useState(false);
+  const [noteResult, setNoteResult] = useState<NoteResult | null>(null);
+  const [undoing, setUndoing] = useState(false);
   useEffect(() => {
     setDisplayCopy(initialCopy);
     setEditedCopy(initialCopy);
     setIsEditing(false);
   }, [initialCopy, post._calendarPostKey]);
+  useEffect(() => {
+    setNoteOpen(false);
+    setNote("");
+    setNotRewritten(false);
+    setNoteResult(null);
+  }, [post._calendarPostKey]);
 
-  const saveRevision = async (copy: string, generated?: any) => {
+  const saveRevision = async (copy: string, generated?: any, rewriteNote?: string): Promise<{ updated: CalendarPost; learned: { changes?: LearnedChange[] } | null }> => {
     if (!clientId || !post._calendarPostKey) {
       throw new Error("This post can't be edited here.");
     }
@@ -60,11 +79,13 @@ export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
         hashtags: Array.isArray(updated.hashtags) ? updated.hashtags : typeof updated.hashtags === "string" ? updated.hashtags.split(/[\s,]+/).filter(Boolean) : null,
         cta: updated.CTA || null, concept: post.concept || null, visual_direction: post.visual_direction || null,
         format: post.format || null, source: generated ? "regeneration" : "calendar",
+        // The note a rewrite was asked with: the server decides whether it is a lasting preference.
+        ...(generated && rewriteNote ? { note: rewriteNote, previous_copy: displayCopy } : {}),
       },
     }), { again: (e) => invokeResendable(e, { idempotent: true }) });
     if (error || data?.error) throw new Error("The copy is not saved yet.");
     onCopySaved?.(updated);
-    return updated;
+    return { updated, learned: data?.learned && Array.isArray(data.learned.changes) ? data.learned : null };
   };
 
   // How much of the AI draft survives, and how long people deliberate before
@@ -128,8 +149,10 @@ export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
   };
 
   const handleRegenerate = async () => {
-    if (!clientId || !isMoburstStaff) return;
+    if (!clientId) return;
+    const rewriteNote = cleanNote(note);
     setIsRegenerating(true);
+    setNotRewritten(false);
     regenCount.current += 1;
     const t0 = performance.now();
     const previousCopy = displayCopy;
@@ -147,8 +170,10 @@ export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
             displayCopy ||
             "social media post",
           pillar: post.pillar || null,
+          format: post.format || null,
           current_copy: displayCopy,
           current_cta: post.CTA || post.cta || null,
+          ...(rewriteNote ? { note: rewriteNote } : {}),
         },
       }));
       if (error || data?.error) throw new Error("not rewritten");
@@ -157,7 +182,7 @@ export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
       const newCopy = postResult?.caption_angle || postResult?.copy || postResult?.post_copy;
       if (!newCopy?.trim()) throw new Error("not rewritten");
       if (newCopy) {
-        await saveRevision(newCopy, postResult);
+        const { learned } = await saveRevision(newCopy, postResult, rewriteNote);
 
         // A high regeneration count on one post is the clearest "the model is
         // not giving them what they want" signal the product emits.
@@ -168,12 +193,17 @@ export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
           changed_pct: editDistancePct(previousCopy, newCopy),
           chars: String(newCopy).length,
           duration_ms: performance.now() - t0,
+          with_note: !!rewriteNote,
           ok: true,
         });
 
         setDisplayCopy(newCopy);
         setEditedCopy(newCopy);
-        toast.success("Copy regenerated");
+        setNoteOpen(false);
+        setNote("");
+        // A rewrite with a note says what the note taught the brand, with Undo.
+        setNoteResult(rewriteNote ? { learned, undone: false } : null);
+        toast.success(story ? "Message regenerated" : "Copy regenerated");
       }
     } catch (err: any) {
       // The copy on the post stays as it was.
@@ -182,13 +212,26 @@ export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
         platform: post.platform || null,
         attempt: regenCount.current,
         duration_ms: performance.now() - t0,
+        with_note: !!rewriteNote,
         ok: false,
         error_code: String(err?.message || "unknown").slice(0, 80),
       });
+      // The box stays open with the note.
+      setNotRewritten(true);
     } finally {
       setIsRegenerating(false);
     }
   };
+
+  const undoNote = async () => {
+    const changes = noteResult?.learned?.changes;
+    if (!clientId || !changes?.length) return;
+    setUndoing(true);
+    // Sent again quietly; the line changes once the server has taken it back.
+    if (await undoCopyNote(clientId, changes)) setNoteResult((r) => (r ? { ...r, undone: true } : r));
+    setUndoing(false);
+  };
+  const learnedLine = noteResult ? copyLearnedLine(noteResult.learned, brand, { undone: noteResult.undone }) : null;
 
   return (
     <div className="space-y-3">
@@ -241,7 +284,19 @@ export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
               </div>
             )}
           </div>
-          {clientId && (
+          {learnedLine && <LearnedNote text={learnedLine.text} onUndo={learnedLine.undo ? () => void undoNote() : undefined} undoing={undoing} />}
+          {clientId && noteOpen && (
+            <NoteBox
+              value={note}
+              onChange={setNote}
+              onSubmit={() => void handleRegenerate()}
+              onCancel={() => { setNoteOpen(false); setNote(""); setNotRewritten(false); }}
+              busy={isRegenerating}
+              kept={notRewritten ? notStartedLine("copy", note) : null}
+              placeholder={story ? NOTE_PLACEHOLDER.story : NOTE_PLACEHOLDER.copy}
+            />
+          )}
+          {clientId && !noteOpen && (
             <div className="flex gap-2">
               <Button
                 variant="outline"
@@ -254,19 +309,15 @@ export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
               >
                 <Pencil className="h-3.5 w-3.5 mr-1" /> Edit
               </Button>
-              {isMoburstStaff && !story && <Button
+              <Button
                 variant="ghost"
                 size="sm"
-                onClick={handleRegenerate}
+                onClick={() => setNoteOpen(true)}
                 disabled={isRegenerating}
               >
-                {isRegenerating ? (
-                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-3.5 w-3.5 mr-1" />
-                )}
-                {isRegenerating ? "Regenerating..." : "Regenerate"}
-              </Button>}
+                <RefreshCw className="h-3.5 w-3.5 mr-1" />
+                Regenerate
+              </Button>
             </div>
           )}
           {post.visual_direction && (
