@@ -7,7 +7,7 @@ const CLIENT = "00000000-0000-4000-8000-000000000001";
 describe("auditRow", () => {
   it("records the call in the API's table: method MCP, the tool as the path, the person and the OAuth client", () => {
     expect(auditRow({ tool: "socialytics_client_get", status: 200, durationMs: 41, clientId: CLIENT, errorCode: null, userId: PERSON, oauthClientId: "oc-1", ip: "203.0.113.9" })).toEqual({
-      key_id: null, method: "MCP", path: "mcp/socialytics_client_get", status: 200, duration_ms: 41, client_id: CLIENT, job_id: null, ip: "203.0.113.9", error_code: null, user_id: PERSON, oauth_client_id: "oc-1",
+      key_id: null, method: "MCP", path: "mcp/socialytics_client_get", status: 200, duration_ms: 41, client_id: CLIENT, job_id: null, ip: "203.0.113.9", error_code: null, user_id: PERSON, oauth_client_id: "oc-1", target: null,
     });
   });
 
@@ -15,8 +15,14 @@ describe("auditRow", () => {
     const row = auditRow({ tool: "socialytics_report_get", status: 404, durationMs: 3, clientId: "Bader Law", errorCode: "not_found", userId: PERSON, oauthClientId: "oc-1", ip: null });
     expect(row.client_id).toBeNull();
     expect(row.error_code).toBe("not_found");
-    expect(Object.keys(row).sort()).toEqual(["client_id", "duration_ms", "error_code", "ip", "job_id", "key_id", "method", "oauth_client_id", "path", "status", "user_id"]);
+    expect(Object.keys(row).sort()).toEqual(["client_id", "duration_ms", "error_code", "ip", "job_id", "key_id", "method", "oauth_client_id", "path", "status", "target", "user_id"]);
     expect(auditRow({ tool: "t", status: 200, durationMs: -5, errorCode: null, userId: PERSON, oauthClientId: null, ip: null }).duration_ms).toBe(0);
+  });
+
+  it("names what a save wrote, and nothing for a read", () => {
+    expect(auditRow({ tool: "socialytics_note_save", status: 200, durationMs: 9, clientId: CLIENT, errorCode: null, userId: PERSON, oauthClientId: "oc-1", ip: null, target: "n-1" }).target).toBe("n-1");
+    expect(auditRow({ tool: "socialytics_note_save", status: 200, durationMs: 9, clientId: CLIENT, errorCode: null, userId: PERSON, oauthClientId: "oc-1", ip: null, target: "" }).target).toBeNull();
+    expect(auditRow({ tool: "socialytics_client_get", status: 200, durationMs: 9, errorCode: null, userId: PERSON, oauthClientId: "oc-1", ip: null }).target).toBeNull();
   });
 });
 
