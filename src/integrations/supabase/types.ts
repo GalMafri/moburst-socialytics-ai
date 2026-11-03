@@ -4795,6 +4795,10 @@ export type Database = {
         }
         Returns: Json
       }
+      trend_hashtags_refreshed: {
+        Args: { p_at: string; p_client: string }
+        Returns: undefined
+      }
       trend_measures: {
         Args: { p_client?: string }
         Returns: {
@@ -4813,6 +4817,17 @@ export type Database = {
       trend_search_override_clear: {
         Args: { p_client: string; p_platform: string }
         Returns: undefined
+      }
+      trend_search_override_put: {
+        Args: {
+          p_check_hashtags?: boolean
+          p_client: string
+          p_hashtags_at?: string
+          p_platform: string
+          p_searches: Json
+          p_written_at: string
+        }
+        Returns: boolean
       }
       trend_term_add: {
         Args: {
