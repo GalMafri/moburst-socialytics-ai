@@ -10,7 +10,11 @@
 // (evidence.ts resolveRhythm), so no plan waits for a setting. Nothing ends
 // in failure while its week can still be used: a plan or revision that
 // doesn't finish is tried again with growing waits (retryWait), and a week
-// that is over closes quietly.
+// that is over closes quietly. A plan a person stopped or removed
+// (calendar_stop_plan, status canceled) gets no model call after the run
+// sees it and nothing written: the run checks before each model call and
+// before writing, every write to the plan leaves a stopped plan as it is,
+// and the database takes no posts for it (calendar_posts_plan_open).
 
 import { anthropicMessages } from "../anthropic.ts";
 import { collectOwnedCompetitive } from "../competitive/ownedSource.ts";
@@ -307,15 +311,25 @@ async function must(p: PromiseLike<{ error: { message: string } | null }>, what:
 
 /**
  * One run at a time per week: a run claims the plan before it writes or
- * revises, and a claim older than CLAIM_MS belonged to a run that died.
+ * revises, and a claim older than CLAIM_MS belonged to a run that died. A
+ * plan a person stopped is never claimed.
  */
 async function claimPlan(admin: Db, planId: string, now: Date): Promise<boolean> {
   const stale = new Date(now.getTime() - CLAIM_MS).toISOString();
   const { data, error } = await admin.from("calendar_plans").update({ claimed_at: now.toISOString(), updated_at: now.toISOString() })
-    .eq("id", planId).or(`claimed_at.is.null,claimed_at.lt."${stale}"`).select("id");
+    .eq("id", planId).neq("status", "canceled").or(`claimed_at.is.null,claimed_at.lt."${stale}"`).select("id");
   if (error) throw new Error(`Could not claim the week: ${error.message}`);
   return !!data?.length;
 }
+
+/** A person stopped the week's plan or removed it (calendar_stop_plan): nothing more is asked of the model or written for it. */
+async function planStopped(admin: Db, planId: string): Promise<boolean> {
+  const { data, error } = await admin.from("calendar_plans").select("status").eq("id", planId).maybeSingle();
+  if (error) throw new Error(`Could not read the plan: ${error.message}`);
+  return !data || data.status === "canceled";
+}
+
+const STOPPED: WeekJobOutcome = { status: "skipped", reason: "A person stopped this week's plan." };
 
 /** The client's voice profile is being learned: plans and revisions wait for it. */
 async function voicePending(admin: Db, clientId: string): Promise<boolean> {
@@ -347,9 +361,9 @@ const retryLater = (job: WeekJob, reason: string, now: Date): WeekJobOutcome =>
 const leftByStoppedRun = (plan: { claimed_at?: string | null }, now: Date) =>
   !!plan.claimed_at && Date.parse(plan.claimed_at) < now.getTime() - CLAIM_MS;
 
-/** Release a claim a stopped run left, unless a new run took it meanwhile. */
+/** Release a claim a stopped run left, unless a new run took it meanwhile or a person stopped the plan. */
 async function releaseStoppedRun(admin: Db, plan: { id: string; claimed_at: string }, patch: Record<string, unknown> = {}): Promise<void> {
-  await admin.from("calendar_plans").update({ claimed_at: null, updated_at: new Date().toISOString(), ...patch }).eq("id", plan.id).eq("claimed_at", plan.claimed_at);
+  await admin.from("calendar_plans").update({ claimed_at: null, updated_at: new Date().toISOString(), ...patch }).eq("id", plan.id).neq("status", "canceled").eq("claimed_at", plan.claimed_at);
 }
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -387,6 +401,7 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
     const { data: plan, error: planError } = await admin.from("calendar_plans").select("*").eq("client_id", job.client_id).eq("week_start", week).maybeSingle();
     if (planError) throw new Error(`Could not read the plan: ${planError.message}`);
     if (!plan) return { status: "skipped", reason: "The plan this job was for no longer exists." };
+    if (plan.status === "canceled") return STOPPED;
     if (plan.status === "ready") return { status: "done", result: { plan_id: plan.id, already: true } };
     if (plan.status === "expired") return { status: "skipped", reason: "The week is over." };
     planId = plan.id;
@@ -398,7 +413,7 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
     const firstDate = tomorrow > week ? tomorrow : week;
     // A week with no day left to post on closes quietly.
     if (firstDate > addDays(week, 6)) {
-      await must(admin.from("calendar_plans").update({ status: "expired", claimed_at: null, updated_at: now.toISOString() }).eq("id", plan.id), "Could not close the week");
+      await must(admin.from("calendar_plans").update({ status: "expired", claimed_at: null, updated_at: now.toISOString() }).eq("id", plan.id).neq("status", "canceled"), "Could not close the week");
       return { status: "skipped", reason: "The week is over." };
     }
     if (leftByStoppedRun(plan, now)) {
@@ -406,7 +421,7 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
       return retryLater(job, "The last run stopped before finishing.", now);
     }
     if (await voicePending(admin, job.client_id)) return waitForVoice(now);
-    if (!(await claimPlan(admin, plan.id, now))) return busyElsewhere(now);
+    if (!(await claimPlan(admin, plan.id, now))) return (await planStopped(admin, plan.id)) ? STOPPED : busyElsewhere(now);
     claimed = true;
 
     const writtenSoFar = async () => {
@@ -414,23 +429,32 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
       if (error) throw new Error(`Could not read the week's posts: ${error.message}`);
       return count ?? 0;
     };
-    const markReady = (extra: Record<string, unknown> = {}) => must(admin.from("calendar_plans")
-      .update({ status: "ready", ready_at: new Date().toISOString(), updated_at: new Date().toISOString(), error: null, claimed_at: null, ...extra }).eq("id", plan.id), "Could not finish the plan");
+    /** The plan made ready, unless a person stopped it meanwhile (false then). */
+    const markReady = async (extra: Record<string, unknown> = {}) => {
+      const { data, error } = await admin.from("calendar_plans")
+        .update({ status: "ready", ready_at: new Date().toISOString(), updated_at: new Date().toISOString(), error: null, claimed_at: null, ...extra })
+        .eq("id", plan.id).neq("status", "canceled").select("id");
+      if (error) throw new Error(`Could not finish the plan: ${error.message}`);
+      return !!data?.length;
+    };
 
     // A run cut off after writing the posts: finish the plan, don't write them twice.
     const written = await writtenSoFar();
     if (written) {
-      await markReady();
+      if (!(await markReady())) return STOPPED;
       return { status: "done", result: { plan_id: plan.id, posts: written, finished: true } };
     }
-    await must(admin.from("calendar_plans").update({ status: "planning", error: null, updated_at: now.toISOString() }).eq("id", plan.id), "Could not start the plan");
+    const { data: started, error: startError } = await admin.from("calendar_plans").update({ status: "planning", error: null, updated_at: now.toISOString() })
+      .eq("id", plan.id).neq("status", "canceled").select("id");
+    if (startError) throw new Error(`Could not start the plan: ${startError.message}`);
+    if (!started?.length) return STOPPED;
 
     const gathered = await gatherEvidence(admin, client, now, { week });
     const rhythm = { applied: gathered.rhythm, learned: gathered.learnedRhythm, sources: gathered.rhythmSources, stories: gathered.stories };
     const evidence = { items: gathered.evidence, avoid: gathered.avoid, thin: gathered.thin, sources: gathered.sources, first_date: firstDate };
     // A client that posts less than once a week has weeks with nothing to post on any platform.
     if (!gathered.rhythm.length && gathered.learnedRhythm.length) {
-      await markReady({ rhythm, evidence });
+      if (!(await markReady({ rhythm, evidence }))) return STOPPED;
       return { status: "done", result: { plan_id: plan.id, posts: 0, quiet_week: true } };
     }
 
@@ -466,28 +490,35 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
     let posts: ReturnType<typeof parseWeekPlan> = [];
     const tokens = { input: 0, output: 0 };
     for (let attempt = 0; attempt < 2 && !posts.length; attempt++) {
+      // No model call starts once a person stopped the plan.
+      if (await planStopped(admin, plan.id)) return STOPPED;
       const result = await anthropicMessages({ apiKey: apiKey(), body: { model: COPY_MODEL, max_tokens: 16000, messages: [{ role: "user", content: weekPrompt(ctx) }] } });
       const u = usage(result.raw);
       tokens.input += u.input; tokens.output += u.output;
       posts = parseWeekPlan(result.text, ctx);
     }
+    // Stopped during the model call: the reply is dropped.
+    if (await planStopped(admin, plan.id)) return STOPPED;
     if (!posts.length) throw new Error("The planner's reply had no usable posts.");
     const finishing = { model: COPY_MODEL, input_tokens: tokens.input, output_tokens: tokens.output, rhythm, evidence };
     // Checked again right before writing: a run that outlived its claim may have written them meanwhile.
     if (await writtenSoFar()) {
-      await markReady(finishing);
+      if (!(await markReady(finishing))) return STOPPED;
       return { status: "done", result: { plan_id: plan.id, finished: true } };
     }
     // The week's Stories are added in code, with no model call: one for each of the soonest Instagram posts.
+    // A plan stopped after the check above takes none of them (calendar_posts_plan_open).
     const rows = withStories(posts, gathered.stories.perWeek).map((p) => ({ ...p, client_id: client.id, plan_id: plan.id, created_by: plan.requested_by ?? null }));
     await must(admin.from("calendar_posts").insert(rows), "Could not add the week's posts");
-    await markReady(finishing);
+    if (!(await markReady(finishing))) return STOPPED;
     return { status: "done", result: { plan_id: plan.id, posts: rows.length, input_tokens: tokens.input, output_tokens: tokens.output } };
   } catch (e) {
+    // A plan a person stopped stays stopped, whatever went wrong after the stop.
+    if (planId && (await planStopped(admin, planId).catch(() => false))) return STOPPED;
     // Whatever went wrong (a provider error, a reply that couldn't be read), the week is tried again later.
     const reason = message(e);
     if (planId && claimed) {
-      await Promise.resolve(admin.from("calendar_plans").update({ status: "queued", error: reason, claimed_at: null, updated_at: new Date().toISOString() }).eq("id", planId))
+      await Promise.resolve(admin.from("calendar_plans").update({ status: "queued", error: reason, claimed_at: null, updated_at: new Date().toISOString() }).eq("id", planId).neq("status", "canceled"))
         .catch((err: unknown) => console.warn("[calendar] could not release the week:", message(err)));
     }
     return retryLater(job, reason, now);
@@ -540,13 +571,14 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
     const { data: plan, error: planError } = await admin.from("calendar_plans").select("*").eq("client_id", job.client_id).eq("week_start", week).maybeSingle();
     if (planError) throw new Error(`Could not read the plan: ${planError.message}`);
     const pending = plan?.pending_revision as { note: string; by: string | null; at: string; scope: "untouched" | "empty" } | null;
+    if (plan?.status === "canceled") return STOPPED;
     if (!plan || !pending) return { status: "skipped", reason: "No revision is waiting for this week." };
     planId = plan.id;
 
     const finish = (entry: Record<string, unknown>) => must(admin.from("calendar_plans").update({
       pending_revision: null, claimed_at: null, updated_at: new Date().toISOString(),
       revisions: [...(Array.isArray(plan.revisions) ? plan.revisions : []), { note: pending.note, by: pending.by, at: pending.at, scope: pending.scope, done_at: new Date().toISOString(), ...entry }],
-    }).eq("id", plan.id), "Could not record the revision");
+    }).eq("id", plan.id).neq("status", "canceled"), "Could not record the revision");
 
     const { data: client, error } = await admin.from("clients").select(CLIENT_COLUMNS).eq("id", job.client_id).maybeSingle();
     if (error || !client) throw new Error("Could not read the client.");
@@ -561,7 +593,7 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
       return retryLater(job, "The last run stopped before finishing.", now);
     }
     if (await voicePending(admin, job.client_id)) return waitForVoice(now);
-    if (!(await claimPlan(admin, plan.id, now))) return busyElsewhere(now);
+    if (!(await claimPlan(admin, plan.id, now))) return (await planStopped(admin, plan.id)) ? STOPPED : busyElsewhere(now);
     claimed = true;
 
     const { data: rows, error: rowsError } = await admin.from("calendar_posts").select("id, post_key, post_date, platform, format, pillar, copy, hashtags, cta, visual_direction, reasons, touched_at, plan_id, story_of")
@@ -595,7 +627,10 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
       others: all.filter((p) => !targets.some((t) => t.id === p.id) && p.copy).map((p) => ({ date: p.post_date, platform: p.platform, copy: p.copy })),
       strategy: await clientStrategy(admin, client.id),
     });
+    // No model call starts, and nothing is rewritten, once a person removed the plan.
+    if (await planStopped(admin, plan.id)) return STOPPED;
     const result = await anthropicMessages({ apiKey: apiKey(), body: { model: COPY_MODEL, max_tokens: 12000, messages: [{ role: "user", content: prompt }] } });
+    if (await planStopped(admin, plan.id)) return STOPPED;
     const revised = parseRevision(result.text, targets.map((p) => p.id), gathered?.evidence ?? [], pending.scope === "empty");
     if (!revised.length) throw new Error("The rewrite's reply had no usable posts.");
 
@@ -605,8 +640,8 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
     for (const r of revised) {
       const was = targets.find((p) => p.id === r.id)!;
       const patch: Record<string, unknown> = { copy: r.copy, hashtags: r.hashtags, cta: r.cta, visual_direction: r.visual_direction, ...(r.pillar ? { pillar: r.pillar } : {}), ...(r.reason ? { reasons: [r.reason] } : {}) };
-      // Only if nobody changed the copy or moved the post since it was read.
-      const { data: updated, error: updateError } = await admin.from("calendar_posts").update(patch).eq("id", r.id).eq("copy", was.copy ?? "").is("touched_at", null).select("id");
+      // Only if nobody changed the copy or moved the post since it was read, and it is still the plan's.
+      const { data: updated, error: updateError } = await admin.from("calendar_posts").update(patch).eq("id", r.id).eq("copy", was.copy ?? "").is("touched_at", null).eq("plan_id", plan.id).select("id");
       if (updateError) throw new Error(`Could not rewrite a post: ${updateError.message}`);
       if (updated?.length) {
         replaced.push({ id: was.id, copy: was.copy, hashtags: was.hashtags, cta: was.cta, pillar: was.pillar, visual_direction: was.visual_direction, reasons: was.reasons });
@@ -615,7 +650,7 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
     }
     // A planned Story takes its post's new copy, the message its frame is written from, only when nobody worked on the Story.
     for (const st of planPosts.filter((p) => isStoryPost(p) && p.story_of && rewrote.has(p.story_of) && !worked.has(p.id))) {
-      const { data: updated, error: updateError } = await admin.from("calendar_posts").update({ copy: rewrote.get(st.story_of) }).eq("id", st.id).eq("copy", st.copy ?? "").is("touched_at", null).select("id");
+      const { data: updated, error: updateError } = await admin.from("calendar_posts").update({ copy: rewrote.get(st.story_of) }).eq("id", st.id).eq("copy", st.copy ?? "").is("touched_at", null).eq("plan_id", plan.id).select("id");
       if (updateError) throw new Error(`Could not rewrite a Story: ${updateError.message}`);
       if (updated?.length) replaced.push({ id: st.id, copy: st.copy, hashtags: st.hashtags, cta: st.cta, pillar: st.pillar, visual_direction: st.visual_direction, reasons: st.reasons });
     }
@@ -628,10 +663,12 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
     }
     return { status: "done", result: { plan_id: plan.id, rewritten: replaced.length } };
   } catch (e) {
+    // A plan a person removed stays removed.
+    if (planId && (await planStopped(admin, planId).catch(() => false))) return STOPPED;
     // The revision stays waiting and is tried again later, while the week has days to come.
     const reason = message(e);
     if (planId && claimed) {
-      await Promise.resolve(admin.from("calendar_plans").update({ claimed_at: null }).eq("id", planId))
+      await Promise.resolve(admin.from("calendar_plans").update({ claimed_at: null }).eq("id", planId).neq("status", "canceled"))
         .catch((err: unknown) => console.warn("[calendar] could not release the week:", message(err)));
     }
     return retryLater(job, reason, now);
