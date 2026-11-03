@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countryCode, domainCountry, htmlLanguage, replacesLocation, resolveLocation, schemaAddresses, textAddresses, zoneCountry, zoneOf } from "./location";
+import { cityZone, countryCode, domainCountry, followersZone, htmlLanguage, regionsFor, replacesLocation, resolveLocation, resolveSocialLocation, schemaAddresses, SOURCE_RANK, textAddresses, zoneCountry, zoneOf } from "./location";
 
 const ld = (o: unknown) => `<script type="application/ld+json">${JSON.stringify(o)}</script>`;
 // Bader Law's site lists its Georgia offices as schema.org LegalService locations.
@@ -49,6 +49,69 @@ describe("the order of sources", () => {
     expect(replacesLocation({ source: "site_read", website: "baderlaw.com" }, { source: "schema.org", website: "baderlaw.com" })).toBe(true);
     expect(replacesLocation({ source: "schema.org", website: "old.com" }, { source: "country", website: "new.com" })).toBe(true);
     expect(replacesLocation(null, { source: null, website: "x.com" })).toBe(false);
+  });
+});
+
+describe("sources from the client's profiles and posts (onboarding from social profiles, section 3)", () => {
+  const NONE = { profileAddresses: [], postTexts: [] };
+  it("ranks a Google Business Profile address with schema.org, post addresses with page text, followers below where posts say the business is", () => {
+    expect(SOURCE_RANK.profile_address).toBe(SOURCE_RANK["schema.org"]);
+    expect(SOURCE_RANK.post_text).toBe(SOURCE_RANK.page_text);
+    expect(SOURCE_RANK.post_read).toBe(SOURCE_RANK.site_read);
+    expect(SOURCE_RANK.followers).toBeGreaterThan(SOURCE_RANK.post_read);
+    expect(SOURCE_RANK.country).toBeGreaterThan(SOURCE_RANK.followers);
+  });
+  it("takes a profile's address first, then addresses in posts (ZIP or street number required), then where the posts say the business is", () => {
+    const followers = { zone: "America/Los_Angeles", country: "US", city: "Los Angeles", share: 0.7 };
+    expect(resolveSocialLocation({ profileAddresses: [{ locality: "Austin", region: "TX", country: "US" }], postTexts: ["Visit 12 Main Street, Denver, CO 80202"], followers }))
+      .toMatchObject({ timezone: "America/Chicago", source: "profile_address", country: "US", locality: "Austin" });
+    expect(resolveSocialLocation({ profileAddresses: [], postTexts: ["Grand opening at 12 Main Street, Denver, CO 80202!", "Love Austin, Texas"], followers }))
+      .toMatchObject({ timezone: "America/Denver", source: "post_text" });
+    expect(resolveSocialLocation({ profileAddresses: [], postTexts: ["We love brands in Austin, Texas"], stated: { city: "Tel Aviv", region: null, country: "Israel" }, followers }))
+      .toMatchObject({ timezone: "Asia/Jerusalem", source: "post_read", country: "IL" });
+  });
+  it("uses followers only when the profiles and posts state no location, and never over a stated country", () => {
+    const followers = { zone: "America/Los_Angeles", country: "US", city: "Los Angeles", share: 0.6 };
+    expect(resolveSocialLocation({ ...NONE, followers, countries: ["US"] })).toMatchObject({ timezone: "America/Los_Angeles", source: "followers", locality: "Los Angeles" });
+    // The posts say the United States, with no state: its main zone, never the followers' city.
+    expect(resolveSocialLocation({ ...NONE, stated: { city: null, region: null, country: "United States" }, followers })).toMatchObject({ timezone: "America/New_York", source: "country" });
+    // Nothing stated and no city holding half the followers: the top follower country's main zone.
+    expect(resolveSocialLocation({ ...NONE, followers: null, countries: ["GB"] })).toMatchObject({ timezone: "Europe/London", source: "country", country: "GB" });
+  });
+  it("leaves the time zone empty below every source, never UTC", () => {
+    expect(resolveSocialLocation(NONE)).toMatchObject({ timezone: null, source: null });
+  });
+  it("lets a profile address replace page text, and never lets followers replace an address", () => {
+    expect(replacesLocation({ source: "page_text", website: "olo.com" }, { source: "profile_address", website: null })).toBe(true);
+    expect(replacesLocation({ source: "post_text", website: null }, { source: "followers", website: null })).toBe(false);
+    expect(replacesLocation({ source: "page_footer", website: "olo.com" }, { source: "followers", website: null })).toBe(false);
+    expect(replacesLocation({ source: "followers", website: null }, { source: "followers", website: null })).toBe(true);
+  });
+  it("keeps the site's words on a tie between the site and the posts, and a site found later replaces only what ranks lower", () => {
+    expect(replacesLocation({ source: "page_text", website: "olo.com" }, { source: "post_text", website: null })).toBe(false);
+    expect(replacesLocation({ source: "post_text", website: null }, { source: "page_text", website: "olo.com" })).toBe(true);
+    expect(replacesLocation({ source: "profile_address", website: null }, { source: "page_text", website: "olo.com" })).toBe(false);
+    expect(replacesLocation({ source: "followers", website: null }, { source: "site_read", website: "olo.com" })).toBe(true);
+  });
+});
+
+describe("where the followers are", () => {
+  it("reads a city as Sprout's networks write one", () => {
+    expect(cityZone("Los Angeles, California, United States")).toEqual({ zone: "America/Los_Angeles", country: "US", city: "Los Angeles" });
+    expect(cityZone("Austin, TX")).toEqual({ zone: "America/Chicago", country: "US", city: "Austin" });
+    expect(cityZone("Tel Aviv, Israel")).toEqual({ zone: "Asia/Jerusalem", country: "IL", city: "Tel Aviv" });
+    expect(cityZone("Springfield")).toBeNull();
+  });
+  it("takes the zone that holds half or more of the followers with a known city", () => {
+    expect(followersZone([{ name: "Austin, TX", count: 30 }, { name: "Dallas, Texas, United States", count: 25 }, { name: "London, United Kingdom", count: 40 }, { name: "Nowhere", count: 900 }]))
+      .toEqual({ zone: "America/Chicago", country: "US", city: "Austin", share: 0.58 });
+    expect(followersZone([{ name: "Austin, TX", count: 30 }, { name: "London, United Kingdom", count: 40 }, { name: "Tel Aviv, Israel", count: 30 }])).toBeNull();
+    expect(followersZone([])).toBeNull();
+  });
+  it("lists the business's country, then each country with 20% or more of followers, else the top one", () => {
+    expect(regionsFor("US", [{ country: "GB", share: 0.5 }, { country: "US", share: 0.3 }, { country: "IL", share: 0.1 }])).toEqual(["US", "GB"]);
+    expect(regionsFor(null, [{ country: "GB", share: 0.15 }, { country: "IL", share: 0.1 }])).toEqual(["GB"]);
+    expect(regionsFor(null, [])).toEqual([]);
   });
 });
 

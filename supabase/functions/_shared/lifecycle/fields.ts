@@ -40,14 +40,28 @@ export interface FieldWrite {
 }
 
 /**
+ * Where the lifecycle's value in a field came from (field_sources[field].from):
+ * "website", "posts", "followers", "profile_picture:<network>" or the like.
+ * Null for a value with no record of it: one a person set, or one the
+ * lifecycle wrote before sources were recorded (the website's, then).
+ */
+export function sourceOf(fieldSources: unknown, field: string): string | null {
+  const entry = fieldSources && typeof fieldSources === "object" ? (fieldSources as Record<string, unknown>)[field] : null;
+  const from = entry && typeof entry === "object" ? (entry as { from?: unknown }).from : null;
+  return typeof from === "string" && from ? from : null;
+}
+
+/**
  * Write fields on a client, skipping every one a person set (and, for the
  * lifecycle, every one the portal set). Atomic: the check and the write
- * happen under the row's lock.
+ * happen under the row's lock. `from` records where each value came from.
  */
-export async function writeClientFields(db: Db, clientId: string, fields: Partial<Record<LifecycleField, unknown>>, by: "lifecycle" | "portal" = "lifecycle"): Promise<FieldWrite> {
+export async function writeClientFields(db: Db, clientId: string, fields: Partial<Record<LifecycleField, unknown>>, by: "lifecycle" | "portal" = "lifecycle", from: Partial<Record<LifecycleField, string>> = {}): Promise<FieldWrite> {
   const entries = Object.entries(fields).filter(([, v]) => v !== undefined);
   if (!entries.length) return { written: [], skipped: [] };
-  const { data, error } = await db.rpc("lifecycle_write_client", { p_client: clientId, p_fields: Object.fromEntries(entries), p_by: by });
+  const sources = Object.fromEntries(Object.entries(from).filter(([k, v]) => typeof v === "string" && v && entries.some(([f]) => f === k)));
+  const p_fields = Object.keys(sources).length ? { ...Object.fromEntries(entries), _from: sources } : Object.fromEntries(entries);
+  const { data, error } = await db.rpc("lifecycle_write_client", { p_client: clientId, p_fields, p_by: by });
   if (error) throw new Error(`Could not save the client's details: ${error.message}`);
   const out = (data ?? {}) as { written?: string[]; skipped?: string[] };
   return { written: out.written ?? [], skipped: out.skipped ?? [] };

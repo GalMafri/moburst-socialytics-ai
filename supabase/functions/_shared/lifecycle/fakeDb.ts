@@ -135,19 +135,20 @@ export function fakeDb(tables: Record<string, Row[]> = {}, rpcs: Record<string, 
   return db;
 }
 
-/** A lifecycle_write_client stand-in with the database rule: a field a person set is skipped. */
+/** A lifecycle_write_client stand-in with the database rule: a field a person set is skipped, and "_from" records where a value came from. */
 export function writeClientRpc(args: Row, db: FakeDb) {
   const client = db.tables.clients.find((c) => c.id === args.p_client);
   const written: string[] = [], skipped: string[] = [];
   if (!client) return { written, skipped };
   const sources = { ...(client.field_sources ?? {}) };
-  for (const [k, v] of Object.entries(args.p_fields as Row)) {
+  const { _from: from = {}, ...fields } = args.p_fields as Row;
+  for (const [k, v] of Object.entries(fields)) {
     const gov = k === "pillars_source" || k === "pillars_derived_at" ? "content_pillars" : k;
     const by = sources[gov]?.by;
     if (k !== "location" && (by === "person" || (by === "portal" && args.p_by === "lifecycle"))) { skipped.push(k); continue; }
     client[k] = v;
     written.push(k);
-    if (k === gov && k !== "location") sources[k] = { by: args.p_by, at: "now" };
+    if (k === gov && k !== "location") sources[k] = { by: args.p_by, at: "now", ...(typeof from[k] === "string" && from[k] ? { from: from[k] } : {}) };
   }
   client.field_sources = sources;
   return { written, skipped };
