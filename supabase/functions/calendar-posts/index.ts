@@ -25,8 +25,9 @@
 //        a member of the client or staff: take back what a note taught
 //   POST {action:"preview_evidence", client_id, week?}
 //        staff with write access: what the planner would see for this client
-//        now (rhythm and where it came from, scored evidence, thin data), with
-//        no model call
+//        now (rhythm and where it came from, scored evidence, thin data, and
+//        the week's dated moments as judged, when they are), with no model
+//        call
 //
 // Reasons are worded when shown (_shared/calendar/reasonText.ts) and the
 // monthly voice job keeps the preference memory short, so neither needs an
@@ -39,6 +40,7 @@ import { learnFromSignal, undoLearning } from "../_shared/voice/load.ts";
 import { CLIENT_COLUMNS, gatherEvidence } from "../_shared/calendar/runWeek.ts";
 import { plannable } from "../_shared/calendar/planState.ts";
 import { type CopyDeps, saveCopy, undoNote } from "./copy.ts";
+import { momentEvidence } from "../_shared/calendar/moments.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
@@ -133,7 +135,12 @@ Deno.serve(async (req) => {
       // The week to preview (its Monday); by default the week after this one.
       const week = /^\d{4}-\d{2}-\d{2}$/.test(String(body.week || "")) ? mondayOf(String(body.week)) : undefined;
       const g = await gatherEvidence(admin, client, new Date(), { week });
-      return json({ own_posts: g.own.length, rhythm: g.rhythm, learned_rhythm: g.learnedRhythm, rhythm_sources: g.rhythmSources, evidence: g.evidence, avoid: g.avoid, thin: g.thin, sources: g.sources, examples: g.examples });
+      // The week's dated moments as week_moments judged them (null until judged), cited as M1, M2.
+      const monday = week ?? addDays(mondayOf(todayIn(String(client.timezone || "UTC"))), 7);
+      const { data: plan } = await admin.from("calendar_plans").select("moments").eq("client_id", clientId).eq("week_start", monday).maybeSingle();
+      const moments = plan?.moments ?? null;
+      const momentItems = momentEvidence(Array.isArray(moments?.kept) ? moments.kept : []);
+      return json({ own_posts: g.own.length, rhythm: g.rhythm, learned_rhythm: g.learnedRhythm, rhythm_sources: g.rhythmSources, evidence: [...g.evidence, ...momentItems], avoid: g.avoid, thin: g.thin, sources: g.sources, examples: g.examples, week: monday, moments });
     }
 
     return json({ error: `Unknown action '${body?.action}'` }, 400);

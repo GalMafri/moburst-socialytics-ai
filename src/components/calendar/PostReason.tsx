@@ -14,6 +14,14 @@ import { evidenceSentence, reasonWords, type PostEvidence, type PostReason as Re
 const shortDate = (iso?: string) => (iso ? new Date(`${iso.slice(0, 10)}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : "");
 const times = (m?: number) => (m === undefined ? "" : `${Number.isInteger(m) ? m : m.toFixed(1)}x`);
 
+/** A dated moment: the sentence names it and its date; the row adds the client's own post on it last year and the competitors who posted about it. */
+function momentLine(e: PostEvidence): string {
+  const lastYear = e.platform && e.multiple !== undefined
+    ? `Last year: ${[e.platform, e.format && e.format !== "unknown" ? e.format : ""].filter(Boolean).join(" ")} · ${times(e.multiple)} your usual ${e.metric}${e.sample ? ` (median of ${e.sample} posts)` : ""}`
+    : "";
+  return [lastYear, e.companies ? `${e.companies} competitor${e.companies === 1 ? "" : "s"} posted about it` : ""].filter(Boolean).join(" · ");
+}
+
 function evidenceLine(e: PostEvidence): string {
   const where = [e.company, e.platform, e.format && e.format !== "unknown" ? e.format : ""].filter(Boolean).join(" · ");
   const parts = [where, shortDate(e.date)];
@@ -39,6 +47,20 @@ export function PostReason({ reasons }: { reasons: Reason[] | null | undefined }
             const line = e.theme ? (i === 0 ? "" : evidenceSentence(e)) : evidenceLine(e);
             // A stored link is a stranger's post; only a web address is ever made a link.
             const link = e.link && /^https?:\/\//i.test(e.link) ? e.link : null;
+            // A moment's link is the page that gives its date, not a post.
+            if (e.kind === "moment") {
+              const moment = momentLine(e);
+              return (
+                <li key={e.id} className="t-secondary">
+                  {moment && <span>{moment}</span>}
+                  {link && (
+                    <a href={link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-white">
+                      See the date <ExternalLink className="h-3 w-3" aria-hidden />
+                    </a>
+                  )}
+                </li>
+              );
+            }
             return (
               <li key={e.id} className="t-secondary">
                 {line && <span>{line}</span>}

@@ -68,6 +68,19 @@ describe("PostReason", () => {
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
 
+  it("words a seasonal post from its checked moment, with last year's post and a link to where the date comes from", () => {
+    const moment = {
+      id: "M1", kind: "moment" as const, text: "Halloween", key: "us:halloween", category: "cultural_commercial", date: "2026-10-31", link: "https://www.timeanddate.com/holidays/us/halloween",
+      fit: "Costume reels are where your followers already show up.", platform: "Instagram", format: "reel", metric: "engagement", multiple: 2.3, sample: 8, companies: 2,
+    };
+    render(<PostReason reasons={[{ type: "seasonal", label: "Old", fit: moment.fit, evidence: [moment], test: false }]} />);
+    expect(screen.getByText("Halloween, Oct 31. Your Instagram reel for it last year got 2.3x your usual engagement. Costume reels are where your followers already show up.")).toBeInTheDocument();
+    expect(screen.getByText("Last year: Instagram reel · 2.3x your usual engagement (median of 8 posts) · 2 competitors posted about it")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /See the date/ })).toHaveAttribute("href", moment.link);
+    expect(screen.queryByRole("link", { name: /View the post/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('"Halloween"')).not.toBeInTheDocument();
+  });
+
   it("words a seasonal post from its moment", () => {
     render(<PostReason reasons={[{ type: "seasonal", label: "Old", moment: "Halloween on Oct 31", fit: "Fits the team.", test: false }]} />);
     expect(screen.getByText("Halloween on Oct 31. Fits the team.")).toBeInTheDocument();

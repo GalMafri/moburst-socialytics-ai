@@ -13,7 +13,7 @@ export { evidenceSentence };
 /** The evidence a planned post acts on, with its real numbers (supabase/functions/_shared/calendar/reasonText.ts). */
 export interface PostEvidence {
   id: string;
-  kind: "own" | "competitor" | "topic" | "trend" | "report";
+  kind: "own" | "competitor" | "topic" | "trend" | "report" | "moment";
   text: string;
   platform?: string;
   company?: string;
@@ -29,6 +29,10 @@ export interface PostEvidence {
   companies?: number;
   /** A trend's weekly theme; the post that shows it is in text, its author in company. */
   theme?: string;
+  /** A dated moment's key and category, and why it fits; its name is in text, its date this year's, its link the page that gives the date. */
+  key?: string;
+  category?: string;
+  fit?: string;
 }
 
 export interface PostReason {
