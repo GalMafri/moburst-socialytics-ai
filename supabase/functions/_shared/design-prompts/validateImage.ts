@@ -8,6 +8,7 @@ export type { DesignVerdict } from "./correction.ts";
 export { CLEAN_VERDICT, correctionFor, verdictIsDirty } from "./correction.ts";
 import type { DesignVerdict } from "./correction.ts";
 import { CLEAN_VERDICT } from "./correction.ts";
+import { anthropicFetch } from "../anthropic.ts";
 
 /** Interface furniture no post should carry; a model asked for a plain field draws these instead. */
 const FAKE_UI =
@@ -103,7 +104,7 @@ export async function validateDesignImage(
   if (!parts) return { ...CLEAN_VERDICT, skipped: true };
 
   try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+    const response = await anthropicFetch("/v1/messages", {
       method: "POST",
       signal: AbortSignal.timeout(45_000),
       headers: {

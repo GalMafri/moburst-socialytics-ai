@@ -8,7 +8,7 @@
 // tracking step takes each company's profiles from RivalIQ, so a person's
 // confirm never waits on how confident a profile search was.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { ConfirmError, confirmDraftSet } from "../_shared/competitive/confirmSet.ts";
 

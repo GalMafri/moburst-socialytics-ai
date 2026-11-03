@@ -1,4 +1,4 @@
-import {createClient} from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from "../_shared/supabase.ts";
 import {secretEquals} from '../_shared/auth/secretEquals.ts';
 import {requireStaff} from '../_shared/auth/requireStaff.ts';
 import {collectOwnedCompetitive} from '../_shared/competitive/ownedSource.ts';

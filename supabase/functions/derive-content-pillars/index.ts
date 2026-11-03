@@ -6,7 +6,7 @@
 // are a proposal the page puts in the editable list, and a client whose
 // pillars were written by hand never loses them to somebody pressing this.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { anthropicKey, derivePillars, PillarsError } from "../_shared/brand/pillars.ts";
 

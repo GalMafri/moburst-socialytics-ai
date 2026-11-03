@@ -10,7 +10,7 @@
 // One RivalIQ call per request (the account allows 1 concurrent / 100 per
 // hour). Staff-gated FIRST, then per-client write check.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { requireStaff, AuthzError } from "../_shared/auth/requireStaff.ts";
 import { summarizeLandscapes } from "../_shared/competitive/rivaliqLandscape.ts";
 import { rivalIqFetch } from "../_shared/competitive/rivaliqFetch.ts";

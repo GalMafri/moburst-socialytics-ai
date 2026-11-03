@@ -19,7 +19,8 @@
  * one call to another function, through the operational secret acting for
  * the person (see _shared/invoke.ts), after the scope check.
  */
-import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { callEnvFromDeno, callFunction } from "../_shared/invoke.ts";
 import { makeStore } from "../_shared/socialytics-api/store.ts";
 import { personReads } from "./reads.ts";

@@ -13,7 +13,7 @@
 // edit lives on competitive_insight_feedback, keyed by the original text).
 // The rewrite is written from the report's own figures, never invented ones.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
 import { clipText } from "../_shared/text/clip.ts";

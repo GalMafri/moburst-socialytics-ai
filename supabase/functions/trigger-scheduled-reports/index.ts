@@ -10,7 +10,7 @@
 // runs, every stale feed, every due dispatch), and on that day the feed
 // refreshes alone outlasted the caller's timeout.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { secretEquals } from "../_shared/auth/secretEquals.ts";
 
 const corsHeaders = {

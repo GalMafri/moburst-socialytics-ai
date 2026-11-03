@@ -14,7 +14,7 @@
 //                             (a browser follows it), so `state` is the proof.
 //   POST {action:"status"}  → staff. Whether it is linked, and to whom.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import {
   PROVIDER,

@@ -14,7 +14,7 @@
 // so those are copied into the public generated-media bucket and the durable
 // copy is what gets cached. Any signed-in user may call this (read-only data).
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { isPubliclyFetchable } from "../_shared/net/safeUrl.ts";
 import { OAUTH_READ_ONLY, oauthClientOf } from "../_shared/auth/authz.ts";
 

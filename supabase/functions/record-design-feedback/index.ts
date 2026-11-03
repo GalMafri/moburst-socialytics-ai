@@ -7,7 +7,7 @@
 // than just disappearing. Archiving hides without teaching — for a design that
 // is fine but not wanted. Staff only, like approval.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { recordFeedback } from "../_shared/design-prompts/feedback.ts";
 

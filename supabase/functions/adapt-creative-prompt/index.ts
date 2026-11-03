@@ -1,4 +1,5 @@
 import { staffGate } from "../_shared/auth/requireStaff.ts";
+import { anthropicFetch } from "../_shared/anthropic.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -82,7 +83,7 @@ Rewrite ONLY the visual direction/design prompt to work for the target format. K
 
 Return ONLY the adapted visual direction text, nothing else.`;
 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+    const response = await anthropicFetch("/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

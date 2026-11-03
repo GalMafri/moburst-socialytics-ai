@@ -15,7 +15,7 @@ import { competitiveRangeError } from "../_shared/reports/competitiveRange.ts";
 // A report id (an older screen's "Run now" on a run that did not finish)
 // asks for that report's kind and period again, the same way.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { type ReportRange, STUCK_AFTER_MINUTES } from "../_shared/reports/payloads.ts";
 

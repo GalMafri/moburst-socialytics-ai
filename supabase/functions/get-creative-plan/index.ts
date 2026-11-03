@@ -1,4 +1,4 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from "../_shared/supabase.ts";
 import { AuthzError, requireStaff } from '../_shared/auth/requireStaff.ts';
 import { loadCreativePlan } from '../_shared/design-prompts/loadCreativePlan.ts';
 

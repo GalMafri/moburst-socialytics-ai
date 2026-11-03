@@ -30,3 +30,21 @@ export function wellFormedDeep<T>(value: T): T {
   }
   return value;
 }
+
+/** A half emoji as JSON.stringify writes it: \ud800 to \udfff, escaped. */
+const LONE_ESCAPE = /\\u[dD][89a-fA-F][0-9a-fA-F]{2}/;
+
+/** A JSON request body with any half emoji dropped; any other body exactly as it was. */
+export function wellFormedBody<T>(body: T): T {
+  if (typeof body !== "string" || !LONE_ESCAPE.test(body)) return body;
+  try {
+    return JSON.stringify(wellFormedDeep(JSON.parse(body))) as T;
+  } catch {
+    return body;
+  }
+}
+
+/** fetch that drops any half emoji from a JSON body before sending it. `base` is the fetch to send with; the global one when none is given. */
+export function wellFormedFetch(base?: typeof fetch): typeof fetch {
+  return (input, init) => (base ?? globalThis.fetch)(input, init && typeof init.body === "string" ? { ...init, body: wellFormedBody(init.body) } : init);
+}

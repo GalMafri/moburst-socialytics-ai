@@ -7,7 +7,7 @@
 //   approve -> mark the finished library as the client's system (v2).
 // Nothing here decides a layout: every template is a post the renderer has
 // reproduced, scored against the original; the reproduction is its preview.
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from "../_shared/supabase.ts";
 import { AuthzError, requireStaff } from '../_shared/auth/requireStaff.ts';
 import { secretEquals } from '../_shared/auth/secretEquals.ts';
 import { referencesFor } from '../_shared/design-prompts/designRefs.ts';

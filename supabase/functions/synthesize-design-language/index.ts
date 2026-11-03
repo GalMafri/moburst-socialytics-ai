@@ -1,5 +1,5 @@
 import { requireStaff } from "../_shared/auth/requireStaff.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { learnBrandStyle } from "../_shared/brand-references/learnStyle.ts";
 import { StyleError } from "../_shared/brand-references/errors.ts";
 

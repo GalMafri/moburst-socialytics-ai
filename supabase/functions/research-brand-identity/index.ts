@@ -2,7 +2,7 @@
 // _shared/brand/research.ts, which the client lifecycle's brand_read step
 // runs on the server; this function answers the page with the same result
 // and writes nothing.
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { staffGate } from "../_shared/auth/requireStaff.ts";
 import { openaiKeyFor, ResearchError, researchBrand } from "../_shared/brand/research.ts";
 import { htmlLanguage, resolveLocation } from "../_shared/lifecycle/location.ts";

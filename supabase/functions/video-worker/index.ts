@@ -8,7 +8,7 @@
 //   the pass starts the next while video work remains. A minute timer
 //   (cron video-worker) restarts it if a pass ever fails to.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { secretEquals } from "../_shared/auth/secretEquals.ts";
 import { settleRequest } from "../_shared/canva/jobs.ts";
 import { wakeVideoWorker } from "../_shared/canva/worker.ts";

@@ -7,7 +7,7 @@
 // competitors step also runs. Rows a person edited keep what the person set
 // (an upsert only fills gaps unless `refresh` is true).
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { detectCompetitorHandles } from "../_shared/competitive/detectHandles.ts";
 

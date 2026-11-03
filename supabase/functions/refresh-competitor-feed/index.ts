@@ -3,7 +3,7 @@
 // _shared/competitive/refreshFeed.ts, which the scheduled-jobs worker also runs
 // in-process for the weekly refresh.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { FeedRefreshError, refreshCompetitorFeed } from "../_shared/competitive/refreshFeed.ts";
 import { requireStaff } from "../_shared/auth/requireStaff.ts";
 import { secretEquals } from "../_shared/auth/secretEquals.ts";

@@ -7,7 +7,7 @@
 //
 // Auth: x-agent-key must equal SOCIALYTICS_AGENT_KEY. Every op is scoped to
 // the job the key claimed, and delivery writes only through the job's plan.
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from "../_shared/supabase.ts";
 import { secretEquals } from '../_shared/auth/secretEquals.ts';
 import { loadCreativePlan } from '../_shared/design-prompts/loadCreativePlan.ts';
 import { platformDesignSpec } from '../_shared/design-prompts/aspect.ts';

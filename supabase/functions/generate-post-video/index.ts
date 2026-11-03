@@ -2,7 +2,7 @@ import {loadCreativePlan} from "../_shared/design-prompts/loadCreativePlan.ts";
 import {creativeVideoPrompt} from "../_shared/design-prompts/creativePlan.ts";
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { buildVideoPrompt } from "../_shared/design-prompts/buildVideoPrompt.ts";
 import { videoAspectRatio } from "../_shared/design-prompts/aspect.ts";
 import { brandFootingAdvice, footingOf, resolveBrandContext } from "../_shared/design-prompts/resolveBrand.ts";

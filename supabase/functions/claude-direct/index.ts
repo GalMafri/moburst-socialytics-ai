@@ -8,7 +8,7 @@
 // POST {"run_id","save_as","body","start"[,"keep_days"]} with the operational
 // secret (X-Socialytics-Secret). Only for a pipeline run that is running.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { secretEquals } from "../_shared/auth/secretEquals.ts";
 import { CLAUDE_DIRECT_DEADLINE_MS, directFailedKey, runClaudeDirect, type DirectFailure } from "../_shared/pipelines/claudeDirect.ts";
 import { makePayloadStore } from "../_shared/pipelines/store.ts";

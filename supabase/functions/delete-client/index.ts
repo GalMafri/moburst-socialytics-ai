@@ -7,7 +7,7 @@
 // staff-with-write-access AND admin.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { requireStaff, AuthzError } from "../_shared/auth/requireStaff.ts";
 
 const corsHeaders = {

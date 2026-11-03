@@ -2,7 +2,7 @@
 // Competitors screen. The plan, the lease, the API and linking live in
 // _shared/competitive/rivaliqSetupRun.ts, which the client lifecycle's
 // tracking step uses to run the same setup on the server until it is done.
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from "../_shared/supabase.ts";
 import { requireStaff, AuthzError } from '../_shared/auth/requireStaff.ts';
 import { advanceRivalIqSetup, cleanupRivalIqLandscape } from '../_shared/competitive/rivaliqSetup.ts';
 import { leaseSetupJob, linkVerified, planFingerprint, rivalIqApi, SetupError, setupPlan } from '../_shared/competitive/rivaliqSetupRun.ts';

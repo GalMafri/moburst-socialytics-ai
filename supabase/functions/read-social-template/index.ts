@@ -7,7 +7,7 @@
 // greyscale) and stores render and heatmap in brand-assets, so the caller can
 // stop when the score is good enough or keep the best of a few rounds.
 // Faces are matched by code from the text crops (step 'fonts').
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from "../_shared/supabase.ts";
 import { Image } from 'https://deno.land/x/imagescript@1.3.0/mod.ts';
 import { AuthzError, requireStaff } from '../_shared/auth/requireStaff.ts';
 import { secretEquals } from '../_shared/auth/secretEquals.ts';
@@ -18,6 +18,7 @@ import { similarity } from '../_shared/design-system/compare.ts';
 import { matchFontBlock } from '../_shared/design-system/fontMatch.ts';
 import { cutLogo } from '../_shared/design-system/logoAsset.ts';
 import { SPEC_TOOL, proposeInstructions, refineInstructions, toSpec } from '../_shared/design-system/reader.ts';
+import { anthropicFetch } from "../_shared/anthropic.ts";
 
 const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-socialytics-secret' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -36,7 +37,7 @@ async function postBytes(db: any, path: string): Promise<Uint8Array> {
 }
 
 async function callModel(apiKey: string, content: any[]): Promise<any> {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await anthropicFetch("/v1/messages", {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' }, signal: AbortSignal.timeout(110_000),
     body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 6000, tools: [SPEC_TOOL], tool_choice: { type: 'tool', name: SPEC_TOOL.name }, messages: [{ role: 'user', content }] }),
   });

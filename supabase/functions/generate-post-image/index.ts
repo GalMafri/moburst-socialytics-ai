@@ -1,7 +1,7 @@
 import {startImageWithHiggsfield} from "../_shared/higgsfield/startImage.ts";
 import { loadCreativePlan } from "../_shared/design-prompts/loadCreativePlan.ts";
 import { creativeImagePrompt, frameReferenceIndices} from '../_shared/design-prompts/creativePlan.ts';
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 import { buildImagePrompt } from "../_shared/design-prompts/buildImagePrompt.ts";
 import { loadDesignLearnings } from "../_shared/design-prompts/learnings.ts";
 import { imageAspectRatio, platformDesignSpec} from '../_shared/design-prompts/aspect.ts';
@@ -11,6 +11,7 @@ import { mediaBackendFor } from "../_shared/higgsfield/backend.ts";
 import { renderImageWithHiggsfield } from "../_shared/higgsfield/renderImage.ts";
 import { HiggsfieldError } from "../_shared/higgsfield/generate.ts";
 import { resolveContextImageUrls } from "../_shared/higgsfield/context.ts";
+import { anthropicFetch } from "../_shared/anthropic.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -33,7 +34,7 @@ async function detectContactSheet(
   anthropicKey: string,
 ): Promise<{ isContactSheet: boolean; reason: string; raw: string }> {
   try {
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    const resp = await anthropicFetch("/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

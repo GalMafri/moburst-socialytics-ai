@@ -12,7 +12,8 @@
 // else. The bridge-style "always return 200" is intentionally NOT used here —
 // real HTTP codes on error so the caller knows the dump failed.
 
-import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
