@@ -11,7 +11,7 @@ import { shadowLinkedInSource } from "../shadow";
 import { loadShadowPair } from "../store";
 import { drivePipeline, pipelineDb, testClock } from "../testDriver";
 import { linkedInSourceAnswer, prepareSourceRequest, verifyLinkedInRows } from "../linkedin/sources";
-import { fakeActor, linkedInRows, POSTS } from "../fixtures/moburst";
+import { fakeActor, linkedInRows, POSTS } from "../../../../fixtures/pipelines/moburst";
 import { linkedInSourcePipeline } from "./linkedinSource";
 
 // deno-lint-ignore no-explicit-any

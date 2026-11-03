@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 // deno-lint-ignore no-explicit-any
 type Any = any;
 const here = dirname(fileURLToPath(import.meta.url));
-const root = join(here, "..", "..", "..", "..", "..");
+const root = join(here, "..", "..", "..");
 const read = (path: string) => JSON.parse(readFileSync(path, "utf8"));
 
 export const MOBURST: Any = read(join(here, "social-moburst-2026-09.json"));

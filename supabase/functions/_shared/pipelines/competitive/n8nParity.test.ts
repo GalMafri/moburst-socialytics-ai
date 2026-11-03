@@ -14,7 +14,7 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { fakeDb } from "../../lifecycle/fakeDb";
 import { buildCompetitivePayload } from "../../reports/payloads";
-import { FX, linkedInRows, owned, POSTS, snap } from "../fixtures/moburst";
+import { FX, linkedInRows, owned, POSTS, snap } from "../../../../fixtures/pipelines/moburst";
 import { linkedInActorInput, mergeLinkedInPosts, prepareCompetitiveLinkedInSources, prepareSourceRequest, verifyLinkedInRows, linkedInSourceAnswer } from "../linkedin/sources";
 import { aggregateCompetitive } from "./aggregate";
 import { assembleReportData, buildPostWindows, checkReadiness, mergeOwnedPosts, mergePostPages, previousPeriodOf, resolveLandscape, runConfig } from "./nodes";

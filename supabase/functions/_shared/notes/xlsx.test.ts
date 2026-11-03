@@ -10,7 +10,7 @@ import { join } from "path";
 import { strToU8, zipSync } from "fflate";
 import { xlsxSheets } from "./xlsx";
 
-const fixture = (name: string) => new Uint8Array(readFileSync(join(__dirname, "fixtures", name)));
+const fixture = (name: string) => new Uint8Array(readFileSync(join(__dirname, "..", "..", "..", "fixtures", "notes", name)));
 const NS = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
 const REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 

@@ -13,7 +13,7 @@ import { TREND_PLATFORMS, type TrendPlatform } from "./types";
 
 const here = dirname(fileURLToPath(import.meta.url));
 // deno-lint-ignore no-explicit-any
-const rows = (p: TrendPlatform): any[] => JSON.parse(readFileSync(join(here, "fixtures", `${p}.json`), "utf8"));
+const rows = (p: TrendPlatform): any[] => JSON.parse(readFileSync(join(here, "..", "..", "..", "fixtures", "trends", `${p}.json`), "utf8"));
 const read = (p: TrendPlatform) => rows(p).map((r) => TREND_SOURCES[p].normalize(r, "run search"));
 const opts = { region: "US", language: "en", windowStart: "2026-10-25", windowEnd: "2026-11-01" };
 const eight = ["a", "b", "c", "d", "e", "f", "g", "h"];

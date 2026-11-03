@@ -8,7 +8,7 @@ import { join } from "path";
 import { strToU8, zipSync } from "fflate";
 import { docxText } from "./docx";
 
-const fixture = (name: string) => new Uint8Array(readFileSync(join(__dirname, "fixtures", name)));
+const fixture = (name: string) => new Uint8Array(readFileSync(join(__dirname, "..", "..", "..", "fixtures", "notes", name)));
 const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
 const docx = (files: Record<string, string>) => zipSync(Object.fromEntries(Object.entries(files).map(([k, v]) => [k, strToU8(v)])));
 

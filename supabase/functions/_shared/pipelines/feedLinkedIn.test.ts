@@ -9,7 +9,7 @@ import { fakeDb } from "../lifecycle/fakeDb";
 import { linkedInSourcePipeline } from "./definitions/linkedinSource";
 import { feedLinkedInAnswer, LINKEDIN_INLINE_BUDGET_MS } from "./feedLinkedIn";
 import { InlineRunStopped } from "./inline";
-import { fakeActor, POSTS } from "./fixtures/moburst";
+import { fakeActor, POSTS } from "../../../fixtures/pipelines/moburst";
 import { APP_STOPS_BEFORE_N8N } from "./types";
 
 const MOBURST = "d00ce604-2bcc-455a-9826-f80250db75cf";

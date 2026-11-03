@@ -18,7 +18,7 @@ import type { Person } from "./access";
 import { runTool, TOOLS, type ToolDeps } from "./tools";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const MOBURST_SEPTEMBER = (JSON.parse(readFileSync(join(here, "..", "_shared", "pipelines", "fixtures", "social-moburst-2026-09.json"), "utf8")) as { stored_report: ReportRow }).stored_report;
+const MOBURST_SEPTEMBER = (JSON.parse(readFileSync(join(here, "..", "..", "fixtures", "pipelines", "social-moburst-2026-09.json"), "utf8")) as { stored_report: ReportRow }).stored_report;
 
 const CALM = { ...CLIENT, id: "c-calm", name: "Calm", company_slug: "calm", website_url: "https://calm.com", created_at: "2026-09-01T00:00:00.000Z" };
 const DEMO = { ...CLIENT, id: "c-demo", name: "Brooklinen", company_slug: "demo-brooklinen", website_url: "https://brooklinen.com", created_at: "2026-10-01T00:00:00.000Z", demo_job_id: "job-1" };

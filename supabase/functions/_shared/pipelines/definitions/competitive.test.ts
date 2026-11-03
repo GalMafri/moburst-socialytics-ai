@@ -16,7 +16,7 @@ import { makeRegistry } from "../registry";
 import { startPipelineRun } from "../store";
 import { drivePipeline, pipelineDb, testClock } from "../testDriver";
 import { competitivePipeline, POST_WINDOW_SPACING_SECONDS, type CompetitiveDeps } from "./competitive";
-import { FX, linkedInRows, owned, POSTS, snap } from "../fixtures/moburst";
+import { FX, linkedInRows, owned, POSTS, snap } from "../../../../fixtures/pipelines/moburst";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;

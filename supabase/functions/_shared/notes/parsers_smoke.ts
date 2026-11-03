@@ -13,7 +13,7 @@ import type { NoteFileType } from "./notes.ts";
 
 const files: Array<[string, NoteFileType]> = [["meeting.docx", "docx"], ["rich.docx", "docx"], ["plan.xlsx", "xlsx"], ["mixed.xlsx", "xlsx"], ["notes.pdf", "pdf"], ["scan.pdf", "pdf"]];
 for (const [name, type] of files) {
-  const out = await readNoteFile(await Deno.readFile(new URL(`./fixtures/${name}`, import.meta.url)), type, PARSERS);
+  const out = await readNoteFile(await Deno.readFile(new URL(`../../../fixtures/notes/${name}`, import.meta.url)), type, PARSERS);
   const what = out.kind === "text" ? JSON.stringify(out.text) : out.kind === "nothing" ? out.why : `${out.data.length} base64 characters`;
   console.log(`${name}: ${out.kind}: ${what}`);
 }
