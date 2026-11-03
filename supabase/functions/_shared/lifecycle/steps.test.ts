@@ -435,7 +435,7 @@ describe("content_strategy", () => {
     // The brief changed since the profile was written: the profile is rewritten first, then the strategy.
     const stale = await current(db, c());
     expect(await STEPS.content_strategy.inputs(db, c({ brief_text: "A new brief." }), stale)).toBeNull();
-    expect(await STEPS.content_strategy.inputs(db, c(), stale)).toMatch(/^v2\|profile:2026-11-01T08:00:00.000Z\|networks:fb_instagram_account\|rhythm:[^|]+\|public:/);
+    expect(await STEPS.content_strategy.inputs(db, c(), stale)).toMatch(/^v2\|profile:2026-11-01T08:00:00.000Z\|networks:fb_instagram_account\|rhythm:[^|]+\|public:[^|]+/);
   });
 
   it("keys on the profile's date, the active Sprout networks and the posting rhythm, never on people's versions", async () => {

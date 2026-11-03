@@ -7,7 +7,7 @@
 // platform are never read in public; client and competitors are kept apart;
 // the read waits across runs and is reused for 7 days.
 import { describe, expect, it } from "vitest";
-import { feedPosts, figures, planTargets, PUBLIC_READERS, readInputs, stepRead, targetsKey, TIKTOK_MAX_PER_PROFILE, type PublicPost, type PublicReadState } from "./publicRead";
+import { feedPosts, figures, INSTAGRAM_LATEST, planTargets, PUBLIC_READERS, readInputs, stepRead, targetsKey, TIKTOK_MAX_PER_PROFILE, type PublicPost, type PublicReadState } from "./publicRead";
 import { fakeDb } from "../lifecycle/fakeDb";
 import type { ApifyClient, ApifyRun } from "../apify/client";
 
@@ -41,12 +41,14 @@ describe("what is read with Apify", () => {
     const targets = planTargets({ profiles, feed: [], tracked: new Set(["teamsnap|LinkedIn"]), sprout: new Set(["LinkedIn"]) });
     expect(targets).toEqual([
       { company: "Acme", client: true, platform: "TikTok", url: "https://www.tiktok.com/@acme" },
+      { company: "Acme", client: true, platform: "Instagram", url: "https://www.instagram.com/acme/" },
       { company: "BenchApp", client: false, platform: "TikTok", url: "https://www.tiktok.com/@benchapp" },
     ]);
-    // Instagram has no public profile reader in the app, so it is not read; LinkedIn is on Sprout for the client and tracked for TeamSnap.
-    expect(Object.keys(PUBLIC_READERS).sort()).toEqual(["LinkedIn", "TikTok"]);
+    // LinkedIn is on Sprout for the client and tracked by RivalIQ for TeamSnap. Facebook, YouTube and X have no profile reader in the app.
+    expect(Object.keys(PUBLIC_READERS).sort()).toEqual(["Instagram", "LinkedIn", "TikTok"]);
+    expect(planTargets({ profiles: [{ company: "Acme", client: true, platform: "facebook", handle: "acme", url: null }], feed: [], tracked: new Set(), sprout: new Set() })).toEqual([]);
     const fed = planTargets({ profiles, feed: [{ company: "BenchApp", platform: "TikTok" } as PublicPost], tracked: new Set(), sprout: new Set() });
-    expect(fed.map((t) => `${t.company} ${t.platform}`)).toEqual(["Acme TikTok", "Acme LinkedIn", "TeamSnap LinkedIn"]);
+    expect(fed.map((t) => `${t.company} ${t.platform}`)).toEqual(["Acme TikTok", "Acme Instagram", "Acme LinkedIn", "TeamSnap LinkedIn"]);
   });
 
   it("asks the actors the way the app already runs them: LinkedIn pages in one run, a TikTok profile a run", () => {
@@ -57,18 +59,29 @@ describe("what is read with Apify", () => {
     const tt = PUBLIC_READERS.TikTok.runs([{ company: "A", client: true, platform: "TikTok", url: "https://www.tiktok.com/@a" }, { company: "B", client: false, platform: "TikTok", url: "https://www.tiktok.com/@b" }], "2026-08-05");
     expect(tt.map((r) => r.input)).toEqual([{ startUrls: ["https://www.tiktok.com/@a"], maxItems: TIKTOK_MAX_PER_PROFILE }, { startUrls: ["https://www.tiktok.com/@b"], maxItems: TIKTOK_MAX_PER_PROFILE }]);
     expect(PUBLIC_READERS.TikTok.actor.name).toBe("apidojo/tiktok-scraper");
+    const ig = PUBLIC_READERS.Instagram.runs([{ company: "A", client: true, platform: "Instagram", url: "https://www.instagram.com/a/" }, { company: "B", client: false, platform: "Instagram", url: "https://www.instagram.com/b/" }], "2026-08-05");
+    expect(ig.map((r) => r.input)).toEqual([{ usernames: ["a", "b"] }]);
+    expect(PUBLIC_READERS.Instagram.actor.name).toBe("apify/instagram-profile-scraper");
   });
 
   it("keeps a LinkedIn page's own posts and a TikTok profile's posts, and drops reposts and rows of another profile", () => {
     const li = [{ company: "Acme", client: true, platform: "LinkedIn", url: "https://www.linkedin.com/company/acme" }];
     const row = (over: Record<string, unknown>) => ({ type: "post", id: "1", query: { targetUrl: "https://www.linkedin.com/company/acme" }, author: { linkedinUrl: "https://www.linkedin.com/company/acme" }, postedAt: { date: "2026-10-10T00:00:00Z" }, linkedinUrl: "https://www.linkedin.com/posts/acme_1", engagement: { likes: 5, comments: 2, shares: 1 }, content: "Hello", ...over });
-    expect(PUBLIC_READERS.LinkedIn.normalize(row({}), li)).toMatchObject({ company: "Acme", client: true, platform: "LinkedIn", engagement: 8, followers: null, source: "apify" });
-    expect(PUBLIC_READERS.LinkedIn.normalize(row({ header: { imageLink: "https://www.linkedin.com/company/acme", text: "Acme reposted this" } }), li)).toBeNull();
-    expect(PUBLIC_READERS.LinkedIn.normalize(row({ author: { linkedinUrl: "https://www.linkedin.com/company/other" } }), li)).toBeNull();
+    expect(PUBLIC_READERS.LinkedIn.normalize(row({}), li)).toEqual([expect.objectContaining({ company: "Acme", client: true, platform: "LinkedIn", engagement: 8, followers: null, source: "apify" })]);
+    expect(PUBLIC_READERS.LinkedIn.normalize(row({ header: { imageLink: "https://www.linkedin.com/company/acme", text: "Acme reposted this" } }), li)).toEqual([]);
+    expect(PUBLIC_READERS.LinkedIn.normalize(row({ author: { linkedinUrl: "https://www.linkedin.com/company/other" } }), li)).toEqual([]);
     const tt = [{ company: "BenchApp", client: false, platform: "TikTok", url: "https://www.tiktok.com/@benchapp" }];
     const t = { id: "9", postPage: "https://www.tiktok.com/@benchapp/video/9", uploadedAtFormatted: "2026-10-30T10:00:00.000Z", views: 2000, likes: 100, comments: 10, shares: 5, title: "Captain POV", channel: { username: "BenchApp", followers: 5600 } };
-    expect(PUBLIC_READERS.TikTok.normalize(t, tt)).toMatchObject({ company: "BenchApp", client: false, platform: "TikTok", engagement: 115, views: 2000, followers: 5600 });
-    expect(PUBLIC_READERS.TikTok.normalize({ ...t, channel: { username: "someoneelse" } }, tt)).toBeNull();
+    expect(PUBLIC_READERS.TikTok.normalize(t, tt)).toEqual([expect.objectContaining({ company: "BenchApp", client: false, platform: "TikTok", engagement: 115, views: 2000, followers: 5600 })]);
+    expect(PUBLIC_READERS.TikTok.normalize({ ...t, channel: { username: "someoneelse" } }, tt)).toEqual([]);
+    // An Instagram profile's answer carries its 12 latest posts and its followers.
+    const ig = [{ company: "Acme", client: true, platform: "Instagram", url: "https://www.instagram.com/acme/" }];
+    const profile = { username: "acme", followersCount: 3400, latestPosts: [
+      { id: "1", type: "Sidecar", url: "https://www.instagram.com/p/A/", caption: "Checklist", likesCount: 120, commentsCount: 8, timestamp: "2026-10-30T10:00:00.000Z" },
+      { id: "2", type: "Video", url: "https://www.instagram.com/p/B/", caption: "Reel", likesCount: 50, commentsCount: 2, videoViewCount: 900, timestamp: "2026-10-20T10:00:00.000Z" },
+    ] };
+    expect(PUBLIC_READERS.Instagram.normalize(profile, ig).map((p) => [p.format, p.engagement, p.views, p.followers, p.capped])).toEqual([["carousel", 128, null, 3400, INSTAGRAM_LATEST], ["video", 52, 900, 3400, INSTAGRAM_LATEST]]);
+    expect(PUBLIC_READERS.Instagram.normalize({ ...profile, username: "other" }, ig)).toEqual([]);
   });
 });
 
@@ -83,6 +96,13 @@ describe("the figures", () => {
     const bench = out.find((f) => f.company === "BenchApp")!;
     expect(bench).toMatchObject({ posts: 3, posts_per_week: 0.23, median_engagement: 20, rate_per_view: 0.02, followers: 600 });
     expect(out.find((f) => f.client)).toMatchObject({ platform: "LinkedIn", posts: 1, rate_per_view: null, followers: null });
+  });
+
+  it("counts a read that reached its cap over the days it covers, not the whole 90", () => {
+    const ig = (i: number): PublicPost => ({ company: "Acme", client: true, platform: "Instagram", id: `i${i}`, publishedAt: new Date(NOW.getTime() - (2 + i * 2) * 86_400_000).toISOString(), text: "", link: null, format: "image", engagement: 10, views: null, followers: 3400, boosted: false, source: "apify", capped: 12 });
+    // 12 posts over 24 days: 3.5 a week, not 0.93.
+    expect(figures(Array.from({ length: 12 }, (_, i) => ig(i)), NOW)[0].posts_per_week).toBe(3.5);
+    expect(figures(Array.from({ length: 11 }, (_, i) => ig(i)), NOW)[0].posts_per_week).toBe(0.86);
   });
 });
 

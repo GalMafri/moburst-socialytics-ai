@@ -840,7 +840,7 @@ export const STEPS: Record<string, StepDef> = {
       const networks = [...new Set((data ?? []).map((r: { network_type: unknown }) => String(r.network_type ?? "")))].filter(Boolean).sort().join(",");
       // Version 2 (fields, public reads): each client gets one rewrite after release, and another when its public profiles change.
       const profiles = desiredProfiles(await profileInputs(db, { id: client.id, name: client.name }, { tracking: rows.get("tracking")?.result ?? null, brand_read: rows.get("brand_read")?.result ?? null }));
-      return `v2|profile:${p.written_at}|networks:${networks}|rhythm:${textHash(JSON.stringify(client.posting_rhythm ?? null))}${socialVersionKey(rows, postsOnly(client))}|public:${profilesKey(profiles)}`;
+      return `v2|profile:${p.written_at}|networks:${networks}|rhythm:${textHash(JSON.stringify(client.posting_rhythm ?? null))}|public:${profilesKey(profiles)}${socialVersionKey(rows, postsOnly(client))}`;
     },
     async run(db, client, { rows }) {
       const key = await deps.anthropicKey(db);

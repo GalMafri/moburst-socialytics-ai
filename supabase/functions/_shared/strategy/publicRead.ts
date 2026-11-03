@@ -11,8 +11,13 @@
 //   * a profile the feed does not cover, on a platform the app has a public
 //     profile reader for, is read with that Apify actor: LinkedIn company
 //     pages with harvestapi/linkedin-company-posts (the competitor feed's own
-//     LinkedIn source) and TikTok profiles with apidojo/tiktok-scraper (the
-//     trends source, given the profile's link, as its input schema documents);
+//     LinkedIn source), Instagram profiles with apify/instagram-profile-
+//     scraper (the bio reader's actor; its answer carries the profile's 12
+//     latest posts and its followers) and TikTok profiles with
+//     apidojo/tiktok-scraper (the trends source, given the profile's link, as
+//     its input schema documents). Facebook, YouTube and X have no profile
+//     reader in the app, so a profile there that the feed does not cover has
+//     no public posts;
 //   * the client's posts on a platform Sprout covers are never read in
 //     public: Sprout measures them.
 // The read runs across lifecycle runs (start, then look again a few minutes
@@ -23,6 +28,7 @@
 import { clientCompanyId, companyKey, isBoosted, isClientPost, median, OWN_DAYS, platformName } from "../calendar/evidence.ts";
 import { LINKEDIN_ACTOR, LINKEDIN_MAX_POSTS, linkedInProfile } from "../pipelines/linkedin/sources.ts";
 import { TREND_SOURCES } from "../trends/sources.ts";
+import { INSTAGRAM_PROFILE_ACTOR } from "../apify/instagramProfile.ts";
 import { isFinalRunStatus, type ApifyClient } from "../apify/client.ts";
 import { textHash } from "../lifecycle/names.ts";
 import { desiredProfiles, profileInputs, syncProfiles } from "./profiles.ts";
@@ -59,6 +65,8 @@ export interface PublicPost {
   followers: number | null;
   boosted: boolean;
   source: "feed" | "apify";
+  /** The most posts the read could bring back for the profile: a read that reached it covers less than 90 days. */
+  capped?: number;
 }
 
 /** A profile the app has a public reader for and the feed does not cover. */
@@ -75,8 +83,8 @@ interface Reader {
   url(handle: string, url: string | null): string;
   /** The runs for these targets: LinkedIn takes every page in one run, TikTok one profile a run. */
   runs(targets: Target[], since: string): Array<{ targets: Target[]; input: Record<string, unknown> }>;
-  /** A row of the answer as a post of one of the targets, or null for a row that is not one. */
-  normalize(row: Any, targets: Target[]): PublicPost | null;
+  /** A row of the answer as posts of one of the targets; none for a row that is not one. */
+  normalize(row: Any, targets: Target[]): PublicPost[];
 }
 
 const num = (v: unknown): number | null => {
@@ -91,6 +99,9 @@ const iso = (v: unknown): string | null => {
 };
 const clipText = (s: string) => (s.length > TEXT_CHARS ? `${s.slice(0, TEXT_CHARS - 1)}…` : s);
 
+/** The latest posts the Instagram profile actor answers with. */
+export const INSTAGRAM_LATEST = 12;
+const instagramHandle = (url: string) => (url.match(/instagram\.com\/([a-z0-9._]+)/i)?.[1] ?? "").toLowerCase();
 const tiktokHandle = (url: string) => (url.match(/tiktok\.com\/@([a-z0-9._]+)/i)?.[1] ?? "").toLowerCase();
 
 /** The public profile readers, one per platform: only actors the app already runs. */
@@ -103,24 +114,49 @@ export const PUBLIC_READERS: Record<string, Reader> = {
       input: { targetUrls: targets.map((t) => t.url), maxPosts: LINKEDIN_MAX_POSTS, postedLimitDate: since, scrapeComments: false, scrapeReactions: false, includeReposts: false, includeQuotePosts: true },
     }] : [],
     normalize(row, targets) {
-      if (!row || typeof row !== "object" || row.type !== "post") return null;
+      if (!row || typeof row !== "object" || row.type !== "post") return [];
       const target = targets.find((t) => t.url === linkedInProfile(row.query?.targetUrl));
-      if (!target) return null;
+      if (!target) return [];
       // The competitor feed's checks: the page's own post (or a collaboration it shows), never a repost.
       const header = linkedInProfile(row.header?.imageLink) === target.url;
-      if (header && /reposted this/i.test(row.header?.text || "")) return null;
+      if (header && /reposted this/i.test(row.header?.text || "")) return [];
       const collaboration = header && /collaborated on this/i.test(row.header?.text || "");
-      if (linkedInProfile(row.author?.linkedinUrl) !== target.url && !collaboration) return null;
+      if (linkedInProfile(row.author?.linkedinUrl) !== target.url && !collaboration) return [];
       const at = iso(row.postedAt?.date);
       const link = text(row.linkedinUrl);
       const counts = ["likes", "comments", "shares"].map((k) => num(row.engagement?.[k]));
-      if (!at || !/^https:\/\/www\.linkedin\.com\//.test(link) || counts.some((n) => n === null)) return null;
+      if (!at || !/^https:\/\/www\.linkedin\.com\//.test(link) || counts.some((n) => n === null)) return [];
       const image = row.postImages?.[0]?.url || row.document || row.postVideo || row.article;
-      return {
+      return [{
         company: target.company, client: target.client, platform: "LinkedIn", id: `linkedin:${text(row.id) || link}`, publishedAt: at,
         text: clipText(text(row.content)), link, format: row.document ? "carousel" : row.postVideo ? "video" : row.article ? "link" : image ? "image" : "text",
-        engagement: (counts as number[]).reduce((s, n) => s + n, 0), views: null, followers: null, boosted: false, source: "apify",
-      };
+        engagement: (counts as number[]).reduce((s, n) => s + n, 0), views: null, followers: null, boosted: false, source: "apify", capped: LINKEDIN_MAX_POSTS,
+      }];
+    },
+  },
+  Instagram: {
+    actor: INSTAGRAM_PROFILE_ACTOR,
+    url: (handle, url) => {
+      const h = (String(url ?? "").match(/instagram\.com\/([a-z0-9._]+)/i)?.[1] ?? String(handle ?? "")).replace(/^@/, "").toLowerCase();
+      return /^[a-z0-9._]{1,30}$/.test(h) && !["p", "reel", "explore"].includes(h) ? `https://www.instagram.com/${h}/` : "";
+    },
+    runs: (targets) => targets.length ? [{ targets, input: { usernames: targets.map((t) => instagramHandle(t.url)) } }] : [],
+    normalize(row, targets) {
+      if (!row || typeof row !== "object") return [];
+      const target = targets.find((t) => instagramHandle(t.url) === text(row.username).toLowerCase());
+      if (!target) return [];
+      const followers = num(row.followersCount);
+      return (Array.isArray(row.latestPosts) ? row.latestPosts : []).flatMap((p: Any): PublicPost[] => {
+        const at = iso(p?.timestamp);
+        const link = text(p?.url) || (text(p?.shortCode) ? `https://www.instagram.com/p/${text(p.shortCode)}/` : "");
+        if (!at || !/^https:\/\//.test(link)) return [];
+        const kind = text(p?.type).toLowerCase();
+        return [{
+          company: target.company, client: target.client, platform: "Instagram", id: `instagram:${text(p?.id) || text(p?.shortCode) || link}`, publishedAt: at,
+          text: clipText(text(p?.caption)), link, format: kind === "sidecar" ? "carousel" : kind === "video" ? "video" : "image",
+          engagement: (num(p?.likesCount) ?? 0) + (num(p?.commentsCount) ?? 0), views: num(p?.videoViewCount), followers, boosted: false, source: "apify", capped: INSTAGRAM_LATEST,
+        }];
+      });
     },
   },
   TikTok: {
@@ -131,20 +167,20 @@ export const PUBLIC_READERS: Record<string, Reader> = {
     },
     runs: (targets) => targets.map((t) => ({ targets: [t], input: { startUrls: [t.url], maxItems: TIKTOK_MAX_PER_PROFILE } })),
     normalize(row, targets) {
-      if (!row || typeof row !== "object") return null;
+      if (!row || typeof row !== "object") return [];
       const handle = (text(row.channel?.username) || text(row.authorMeta?.name)).toLowerCase();
       const target = targets.find((t) => tiktokHandle(t.url) === handle);
       const link = text(row.postPage) || text(row.webVideoUrl);
       const at = iso(row.uploadedAtFormatted) ?? iso(row.createTimeISO) ?? iso(row.uploadedAt);
-      if (!target || !at || !/^https:\/\//.test(link)) return null;
+      if (!target || !at || !/^https:\/\//.test(link)) return [];
       const likes = num(row.likes ?? row.diggCount) ?? 0;
       const comments = num(row.comments ?? row.commentCount) ?? 0;
       const shares = num(row.shares ?? row.shareCount) ?? 0;
-      return {
+      return [{
         company: target.company, client: target.client, platform: "TikTok", id: `tiktok:${text(row.id) || link}`, publishedAt: at,
         text: clipText(text(row.title) || text(row.text)), link, format: "short_video", engagement: likes + comments + shares,
-        views: num(row.views ?? row.playCount), followers: num(row.channel?.followers ?? row.authorMeta?.fans), boosted: false, source: "apify",
-      };
+        views: num(row.views ?? row.playCount), followers: num(row.channel?.followers ?? row.authorMeta?.fans), boosted: false, source: "apify", capped: TIKTOK_MAX_PER_PROFILE,
+      }];
     },
   },
 };
@@ -233,13 +269,17 @@ export function figures(posts: PublicPost[], now: Date, days = READ_DAYS): Compa
   }
   const round = (n: number, d: number) => Math.round(n * 10 ** d) / 10 ** d;
   return [...groups.values()].map((g) => {
+    // A read that reached its cap covers less than the 90 days: its pace is over the days it covers, at least a week.
+    const cap = g.find((p) => p.capped)?.capped;
+    const oldest = Math.min(...g.map((p) => Date.parse(p.publishedAt)));
+    const span = cap && g.length >= cap ? Math.min(days, Math.max(7, (t - oldest) / DAY)) : days;
     const settled = g.filter((p) => !p.boosted && Date.parse(p.publishedAt) <= t - 48 * 3_600_000);
     const mid = median(settled.map((p) => p.engagement));
     const viewed = settled.filter((p) => (p.views ?? 0) > 0);
     const views = viewed.reduce((s, p) => s + (p.views as number), 0);
     const newest = [...g].filter((p) => p.followers !== null).sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))[0];
     return {
-      company: g[0].company, client: g[0].client, platform: g[0].platform, posts: g.length, posts_per_week: round((g.length * 7) / days, 2),
+      company: g[0].company, client: g[0].client, platform: g[0].platform, posts: g.length, posts_per_week: round((g.length * 7) / span, 2),
       median_engagement: mid === null ? null : round(mid, 1),
       rate_per_view: views > 0 && ["TikTok", "YouTube"].includes(g[0].platform) ? round(viewed.reduce((s, p) => s + p.engagement, 0) / views, 4) : null,
       followers: newest ? newest.followers : null,
@@ -294,8 +334,9 @@ async function look(state: PublicReadState, apify: ApifyFactory, now: Date): Pro
       const reader = PUBLIC_READERS[r.platform];
       const rows = await client.datasetItems(run.defaultDatasetId, { maxItems: 5000 });
       for (const row of rows) {
-        const p = reader?.normalize(row, r.targets);
-        if (p && p.publishedAt.slice(0, 10) >= state.window.start && !posts.some((x) => x.id === p.id)) posts.push(p);
+        for (const p of reader?.normalize(row, r.targets) ?? []) {
+          if (p.publishedAt.slice(0, 10) >= state.window.start && !posts.some((x) => x.id === p.id)) posts.push(p);
+        }
       }
     } catch (e) {
       console.warn("[strategy] public read not looked at", r.platform, e instanceof Error ? e.message : String(e));
