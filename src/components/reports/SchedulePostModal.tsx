@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { formatDateTime, platformName, timeZoneName } from "@/lib/display";
+import { platformName, sproutDraftLine, timeZoneName } from "@/lib/display";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -42,8 +42,8 @@ const platformToNetworkTypes: Record<string, string[]> = {
 
 export interface ScheduledRow { id: string; platform?: string | null; post_content?: string | null; scheduled_time?: string | null; status?: string | null; calendar_post_key?: string | null }
 
-/** A post sent to Sprout: "scheduled" for a chosen time, or "publish_now" to go out now (schedule-sprout-post/send.ts). */
-const SENT = ["scheduled", "publish_now"];
+/** A post sent to Sprout: "scheduled" for a set time, or "sent_now" for the earliest minute (schedule-sprout-post/send.ts). */
+const SENT = ["scheduled", "sent_now"];
 
 /** This post's Sprout post, if it has one: by the calendar post's key, else by platform and the start of the copy. */
 export function scheduledFor(rows: ScheduledRow[] | null | undefined, post: { _calendarPostKey?: string; platform?: string; copy?: string } | null): ScheduledRow | null {
@@ -54,20 +54,6 @@ export function scheduledFor(rows: ScheduledRow[] | null | undefined, post: { _c
   const platform = (post.platform || "").toLowerCase();
   const copy = postCopyOf(post).trim().slice(0, 200);
   return live.find((r) => !r.calendar_post_key && (r.platform || "").toLowerCase() === platform && copy && (r.post_content || "").trim().slice(0, 200) === copy) ?? null;
-}
-
-/**
- * Where a post stands in Sprout, in words. Sprout's API takes posts as
- * drafts only (api.sproutsocial.com/docs, Publishing Post Endpoints), so a
- * sent post is a draft on Sprout's calendar until someone schedules or
- * sends it there; the words say so.
- */
-export function sproutStateText(row: Pick<ScheduledRow, "status" | "scheduled_time"> | null | undefined, timeZone?: string): string {
-  if (!row?.scheduled_time) return "Not sent to Sprout yet.";
-  const at = formatDateTime(row.scheduled_time, { timeZone });
-  return row.status === "publish_now"
-    ? `Sent to Sprout to go out now (${at}), as a draft. It goes out once someone sends it from Sprout.`
-    : `In Sprout as a draft for ${at}. It goes out once someone schedules it in Sprout.`;
 }
 
 /** The client's Sprout posts, as the post panel and this dialog read them. */
@@ -86,13 +72,15 @@ export function useScheduledPosts(clientId: string | undefined, enabled = true) 
 
 /**
  * Sends one post to the client's Sprout profile (Lital's decision 4, 19 Oct
- * 2026: staff schedule each post), scheduled for a time or published now (2
- * Nov 2026). The post is checked against what the network accepts while it is
+ * 2026: staff schedule each post), for a set time or now. Sprout's API takes
+ * posts as drafts only, so the post arrives in Sprout as a draft and is
+ * approved there (Lital, 3 Nov 2026: released as drafts, with words that say
+ * so). The post is checked against what the network accepts while it is
  * prepared here, with the same rules the server checks (publishRules.ts), so
- * Sprout never refuses it; the one-minute rule is for a chosen time only. A
+ * Sprout never refuses it; the one-minute rule is for a set time only. A
  * request that does not get through is sent again quietly. The dialog then
- * shows the post's state: in Sprout for a time, or not sent yet, never a
- * failure.
+ * shows the post's state: sent as a draft for a time, or not sent yet, never
+ * a failure.
  */
 export function SchedulePostModal({
   open,
@@ -112,7 +100,7 @@ export function SchedulePostModal({
   const [scheduling, setScheduling] = useState(false);
   const [notScheduled, setNotScheduled] = useState(false);
   const [justSent, setJustSent] = useState<ScheduledRow | null>(null);
-  /** "schedule": the chosen date and time. "now": the earliest minute Sprout takes. */
+  /** "schedule": the set date and time. "now": the earliest minute Sprout takes. */
   const [mode, setMode] = useState<"schedule" | "now">("schedule");
   const mediaSignature = JSON.stringify(generatedMediaUrls);
 
@@ -220,7 +208,7 @@ export function SchedulePostModal({
         calendar_post_key: post?._calendarPostKey ?? null,
         sprout_profile_id: Number(selectedProfileId),
         platform: post.platform,
-        ...(mode === "now" ? { publish_now: true } : { scheduled_time: sendAt }),
+        ...(mode === "now" ? { send_now: true } : { scheduled_time: sendAt }),
         post_content: postContent,
         media_urls: mediaUrls.length > 0 ? mediaUrls : undefined,
       },
@@ -235,9 +223,9 @@ export function SchedulePostModal({
       setNotScheduled(true);
       return;
     }
-    const sent: ScheduledRow = { id: "just-sent", status: (data as any).status ?? (mode === "now" ? "publish_now" : "scheduled"), scheduled_time: (data as any).scheduled_time ?? sendAt };
+    const sent: ScheduledRow = { id: "just-sent", status: (data as any).status ?? (mode === "now" ? "sent_now" : "scheduled"), scheduled_time: (data as any).scheduled_time ?? sendAt };
     setJustSent(sent);
-    toast.success(sproutStateText(sent, clientTimezone));
+    toast.success(sproutDraftLine(sent.scheduled_time, clientTimezone));
     onOpenChange(false);
   };
 
@@ -250,8 +238,8 @@ export function SchedulePostModal({
           </DialogTitle>
           <DialogDescription>
             {sentState?.scheduled_time
-              ? sproutStateText(sentState, clientTimezone)
-              : "The copy and media go to the client's Sprout profile as a draft, for the time chosen here. It goes out once someone schedules or sends it in Sprout."}
+              ? sproutDraftLine(sentState.scheduled_time, clientTimezone)
+              : "The copy and media go to the client's Sprout profile."}
           </DialogDescription>
         </DialogHeader>
 
@@ -296,15 +284,15 @@ export function SchedulePostModal({
           <RadioGroup value={mode} onValueChange={(v) => setMode(v === "now" ? "now" : "schedule")} className="flex items-center gap-6">
             <div className="flex items-center gap-2">
               <RadioGroupItem value="now" id="send-now" />
-              <Label htmlFor="send-now" className="t-body font-normal">Publish now</Label>
+              <Label htmlFor="send-now" className="t-body font-normal">Send to Sprout now</Label>
             </div>
             <div className="flex items-center gap-2">
               <RadioGroupItem value="schedule" id="send-schedule" />
-              <Label htmlFor="send-schedule" className="t-body font-normal">Schedule</Label>
+              <Label htmlFor="send-schedule" className="t-body font-normal">Send to Sprout for a set time</Label>
             </div>
           </RadioGroup>
 
-          {mode === "now" && <p className="t-secondary">Goes to Sprout for the next minute.</p>}
+          <p className="t-secondary">It arrives in Sprout as a draft. Approve it there to post it.</p>
           {mode === "schedule" && <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
               <Label htmlFor="schedule-date" className="flex items-center gap-1"><Calendar className="h-3 w-3" aria-hidden="true" /> Date</Label>
@@ -353,7 +341,7 @@ export function SchedulePostModal({
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button onClick={() => void handleSend()} disabled={scheduling || !ready}>
             {scheduling ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
-            {mode === "now" ? "Publish now" : sentState ? "Schedule again" : "Schedule Post"}
+            {sentState ? "Send again" : "Send"}
           </Button>
         </DialogFooter>
       </DialogContent>

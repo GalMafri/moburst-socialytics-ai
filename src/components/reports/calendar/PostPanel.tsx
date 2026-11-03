@@ -26,7 +26,8 @@ import { CopyEditor } from "./CopyEditor";
 import { CreatePostDesignButton } from "@/components/reports/CreatePostDesignButton";
 import { useGenerationForPost } from "@/components/reports/calendar/GenerationContext";
 import { CreatePostVideoButton } from "@/components/reports/CreatePostVideoButton";
-import { SchedulePostModal, scheduledFor, sproutStateText, useScheduledPosts } from "@/components/reports/SchedulePostModal";
+import { SchedulePostModal, scheduledFor, useScheduledPosts } from "@/components/reports/SchedulePostModal";
+import { sproutDraftLine } from "@/lib/display";
 import type { ClientContext } from "@/lib/clientContext";
 import { isStoryPost, isTextOnlyFormat, isVideoFormat } from "@/lib/platform";
 import { storyFileName } from "@/lib/story";
@@ -483,10 +484,10 @@ export function PostPanel({
             {/* Schedule tab — hidden for clients */}
             {!isClient && (
               <TabsContent value="schedule" className="mt-4 space-y-3">
-                <p className="t-body" role="status">{sproutStateText(scheduled, clientTimezone)}</p>
+                <p className="t-body" role="status">{sproutDraftLine(scheduled?.scheduled_time, clientTimezone)}</p>
                 {clientId ? (
                   <>
-                    <Button onClick={() => setScheduleOpen(true)}>{scheduled ? "Open scheduler" : "Schedule to Sprout"}</Button>
+                    <Button onClick={() => setScheduleOpen(true)}>Send to Sprout</Button>
                     <SchedulePostModal
                       open={scheduleOpen}
                       onOpenChange={setScheduleOpen}

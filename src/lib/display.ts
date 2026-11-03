@@ -80,12 +80,23 @@ export function formatDate(value: string | number | Date | null | undefined, opt
   });
 }
 
-/** "Oct 7, 2026, 2:35 PM" in the viewer's time zone, or the one given. */
-export function formatDateTime(value: string | number | Date | null | undefined, opts: { timeZone?: string } = {}): string {
+/** "Oct 7, 2026, 2:35 PM" in the viewer's time zone, or the one given; "Oct 7, 2:35 PM" with year: false. */
+export function formatDateTime(value: string | number | Date | null | undefined, opts: { timeZone?: string; year?: boolean } = {}): string {
   const parsed = toDate(value);
   if (!parsed) return "";
-  if (parsed.dateOnly) return formatDate(value);
-  return parsed.date.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZone: opts.timeZone });
+  if (parsed.dateOnly) return formatDate(value, { year: opts.year });
+  return parsed.date.toLocaleString("en-US", { month: "short", day: "numeric", ...(opts.year === false ? {} : { year: "numeric" }), hour: "numeric", minute: "2-digit", timeZone: opts.timeZone });
+}
+
+/**
+ * A post's line about Sprout: "Sent to Sprout as a draft for Nov 9, 6:45 PM."
+ * in the client's time zone, or "Not sent to Sprout yet." Sprout's API takes
+ * posts as drafts only (supabase/functions/_shared/sprout/publishing.ts), so
+ * every post sent, for a set time or now, is a draft for its time.
+ */
+export function sproutDraftLine(sendTime: string | null | undefined, timeZone?: string): string {
+  const at = formatDateTime(sendTime, { timeZone, year: false });
+  return at ? `Sent to Sprout as a draft for ${at}.` : "Not sent to Sprout yet.";
 }
 
 /** "Sep 1, 2026 to Sep 30, 2026". Empty when either end is missing. */

@@ -85,13 +85,13 @@ describe('QA-02 actual copy and scheduling components',()=>{
   expect(f.rows.at(-1).post_copy).toBe('Reviewed fixture copy');expect(screen.getByText('Reviewed fixture copy')).toBeInTheDocument();expect(screen.queryByText('Original fixture copy')).toBeNull();
  });
  it('uses the edited copy in the actual scheduler',async()=>{
-  mount(panels());await edit();fireEvent.click(screen.getByRole('tab',{name:'Schedule'}));fireEvent.click(screen.getByRole('button',{name:/Open scheduler|Schedule to Sprout/}));
+  mount(panels());await edit();fireEvent.click(screen.getByRole('tab',{name:'Schedule'}));fireEvent.click(screen.getByRole('button',{name:'Send to Sprout'}));
   await waitFor(()=>expect(screen.getByLabelText('Post copy (includes hashtags)')).toHaveValue('Reviewed fixture copy'));
   expect(f.rows.at(-1).post_copy).toBe('Reviewed fixture copy');
  });
  it('uses regenerated copy in the actual scheduler',async()=>{
   mount(panels());fireEvent.click(screen.getByRole('button',{name:'Regenerate'}));await waitFor(()=>expect(screen.getByText('Regenerated fixture copy')).toBeInTheDocument());
-  fireEvent.click(screen.getByRole('tab',{name:'Schedule'}));fireEvent.click(screen.getByRole('button',{name:/Open scheduler|Schedule to Sprout/}));expect(screen.getByLabelText('Post copy (includes hashtags)')).toHaveValue('Regenerated fixture copy');
+  fireEvent.click(screen.getByRole('tab',{name:'Schedule'}));fireEvent.click(screen.getByRole('button',{name:'Send to Sprout'}));expect(screen.getByLabelText('Post copy (includes hashtags)')).toHaveValue('Regenerated fixture copy');
  });
 });
 
@@ -121,15 +121,15 @@ describe('QA-06 actual schedule form',()=>{
  it('submits the client timezone independently of the browser zone',async()=>{
   mount(<SchedulePostModal open onOpenChange={()=>{}} post={original} clientId="fixture-client" reportId="fixture-report" clientTimezone="UTC" generatedMediaUrls={[]}/>);
   fireEvent.change(screen.getByLabelText('Date'),{target:{value:'2030-09-21'}});fireEvent.change(screen.getByLabelText('Time (UTC)'),{target:{value:'15:00'}});
-  await waitFor(()=>expect(screen.getByRole('button',{name:'Schedule Post'})).toBeEnabled());
-  fireEvent.click(screen.getByRole('button',{name:'Schedule Post'}));
+  await waitFor(()=>expect(screen.getByRole('button',{name:'Send'})).toBeEnabled());
+  fireEvent.click(screen.getByRole('button',{name:'Send'}));
   await waitFor(()=>expect(f.invokes.some(x=>x.name==='schedule-sprout-post')).toBe(true));
   expect(f.invokes.find(x=>x.name==='schedule-sprout-post').args.body.scheduled_time).toBe('2030-09-21T15:00:00.000Z');
  });
  it('control: an assigned-profile read that has not answered keeps scheduling closed, quietly',async()=>{
   f.assignedError={message:'fixture read rejected'};
   mount(<SchedulePostModal open onOpenChange={()=>{}} post={original} clientId="fixture-client" reportId="fixture-report" generatedMediaUrls={[]}/>);
-  expect(await screen.findByText('Loading profiles…')).toBeInTheDocument();expect(screen.getByRole('button',{name:'Schedule Post'})).toBeDisabled();
+  expect(await screen.findByText('Loading profiles…')).toBeInTheDocument();expect(screen.getByRole('button',{name:'Send'})).toBeDisabled();
   expect(screen.queryByRole('alert')).toBeNull();expect(screen.queryByText(/could not|failed|fixture read rejected/i)).toBeNull();
  });
 
@@ -138,7 +138,7 @@ describe('QA-06 actual schedule form',()=>{
   fireEvent.change(screen.getByLabelText('Date'),{target:{value:'2030-09-21'}});fireEvent.change(screen.getByLabelText('Time (UTC)'),{target:{value:'15:00'}});
   // No Instagram account is assigned in the fixture, so nothing is offered to send to.
   expect(await screen.findByText('This client has no Instagram account in Sprout.')).toBeInTheDocument();
-  expect(screen.getByRole('button',{name:'Schedule Post'})).toBeDisabled();
+  expect(screen.getByRole('button',{name:'Send'})).toBeDisabled();
  });
 });
 
@@ -189,6 +189,6 @@ it('report calendar schedules in the current client timezone when historical rep
  fireEvent.mouseDown(await screen.findByRole('tab',{name:'Content ideas'}),{button:0,ctrlKey:false});
  fireEvent.click(await screen.findByRole('button',{name:'Open post: Calendar timezone test'}));
  fireEvent.mouseDown(screen.getByRole('tab',{name:'Schedule'}),{button:0,ctrlKey:false});
- fireEvent.click(await screen.findByRole('button',{name:/Open scheduler|Schedule to Sprout/}));
+ fireEvent.click(await screen.findByRole('button',{name:'Send to Sprout'}));
  expect(await screen.findByText(/Eastern Time \(New York\)/)).toBeInTheDocument();
 });

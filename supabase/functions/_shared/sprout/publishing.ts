@@ -147,7 +147,7 @@ export function sproutMinute(iso: string): string {
 }
 
 /**
- * Publish now. Sprout has no immediate mode, only scheduled times in the
+ * Send to Sprout now. Sprout has no immediate mode, only scheduled times in the
  * future, rounded down to the minute: the earliest it accepts is the first
  * whole minute at least a minute away, so the time is still ahead when
  * Sprout reads it.

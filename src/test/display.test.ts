@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
-  clientOriginLine, cleanText, declinedBrandLine, competitiveRunStatus, countryNames, eventName, firstRunSentence, formatDate, formatDateTime, formatRange,
+  clientOriginLine, cleanText, declinedBrandLine, competitiveRunStatus, countryNames, eventName, firstRunSentence, formatDate, formatDateTime, formatRange, sproutDraftLine,
   isRawProfileId, languageNames, notePointKindName, noteReadLine, noteStateLine, platformKey, platformName, profileName, roleName, timelineDetail, timelineKindName, usageStateName,
 } from "@/lib/display";
 import { isActiveClient } from "@/lib/activeClients";
@@ -42,6 +42,7 @@ describe("dates", () => {
   });
   it("words a timestamp in the viewer's or the given zone", () => {
     expect(formatDateTime("2026-10-07T07:15:00Z", { timeZone: "America/New_York" })).toBe("Oct 7, 2026, 3:15 AM");
+    expect(formatDateTime("2026-11-09T23:45:00Z", { timeZone: "America/New_York", year: false })).toBe("Nov 9, 6:45 PM");
   });
 });
 
@@ -166,3 +167,14 @@ describe("a Sprout brand a person chose not to add", () => {
     expect(declinedBrandLine(null)).toBe("");
   });
 });
+
+describe("A post's line in Sprout", () => {
+  it("says it was sent as a draft, at its time in the client's zone", () => {
+    expect(sproutDraftLine("2026-11-09T23:45:00Z", "America/New_York")).toBe("Sent to Sprout as a draft for Nov 9, 6:45 PM.");
+    expect(sproutDraftLine("2026-11-02T14:01:00Z", "Asia/Jerusalem")).toBe("Sent to Sprout as a draft for Nov 2, 4:01 PM.");
+  });
+  it("says it is not sent yet when it has no time", () => {
+    expect(sproutDraftLine(null)).toBe("Not sent to Sprout yet.");
+  });
+});
+

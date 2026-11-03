@@ -20,19 +20,19 @@ export interface SendRequest {
   /** When the post goes out (ISO), as the person chose it. Unused when publishing now. */
   scheduledTime: string | null;
   /**
-   * Publish now (Lital, 2 Nov 2026). Sprout has no immediate mode, so the
-   * post is sent for the earliest minute Sprout takes (earliestSendTime) and
-   * recorded with status "publish_now", which tells the screens it was sent
-   * to go out now.
+   * Send to Sprout now (Lital, 2 and 3 Nov 2026). Sprout has no immediate
+   * mode, so the post is sent for the earliest minute Sprout takes
+   * (earliestSendTime) and recorded with status "sent_now". Like every post
+   * from the API, it arrives in Sprout as a draft and is approved there.
    */
-  publishNow?: boolean;
+  sendNow?: boolean;
   customerId: string;
   createdBy: string | null;
 }
 
 /** The scheduled_posts rows this needs: whether one is already there, and writing one. */
 export interface SentStore {
-  /** The send time of a row for the post with this status: at this minute, or (publish now) sent since a time. Null when there is none. */
+  /** The send time of a row for the post with this status: at this minute, or (sent now) sent since a time. Null when there is none. */
   alreadySent(q: { clientId: string; calendarPostKey: string; status: string; at?: string; since?: string }): Promise<string | null>;
   /** True once the row is written. */
   record(row: Record<string, unknown>): Promise<boolean>;
@@ -43,14 +43,14 @@ export interface Reply {
   body: Record<string, unknown>;
 }
 
-/** How long a post published now counts as sent, so a second press or a resend does not send it again. */
-export const PUBLISH_NOW_WINDOW_MS = 15 * 60_000;
+/** How long a post sent now counts as sent, so a second press or a resend does not send it again. */
+export const SEND_NOW_WINDOW_MS = 15 * 60_000;
 
 export async function sendToSprout(req: SendRequest, store: SentStore, opts: { fetchImpl?: typeof fetch; waits?: number[] } = {}): Promise<Reply> {
   const fetchImpl = opts.fetchImpl ?? fetch;
-  const status = req.publishNow ? "publish_now" : "scheduled";
+  const status = req.sendNow ? "sent_now" : "scheduled";
   let chosenAt: string | null = null;
-  if (!req.publishNow) {
+  if (!req.sendNow) {
     try {
       chosenAt = sproutMinute(String(req.scheduledTime ?? ""));
     } catch {
@@ -64,10 +64,10 @@ export async function sendToSprout(req: SendRequest, store: SentStore, opts: { f
   if (problems.length) return { status: 422, body: { error: problems.join(" "), code: "not_publishable", problems } };
 
   // A post already sent is not sent twice: for the same calendar post and
-  // minute, or published now within the last quarter hour.
+  // minute, or sent now within the last quarter hour.
   if (req.calendarPostKey) {
-    const since = new Date(Date.now() - PUBLISH_NOW_WINDOW_MS).toISOString();
-    const already = await store.alreadySent(req.publishNow
+    const since = new Date(Date.now() - SEND_NOW_WINDOW_MS).toISOString();
+    const already = await store.alreadySent(req.sendNow
       ? { clientId: req.clientId, calendarPostKey: req.calendarPostKey, status, since }
       : { clientId: req.clientId, calendarPostKey: req.calendarPostKey, status, at: chosenAt! });
     if (already) return { status: 200, body: { success: true, already: true, recorded: true, status, scheduled_time: already } };
@@ -99,7 +99,7 @@ export async function sendToSprout(req: SendRequest, store: SentStore, opts: { f
     return { status: 502, body: { error: "Sprout did not take every attached file, so nothing was sent.", code: "media_not_taken", media_requested: req.mediaUrls.length, media_attached: media.length } };
   }
 
-  // Publish now: the earliest minute Sprout takes, worked out once the files are in.
+  // Sent now: the earliest minute Sprout takes, worked out once the files are in.
   const sendAt = chosenAt ?? earliestSendTime(new Date());
 
   // Made once: a lost answer is never sent again (createDraftPost), and a refusal answers 500, which the dialog does not repeat.

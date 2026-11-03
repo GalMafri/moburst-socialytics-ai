@@ -87,7 +87,7 @@ describe("the send time (delivery.scheduled_times)", () => {
     expect(sproutMinute("2026-11-09T23:45:00.000Z")).toBe("2026-11-09T23:45:00Z");
     expect(sproutMinute("2026-11-09T23:45:59.999Z")).toBe("2026-11-09T23:45:00Z");
   });
-  it("for Publish now is the first whole minute at least a minute away", () => {
+  it("for Send to Sprout now is the first whole minute at least a minute away", () => {
     expect(earliestSendTime(new Date("2026-11-02T14:00:00.000Z"))).toBe("2026-11-02T14:01:00Z");
     expect(earliestSendTime(new Date("2026-11-02T14:00:01.000Z"))).toBe("2026-11-02T14:02:00Z");
     expect(earliestSendTime(new Date("2026-11-02T14:00:59.000Z"))).toBe("2026-11-02T14:02:00Z");

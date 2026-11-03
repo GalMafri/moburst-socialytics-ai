@@ -120,7 +120,7 @@ function mountPanel(iterations: any[] = [design], from: CalendarPostRow = row) {
 
 async function openScheduler() {
   fireEvent.mouseDown(screen.getByRole("tab", { name: "Schedule" }));
-  fireEvent.click(await screen.findByRole("button", { name: "Schedule to Sprout" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Send to Sprout" }));
   return screen.findByRole("dialog", { name: /Sprout/ });
 }
 
@@ -149,7 +149,7 @@ describe("Scheduling a LinkedIn post from its panel", () => {
   it("schedules it: the button is enabled and the function is called with the post's values", async () => {
     mountPanel();
     await openScheduler();
-    const button = await screen.findByRole("button", { name: "Schedule Post" });
+    const button = await screen.findByRole("button", { name: "Send" });
     await waitFor(() => expect(button).toBeEnabled());
     fireEvent.click(button);
     await waitFor(() => expect(f.invokes.some((x) => x.name === "schedule-sprout-post")).toBe(true));
@@ -175,7 +175,7 @@ describe("Scheduling a LinkedIn post from its panel", () => {
     await openScheduler();
     fireEvent.change(await screen.findByLabelText("Date"), { target: { value: "" } });
     expect(await screen.findByText("Choose a date.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Schedule Post" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
   });
 
   it("says when a time is skipped by the clock change, and the panel stays open", async () => {
@@ -184,7 +184,7 @@ describe("Scheduling a LinkedIn post from its panel", () => {
     fireEvent.change(await screen.findByLabelText("Date"), { target: { value: "2027-03-14" } });
     fireEvent.change(screen.getByLabelText(/^Time/), { target: { value: "02:30" } });
     expect(await screen.findByText("This local time does not exist because the clocks change. Choose another time.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Schedule Post" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
   });
 
   it("says to choose a profile when the client has two for the network", async () => {
@@ -193,7 +193,7 @@ describe("Scheduling a LinkedIn post from its panel", () => {
       mountPanel();
       await openScheduler();
       expect(await screen.findByText("Choose the profile to post to.")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Schedule Post" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
     } finally {
       ASSIGNED.pop();
     }
@@ -203,7 +203,7 @@ describe("Scheduling a LinkedIn post from its panel", () => {
     const newer = { ...design, id: "iteration-2", variant_group_id: "design-request-2", variant_angle: "Design option 1", media_urls: [DESIGN_URL.replace("option-1", "newer")], is_selected: false, created_at: "2026-11-02T08:00:00Z" };
     mountPanel([design, newer]);
     await openScheduler();
-    const button = await screen.findByRole("button", { name: "Schedule Post" });
+    const button = await screen.findByRole("button", { name: "Send" });
     await waitFor(() => expect(button).toBeEnabled());
     fireEvent.click(button);
     await waitFor(() => expect(f.invokes.some((x) => x.name === "schedule-sprout-post")).toBe(true));
@@ -222,46 +222,62 @@ describe("Scheduling a LinkedIn post from its panel", () => {
     f.profilesAnswer = "refused";
     mountPanel();
     await openScheduler();
-    const button = await screen.findByRole("button", { name: "Schedule Post" });
+    const button = await screen.findByRole("button", { name: "Send" });
     await waitFor(() => expect(button).toBeEnabled());
   });
 });
 
-describe("Publish now", () => {
-  it("is a choice beside Schedule, and sends the post to go out now, with no time", async () => {
+describe("Sending to Sprout now, as a draft", () => {
+  it("offers two choices with one line under them, and no publishing words", async () => {
+    mountPanel();
+    const dialog = await openScheduler();
+    expect(await screen.findByRole("radio", { name: "Send to Sprout now" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Send to Sprout for a set time" })).toBeChecked();
+    expect(screen.getByText("It arrives in Sprout as a draft. Approve it there to post it.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Send to Sprout Social" })).toBeInTheDocument();
+    expect(dialog.textContent).not.toMatch(/publish|schedule post/i);
+  });
+
+  it("sends the post now, with no time", async () => {
     mountPanel();
     await openScheduler();
-    fireEvent.click(await screen.findByRole("radio", { name: "Publish now" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "Send to Sprout now" }));
     expect(screen.queryByLabelText("Date")).toBeNull();
-    const button = await screen.findByRole("button", { name: "Publish now" });
+    const button = await screen.findByRole("button", { name: "Send" });
     await waitFor(() => expect(button).toBeEnabled());
     fireEvent.click(button);
     await waitFor(() => expect(f.invokes.some((x) => x.name === "schedule-sprout-post")).toBe(true));
     const body = f.invokes.find((x) => x.name === "schedule-sprout-post")!.body;
-    expect(body).toMatchObject({ publish_now: true, sprout_profile_id: 5719052, calendar_post_key: `post:${POST_ID}`, media_urls: [DESIGN_URL] });
+    expect(body).toMatchObject({ send_now: true, sprout_profile_id: 5719052, calendar_post_key: `post:${POST_ID}`, media_urls: [DESIGN_URL] });
     expect(body).not.toHaveProperty("scheduled_time");
+  });
+
+  it("says the draft's time once it is sent", async () => {
+    f.scheduleAnswer = { data: { success: true, recorded: true, status: "sent_now", scheduled_time: "2026-11-02T14:01:00Z" }, error: null };
+    mountPanel();
+    await openScheduler();
+    fireEvent.click(await screen.findByRole("radio", { name: "Send to Sprout now" }));
+    const button = await screen.findByRole("button", { name: "Send" });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+    await waitFor(() => expect(f.success).toHaveBeenCalledWith("Sent to Sprout as a draft for Nov 2, 9:01 AM."));
   });
 
   it("still says what the network needs", async () => {
     mountPanel([design], { ...row, copy: "x".repeat(3001), hashtags: [] });
     await openScheduler();
-    fireEvent.click(await screen.findByRole("radio", { name: "Publish now" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "Send to Sprout now" }));
     expect(await screen.findByText("The copy is 3,001 characters. LinkedIn takes up to 3,000.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Publish now" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
   });
 
-  it("the post's Schedule tab says it went to Sprout as a draft to go out now", async () => {
-    f.scheduled = [{ id: "s1", calendar_post_key: `post:${POST_ID}`, platform: "LinkedIn", status: "publish_now", scheduled_time: "2026-11-02T14:01:00Z" }];
-    mountPanel();
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Schedule" }));
-    expect(await screen.findByText("Sent to Sprout to go out now (Nov 2, 2026, 9:01 AM), as a draft. It goes out once someone sends it from Sprout.")).toBeInTheDocument();
-  });
-
-  it("a scheduled post shows its time, as a draft in Sprout", async () => {
-    f.scheduled = [{ id: "s1", calendar_post_key: `post:${POST_ID}`, platform: "LinkedIn", status: "scheduled", scheduled_time: "2026-11-09T23:45:00Z" }];
-    mountPanel();
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Schedule" }));
-    expect(await screen.findByText("In Sprout as a draft for Nov 9, 2026, 6:45 PM. It goes out once someone schedules it in Sprout.")).toBeInTheDocument();
-  });
+  it.each([["sent_now", "2026-11-02T14:01:00Z", "Nov 2, 9:01 AM"], ["scheduled", "2026-11-09T23:45:00Z", "Nov 9, 6:45 PM"]])(
+    "the post's Schedule tab reads the draft's time in the client's zone (%s)",
+    async (status, at, words) => {
+      f.scheduled = [{ id: "s1", calendar_post_key: `post:${POST_ID}`, platform: "LinkedIn", status, scheduled_time: at }];
+      mountPanel();
+      fireEvent.mouseDown(screen.getByRole("tab", { name: "Schedule" }));
+      expect(await screen.findByText(`Sent to Sprout as a draft for ${words}.`)).toBeInTheDocument();
+    },
+  );
 });
-

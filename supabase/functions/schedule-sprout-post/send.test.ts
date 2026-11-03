@@ -132,19 +132,19 @@ describe("scheduling a post to Sprout", () => {
   });
 });
 
-describe("publishing a post now", () => {
-  const now = { ...request, scheduledTime: null, publishNow: true };
+describe("sending a post to Sprout now", () => {
+  const now = { ...request, scheduledTime: null, sendNow: true };
 
-  it("sends it for the earliest minute Sprout takes, and records it as published now", async () => {
+  it("sends it for the earliest minute Sprout takes, and records it as sent now", async () => {
     const { sent, fetchImpl } = sprout();
     const { rows, asked, s } = store();
     const reply = await sendToSprout(now, s, { fetchImpl, ...NO_WAIT });
     expect(reply.status).toBe(200);
     expect(JSON.parse(String(sent.at(-1)!.body)).delivery).toEqual({ scheduled_times: ["2026-11-02T14:01:00Z"], type: "SCHEDULED" });
-    expect(rows).toEqual([expect.objectContaining({ status: "publish_now", scheduled_time: "2026-11-02T14:01:00Z", sprout_post_id: "4567890" })]);
-    expect(reply.body).toMatchObject({ success: true, status: "publish_now", scheduled_time: "2026-11-02T14:01:00Z", draft: true });
+    expect(rows).toEqual([expect.objectContaining({ status: "sent_now", scheduled_time: "2026-11-02T14:01:00Z", sprout_post_id: "4567890" })]);
+    expect(reply.body).toMatchObject({ success: true, status: "sent_now", scheduled_time: "2026-11-02T14:01:00Z", draft: true });
     // A second press, or a resend, finds this one.
-    expect(asked).toEqual([{ clientId: "moburst-client", calendarPostKey: request.calendarPostKey, status: "publish_now", since: "2026-11-02T13:45:00.000Z" }]);
+    expect(asked).toEqual([{ clientId: "moburst-client", calendarPostKey: request.calendarPostKey, status: "sent_now", since: "2026-11-02T13:45:00.000Z" }]);
   });
 
   it("is not held by the one-minute rule, which is for scheduling", async () => {
@@ -163,7 +163,7 @@ describe("publishing a post now", () => {
   it("is not sent twice for the same post", async () => {
     const { sent, fetchImpl } = sprout();
     const reply = await sendToSprout(now, store("2026-11-02T13:58:00Z").s, { fetchImpl, ...NO_WAIT });
-    expect(reply.body).toMatchObject({ success: true, already: true, status: "publish_now", scheduled_time: "2026-11-02T13:58:00Z" });
+    expect(reply.body).toMatchObject({ success: true, already: true, status: "sent_now", scheduled_time: "2026-11-02T13:58:00Z" });
     expect(sent).toHaveLength(0);
   });
 });
