@@ -35,8 +35,8 @@ export interface SourceRun {
 export interface TrendSource {
   actor: { id: string; name: string; timeoutSecs?: number; memoryMbytes?: number };
   inputs(searches: string[], o: SearchOptions): SourceRun[];
-  /** A row of the answer as a post; null for a row that is not a post. */
-  normalize(row: unknown, search: string): TrendPost | null;
+  /** A row of the answer as a post; null for a row that is not a post. `position` is the row's place in its run's results, from 1. */
+  normalize(row: unknown, search: string, position?: number): TrendPost | null;
 }
 
 const num = (v: unknown): number => {
@@ -176,15 +176,16 @@ export const TREND_SOURCES: Record<TrendPlatform, TrendSource> = {
       // Search links in startUrls came back empty on 1 Nov; the search field works, one keyword a run.
       return onePerSearch(searches, (s) => ({ search: s, maxItems: POSTS_PER_SEARCH, getDetails: false }));
     },
-    normalize(r: Any, search) {
+    normalize(r: Any, search, position) {
       if (!r || typeof r !== "object" || (r.type && r.type !== "pin")) return null;
+      // The list results carry no saves or likes (aggregated_pin_data is empty), so pins are
+      // ranked by the search's own order and how recent they are (UNCOUNTED_PLATFORMS).
       return post("pinterest", {
         url: text(r.url), author: text(r.pinner?.username) || text(r.pinner?.full_name),
         text: [text(r.grid_title) || text(r.title), text(r.description)].filter(Boolean).join("\n"),
-        // A pin's date is when it was pinned, not when its idea was posted; the spec ranks pins by saves instead.
-        posted_at: null, format: "pin", views: 0, likes: num(r.like_count), comments: 0, shares: 0,
+        posted_at: iso(r.created_at), format: "pin", views: 0, likes: num(r.like_count), comments: 0, shares: 0,
         saves: num(r.aggregated_pin_data?.aggregated_stats?.saves ?? r.repin_count), search: text(r.inputSource) || search,
-        handle: text(r.pinner?.username),
+        handle: text(r.pinner?.username), ...(position ? { position } : {}),
       });
     },
   },

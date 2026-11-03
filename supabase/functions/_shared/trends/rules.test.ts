@@ -40,12 +40,35 @@ describe("the rules before Claude", () => {
     expect(ruleFilter([yt("a1"), tracked], opts()).dropped.map((d) => d.reason)).toEqual(["duplicate"]);
   });
 
-  it("drops posts outside the 7-day window, except undated pins", () => {
+  it("drops posts outside the 7-day window, and pins only past 90 days", () => {
     const old = post({ posted_at: "2026-10-20T10:00:00.000Z" });
-    const pin = post({ platform: "pinterest", url: "https://www.pinterest.com/pin/1/", posted_at: null, format: "pin" });
-    const out = ruleFilter([old, pin], opts());
-    expect(out.candidates).toEqual([pin]);
-    expect(out.dropped.map((d) => d.reason)).toEqual(["outside_window"]);
+    const pin = (id: number, posted_at: string | null) => post({ platform: "pinterest", url: `https://www.pinterest.com/pin/${id}/`, posted_at, format: "pin", engagement: 0 });
+    const recentPin = pin(1, "2026-10-13T14:00:15.000Z");
+    const undatedPin = pin(2, null);
+    const stalePin = pin(3, "2026-07-01T10:00:00.000Z");
+    const out = ruleFilter([old, recentPin, undatedPin, stalePin], opts());
+    expect(out.candidates).toEqual([recentPin, undatedPin]);
+    expect(out.dropped.map((d) => [d.post.url, d.reason])).toEqual([[old.url, "outside_window"], [stalePin.url, "outside_window"]]);
+  });
+
+  it("ranks pins by their search's own order, the newer first among equals", () => {
+    const pin = (id: number, o: Partial<TrendPost>) => post({ platform: "pinterest", url: `https://www.pinterest.com/pin/${id}/`, format: "pin", engagement: 0, ...o });
+    const a2 = pin(1, { search: "a", position: 2, posted_at: "2026-10-30T10:00:00.000Z" });
+    const a1 = pin(2, { search: "a", position: 1, posted_at: "2026-09-01T10:00:00.000Z" });
+    const b1 = pin(3, { search: "b", position: 1, posted_at: "2026-10-20T10:00:00.000Z" });
+    const b2 = pin(4, { search: "b", position: 2, posted_at: "2026-10-31T10:00:00.000Z" });
+    const out = ruleFilter([a2, a1, b1, b2], opts({ capPerPlatform: 3 }));
+    // Each search's first result takes the first turn, the newer of those first; then the second results.
+    expect(out.candidates.map((p) => p.url)).toEqual([b1.url, a1.url, b2.url]);
+    expect(out.dropped).toEqual([{ post: a2, reason: "over_cap" }]);
+  });
+
+  it("never offers again a pin an earlier week kept, and leaves posts with counts alone", () => {
+    const seenPin = post({ platform: "pinterest", url: "https://www.pinterest.com/pin/9/", posted_at: null, format: "pin" });
+    const tiktok = post();
+    const out = ruleFilter([seenPin, tiktok], opts({ keptBefore: ["https://pinterest.com/pin/9", tiktok.url] }));
+    expect(out.candidates).toEqual([tiktok]);
+    expect(out.dropped).toEqual([{ post: seenPin, reason: "kept_before" }]);
   });
 
   it("keeps only the client's language, for a Hebrew client too", () => {

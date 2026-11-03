@@ -13,6 +13,18 @@ const post = (i: number, over: Partial<TrendPost> = {}): TrendPost => ({
   engagement: 10 * i, search: "app growth", ...over,
 });
 const profile = { audience: "App founders", fit_rubric: "Posts that teach app growth.", topics: [{ term: "app growth", reason: "core" }] };
+describe("a pin in the filter request", () => {
+  it("says a pin has no counts and where it came in its search, instead of showing zeros", () => {
+    const pin = post(1, { platform: "pinterest", url: "https://www.pinterest.com/pin/1/", format: "pin", views: 0, likes: 0, comments: 0, shares: 0, saves: 0, posted_at: "2026-10-13T14:00:15.000Z", position: 3 });
+    const body = filterRequest(profile, [], [pin, post(2)]) as { system: string; messages: Array<{ content: string }> };
+    const content = body.messages[0].content;
+    expect(content).toContain("pinterest | by creator1 | made 2026-10-13\nno engagement counts; result 3 in its search");
+    expect(content).not.toContain("pinterest | by creator1 | made 2026-10-13\nviews 0");
+    expect(content).toContain("views 1000, likes 20, comments 1, shares 0, saves 0");
+    expect(body.system).toContain("never drop one as low_quality for having no counts");
+  });
+});
+
 const keep = (id: string, fit = 80) => ({ id, keep: true, fit, why: "Shows a growth tactic", format: "short_video", lesson: "Open on the result" });
 const drop = (id: string, reason = "off_topic") => ({ id, keep: false, reason });
 
