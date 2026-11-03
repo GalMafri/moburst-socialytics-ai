@@ -32,6 +32,33 @@ describe("evidenceSentence", () => {
   });
 });
 
+/** A dated moment the judge kept (moments.ts), with the client's own post on it last year. */
+const MOMENT: EvidenceRef = {
+  id: "M1", kind: "moment", text: "Halloween", key: "us:halloween", category: "cultural_commercial", date: "2026-10-31", link: "https://www.timeanddate.com/holidays/us/halloween",
+  fit: "Costume reels are where your followers already show up.", platform: "Instagram", format: "reel", metric: "engagement", value: 23, median: 10, multiple: 2.3, sample: 8,
+};
+const BARE_MOMENT: EvidenceRef = { id: "M2", kind: "moment", text: "World Kindness Day", key: "global:world-kindness-day", category: "awareness_day", date: "2026-11-13", link: "https://x.test/k", fit: "Kindness is part of your team culture." };
+
+describe("a moment's reason", () => {
+  it("names the moment and its date from the evidence, then the client's own post on it last year", () => {
+    expect(evidenceSentence(MOMENT)).toBe("Halloween, Oct 31. Your Instagram reel for it last year got 2.3x your usual engagement");
+  });
+
+  it("gives the competitors who posted about it, or the moment alone, when the client has no post from last year", () => {
+    expect(evidenceSentence({ ...BARE_MOMENT, companies: 3 })).toBe("World Kindness Day, Nov 13. 3 competitors posted about it");
+    expect(evidenceSentence({ ...BARE_MOMENT, companies: 1 })).toBe("World Kindness Day, Nov 13. A competitor posted about it");
+    expect(evidenceSentence(BARE_MOMENT)).toBe("World Kindness Day, Nov 13");
+  });
+
+  it("reads as the evidence, then the judge's sentence, with no ids, and an early signal when last year's numbers are thin", () => {
+    expect(reasonLabel({ type: "seasonal", evidence: [MOMENT], fit: MOMENT.fit }))
+      .toBe("Halloween, Oct 31. Your Instagram reel for it last year got 2.3x your usual engagement. Costume reels are where your followers already show up.");
+    expect(reasonLabel({ type: "seasonal", evidence: [{ ...MOMENT, thin: true }], fit: MOMENT.fit })).toMatch(/ Early signal\.$/);
+    expect(reasonLabel({ type: "seasonal", evidence: [BARE_MOMENT], fit: "M2 fits the team." })).toBe("World Kindness Day, Nov 13.");
+    expect(wordReason({ type: "seasonal", label: "Old", fit: BARE_MOMENT.fit, evidence: [BARE_MOMENT], test: false })).toBe("World Kindness Day, Nov 13. Kindness is part of your team culture.");
+  });
+});
+
 describe("reasonLabel", () => {
   it("adds the test mark, the fit and the early-signal note", () => {
     expect(reasonLabel({ type: "competitor", evidence: [RIVAL], fit: "Captains live this every week. Another note.", test: true }))

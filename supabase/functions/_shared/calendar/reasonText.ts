@@ -14,7 +14,7 @@ export type ReasonType = "performance" | "competitor" | "trend" | "seasonal" | "
 /** A piece of evidence as a post's reason keeps it (the planner's EvidenceItem). */
 export interface EvidenceRef {
   id: string;
-  kind: "own" | "competitor" | "topic" | "trend" | "report";
+  kind: "own" | "competitor" | "topic" | "trend" | "report" | "moment";
   text: string;
   platform?: string;
   company?: string;
@@ -30,6 +30,10 @@ export interface EvidenceRef {
   companies?: number;
   /** Trends: the weekly theme the example post shows. */
   theme?: string;
+  /** Moments (moments.ts): the moment's key, its category, and the judge's sentence on why it fits. The moment's name is its text, its date this year's. */
+  key?: string;
+  category?: string;
+  fit?: string;
 }
 
 export interface Reason {
@@ -85,7 +89,7 @@ export function headline(text: string): string {
  */
 export function clientFit(fit: string | undefined): string | undefined {
   const first = String(fit ?? "").replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s/)[0]?.trim() ?? "";
-  if (!first || /\b[PCTNR]\d{1,2}\b/.test(first) || first.length > 180) return undefined;
+  if (!first || /\b[PCTNRMO]\d{1,2}\b/.test(first) || first.length > 180) return undefined;
   return first;
 }
 
@@ -109,6 +113,14 @@ export function evidenceSentence(e: EvidenceRef): string {
     }
     case "report":
       return `From the monthly report: ${headline(e.text)}`;
+    case "moment": {
+      // The moment's name and date come from the evidence (moments.ts), never from the planner.
+      const head = [e.text, when].filter(Boolean).join(", ");
+      if (e.multiple !== undefined && e.platform) return `${head}. Your ${e.platform} ${formatWord(e.format)} for it last year got ${fmtMultiple(e.multiple)} your usual ${e.metric}`;
+      if (e.companies && e.companies > 1) return `${head}. ${e.companies} competitors posted about it`;
+      if (e.companies === 1) return `${head}. A competitor posted about it`;
+      return head;
+    }
     default:
       return "";
   }

@@ -49,9 +49,9 @@ export interface CompetitorPost {
 }
 
 export interface EvidenceItem {
-  /** P = the client's post, C = competitor post, T = competitor topic, N = platform trend, R = report finding. */
+  /** P = the client's post, C = competitor post, T = competitor topic, N = platform trend, R = report finding, M = a dated moment (moments.ts). */
   id: string;
-  kind: "own" | "competitor" | "topic" | "trend" | "report";
+  kind: "own" | "competitor" | "topic" | "trend" | "report" | "moment";
   text: string;
   platform?: string;
   company?: string;
@@ -70,6 +70,10 @@ export interface EvidenceItem {
   companies?: number;
   /** Trends: the weekly theme this example post shows. A trend's author is kept in company. */
   theme?: string;
+  /** Moments: the moment's key ("us:election-day"), its category, and the judge's sentence on why it fits. */
+  key?: string;
+  category?: string;
+  fit?: string;
 }
 
 /**
@@ -144,7 +148,7 @@ interface Scored<T> {
 }
 
 /** How far above its usual a value is, smoothed so a near-zero usual can't produce a four-digit multiple. */
-const ratio = (value: number, usual: number) => (value + 1) / (usual + 1);
+export const ratio = (value: number, usual: number) => (value + 1) / (usual + 1);
 
 /**
  * The client's organic posts from the last 90 days that have settled, each
