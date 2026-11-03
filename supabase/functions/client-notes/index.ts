@@ -28,7 +28,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { clipText } from "../_shared/text/clip.ts";
-import { isNotePath, noteFileType, noteTitle, todayIn, validNoteDate, NOTE_FILES_AT_ONCE, NOTE_TEXT_MAX, NOTES_BUCKET } from "../_shared/notes/notes.ts";
+import { isNotePath, noteFileType, todayIn, validNoteDate, NOTE_FILES_AT_ONCE, NOTES_BUCKET } from "../_shared/notes/notes.ts";
+import { addTextNote, noteWrites } from "../_shared/notes/add.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -39,7 +40,7 @@ const service = () => createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-async function must<T = unknown>(p: PromiseLike<{ data?: T; error: { message: string } | null }>, what: string): Promise<T> {
+async function must<T = unknown>(p: PromiseLike<{ data?: T | null; error: { message: string } | null }>, what: string): Promise<T> {
   const { data, error } = await p;
   if (error) throw new Error(`${what}: ${error.message}`);
   return data as T;
@@ -52,41 +53,38 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const action = String(body?.action || "");
 
-    if (action === "add_text" || action === "add_files") {
+    if (action === "add_text") {
       const clientId = String(body.client_id || "");
       if (!UUID.test(clientId)) return json({ error: "client_id is required." }, 400);
       const caller = await requireStaff(req, { writeClientId: clientId });
-      const { data: client } = await admin.from("clients").select("id, timezone").eq("id", clientId).maybeSingle();
+      // The one path for a typed note, the app's and Claude's (_shared/notes/add.ts).
+      const added = await addTextNote(noteWrites(admin), { clientId, noteId: body.note_id, text: body.text, date: body.date, source: "app", userId: caller.userId, now: new Date() });
+      if (!added.ok) return json({ error: added.error }, added.status);
+      return json({ ok: true, added: added.added ? 1 : 0 }, 202);
+    }
+
+    if (action === "add_files") {
+      const clientId = String(body.client_id || "");
+      if (!UUID.test(clientId)) return json({ error: "client_id is required." }, 400);
+      const caller = await requireStaff(req, { writeClientId: clientId });
+      const writes = noteWrites(admin);
+      const client = await writes.client(clientId);
       if (!client) return json({ error: "No such client." }, 404);
       const today = todayIn(String(client.timezone || "UTC"), new Date());
       const date = body.date ? validNoteDate(body.date, today) : null;
       if (body.date && !date) return json({ error: "date must be a day no later than tomorrow (YYYY-MM-DD)." }, 400);
-      const { data: profile } = await admin.from("profiles").select("display_name, email").eq("user_id", caller.userId).maybeSingle();
-      const by = { added_by: caller.userId, added_by_name: String(profile?.display_name || profile?.email || "").trim() || null };
+      const by = { added_by: caller.userId, added_by_name: await writes.authorName(caller.userId) };
       // A date a person gave beats any date the reading finds; the day it was added does not.
       const dated = { note_date: date ?? today, date_set_by: date ? "person" : "app" };
-
-      let added = 0;
-      if (action === "add_text") {
-        const text = String(body.text ?? "").replace(/\r/g, "").trim();
-        if (!text) return json({ error: "text is required." }, 400);
-        if (text.length > NOTE_TEXT_MAX) return json({ error: `A note holds at most ${NOTE_TEXT_MAX} characters.` }, 400);
-        const id = UUID.test(String(body.note_id || "")) ? String(body.note_id) : crypto.randomUUID();
-        const rows = await must<Array<{ id: string }>>(admin.from("client_notes")
-          .upsert({ id, client_id: clientId, kind: "typed", title: noteTitle(text), text, ...dated, ...by }, { onConflict: "id", ignoreDuplicates: true }).select("id"), "Could not add the note");
-        added = rows?.length ?? 0;
-      } else {
-        const files = (Array.isArray(body.files) ? body.files : []).slice(0, NOTE_FILES_AT_ONCE) as Array<{ path?: unknown; name?: unknown }>;
-        const rows = files.filter((f) => isNotePath(clientId, String(f?.path ?? ""))).map((f) => ({
-          client_id: clientId, kind: "file", title: clipText(String(f.name || f.path).trim(), 200), file_path: String(f.path), file_type: noteFileType(String(f.path)), ...dated, ...by,
-        }));
-        if (!rows.length) return json({ error: "files must hold the paths of uploaded note files." }, 400);
-        // The same file dropped twice is stored and read once.
-        const inserted = await must<Array<{ id: string }>>(admin.from("client_notes").upsert(rows, { onConflict: "client_id,file_path", ignoreDuplicates: true }).select("id"), "Could not add the files");
-        added = inserted?.length ?? 0;
-      }
-      await must(admin.rpc("client_notes_queue_read", { p_client: clientId }), "Could not queue the reading");
-      return json({ ok: true, added }, 202);
+      const files = (Array.isArray(body.files) ? body.files : []).slice(0, NOTE_FILES_AT_ONCE) as Array<{ path?: unknown; name?: unknown }>;
+      const rows = files.filter((f) => isNotePath(clientId, String(f?.path ?? ""))).map((f) => ({
+        client_id: clientId, kind: "file", title: clipText(String(f.name || f.path).trim(), 200), file_path: String(f.path), file_type: noteFileType(String(f.path)), ...dated, ...by,
+      }));
+      if (!rows.length) return json({ error: "files must hold the paths of uploaded note files." }, 400);
+      // The same file dropped twice is stored and read once.
+      const inserted = await must<Array<{ id: string }>>(admin.from("client_notes").upsert(rows, { onConflict: "client_id,file_path", ignoreDuplicates: true }).select("id"), "Could not add the files");
+      await writes.queueRead(clientId);
+      return json({ ok: true, added: inserted?.length ?? 0 }, 202);
     }
 
     if (action === "set_date" || action === "remove_note") {
