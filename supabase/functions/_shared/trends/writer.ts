@@ -51,23 +51,24 @@ export const TREND_WRITERS: Record<string, (db: Db, run: PipelineRun, data: Reco
 
   /**
    * One platform's rewritten searches, into trend_profiles.search_overrides
-   * beside the other platforms'. Written only while the profile the run read
-   * stands: a profile written since cleared the overrides on purpose, since
-   * they were made from the old one. Instagram searches by the profile's
-   * hashtags, so its rewrite is also written only while the hashtags the run
-   * read stand: the monthly refresh replaces them and clears that rewrite.
+   * beside the other platforms', merged in the database
+   * (trend_search_override_put, 20261110180000_trend_merges_and_share.sql) so a
+   * "Go back" on another platform in between stays. Written only while the
+   * profile the run read stands: a profile written since cleared the overrides
+   * on purpose, since they were made from the old one. Instagram searches by
+   * the profile's hashtags, so its rewrite is also written only while the
+   * hashtags the run read stand: the monthly refresh replaces them and clears
+   * that rewrite.
    */
   async searches(db, run, data) {
     const platform = String(data.platform ?? "");
     const searches = Array.isArray(data.searches) ? (data.searches as unknown[]).map(String) : [];
     if (!platform || !searches.length) throw new Error("A search rewrite must name its platform and its searches.");
-    const profile = await must(db.from("trend_profiles").select("search_overrides, written_at, hashtags_at").eq("client_id", run.client_id).maybeSingle(), "Could not read the trend profile") as Any;
-    if (!profile || String(profile.written_at) !== String(data.profile_written_at ?? "")) return;
-    const byHashtags = platform === "instagram";
-    if (byHashtags && String(profile.hashtags_at ?? "") !== String(data.profile_hashtags_at ?? "")) return;
-    let q = db.from("trend_profiles").update({ search_overrides: { ...(profile.search_overrides ?? {}), [platform]: searches } })
-      .eq("client_id", run.client_id).eq("written_at", profile.written_at);
-    if (byHashtags) q = profile.hashtags_at == null ? q.is("hashtags_at", null) : q.eq("hashtags_at", profile.hashtags_at);
-    await must(q, "Could not save the rewritten searches");
+    const written = String(data.profile_written_at ?? "");
+    if (!written) return;
+    await must(db.rpc("trend_search_override_put", {
+      p_client: run.client_id, p_platform: platform, p_searches: searches, p_written_at: written,
+      p_hashtags_at: String(data.profile_hashtags_at ?? "") || null, p_check_hashtags: platform === "instagram",
+    }), "Could not save the rewritten searches");
   },
 };

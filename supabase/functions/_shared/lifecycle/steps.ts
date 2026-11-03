@@ -796,7 +796,7 @@ export const STEPS: Record<string, StepDef> = {
       return `${monthIn(deps.now())}:${p.written_at}`;
     },
     async run(db, client) {
-      const { data: p } = await db.from("trend_profiles").select("audience, fit_rubric, hashtags_at, search_overrides").eq("client_id", client.id).maybeSingle();
+      const { data: p } = await db.from("trend_profiles").select("audience, fit_rubric, hashtags_at").eq("client_id", client.id).maybeSingle();
       if (!p) return { status: "waiting", reason: "no_profile", recheckDays: 1 };
       const now = deps.now();
       if (p.hashtags_at && monthIn(new Date(p.hashtags_at)) === monthIn(now)) return { status: "done", result: { skipped: "this_month" } };
@@ -810,8 +810,9 @@ export const STEPS: Record<string, StepDef> = {
       if ("error" in got) return { status: "failed", error: `The trend hashtags could not be refreshed: ${got.error}` };
       for (const platform of HASHTAG_PLATFORMS) await syncLifecycleTerms(db, client.id, "hashtag", platform, got.value[platform]);
       // Instagram searches by these hashtags, so a coverage rewrite of Instagram made from the old ones goes; other platforms' stay.
-      const { instagram: _replaced, ...overrides } = (p.search_overrides ?? {}) as Record<string, string[]>;
-      await db.from("trend_profiles").update({ hashtags_at: now.toISOString(), search_overrides: overrides }).eq("client_id", client.id);
+      // Merged in the database (trend_hashtags_refreshed), so a "Go back" made meanwhile stays.
+      const { error: refreshError } = await db.rpc("trend_hashtags_refreshed", { p_client: client.id, p_at: now.toISOString() });
+      if (refreshError) return { status: "failed", error: `The trend hashtags were saved but the refresh was not recorded: ${refreshError.message}` };
       return { status: "done", result: { refreshed: true } };
     },
   },

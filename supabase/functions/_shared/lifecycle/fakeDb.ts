@@ -46,8 +46,32 @@ export function lookRpc(args: Row, db: FakeDb): null {
   return null;
 }
 
+/** The same moment, or both empty: how the database compares two timestamptz values a run read and a row holds. */
+const sameTime = (a: unknown, b: unknown) => (a == null || a === "") ? (b == null || b === "") : (b != null && b !== "" && Date.parse(String(a)) === Date.parse(String(b)));
+
+/** trend_search_override_put as 20261110180000_trend_merges_and_share.sql has it: merged into the row as it is now. */
+export function overridePutRpc(args: Row, db: FakeDb): boolean {
+  const row = (db.tables.trend_profiles ?? []).find((r) => same(r.client_id, args.p_client));
+  if (!row || !sameTime(row.written_at, args.p_written_at)) return false;
+  if (args.p_check_hashtags && !sameTime(row.hashtags_at, args.p_hashtags_at)) return false;
+  row.search_overrides = { ...(row.search_overrides ?? {}), [String(args.p_platform)]: args.p_searches };
+  return true;
+}
+
+/** trend_hashtags_refreshed as the same migration has it: the refresh recorded and Instagram's rewrite dropped. */
+export function hashtagsRefreshedRpc(args: Row, db: FakeDb): null {
+  const row = (db.tables.trend_profiles ?? []).find((r) => same(r.client_id, args.p_client));
+  if (row) {
+    const { instagram: _dropped, ...rest } = (row.search_overrides ?? {}) as Row;
+    Object.assign(row, { hashtags_at: args.p_at, search_overrides: rest });
+  }
+  return null;
+}
+
 export function fakeDb(tables: Record<string, Row[]> = {}, given: Record<string, (args: Row, db: FakeDb) => unknown> = {}): FakeDb {
-  const rpcs: Record<string, (args: Row, db: FakeDb) => unknown> = { lifecycle_enqueue: lookRpc, ...given };
+  const rpcs: Record<string, (args: Row, db: FakeDb) => unknown> = {
+    lifecycle_enqueue: lookRpc, trend_search_override_put: overridePutRpc, trend_hashtags_refreshed: hashtagsRefreshedRpc, ...given,
+  };
   const db: FakeDb = {
     tables,
     rpcCalls: [],
