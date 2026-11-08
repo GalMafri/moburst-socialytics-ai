@@ -24,6 +24,26 @@ describe("the deck's charts", () => {
     expect(alone).toContain("100%");
   });
 
+  // Moburst's deck of 8 Nov 2026 cut five long pillar names to "Moburst -
+  // Service Spotlig…" and set them edge to edge.
+  it("wraps a long pillar name onto more lines within its column, never cutting it, and keeps the chart's shape", () => {
+    const measure = (text: string, size: number) => text.length * 0.55 * size;
+    const names = ["Moburst - Service Spotlight & Company Impact", "Innovation in Execution - AI & Technology", "Victory Vault - Case Studies & Wins", "Visionary Voices - Thought Leadership", "Inside Moburst - Culture & Careers"];
+    const c = mixChart(names.map((name, i) => ({ name, current: [23, 18, 10, 41, 5][i], planned: [20, 20, 20, 35, 5][i] })), 2, measure);
+    expect(c.svg).not.toContain("…");
+    expect(c.svg).toContain(`width="1292" height="156"`);
+    const column = 1292 / names.length;
+    const labels = [...c.svg.matchAll(/<text[^>]*font-weight="500"[^>]*>([^<]+)<\/text>/g)].map((m) => m[1].replace(/&amp;/g, "&"));
+    expect(labels.join(" ").split(" ").filter(Boolean)).toEqual(names.join(" ").split(" "));
+    expect(labels.every((l) => measure(l, 20) <= column - 16)).toBe(true);
+    expect(labels.length).toBeGreaterThan(names.length);
+    // The largest share's bar reaches the top of the bars' room, so the bars keep their height when the names take more lines.
+    const bars = [...c.svg.matchAll(/<rect x="[\d.]+" y="([\d.]+)" width="36" height="([\d.]+)"/g)].map((m) => ({ y: Number(m[1]), h: Number(m[2]) }));
+    const tallest = bars.reduce((a, b) => (b.h > a.h ? b : a));
+    expect(tallest.y).toBe(32);
+    expect(tallest.h).toBeGreaterThan((41 / 100) * 88);
+  });
+
   it("writes figures short", () => {
     expect([short(4.666), short(42), short(12_400), short(1_250_000)]).toEqual(["4.7", "42", "12.4K", "1.3M"]);
   });

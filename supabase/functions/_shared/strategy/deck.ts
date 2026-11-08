@@ -225,7 +225,7 @@ export function planDeck(input: DeckInput, measure: Measure): DeckPlan {
     if (Number.isFinite(planned)) mix.push({ name: p.name, current: p.share ?? null, planned });
     pillarCards.push({ label: p.name, body: [str((v as Any).purpose), strs((v as Any).formats).length ? `Formats: ${strs((v as Any).formats).join(", ")}` : "", Number.isFinite(planned) ? `Planned share: ${planned}%` : ""].filter(Boolean).join("\n\n") });
   }
-  if (mix.length) charts.mix = mixChart(mix);
+  if (mix.length) charts.mix = mixChart(mix, 2, measure);
   cardSlides("Strategy | Content Pillars", "Our content mix for the next 90 days", pillarCards, { chart: mix.length ? "mix" : undefined });
 
   // 6. One slide per platform posting now or new; 7. a launch flow per new platform.

@@ -421,6 +421,20 @@ describe("the evidence a strategy is written from", () => {
     expect(e.window).toEqual({ start: "2026-08-04", end: "2026-11-02" });
   });
 
+  // The feed keeps 90 days of snapshots, so a company dropped from the set
+  // stays in it for weeks: Moburst swapped SplitMetrics for Thrive on 2 Nov,
+  // and its 3 Nov strategy still charted SplitMetrics.
+  it("counts only the competitors in the client's current set, by RivalIQ id or by name", async () => {
+    const at = (id: string, companyId: string, companyName: string) => ({ postId: id, companyId, companyName, channel: "instagram", publishedAt: "2026-10-20T00:00:00Z", message: "m", postLink: `https://instagram.com/p/${id}`, engagementTotal: 30, type: "image", presenceReach: 9100 });
+    const feed = [{ payload: { client_company_id: "1", socialPosts: [at("f1", "2", "BenchApp"), at("f2", "3", "OldRival"), at("f3", "4", "Rinkside")] } }];
+    const apify = { company: "Rinkside", client: false, platform: "TikTok", id: "r1", publishedAt: "2026-10-21T00:00:00Z", text: "t", link: null, format: "short_video", engagement: 12, views: 300, followers: 500, boosted: false, source: "apify" as const };
+    const read = { key: "k", status: "done" as const, started_at: NOW.toISOString(), read_at: NOW.toISOString(), window: { start: "2026-08-04", end: "2026-11-02" }, runs: [], posts: [apify] };
+    const set = io({ feedSnapshots: async () => feed, competitorSet: async () => [{ name: "BenchApp", rivaliq_company_id: "2" }, { name: "Rinkside", rivaliq_company_id: null }] });
+    const e = (await strategyEvidence(fakeDb(tables()), client(), NOW, set, read))!;
+    expect(e.competitor_figures.map((c) => `${c.company} ${c.platform}`).sort()).toEqual(["BenchApp Instagram", "Rinkside Instagram", "Rinkside TikTok"]);
+    expect(e.competitors).toEqual(["BenchApp", "Rinkside"]);
+  });
+
   it("shares each pillar by the client's own calendar posts over the last 8 weeks", async () => {
     const posts = [
       post("2026-10-30", "Beer League Truths"), post("2026-10-20", "Beer League Truths"), post("2026-09-10", " beer league truths "),
