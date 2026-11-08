@@ -556,12 +556,18 @@ async function storePageLogo(db: Db, client: Row, url: string, io: SocialIO): Pr
   return error ? null : db.storage.from("generated-media").getPublicUrl(path).data.publicUrl;
 }
 
-/** The Instagram bio: the one read before while the profile is the same, else a new read (a run under way is collected first). Quiet: a read that cannot be made keeps the last one. */
+/**
+ * The Instagram bio: the one read before while the profile is the same, else
+ * a new read (a run under way is collected first). Quiet: a read that cannot
+ * be made keeps the last one. A run that can no longer be collected (gone past
+ * Apify's keep time) is dropped with the read time, so the next look starts a
+ * new read; the older bio is kept meanwhile.
+ */
 async function readBio(profiles: ProfileRef[], pictures: Picture[], prev: InstagramState | null, io: SocialIO, now: Date): Promise<InstagramState | null> {
   const ig = profiles.find((p) => platformName(ownedNetwork(p.network_type)) === "Instagram" && p.native_name);
   if (!ig) return null;
   const key = `${ig.id}:${ig.native_name.toLowerCase()}:${pictures.find((p) => p.profileId === ig.id)?.hash ?? ""}`;
-  if (prev?.key === key && !prev.run_id) return prev;
+  if (prev?.key === key && !prev.run_id && prev.read_at) return prev;
   const pending = prev?.key === key ? prev.run_id ?? null : null;
   try {
     const got = await io.instagram(ig.native_name, pending);
@@ -571,11 +577,21 @@ async function readBio(profiles: ProfileRef[], pictures: Picture[], prev: Instag
     return { ...base, read_at: now.toISOString(), bio: got.bio };
   } catch (e) {
     console.warn("[social_read] Instagram bio not read:", e instanceof Error ? e.message : String(e));
-    return prev ? { ...prev } : null;
+    if (!prev) return null;
+    if (!pending) return { ...prev };
+    const { run_id: _lost, ...rest } = prev;
+    return { ...rest, read_at: null };
   }
 }
 
-/** The LinkedIn company page: the one read before while the profile is the same and under 30 days old, else a new read (a run under way is collected first). Quiet: a read that cannot be made keeps the last one. Not part of the evidence version. */
+/**
+ * The LinkedIn company page: the one read before while the profile is the
+ * same and under 30 days old, else a new read (a run under way is collected
+ * first). Quiet: a read that cannot be made keeps the last one. A run that can
+ * no longer be collected (gone past Apify's keep time) is dropped with the
+ * read time, so the next look starts a new read. Not part of the evidence
+ * version.
+ */
 async function readPage(profiles: ProfileRef[], prev: LinkedInPageState | null, io: SocialIO, now: Date): Promise<LinkedInPageState | null> {
   const li = profiles.find((p) => p.network_type === "linkedin_company" && p.native_name);
   if (!li) return null;
@@ -597,7 +613,10 @@ async function readPage(profiles: ProfileRef[], prev: LinkedInPageState | null, 
     console.warn("[social_read] LinkedIn page not read:", e instanceof Error ? e.message : String(e));
     // The last page is kept only for the same profile; a changed profile has no page until it is read.
     if (!prev) return null;
-    return same ? { ...prev } : { ...base, read_at: null, page: null };
+    if (!same) return { ...base, read_at: null, page: null };
+    if (!prev.run_id) return { ...prev };
+    const { run_id: _lost, ...rest } = prev;
+    return { ...rest, read_at: null };
   }
 }
 
@@ -669,8 +688,11 @@ export async function runSocialRead(db: Db, client: Row, ctx: { rows: Map<string
   const local = meta.filter((p) => ids.includes(String(p.id))).map((p) => ({ address: profileAddress(p.network_metadata), network: p.network_type }))
     .filter((x): x is { address: Address; network: string } => !!x.address);
   const profileAddresses = local.map((x) => x.address);
-  const instagram = await readBio(profiles, pictures, (prev?.instagram ?? null) as InstagramState | null, io, now);
-  const linkedin_page = await readPage(profiles, (prev?.linkedin_page ?? null) as LinkedInPageState | null, io, now);
+  // The bio and the page are read together: each may wait up to a minute for its run, and each keeps its own failure.
+  const [instagram, linkedin_page] = await Promise.all([
+    readBio(profiles, pictures, (prev?.instagram ?? null) as InstagramState | null, io, now),
+    readPage(profiles, (prev?.linkedin_page ?? null) as LinkedInPageState | null, io, now),
+  ]);
   const langs = languageCounts(posts);
   const snapshot = snapshotOf(posts, now, {
     top: top.slice(0, TOP_POSTS).map((t) => t.post.id), languages: postLanguages(langs), topCountry: audience.countries[0]?.country ?? null,

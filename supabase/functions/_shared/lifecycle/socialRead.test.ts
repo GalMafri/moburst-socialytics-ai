@@ -2,7 +2,7 @@
 // The social_read step (spec: docs/superpowers/specs/2026-11-03-onboarding-
 // complete-design.md, sections 1 to 3 and 5), on a client added from Sprout
 // with no website: Olo-shaped, a LinkedIn page and an Instagram account.
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fakeDb, writeClientRpc } from "./fakeDb";
 import type { StepRow } from "./policy";
 import type { LinkedInPage } from "../apify/linkedinPage";
@@ -86,6 +86,9 @@ const oloClient = (over: Record<string, unknown> = {}) => ({
   sprout_customer_id: "1676448", look_since: null, harvested_design_references: [], ...over,
 });
 const world = (c: Record<string, unknown>) => fakeDb({ clients: [c], sprout_profiles: PROFILES.map((p) => ({ ...p })) }, { lifecycle_write_client: writeClientRpc });
+/** The warnings a test expects, kept off the output and read back. */
+const quietWarnings = () => vi.spyOn(console, "warn").mockImplementation(() => {});
+afterEach(() => vi.restoreAllMocks());
 const stepRow = (result: Record<string, unknown>): StepRow => ({ client_id: "c1", step: "social_read", inputs_key: "k", status: "done", attempts: 0, attempted_at: NOW.toISOString(), done_at: NOW.toISOString(), next_attempt_at: null, result, error: null });
 
 describe("posts as the step reads them", () => {
@@ -300,9 +303,11 @@ describe("runSocialRead", () => {
     const next = await runSocialRead(db, c, { rows }, collect.fake);
     expect(asked).toBe("r9");
     expect((next as { result: Record<string, unknown> }).result.instagram).toMatchObject({ bio: { biography: "Austin" } });
+    const warn = quietWarnings();
     const missing = io({ instagram: async () => { throw new Error("APIFY_API_TOKEN is not set"); } });
     const d = oloClient();
     expect(await runSocialRead(world(d), d, { rows: new Map() }, missing.fake)).toMatchObject({ status: "done", result: { instagram: null } });
+    expect(warn.mock.calls).toEqual([["[social_read] Instagram bio not read:", "APIFY_API_TOKEN is not set"]]);
   });
 });
 
@@ -368,12 +373,14 @@ describe("snapshotOf", () => {
     const afterFail = await runSocialRead(db, c, { rows: new Map([["social_read", stepRow(old)]]) }, failed.fake);
     expect(pageOf((afterFail as { result: Record<string, unknown> }).result)).toMatchObject({ name: "Olo" });
     expect((afterFail as { result: { linkedin_page: Record<string, unknown> } }).result.linkedin_page).toMatchObject({ status: "FAILED" });
+    const warn = quietWarnings();
     const thrown = io({ linkedinPage: async () => { throw new Error("APIFY_API_TOKEN is not set"); } });
     const afterThrow = await runSocialRead(db, c, { rows: new Map([["social_read", stepRow(old)]]) }, thrown.fake);
     expect(pageOf((afterThrow as { result: Record<string, unknown> }).result)).toMatchObject({ name: "Olo" });
     const none = oloClient();
     expect(await runSocialRead(world(none), none, { rows: new Map() }, thrown.fake)).toMatchObject({ status: "done", result: { linkedin_page: null } });
     expect(pageOf(null)).toBeNull();
+    expect(warn.mock.calls).toEqual([["[social_read] LinkedIn page not read:", "APIFY_API_TOKEN is not set"], ["[social_read] LinkedIn page not read:", "APIFY_API_TOKEN is not set"]]);
   });
 
   it("the page read alone is not a move: a quiet week with a new page returns moved null and the same version", async () => {
@@ -414,6 +421,7 @@ describe("snapshotOf", () => {
     const result = (out as { result: Record<string, unknown> }).result;
     const old = { ...result, linkedin_page: { ...(result.linkedin_page as object), key: "7:olo-old", read_at: ago(1) } };
     expect(pageOf(old)).toMatchObject({ name: "Olo" });
+    const warn = quietWarnings();
     for (const fake of [
       io({ linkedinPage: async () => ({ state: "failed", run_id: "p2", status: "FAILED" }) }),
       io({ linkedinPage: async () => { throw new Error("boom"); } }),
@@ -423,6 +431,88 @@ describe("snapshotOf", () => {
       expect(pageOf(r)).toBeNull();
       expect(r.linkedin_page).toMatchObject({ key: "7:olo", read_at: null });
     }
+    expect(warn.mock.calls).toEqual([["[social_read] LinkedIn page not read:", "boom"]]);
+  });
+
+  it("drops a pending run that can no longer be read, so the next look starts a new read of the page and the bio (final review)", async () => {
+    const warn = quietWarnings();
+    const c = oloClient();
+    const db = world(c);
+    const pending = io({ linkedinPage: async () => ({ state: "pending", run_id: "p9" }), instagram: async () => ({ state: "pending", run_id: "r9" }) });
+    const first = ((await runSocialRead(db, c, { rows: new Map() }, pending.fake)) as { result: Record<string, unknown> }).result;
+    expect(first).toMatchObject({ linkedin_page: { run_id: "p9" }, instagram: { run_id: "r9" } });
+    // Past Apify's keep time a run answers 404: collecting it throws.
+    const asked: Array<string | null> = [];
+    const gone = io({
+      linkedinPage: async (_url, runId) => { asked.push(runId); throw new Error("Apify answered 404"); },
+      instagram: async (_handle, runId) => { asked.push(runId); throw new Error("Apify answered 404"); },
+    });
+    const second = ((await runSocialRead(db, c, { rows: new Map([["social_read", stepRow(first)]]) }, gone.fake)) as { result: Record<string, unknown> }).result;
+    expect(asked.sort()).toEqual(["p9", "r9"]);
+    expect(second.linkedin_page).not.toHaveProperty("run_id");
+    expect(second.instagram).not.toHaveProperty("run_id");
+    // The next look starts a new read of each, with no run id, and both land.
+    const runIds: Array<string | null> = [];
+    const fresh = io({ instagram: async (handle, runId) => { runIds.push(runId); return { state: "read", run_id: "r10", usd: null, bio: { handle, biography: "Austin", links: [], full_name: null, category: null } }; } });
+    const third = ((await runSocialRead(db, c, { rows: new Map([["social_read", stepRow(second)]]) }, fresh.fake)) as { result: Record<string, unknown> }).result;
+    expect(fresh.calls.linkedinPage).toEqual([null]);
+    expect(runIds).toEqual([null]);
+    expect(pageOf(third)).toMatchObject({ name: "Olo" });
+    expect(third.instagram).toMatchObject({ bio: { biography: "Austin" } });
+    expect(warn.mock.calls.map((w) => w[1]).sort()).toEqual(["Apify answered 404", "Apify answered 404"]);
+  });
+
+  it("starts a new bio read after a changed profile's run can no longer be read, though an older bio is kept meanwhile", async () => {
+    const warn = quietWarnings();
+    const c = oloClient();
+    const db = world(c);
+    const read = ((await runSocialRead(db, c, { rows: new Map() }, io().fake)) as { result: Record<string, unknown> }).result;
+    expect(read.instagram).toMatchObject({ handle: "olo.hq", bio: { biography: "Restaurant ordering. Austin, Texas" } });
+    // The handle changes: a new run starts and the old bio is kept while it runs.
+    db.tables.sprout_profiles.find((p) => p.sprout_profile_id === 8)!.native_name = "olo.eats";
+    const started = ((await runSocialRead(db, c, { rows: new Map([["social_read", stepRow(read)]]) }, io({ instagram: async () => ({ state: "pending", run_id: "r11" }) }).fake)) as { result: Record<string, unknown> }).result;
+    expect(started.instagram).toMatchObject({ handle: "olo.eats", run_id: "r11", bio: { biography: "Restaurant ordering. Austin, Texas" } });
+    const lost = ((await runSocialRead(db, c, { rows: new Map([["social_read", stepRow(started)]]) }, io({ instagram: async () => { throw new Error("Apify answered 404"); } }).fake)) as { result: Record<string, unknown> }).result;
+    expect(lost.instagram).not.toHaveProperty("run_id");
+    expect(lost.instagram).toMatchObject({ handle: "olo.eats", bio: { biography: "Restaurant ordering. Austin, Texas" } });
+    const runIds: Array<string | null> = [];
+    const fresh = io({ instagram: async (handle, runId) => { runIds.push(runId); return { state: "read", run_id: "r12", usd: null, bio: { handle, biography: "Eats", links: [], full_name: null, category: null } }; } });
+    const next = ((await runSocialRead(db, c, { rows: new Map([["social_read", stepRow(lost)]]) }, fresh.fake)) as { result: Record<string, unknown> }).result;
+    expect(runIds).toEqual([null]);
+    expect(next.instagram).toMatchObject({ handle: "olo.eats", bio: { biography: "Eats" } });
+    // Read once, it is kept while the profile stays the same.
+    const kept = io();
+    await runSocialRead(db, c, { rows: new Map([["social_read", stepRow(next)]]) }, kept.fake);
+    expect(kept.calls.instagram).toBe(0);
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads the bio and the page together, and one that fails never drops the other (final review)", async () => {
+    // Each read waits until the other has started: read one after the other, the first would give up.
+    let pageStarted!: () => void;
+    let bioStarted!: () => void;
+    const page = new Promise<void>((r) => { pageStarted = r; });
+    const bio = new Promise<void>((r) => { bioStarted = r; });
+    const alongside = (other: Promise<void>) => Promise.race([other, new Promise<void>((_, no) => setTimeout(() => no(new Error("the other read did not start alongside")), 500))]);
+    const together = io({
+      instagram: async (handle) => { bioStarted(); await alongside(page); return { state: "read", run_id: "r1", usd: null, bio: { handle, biography: "Austin", links: [], full_name: null, category: null } }; },
+      linkedinPage: async (url) => { pageStarted(); await alongside(bio); return { state: "read", run_id: "p1", usd: null, page: PAGE(url) }; },
+    });
+    const c = oloClient();
+    const both = ((await runSocialRead(world(c), c, { rows: new Map() }, together.fake)) as { result: Record<string, unknown> }).result;
+    expect(both.instagram).toMatchObject({ bio: { biography: "Austin" } });
+    expect(pageOf(both)).toMatchObject({ name: "Olo" });
+
+    const warn = quietWarnings();
+    const d = oloClient();
+    const noBio = ((await runSocialRead(world(d), d, { rows: new Map() }, io({ instagram: async () => { throw new Error("Apify is down"); } }).fake)) as { result: Record<string, unknown> }).result;
+    expect(noBio.instagram).toBeNull();
+    expect(pageOf(noBio)).toMatchObject({ name: "Olo" });
+    const e = oloClient();
+    const noPage = ((await runSocialRead(world(e), e, { rows: new Map() }, io({ linkedinPage: async () => { throw new Error("Apify is down"); } }).fake)) as { result: Record<string, unknown> }).result;
+    expect(noPage.linkedin_page).toBeNull();
+    expect(noPage.instagram).toMatchObject({ bio: { biography: "Restaurant ordering. Austin, Texas" } });
+    expect(warn.mock.calls).toEqual([["[social_read] Instagram bio not read:", "Apify is down"], ["[social_read] LinkedIn page not read:", "Apify is down"]]);
   });
 });
 
