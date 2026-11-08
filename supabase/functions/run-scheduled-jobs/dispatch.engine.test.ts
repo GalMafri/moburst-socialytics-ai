@@ -76,7 +76,7 @@ type Switch = "none" | "n8n-bare" | "n8n" | "unreadable" | "shadow" | "app" | "a
 const placeholder = (kind: "social" | "competitive") => REGISTRY.get(`placeholder_${kind}`)!;
 const appPipeline = (kind: "social" | "competitive"): PipelineDefinition => ({ ...placeholder(kind), name: `real_${kind}`, modes: ["shadow", "app"], appCapable: true });
 
-function harness(w: ReturnType<typeof world>, sw: Switch, opts: { transport?: "accept" | "reject" | "throw"; startFails?: boolean; appRun?: () => AppRunView | null } = {}) {
+function harness(w: ReturnType<typeof world>, sw: Switch, opts: { transport?: "accept" | "reject" | "throw"; startFails?: boolean; appRun?: () => AppRunView | null; alert?: (text: string) => Promise<boolean> } = {}) {
   const posts: string[] = [];
   const saved: Array<Record<string, unknown>> = [];
   const starts: ReportPipelineStart[] = [];
@@ -111,6 +111,7 @@ function harness(w: ReturnType<typeof world>, sw: Switch, opts: { transport?: "a
     async checkLandscape() { return TRACKED; },
     async saveJob(patch) { saved.push(JSON.parse(JSON.stringify(patch))); order.push(`save ${patch.phase ?? "-"}`); Object.assign(j, patch); },
     ...engineDeps(),
+    ...(opts.alert ? { alert: opts.alert } : {}),
   });
   const run = async (j: ScheduledJob): Promise<JobOutcome> => {
     const outcome = await runDispatch(j, deps(j));
@@ -474,4 +475,61 @@ describe("no automatic hand-off to n8n", () => {
       expect(w.tables.competitive.map((r) => r.id)).toEqual(["old-complete"]);
     }
   });
+});
+
+describe("app: one Slack alert for a report still not made after a day", () => {
+  const HOUR = 60;
+  const PAGE = (kind: "social" | "competitive") => `https://socialytics.moburst.com/clients/client-1/${kind === "social" ? "" : "competitive/"}reports`;
+  const collect = () => {
+    const sent: string[] = [];
+    return { sent, alert: async (text: string) => { sent.push(text); return true; } };
+  };
+
+  it("names the in-app run that stopped, once, and the made message when the report is made", async () => {
+    const w = world(["social"]);
+    const slack = collect();
+    let view: AppRunView = { status: "stopped", heartbeat_at: NOW.toISOString(), outcome: "Step fetch did not finish in 5 tries" };
+    const h = harness(w, "app", { appRun: () => view, alert: slack.alert });
+    const j = job("social");
+    await h.run(j);
+    w.tables.clock = minutes(25 * HOUR);
+    const again = await h.run({ ...j, status: "running" });
+    expect(again.status).toBe("queued");
+    expect(slack.sent).toEqual([`<@U03AZ88435H> The social report for Fixture (October 2026) is still not made a day after its first try. Reason: the in-app run stopped. ${PAGE("social")}`]);
+    expect((again.result as Record<string, unknown>).alerted_at).toBe(minutes(25 * HOUR).toISOString());
+    // The next run is made in the app; the alert is kept through it, and no second one goes out.
+    Object.assign(j, { status: "running", phase: null, report_id: null, result: again.result });
+    w.tables.clock = new Date(again.available_at!);
+    view = { status: "running", heartbeat_at: w.tables.clock.toISOString(), outcome: null };
+    expect((await h.run(j)).result).toMatchObject({ engine: "app", alerted_at: minutes(25 * HOUR).toISOString() });
+    w.tables.reports.at(-1)!.status = "completed";
+    expect((await h.run({ ...j, status: "running" })).status).toBe("done");
+    expect(slack.sent).toHaveLength(2);
+    expect(slack.sent[1]).toBe(`<@U03AZ88435H> The social report for Fixture (October 2026) is made now. ${PAGE("social")}`);
+    expect(h.posts).toEqual([]);
+  });
+
+  for (const [sw, reason] of [
+    ["app-no-pipeline", "the in-app pipeline could not start"],
+    ["unreadable", "the report engine setting could not be read"],
+  ] as const) {
+    it(`words a report that could not start (${sw}) plainly, and alerts once`, async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      for (const kind of ["social", "competitive"] as const) {
+        const w = world([kind]);
+        const slack = collect();
+        const h = harness(w, sw, { alert: slack.alert });
+        const j = job(kind);
+        for (const at of [0, 25 * HOUR, 27 * HOUR]) {
+          w.tables.clock = minutes(at);
+          const out = await h.run(j);
+          expect(out.status).toBe("queued");
+          Object.assign(j, { status: "running", phase: null, report_id: null, result: out.result });
+        }
+        expect(slack.sent).toEqual([`<@U03AZ88435H> The ${kind} report for Fixture (October 2026) is still not made a day after its first try. Reason: ${reason}. ${PAGE(kind)}`]);
+        expect(h.posts).toEqual([]);
+      }
+      warn.mockRestore();
+    });
+  }
 });

@@ -1,8 +1,9 @@
 // @vitest-environment node
 // Node, like the Deno runtime, has AbortSignal.timeout; jsdom does not.
-import { describe, it, expect } from "vitest";
-import { HELD_REDO_MINUTES, LAST_RUN_LEAD_MINUTES, makePoster, MANUAL_RUN_DAYS, manualRun, NEEDS_TRACKING, nextRunOfOccurrence, retryWaitMinutes, runDispatch, type DispatchDeps, type DispatchStore, type ScheduleRow } from "./dispatch";
+import { describe, it, expect, vi } from "vitest";
+import { ALERT_AFTER_MINUTES, HELD_REDO_MINUTES, LAST_RUN_LEAD_MINUTES, makePoster, MANUAL_RUN_DAYS, manualRun, NEEDS_TRACKING, nextRunOfOccurrence, plainReason, retryWaitMinutes, runDispatch, type DispatchDeps, type DispatchStore, type ScheduleRow } from "./dispatch";
 import { HELD_REDOS } from "../_shared/competitive/reportEvidence";
+import { LITAL_SLACK, postIssue } from "../_shared/alerts/slack";
 import { RETRY_MINUTES } from "./worker";
 import type { JobOutcome, ScheduledJob } from "../_shared/scheduled-jobs/types";
 import type { LandscapeCheck } from "../_shared/competitive/landscapeCheck";
@@ -143,7 +144,7 @@ const BUSY: LandscapeCheck = { ok: false, code: "RIVALIQ_BUSY", status: 429, mes
 
 type Transport = "accept" | "reject" | "throw";
 
-function harness(w: ReturnType<typeof world>, transport: Transport = "accept", opts: { onCompetitivePost?: () => void; dryRun?: boolean; tracking?: LandscapeCheck } = {}) {
+function harness(w: ReturnType<typeof world>, transport: Transport = "accept", opts: { onCompetitivePost?: () => void; dryRun?: boolean; tracking?: LandscapeCheck; alert?: (text: string) => Promise<boolean> } = {}) {
   const posts: Array<{ url: string; body: Record<string, unknown> }> = [];
   const saved: Array<Record<string, unknown>> = [];
   const checks: string[] = [];
@@ -169,6 +170,7 @@ function harness(w: ReturnType<typeof world>, transport: Transport = "accept", o
     async saveJob(patch) { saved.push(patch); Object.assign(job, patch); },
     // These rules are checked on the n8n route, a switch set by hand; the app route is in dispatch.engine.test.ts.
     async engine() { return { engine: "n8n" as const }; },
+    ...(opts.alert ? { alert: opts.alert } : {}),
   });
   /** One lease of the job, written back the way the worker's finish() does. */
   const run = async (job: ScheduledJob): Promise<JobOutcome> => {
@@ -695,5 +697,223 @@ describe("a held competitive analysis", () => {
     w.tables.competitive.at(-1)!.status = "complete";
     expect((await h.run(job)).status).toBe("done");
     expect((job.result as { runs: Array<{ outcome: string }> }).runs.map((r) => r.outcome)).toEqual(["held", "ran"]);
+  });
+});
+
+describe("one Slack alert for a report still not made after a day", () => {
+  const HOUR = 3_600_000;
+  const SOCIAL_PAGE = "https://socialytics.moburst.com/clients/client-1/reports";
+  const COMPETITIVE_PAGE = "https://socialytics.moburst.com/clients/client-1/competitive/reports";
+  const collect = () => {
+    const sent: string[] = [];
+    return { sent, alert: async (text: string) => { sent.push(text); return true; } };
+  };
+  type H = ReturnType<typeof harness>;
+  /** The latest social report stops; the lease that finds it at this time runs it again later. */
+  const stopAt = async (w: ReturnType<typeof world>, h: H, job: ScheduledJob, when: Date) => {
+    w.tables.clock = when;
+    w.tables.reports.at(-1)!.status = "failed";
+    const again = await h.run(job);
+    expect(again.status).toBe("queued");
+    return again;
+  };
+  /** The occurrence's next run starts when it is due. */
+  const startNext = async (w: ReturnType<typeof world>, h: H, job: ScheduledJob, again: JobOutcome) => {
+    w.tables.clock = new Date(again.available_at!);
+    expect((await h.run(job)).status).toBe("waiting");
+  };
+
+  it("counts a day from when the occurrence's first run started", () => {
+    expect(ALERT_AFTER_MINUTES).toBe(24 * 60);
+  });
+
+  it("alerts once when the report runs again a day after its first run started, keeps alerted_at, and sends one made message", async () => {
+    const w = world({ kinds: ["social"] });
+    const slack = collect();
+    const h = harness(w, "accept", { alert: slack.alert });
+    const job = jobFor("social");
+    await h.run(job);
+    // A minute short of a day: no alert.
+    let again = await stopAt(w, h, job, new Date(NOW.getTime() + 24 * HOUR - 60_000));
+    expect(slack.sent).toEqual([]);
+    expect(job.result?.alerted_at).toBeUndefined();
+    await startNext(w, h, job, again);
+    again = await stopAt(w, h, job, w.tables.clock);
+    expect(slack.sent).toEqual([`${LITAL_SLACK} The social report for Fixture (September 2026) is still not made a day after its first try. Reason: the n8n workflow did not finish it. ${SOCIAL_PAGE}`]);
+    const alertedAt = w.tables.clock.toISOString();
+    expect(job.result?.alerted_at).toBe(alertedAt);
+    // Retries go on as before, with no second alert.
+    expect(again).toMatchObject({ status: "queued", deferred: true });
+    for (let i = 0; i < 3; i++) {
+      await startNext(w, h, job, again);
+      again = await stopAt(w, h, job, new Date(w.tables.clock.getTime() + HOUR));
+    }
+    expect(slack.sent).toHaveLength(1);
+    expect(job.result?.alerted_at).toBe(alertedAt);
+    // Made at last: one short message, and nothing more.
+    await startNext(w, h, job, again);
+    w.tables.reports.at(-1)!.status = "completed";
+    expect((await h.run(job)).status).toBe("done");
+    expect(slack.sent).toHaveLength(2);
+    expect(slack.sent[1]).toBe(`${LITAL_SLACK} The social report for Fixture (September 2026) is made now. ${SOCIAL_PAGE}`);
+    expect(w.tables.schedules[0].next_run_at).toBe(NEXT);
+  });
+
+  it("alerts when the run that ended is found exactly a day after the first run started", async () => {
+    const w = world({ kinds: ["social"] });
+    const slack = collect();
+    const h = harness(w, "accept", { alert: slack.alert });
+    const job = jobFor("social");
+    await h.run(job);
+    await stopAt(w, h, job, new Date(NOW.getTime() + 24 * HOUR));
+    expect(slack.sent).toHaveLength(1);
+    expect(job.result?.alerted_at).toBe(new Date(NOW.getTime() + 24 * HOUR).toISOString());
+  });
+
+  it("never alerts for a report made within a day, even after runs that stopped", async () => {
+    const w = world({ kinds: ["social"] });
+    const slack = collect();
+    const h = harness(w, "accept", { alert: slack.alert });
+    const job = jobFor("social");
+    await h.run(job);
+    let again = await stopAt(w, h, job, new Date(NOW.getTime() + HOUR));
+    await startNext(w, h, job, again);
+    again = await stopAt(w, h, job, new Date(NOW.getTime() + 20 * HOUR));
+    await startNext(w, h, job, again);
+    w.tables.clock = new Date(NOW.getTime() + 23 * HOUR);
+    w.tables.reports.at(-1)!.status = "completed";
+    expect((await h.run(job)).status).toBe("done");
+    expect(slack.sent).toEqual([]);
+    expect(job.result?.alerted_at).toBeUndefined();
+  });
+
+  it("posts nothing and keeps nothing without the webhook; once it is set, the next run that stops alerts", async () => {
+    const w = world({ kinds: ["social"] });
+    let webhook: string | undefined;
+    const posted: string[] = [];
+    const fetchImpl = async (_url: string | URL | Request, init?: RequestInit) => { posted.push(JSON.parse(String(init!.body)).text); return new Response("ok"); };
+    const h = harness(w, "accept", { alert: (text) => postIssue(webhook, text, fetchImpl as typeof fetch) });
+    const job = jobFor("social");
+    await h.run(job);
+    let again = await stopAt(w, h, job, new Date(NOW.getTime() + 25 * HOUR));
+    expect(posted).toEqual([]);
+    expect(job.result?.alerted_at).toBeUndefined();
+    // The report keeps running again, as before.
+    expect(again).toMatchObject({ status: "queued", deferred: true });
+    webhook = "https://hooks.slack.test/services/fixture";
+    await startNext(w, h, job, again);
+    again = await stopAt(w, h, job, new Date(w.tables.clock.getTime() + HOUR));
+    expect(posted).toHaveLength(1);
+    expect(posted[0]).toMatch(new RegExp(`^${LITAL_SLACK}.*still not made`));
+    expect(job.result?.alerted_at).toBe(w.tables.clock.toISOString());
+    await startNext(w, h, job, again);
+    await stopAt(w, h, job, new Date(w.tables.clock.getTime() + HOUR));
+    expect(posted).toHaveLength(1);
+  });
+
+  it("an alert that fails changes nothing about the run and keeps nothing", async () => {
+    const plain = world({ kinds: ["social"] });
+    const ph = harness(plain);
+    const pj = jobFor("social");
+    await ph.run(pj);
+    const expected = await stopAt(plain, ph, pj, new Date(NOW.getTime() + 25 * HOUR));
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const w = world({ kinds: ["social"] });
+    const h = harness(w, "accept", { alert: async () => { throw new Error("Slack is down"); } });
+    const job = jobFor("social");
+    await h.run(job);
+    const outcome = await stopAt(w, h, job, new Date(NOW.getTime() + 25 * HOUR));
+    expect(outcome).toEqual(expected);
+    expect(job.result?.alerted_at).toBeUndefined();
+    expect(w.writes).toEqual(plain.writes);
+    warn.mockRestore();
+  });
+
+  it("names a competitive report and links the client's competitive reports page", async () => {
+    const w = world({ kinds: ["competitive"] });
+    const slack = collect();
+    const h = harness(w, "accept", { alert: slack.alert });
+    const job = jobFor("competitive");
+    await h.run(job);
+    w.tables.clock = new Date(NOW.getTime() + 25 * HOUR);
+    w.tables.competitive.at(-1)!.status = "failed";
+    expect((await h.run(job)).status).toBe("queued");
+    expect(slack.sent).toEqual([`${LITAL_SLACK} The competitive report for Fixture (September 2026) is still not made a day after its first try. Reason: the n8n workflow did not finish it. ${COMPETITIVE_PAGE}`]);
+  });
+
+  it("a manual run alerts the same way, for the person's period", async () => {
+    const w = world({ kinds: ["social"] });
+    const slack = collect();
+    const h = harness(w, "accept", { alert: slack.alert });
+    const job = manualJob("social");
+    await h.run(job);
+    await stopAt(w, h, job, new Date(NOW.getTime() + 25 * HOUR));
+    expect(slack.sent).toEqual([`${LITAL_SLACK} The social report for Fixture (August 2026) is still not made a day after its first try. Reason: the n8n workflow did not finish it. ${SOCIAL_PAGE}`]);
+  });
+
+  it("a dry run never alerts", async () => {
+    const w = world({ kinds: ["social"] });
+    w.tables.reports.push({ id: "social-0", client_id: "client-1", status: "failed", date_range_start: "2026-09-01", date_range_end: "2026-09-30", created_at: DUE });
+    const slack = collect();
+    const h = harness(w, "accept", { alert: slack.alert, dryRun: true });
+    const r = await h.run(jobFor("social", { phase: "sent", report_id: "social-0", result: { range: { start: "2026-09-01", end: "2026-09-30" }, runs: [{ report_id: "social-0", started_at: new Date(NOW.getTime() - 48 * HOUR).toISOString() }] } }));
+    expect(r.status).toBe("waiting");
+    expect(slack.sent).toEqual([]);
+  });
+
+  it("a held analysis made again a day after its first run alerts once; redos that end held send no made message", async () => {
+    const w = world({ kinds: ["competitive"] });
+    const slack = collect();
+    const h = harness(w, "accept", { alert: slack.alert });
+    const job = jobFor("competitive");
+    for (let redo = 0; redo <= HELD_REDOS; redo++) {
+      expect((await h.run(job)).status).toBe("waiting");
+      Object.assign(w.tables.competitive.at(-1)!, { status: "complete", held: true });
+      w.tables.clock = new Date(w.tables.clock.getTime() + HOUR);
+      const out = await h.run(job);
+      expect(out.status).toBe(redo < HELD_REDOS ? "queued" : "done");
+      // Held an hour after the first run: no alert. Held again a day later: one.
+      expect(slack.sent).toHaveLength(redo === 0 ? 0 : 1);
+      if (out.available_at) w.tables.clock = new Date(out.available_at);
+    }
+    expect(slack.sent[0]).toBe(`${LITAL_SLACK} The competitive report for Fixture (September 2026) is still not made a day after its first try. Reason: the analysis did not pass its checks. ${COMPETITIVE_PAGE}`);
+    expect(job.result?.alerted_at).toBeDefined();
+  });
+
+  it("a held analysis that passes after the alert sends the made message", async () => {
+    const w = world({ kinds: ["competitive"] });
+    const slack = collect();
+    const h = harness(w, "accept", { alert: slack.alert });
+    const job = jobFor("competitive");
+    for (let redo = 0; redo < 2; redo++) {
+      await h.run(job);
+      Object.assign(w.tables.competitive.at(-1)!, { status: "complete", held: true });
+      w.tables.clock = new Date(w.tables.clock.getTime() + HOUR);
+      w.tables.clock = new Date((await h.run(job)).available_at!);
+    }
+    expect(slack.sent).toHaveLength(1);
+    await h.run(job);
+    w.tables.competitive.at(-1)!.status = "complete";
+    expect((await h.run(job)).status).toBe("done");
+    expect(slack.sent).toHaveLength(2);
+    expect(slack.sent[1]).toBe(`${LITAL_SLACK} The competitive report for Fixture (September 2026) is made now. ${COMPETITIVE_PAGE}`);
+  });
+
+  it("words each reason a run ended for in plain words, never raw error text", () => {
+    expect(plainReason("the in-app pipeline stopped (Step fetch did not finish in 5 tries)")).toBe("the in-app run stopped");
+    expect(plainReason("the in-app pipeline run is gone")).toBe("the in-app run stopped");
+    expect(plainReason("the in-app pipeline stopped answering")).toBe("the in-app run stopped answering");
+    expect(plainReason("the in-app pipeline finished without completing the report")).toBe("the in-app run ended without the report");
+    expect(plainReason("the in-app pipeline could not be queued (report_pipeline_start failed)")).toBe("the in-app run could not start");
+    expect(plainReason("the report could not start in the app (The engine switch could not be read (relation does not exist))")).toBe("the report engine setting could not be read");
+    expect(plainReason("the report could not start in the app (No engine switch is given to this dispatch)")).toBe("the report engine setting could not be read");
+    expect(plainReason("the report could not start in the app (No app-capable social pipeline with its secrets set is in this deployment)")).toBe("the in-app pipeline could not start");
+    expect(plainReason("the report was removed")).toBe("the report was removed before it finished");
+    expect(plainReason("the worker stopped 3 times before the request was answered")).toBe("the run kept stopping before it started");
+    for (const n8n of ["the workflow stopped answering", "the workflow did not finish the report", "the workflow refused the request (503)", "the request was never answered"]) {
+      expect(plainReason(n8n)).toBe("the n8n workflow did not finish it");
+    }
+    expect(plainReason("duplicate key value violates unique constraint \"reports_pkey\"")).toBe("it has not finished yet");
   });
 });

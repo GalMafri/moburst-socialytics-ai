@@ -13,6 +13,10 @@
 //
 // Authenticated with the operational secret (X-Socialytics-Secret or X-Cron-Secret).
 //
+// A report dispatch still not made a day after its first try posts one
+// message to #ai-products-issues through the SLACK_ISSUES_WEBHOOK_URL secret
+// (_shared/alerts/slack.ts), and one more when that report is made.
+//
 // In-app report pipelines (_shared/pipelines): each tick also runs due
 // report_pipeline steps in a lane of their own (worker.ts), and the daily
 // sweep removes expired pipeline payloads and old pipeline runs.
@@ -81,6 +85,7 @@ import { closeAbandonedRuns } from "../_shared/reports/schedule.ts";
 import { refreshCompetitorFeed } from "../_shared/competitive/refreshFeed.ts";
 import { checkClientLandscape, landscapeClient, recordTrackingCheck, RIVALIQ_UNAVAILABLE, type LandscapeCheck } from "../_shared/competitive/landscapeCheck.ts";
 import { makePoster, runDispatch, type DispatchDeps } from "./dispatch.ts";
+import { ISSUES_WEBHOOK_ENV, postIssue } from "../_shared/alerts/slack.ts";
 import { runFeedJob } from "./feed.ts";
 import { runVoiceProfile, runWeekPlan, runWeekRevise } from "../_shared/calendar/runWeek.ts";
 import { runMomentFeedback, runMomentsList, runWeekMoments } from "../_shared/calendar/runMoments.ts";
@@ -170,6 +175,9 @@ Deno.serve(async (req) => {
       engine: (kind, clientId) => readEngine(db, kind, clientId, { registry: REGISTRY, env }),
       startPipeline: (a) => startReportPipeline(db, a),
       pipelineRun: (reportId) => appRunView(db, reportId),
+      // A report still not made a day after its first try: one message to #ai-products-issues.
+      // Without the webhook secret nothing is posted, and the report keeps running again.
+      alert: (text) => postIssue(Deno.env.get(ISSUES_WEBHOOK_ENV), text),
     });
     const pipelineDeps: RunnerDeps = {
       now: () => new Date(),

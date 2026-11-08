@@ -57,8 +57,20 @@
 // dispatch given no switch, a switch that cannot be read, or an app with no
 // pipeline that can run in this deployment (a secret not set) waits, and
 // runs again later the same way.
+//
+// A report still not made a day after its first try: when a run of the
+// occurrence ends without the report (or a held analysis is made again)
+// ALERT_AFTER_MINUTES or more after the occurrence's first run started, one
+// Slack message goes to #ai-products-issues (_shared/alerts/slack.ts), and
+// alerted_at is kept in the job's memory so no later run of the same
+// occurrence alerts again. It is kept only when the message was posted, so
+// with no webhook set nothing is recorded and the next run that ends alerts
+// once the webhook is there. When the report is then made, one short message
+// says so. The alert never changes what the dispatch does: retries go on as
+// before.
 
 import { nextRun, rangeForSchedule, type ReportRange } from "../_shared/reports/schedule.ts";
+import { madeReportText, reportsLink, stuckReportText } from "../_shared/alerts/slack.ts";
 import { STUCK_AFTER_MINUTES } from "../_shared/reports/payloads.ts";
 import { isTrackingProblem, LANDSCAPE_MISSING, type LandscapeCheck } from "../_shared/competitive/landscapeCheck.ts";
 import { HELD_REDOS } from "../_shared/competitive/reportEvidence.ts";
@@ -85,6 +97,29 @@ export const LAST_RUN_LEAD_MINUTES = 180;
 export const MANUAL_RUN_DAYS = 7;
 /** The wait before a held competitive analysis is made again. */
 export const HELD_REDO_MINUTES = 24 * 60;
+/** A report still not made this long after its occurrence's first run started gets one Slack alert. */
+export const ALERT_AFTER_MINUTES = 24 * 60;
+
+/** Why a run ended, in the plain words the Slack alert uses; never raw error text. */
+const PLAIN_REASONS: Array<[RegExp, string]> = [
+  [/^the in-app pipeline stopped answering/, "the in-app run stopped answering"],
+  [/^the in-app pipeline (stopped|run is gone)/, "the in-app run stopped"],
+  [/^the in-app pipeline finished without completing the report/, "the in-app run ended without the report"],
+  [/^the in-app pipeline could not be queued/, "the in-app run could not start"],
+  [/^the report could not start in the app \((The engine switch could not be read|No engine switch)/, "the report engine setting could not be read"],
+  [/^the report could not start in the app/, "the in-app pipeline could not start"],
+  [/^the report was removed/, "the report was removed before it finished"],
+  [/^the worker stopped/, "the run kept stopping before it started"],
+  [/^the (workflow|request was never answered)/, "the n8n workflow did not finish it"],
+];
+
+/** The plain words for why a run of the report ended (the reasons runAgain is given below). */
+export function plainReason(why: string): string {
+  return PLAIN_REASONS.find(([pattern]) => pattern.test(why))?.[1] ?? "it has not finished yet";
+}
+
+/** Why a held analysis is made again, in the alert's words. */
+const HELD_REASON = "the analysis did not pass its checks";
 
 /** A run a person asked for, with no schedule behind it (scheduled_jobs.payload). */
 export interface ManualRun {
@@ -216,6 +251,8 @@ export interface DispatchDeps {
   startPipeline?(args: ReportPipelineStart): Promise<{ run_id: string }>;
   /** The in-app run that makes a report (app engine), or null. Without it the job watches the report's own 90-minute clock. */
   pipelineRun?(reportId: string): Promise<AppRunView | null>;
+  /** Posts one message to #ai-products-issues; true when it was posted. Absent: nothing is posted. */
+  alert?(text: string): Promise<boolean>;
 }
 
 /** One run of an occurrence, kept on the job for the logs. */
@@ -242,6 +279,8 @@ export interface DispatchMemory {
   /** Set only when the in-app pipeline makes the report (the app engine); an n8n run never carries it. */
   engine?: "app";
   pipeline_run_id?: string;
+  /** When the Slack alert for this occurrence was posted; set once, kept by every later run. */
+  alerted_at?: string;
   [key: string]: unknown;
 }
 
@@ -310,18 +349,47 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
   /** Where the schedule stands, for the logs; a manual run has no schedule to note. */
   const note = async (result: string | null) => { if (schedule) await d.store.note(schedule.id, result); };
 
+  const kind = competitive ? "competitive" : "social";
+  /** What the job keeps for the occurrence's next run: its period, its runs, and the alert once posted. */
+  const keep = (): DispatchMemory => ({ range: memory.range, runs, ...(memory.alerted_at ? { alerted_at: memory.alerted_at } : {}) });
+  /** The report's period, as this occurrence makes it. */
+  const period = (): ReportRange => memory.range ?? (manual ? manual.range : rangeForSchedule(schedule!.range_mode, now));
+  /** One Slack message; true when it was posted. Nothing here ever changes what the dispatch does. */
+  const tell = async (text: string): Promise<boolean> => {
+    if (!d.alert || d.dryRun) return false;
+    try {
+      return await d.alert(text);
+    } catch (e) {
+      console.warn(`[dispatch] The Slack message for the ${kind} report of ${client.id} was not sent (${e instanceof Error ? e.name : "error"}).`);
+      return false;
+    }
+  };
+  /**
+   * The occurrence's one alert: a run ended without the report a day or more
+   * after the first run started. Recorded on the memory only once posted.
+   */
+  const alertIfLate = async (reason: string): Promise<void> => {
+    if (memory.alerted_at || !d.alert || d.dryRun) return;
+    const first = Math.min(...runs.map((r) => Date.parse(r.started_at)).filter(Number.isFinite));
+    if (!Number.isFinite(first) || now.getTime() - first < ALERT_AFTER_MINUTES * MINUTE) return;
+    const text = stuckReportText({ client: client.name, kind, range: period(), reason, link: reportsLink(kind, client.id) });
+    if (await tell(text)) memory.alerted_at = now.toISOString();
+  };
+
   /** The run with this report ended; the occurrence runs again later, or closes. */
   const runAgain = async (reportId: string | null, why: string, run: ReportRun | null = null): Promise<JobOutcome> => {
     const open = reportId ? runs.find((r) => r.report_id === reportId && !r.ended_at) : undefined;
     if (open) Object.assign(open, { ended_at: now.toISOString(), outcome: "stopped" as const, note: (run?.error ? `${why}: ${run.error}` : why).slice(0, 300) });
-    const kept: DispatchMemory = { range: memory.range, runs };
-    if (d.dryRun) return { status: "waiting", reason: `dry run: would run again (${why})`, result: kept };
+    if (d.dryRun) return { status: "waiting", reason: `dry run: would run again (${why})`, result: keep() };
     if (reportId) {
       await d.store.dropReport(table, reportId);
       if (memory.set_id) await d.store.releaseSet(memory.set_id);
       // A competitive analysis that did not finish never holds the social report.
       if (competitive) await d.store.releaseHeldSocial(client.id);
     }
+    // Posted right before the save that keeps alerted_at, so a later run never posts it again.
+    await alertIfLate(plainReason(why));
+    const kept = keep();
     await d.saveJob({ phase: null, report_id: null, result: kept });
     const next = nextRunOfOccurrence(runs.length, now, deadline);
     if (!next) {
@@ -344,9 +412,11 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
         const held = runs.filter((r) => r.outcome === "held").length;
         const at = Math.min(now.getTime() + HELD_REDO_MINUTES * MINUTE, Date.parse(deadline) - LAST_RUN_LEAD_MINUTES * MINUTE);
         if (held <= HELD_REDOS && at > now.getTime()) {
-          const kept: DispatchMemory = { range: memory.range, runs };
-          if (d.dryRun) return { status: "waiting", reason: "dry run: would make the held analysis again", result: kept };
+          if (d.dryRun) return { status: "waiting", reason: "dry run: would make the held analysis again", result: keep() };
           if (memory.set_id) await d.store.releaseSet(memory.set_id);
+          // Not shown to clients, so not made yet: made again a day or more after the first run, it alerts once.
+          await alertIfLate(HELD_REASON);
+          const kept = keep();
           await d.saveJob({ phase: null, report_id: null, result: kept });
           await note(null);
           return { status: "queued", reason: `The analysis did not pass its checks; it is made again (${held} of ${HELD_REDOS}).`, available_at: new Date(at).toISOString(), deferred: true, result: kept };
@@ -355,6 +425,10 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
         Object.assign(open, { ended_at: now.toISOString(), outcome: "ran" as const });
       }
       if (!d.dryRun && schedule) await d.store.advance(schedule, moved ? schedule.next_run_at : followingRun(schedule, occurrence, now), "The report ran.");
+      // Made after the alert: one short message says so. A held analysis whose redos ran out was never made.
+      if (memory.alerted_at && !(competitive && run.held)) {
+        await tell(madeReportText({ client: client.name, kind, range: period(), link: reportsLink(kind, client.id) }));
+      }
       return { status: "done", result: { ...memory, runs, report_id: reportId } };
     }
     if (memory.engine === "app" && d.pipelineRun) {
