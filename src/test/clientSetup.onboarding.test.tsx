@@ -85,6 +85,26 @@ it('says where the logo and the brief came from', async () => {
   expect(screen.getByText("Drafted from the client's posts on Nov 3, 2026. You can rewrite it; the product never replaces your version.")).toBeInTheDocument();
 });
 
+it('says a logo and a time zone from the LinkedIn page came from the page, never from the website', async () => {
+  f.client = {
+    ...f.client, logo_url: 'https://x/logo-linkedin.png', timezone: 'America/New_York',
+    location: { source: 'profile_address', via: 'linkedin_page', locality: 'New York', timezone: 'America/New_York', website: null },
+    field_sources: { ...f.client.field_sources, timezone: { by: 'lifecycle', from: 'profile_address' }, logo_url: { by: 'lifecycle', at: NOW, from: 'linkedin_page' } },
+  };
+  mount();
+  expect(await screen.findByText("Worked out from the address on the client's LinkedIn page. You can change it here.")).toBeInTheDocument();
+  cleanup();
+  mount('brief');
+  expect(await screen.findByText("From the logo on the client's LinkedIn page, Nov 3, 2026. The website's logo replaces it once the website is found; a logo you upload is kept.")).toBeInTheDocument();
+  expect(screen.queryByText("The logo on file was taken from the client's website.")).toBeNull();
+});
+
+it('says a time zone from the agency is the one most of the agency\'s clients use', async () => {
+  f.client = { ...f.client, timezone: 'America/New_York', location: { source: 'agency', timezone: 'America/New_York', country: null, website: null }, field_sources: { ...f.client.field_sources, timezone: { by: 'lifecycle', from: 'agency' } } };
+  mount();
+  expect(await screen.findByText("Worked out from the time zone most of the agency's clients use, until the client's own location is found. You can change it here.")).toBeInTheDocument();
+});
+
 it('names the three competitors chosen, and why tracking waits, as a plain fact', async () => {
   mount('competitors');
   expect(await screen.findByText('Toast, ChowNow, Square')).toBeInTheDocument();

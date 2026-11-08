@@ -10,9 +10,9 @@
 //
 // In the order a new client goes through them:
 //   website         a website for a client with none, confirmed from its own posts (a client added from Sprout)
-//   brand_read      the website: brand identity, logo, location and timezone, country, language
+//   brand_read      the website: brand identity, logo, location and timezone, country, language (a page on another client's site: its language only)
 //   brief_pillars   a brief from the strategy document or the site when there is none, then pillars and keywords
-//   accounts        Sprout profiles matched by Sprout's brand name and by the site's profile links
+//   accounts        Sprout profiles matched by Sprout's brand name and by the site's profile links (none from another client's site)
 //   social_read     the client's profiles and posts, weekly: logo, brand, location, regions, languages and scored posts (socialRead.ts)
 //   access          the company slug, by the portal's slug rule
 //   design_refs     the client's designed posts per platform, checked weekly, and the visual style learned from them
@@ -20,7 +20,7 @@
 //   trend_profile   what Trends tracks: audience, topics, hashtags, exclusions, fit rubric, platforms
 //   trend_hashtags  the profile's hashtags refreshed from the newest best posts, once a month
 //   content_strategy the client's content strategy, written from all of the above once the profile is current
-//   tracking        RivalIQ tracking for the confirmed set (decision 1), then handles from RivalIQ
+//   tracking        RivalIQ tracking for the confirmed set (decision 1), then handles from RivalIQ; a client on another client's site waits for its own
 //   design_settings logo file, placement and background derived from data (decision 2)
 //   first_output    this week and next planned, and the first monthly report
 // A demo copy (a client the API demo made) runs only the steps its demo job asks for (run.ts).
@@ -32,9 +32,9 @@ import { liveRefsIO, readChoices, refreshReferences } from "../brand-references/
 import { defaultSproutCustomerId } from "../sprout/customer.ts";
 import { listCustomerProfiles } from "../sprout/profiles.ts";
 import { listBrandPosts, MAX_POST_PAGES, POSTS_YEAR_DAYS } from "../sprout/posts.ts";
-import { searchWebsite, searchWebsiteByName, webReader } from "../sprout/website.ts";
+import { searchWebsite, searchWebsiteByName, statedWebsite, webReader } from "../sprout/website.ts";
 import { fetchSiteHtml, logoOnPage, normalizeWebsite, openaiKeyFor, ResearchError, researchBrand } from "../brand/research.ts";
-import { anthropicKey, briefFromStrategyDoc, derivePillars, isGenericPillars, PillarsError, type PillarClient, type PillarPost } from "../brand/pillars.ts";
+import { anthropicKey, briefFromStrategyDoc, derivePillars, isGenericPillars, pageEvidence, PillarsError, type PillarClient, type PillarPost } from "../brand/pillars.ts";
 import { fetchSiteText, identifyCompetitors, IdentifyError } from "../competitive/identify.ts";
 import { detectCompetitorHandles } from "../competitive/detectHandles.ts";
 import { confirmDraftSet } from "../competitive/confirmSet.ts";
@@ -42,12 +42,14 @@ import { advanceSetupOnServer, resetTracking, rivalIqApi, SetupError, syncTracke
 import { LANDSCAPE_MISSING } from "../competitive/landscapeCheck.ts";
 import { scrapeMarkdown, searchWeb } from "../net/firecrawl.ts";
 import { FollowFailure } from "../competitive/rivaliqFollowFailure.ts";
-import { followerMarkets, runSocialRead, socialResult, socialVersionKey, topPostsText } from "./socialRead.ts";
+import { followerMarkets, pageOf, runSocialRead, socialResult, socialVersionKey, topPostsText } from "./socialRead.ts";
 import { liveSocialIO } from "./socialIO.ts";
 import { matchProfiles, platformsOf, profileKeyOf, profileListKey, siteProfileLinks, type SproutProfile } from "./accounts.ts";
 import { libraryPaths, MAX_REFS, pickBackground, placementFor } from "./designSettings.ts";
 import { referencesFor } from "../design-prompts/designRefs.ts";
 import { lifecycleMayWrite, setBy, sourceOf, writeClientFields } from "./fields.ts";
+import { parentPageFor, sameSiteClient } from "./parentPage.ts";
+import { zoneFromAgency } from "./agencyZone.ts";
 import { countryCode, htmlLanguage, regionsFor, replacesLocation, resolveLocation, SOURCE_RANK, zoneCountry } from "./location.ts";
 import { normName, slugify, textHash } from "./names.ts";
 import { cleanSiteText } from "./siteText.ts";
@@ -177,6 +179,25 @@ export function settled(rows: Map<string, StepRow>, step: string): boolean {
   return true;
 }
 
+/** The client has pillars (not the five generic ones) and keywords, whoever wrote them. */
+function hasPillarsAndKeywords(client: ClientRow): boolean {
+  return !isGenericPillars(client.content_pillars) && Array.isArray(client.social_keywords) && client.social_keywords.length > 0;
+}
+
+/**
+ * The LinkedIn page's part of brief_pillars' inputs key. While the client
+ * has no pillars and keywords, the page's text is an input, so a page read
+ * runs the step again (Kitcaster, 8 Nov: its posts alone gave none). A
+ * client with both keeps the part the step last ran on: a page read never
+ * runs a complete client again, and the run that completes one sets off no
+ * other (no step's inputs move on what it writes).
+ */
+function briefPageKey(client: ClientRow, rows: Map<string, StepRow>): string {
+  if (hasPillarsAndKeywords(client)) return str(rows.get("brief_pillars")?.inputs_key).match(/\|page:[0-9a-f]{8}(?=\||$)/)?.[0] ?? "";
+  const page = pageEvidence(pageOf(socialResult(rows)));
+  return page ? `|page:${textHash(page)}` : "";
+}
+
 /** A client whose own posts are its only evidence: no website, no strategy document, no brief a person wrote. */
 export function postsOnly(client: ClientRow): boolean {
   const personBrief = !!str(client.brief_text) && setBy(client.field_sources, "brief_text") !== "lifecycle";
@@ -269,7 +290,11 @@ export const STEPS: Record<string, StepDef> = {
   // one more post; then, at creation, when the name or profiles change and
   // monthly while there is none, a web search by name that counts only a
   // site linking to one of the client's profiles. Looked at again every 7
-  // days as posts arrive. The website it confirms is brand_read's input; a
+  // days as posts arrive. A website the client's LinkedIn page states comes
+  // first, as stated (subdomain and path kept) and with no search, unless it
+  // is another active client's own site (the same host and path,
+  // parentPage.ts sameSiteClient): that is recorded on the result and the
+  // search goes on as if none were stated. The website it confirms is brand_read's input; a
   // website the client has, or one a person set, is never replaced.
   website: {
     policy: { recheckDays: 7 },
@@ -277,10 +302,21 @@ export const STEPS: Record<string, StepDef> = {
       if (siteKey(client.website_url) || !lifecycleMayWrite(client.field_sources, "website_url")) return null;
       const ids = (await activeProfiles(db, client.id)).map((p) => p.id);
       const links = ((socialResult(rows)?.instagram?.bio?.links ?? []) as string[]).join(" ");
-      return ids.length ? `profiles:${ids.join(",")}|name:${normName(client.name)}${links ? `|bio:${textHash(links)}` : ""}` : null;
+      const stated = siteKey(statedWebsite(pageOf(socialResult(rows))));
+      return ids.length ? `profiles:${ids.join(",")}|name:${normName(client.name)}${links ? `|bio:${textHash(links)}` : ""}${stated ? `|page:${stated}` : ""}` : null;
     },
     async run(db, client, { previous, rows }) {
       if (siteKey(client.website_url) || !lifecycleMayWrite(client.field_sources, "website_url")) return { status: "done", result: { kept: true } };
+      // The website the client's LinkedIn page states is the first evidence: it is kept as stated, with no search.
+      // Another active client's own site is that client's: recorded, and searched past as if none were stated.
+      const stated = statedWebsite(pageOf(socialResult(rows)));
+      const owner = stated ? await sameSiteClient(db, client.id, stated) : null;
+      const statedOther = owner ? { stated_website: stated, stated_site_of: owner.name } : {};
+      if (stated && !owner) {
+        const at = deps.now();
+        const written = await writeClientFields(db, client.id, { website_url: stated });
+        return { status: "done", result: { website: stated, confirmed_by: "profile_website", linked_network: "linkedin_company", found_at: at.toISOString(), written: written.written, kept: written.skipped } };
+      }
       const profiles = await activeProfiles(db, client.id);
       if (!profiles.length) return { status: "waiting", reason: "social_accounts" };
       const now = deps.now();
@@ -320,12 +356,12 @@ export const STEPS: Record<string, StepDef> = {
       }
       const search = searched ?? (searchedAt ? { searched_at: searchedAt, queries: before?.queries ?? [], tried: before?.searched ?? [] } : null);
       const looked = { posts: posts.length, months: 12, ...(search ? { searched_at: search.searched_at, queries: search.queries, searched: search.tried } : {}) };
-      if (!website) return { status: "waiting", reason: "website", recheckDays: 7, result: { ...looked, most_linked: found.most_linked, tried } };
+      if (!website) return { status: "waiting", reason: "website", recheckDays: 7, result: { ...looked, most_linked: found.most_linked, tried, ...statedOther } };
       // Which of the client's profiles the site links to, for the setup page's line.
       const keys = new Set(linked);
       const linkedNetwork = profiles.map((p) => ({ p, k: profileKeyOf(p) })).find((x) => x.k && keys.has(x.k))?.p.network_type ?? null;
       const written = await writeClientFields(db, client.id, { website_url: website });
-      return { status: "done", result: { ...looked, website, confirmed_by: confirmedBy, linked_network: linkedNetwork, found_at: now.toISOString(), written: written.written, kept: written.skipped } };
+      return { status: "done", result: { ...looked, website, confirmed_by: confirmedBy, linked_network: linkedNetwork, found_at: now.toISOString(), written: written.written, kept: written.skipped, ...statedOther } };
     },
   },
 
@@ -335,19 +371,28 @@ export const STEPS: Record<string, StepDef> = {
   // it reads can still be written. The site's values replace what the social
   // profiles gave where the site ranks higher (location.ts); the posts'
   // languages outrank the site's language tag, and the regions keep the
-  // followers' countries (onboarding from social profiles, section 3).
+  // followers' countries (onboarding from social profiles, section 3). A
+  // zone the agency gave is labeled by the website's source when the website
+  // finds the same zone. A page on another client's site (parentPage.ts) is
+  // read for its language only: never that client's brand, logo, place or
+  // profile links; becoming one, or ceasing to be one, reads it again.
   brand_read: {
     policy: { refreshDays: 180 },
-    async inputs(_db, client) {
+    async inputs(db, client) {
       const site = siteKey(client.website_url);
+      if (!site) return null;
       // A new look in the client's posts (design_refs) reads the site again, so the logo file and colors follow a rebrand.
-      return site && str(client.look_since) ? `${site}|look:${str(client.look_since)}` : site;
+      const key = str(client.look_since) ? `${site}|look:${str(client.look_since)}` : site;
+      return (await parentPageFor(db, client)) ? `${key}|text_only` : key;
     },
     async run(db, client, { rows }) {
       const fs = client.field_sources;
       const may = (f: string) => lifecycleMayWrite(fs, f);
       const website = normalizeWebsite(String(client.website_url));
       const key = siteKey(client.website_url)!;
+      // A page on another client's site gives its text and language, nothing about the client's brand, logo or place.
+      const textOnly = await parentPageFor(db, client);
+      const own = (f: string) => !textOnly && may(f);
       let page: { html: string; via: "direct" | "firecrawl" };
       try {
         page = await deps.fetchSiteHtml(website, { firecrawlKey: deps.firecrawlKey() });
@@ -360,7 +405,7 @@ export const STEPS: Record<string, StepDef> = {
       const exactZone = !!free.source && SOURCE_RANK[free.source] <= SOURCE_RANK.page_text;
       const personZone = !may("timezone") ? zoneCountry(client.timezone) : null;
       const freeCountry = (exactZone ? free.country : null) ?? personZone ?? lang.country;
-      const needModel = may("brand_identity") || (may("timezone") && !exactZone) || (may("geo") && !freeCountry) || (may("language") && !lang.language);
+      const needModel = own("brand_identity") || (own("timezone") && !exactZone) || (own("geo") && !freeCountry) || (may("language") && !lang.language);
       let read = null;
       if (needModel) {
         const openaiKey = await deps.openaiKey(db);
@@ -375,10 +420,10 @@ export const STEPS: Record<string, StepDef> = {
       const location = resolveLocation(page.html, { headquarters: read?.headquarters ?? null, website });
       const now = deps.now();
       const fields: Record<string, unknown> = {};
-      if (read?.brand_identity && may("brand_identity")) fields.brand_identity = read.brand_identity;
+      if (read?.brand_identity && own("brand_identity")) fields.brand_identity = read.brand_identity;
       // The logo the site shows. An inline SVG is kept in the project's storage so it has an address.
-      const logo = read?.logo ?? logoOnPage(page.html, new URL(website).origin);
-      if (may("logo_url") && logo) {
+      const logo = textOnly ? null : read?.logo ?? logoOnPage(page.html, new URL(website).origin);
+      if (own("logo_url") && logo) {
         let url: string | null = null;
         if ("url" in logo) url = logo.url;
         else {
@@ -389,14 +434,15 @@ export const STEPS: Record<string, StepDef> = {
         if (url && url !== str(client.logo_url)) fields.logo_url = url;
       }
       const stored = client.location && typeof client.location === "object" ? client.location : null;
-      const better = replacesLocation(stored, { source: location.source, website: key });
+      const better = !textOnly && replacesLocation(stored, { source: location.source, website: key });
       if (better) {
         fields.location = { ...location, website: key, read_at: now.toISOString() };
-        if (location.timezone && may("timezone") && location.timezone !== str(client.timezone)) fields.timezone = location.timezone;
+        // The same zone is written again when the agency gave it, so it is labeled by its real source.
+        if (location.timezone && may("timezone") && (location.timezone !== str(client.timezone) || zoneFromAgency(fs))) fields.timezone = location.timezone;
       }
-      const country = location.country ?? personZone ?? lang.country ?? countryCode(read?.headquarters?.country);
+      const country = textOnly ? null : location.country ?? personZone ?? lang.country ?? countryCode(read?.headquarters?.country);
       const regions = regionsFor(country, (socialResult(rows)?.follower_countries ?? []) as Array<{ country: string; share: number }>);
-      if (regions.length && may("geo") && regions.join(",") !== str(client.geo)) fields.geo = regions.join(",");
+      if (regions.length && own("geo") && regions.join(",") !== str(client.geo)) fields.geo = regions.join(",");
       const language = lang.language ?? read?.site_language ?? null;
       if (language && may("language") && sourceOf(fs, "language") !== "posts" && language !== str(client.language)) fields.language = language;
       const written = await writeClientFields(db, client.id, fields, "lifecycle", {
@@ -406,11 +452,12 @@ export const STEPS: Record<string, StepDef> = {
         status: "done",
         result: {
           website: key, fetched_via: page.via, model_read: needModel,
-          timezone: location.timezone, timezone_source: location.source, country, language,
+          timezone: textOnly ? null : location.timezone, timezone_source: textOnly ? null : location.source, country, language,
           logo: logo ? ("url" in logo ? "file" : "inline_svg") : "none",
           written: written.written, kept: written.skipped,
-          // The profiles the homepage links to, for the accounts step.
-          site_profiles: siteProfileLinks(page.html),
+          // The profiles the homepage links to, for the accounts step; another client's, on a page of its site.
+          site_profiles: textOnly ? [] : siteProfileLinks(page.html),
+          ...(textOnly ? { parent_page: true } : {}),
         },
       };
     },
@@ -428,11 +475,18 @@ export const STEPS: Record<string, StepDef> = {
   // labeled, and its 12 newest) are the posts the pillars read, and for a
   // client with no website or document the brief is drafted from them; one
   // with fewer than 5 posts with text waits and looks again weekly. A move
-  // of the posts' evidence version runs it again (socialVersionKey).
+  // of the posts' evidence version runs it again (socialVersionKey). The
+  // client's LinkedIn page (social_read) is evidence for the pillars like the
+  // website's text, and its about text is the brief when there is no
+  // document or site text, before the posts. Keywords are written even when
+  // no pillar stands; the step then waits for evidence. A page read runs it
+  // again only while the client has no pillars and keywords (briefPageKey).
   brief_pillars: {
     policy: {},
     async inputs(db, client, rows) {
       const site = siteKey(client.website_url);
+      // Posts-only by the client's own fields, not the page: a page exists only inside a social result, so the guard
+      // below never holds for it, and the social part of the key stays as it was when a page is read.
       const fromPosts = postsOnly(client);
       if (fromPosts && !str(client.brief_text) && !socialResult(rows)) return null;
       if (site && !settled(rows, "brand_read")) return null;
@@ -442,7 +496,7 @@ export const STEPS: Record<string, StepDef> = {
       // A brief the lifecycle wrote is not an input (the step wrote it), so writing it never re-runs the step.
       const brief = !str(client.brief_text) || setBy(fs, "brief_text") === "lifecycle" ? "site" : textHash(client.brief_text);
       const own = ["brief_text", "content_pillars", "social_keywords"].map((f) => (lifecycleMayWrite(fs, f) ? "p" : "x")).join("");
-      return `brief:${brief}|doc:${str(client.strategy_doc_file_path)}|site:${site ?? ""}|own:${own}${socialVersionKey(rows, fromPosts)}`;
+      return `brief:${brief}|doc:${str(client.strategy_doc_file_path)}|site:${site ?? ""}|own:${own}${socialVersionKey(rows, fromPosts)}${briefPageKey(client, rows)}`;
     },
     async run(db, client, { rows }) {
       const fs = client.field_sources;
@@ -456,14 +510,16 @@ export const STEPS: Record<string, StepDef> = {
       if (!wantBrief && !wantPillars && !wantKeywords) return { status: "done", result: { brief: "kept", pillars: "kept" } };
       const social = socialResult(rows);
       const posts = (Array.isArray(social?.posts) ? social!.posts : []) as PillarPost[];
+      const page = pageOf(social);
       // A client whose posts are its only evidence needs 5 organic posts with text (in 90 days, else 12 months).
-      if (postsOnly(client) && social && !social.enough) {
+      // A LinkedIn page with text to read is evidence like the website's text, so its client does not wait for posts.
+      if (postsOnly(client) && !pageEvidence(page) && social && !social.enough) {
         return { status: "waiting", reason: "posts", recheckDays: 7, result: { text_posts: Number(social.text_posts) || 0, window_days: social.window_days ?? null } };
       }
 
       const fields: Record<string, unknown> = {};
       const from: Record<string, string> = {};
-      let brief: "from_doc" | "drafted" | "from_posts" | "kept" | "none" = personBrief ? "kept" : "none";
+      let brief: "from_doc" | "drafted" | "from_page" | "from_posts" | "kept" | "none" = personBrief ? "kept" : "none";
       const docPath = str(client.strategy_doc_file_path) || null;
       let briefDoc: string | null = null;
       // 1. The strategy document's own words. One already copied from this document is not read again.
@@ -504,7 +560,17 @@ export const STEPS: Record<string, StepDef> = {
         }
         brief = "drafted";
       }
-      // 3. The client's posts, when there is no document or website to take the brief from: the same call as the pillars writes it.
+      // 3. The LinkedIn page's about text, when there is no document or site text to take the brief from.
+      const about = str(page?.about);
+      if (wantBrief && brief === "none" && about.length >= 80) {
+        const body = clipText(about, 2500);
+        if (!str(client.brief_text).endsWith(body)) {
+          fields.brief_text = `Drafted from the LinkedIn page on ${day(deps.now())}:\n\n${body}`;
+          from.brief_text = "linkedin_page";
+        }
+        brief = "from_page";
+      }
+      // 4. The client's posts, when there is nothing else to take the brief from: the same call as the pillars writes it.
       const briefFromPosts = wantBrief && brief === "none" && posts.length > 0;
       let pillars: "derived" | "kept" | "none" = wantPillars ? "none" : "kept";
       let derivedNames: string[] = [];
@@ -513,12 +579,13 @@ export const STEPS: Record<string, StepDef> = {
       if (wantPillars || wantKeywords || briefFromPosts) {
         const key = await deps.anthropicKey(db);
         if (!key) return { status: "failed", error: "The AI connection is not configured." };
-        // The derivation reads the strategy document itself, so a brief copied from it is not given twice.
+        // The derivation reads the strategy document and the LinkedIn page itself, so a brief taken from either is not given twice.
         const evidence = { ...client, brief_text: brief === "drafted" ? (fields.brief_text as string | undefined) ?? str(client.brief_text) : personBrief };
         try {
           const d = await deps.derivePillars(db, evidence as PillarClient, key, {
             siteText: brief === "drafted" ? null : siteText || null, language: str(client.language) || null,
             ...(posts.length ? { posts, briefFromPosts, bio: (social?.instagram?.bio?.biography as string | undefined) ?? null } : {}),
+            ...(page ? { page } : {}),
           });
           if (briefFromPosts && d.brief) {
             fields.brief_text = `Drafted from the client's posts on ${day(deps.now())}:\n\n${d.brief}`;
@@ -547,14 +614,18 @@ export const STEPS: Record<string, StepDef> = {
         }
       }
       const written = await writeClientFields(db, client.id, fields, "lifecycle", from);
-      return { status: "done", result: { brief, brief_doc: briefDoc, pillars, pillar_names: derivedNames, keywords: derivedKeywords, source, site_chars: siteText.length, posts: posts.length, drafted_at: deps.now().toISOString(), written: written.written, kept: written.skipped } };
+      const result = { brief, brief_doc: briefDoc, pillars, pillar_names: derivedNames, keywords: derivedKeywords, source, site_chars: siteText.length, posts: posts.length, drafted_at: deps.now().toISOString(), written: written.written, kept: written.skipped };
+      // No pillar stood: the brief and keywords are written, and the step looks for evidence again in a week.
+      if (wantPillars && pillars === "none") return { status: "waiting", reason: "evidence", recheckDays: 7, result };
+      return { status: "done", result };
     },
   },
 
   // Sprout profiles that belong to the client, by Sprout's own brand name and
   // by the profiles the client's homepage links to (accounts.ts). Looked at
   // every day, so profiles added to Sprout later are picked up within a day.
-  // A profile a person removed stays removed.
+  // A profile a person removed stays removed. A page on another client's
+  // site gives no links: they are that client's profiles.
   accounts: {
     policy: { refreshDays: 0.5 },
     async inputs(db, client, rows) {
@@ -569,7 +640,8 @@ export const STEPS: Record<string, StepDef> = {
     async run(db, client, { rows }) {
       const customer = String(client.sprout_customer_id || defaultSproutCustomerId());
       const profiles = await deps.listCustomerProfiles(customer);
-      let links = (rows.get("brand_read")?.result?.site_profiles as string[] | undefined) ?? null;
+      const textOnly = await parentPageFor(db, client);
+      let links = textOnly ? [] : (rows.get("brand_read")?.result?.site_profiles as string[] | undefined) ?? null;
       if (!links && client.website_url) {
         try {
           links = siteProfileLinks((await deps.fetchSiteHtml(normalizeWebsite(String(client.website_url)), {})).html);
@@ -892,7 +964,9 @@ export const STEPS: Record<string, StepDef> = {
   // Without a client website RivalIQ cannot follow the client, and with its
   // plan full it cannot follow anyone new (Lital, 3 Nov 2026: 40 of 40,
   // pinned): tracking waits, as a plain fact on the setup page, and starts
-  // when a website is found or a place opens.
+  // when a website is found or a place opens. A client whose website is a
+  // page on another client's site (parentPage.ts) waits for a site of its
+  // own: RivalIQ would take that client's company as this one's.
   tracking: {
     policy: {},
     async inputs(db, client, rows) {
@@ -903,11 +977,13 @@ export const STEPS: Record<string, StepDef> = {
       const { data, error } = await db.from("competitors").select("id, website_url, selected_rank").eq("set_id", set.id).eq("is_selected", true).order("selected_rank");
       if (error) throw new Error(`Could not read the selected competitors: ${error.message}`);
       const selection = textHash((data ?? []).map((c: { id: string; website_url: string | null; selected_rank: number | null }) => `${c.selected_rank}:${c.id}:${c.website_url}`).join("|"));
-      return `${set.id}|${set.rivaliq_landscape_id ?? "none"}|${set.tracking_check?.code ?? ""}|${selection}|${siteKey(client.website_url) ?? ""}`;
+      const key = `${set.id}|${set.rivaliq_landscape_id ?? "none"}|${set.tracking_check?.code ?? ""}|${selection}|${siteKey(client.website_url) ?? ""}`;
+      return (await parentPageFor(db, client)) ? `${key}|text_only` : key;
     },
     async run(db, client, { rows }) {
       const set = await currentSet(db, client.id);
       if (!set) return { status: "waiting", reason: "competitor_set" };
+      if (await parentPageFor(db, client)) return { status: "waiting", reason: "own_site", result: { set_id: set.id } };
       // RivalIQ follows companies by their website: nothing is asked of it until the client has one.
       if (!siteKey(client.website_url) && !set.rivaliq_landscape_id) return { status: "waiting", reason: "client_website", result: { set_id: set.id } };
       const key = deps.rivaliqKey();

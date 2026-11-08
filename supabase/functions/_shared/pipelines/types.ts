@@ -3,17 +3,13 @@
 //
 // Moving the report workflows from n8n into the app happens behind one switch
 // per report kind and client (report_engines):
-//   n8n     today's path, unchanged. n8n is the live engine and the backup.
+//   n8n     the n8n workflow, as before; only where a row set by hand asks
+//           for it. n8n is never a backup for the app.
 //   shadow  n8n still runs for real, and the in-app pipeline runs next to it,
 //           writing only to shadow storage, so the two can be compared.
-//   app     only the in-app pipeline runs, and writes the real report.
+//   app     only the in-app pipeline runs, and writes the real report. A run
+//           that stops, or cannot start, is run again in the app.
 // The tables are in supabase/migrations/20261020110000_inhouse_groundwork.sql.
-
-/**
- * In-app runs of one report (or of one LinkedIn source window) that may stop
- * before n8n, the backup, makes it instead.
- */
-export const APP_STOPS_BEFORE_N8N = 2;
 
 /** The three report workflows that serve Socialytics today. */
 export type ReportKind = "social" | "competitive" | "linkedin_source";

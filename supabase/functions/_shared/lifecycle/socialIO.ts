@@ -10,6 +10,7 @@ import { listFollowerLocations } from "../sprout/audience.ts";
 import { listCustomerProfiles } from "../sprout/profiles.ts";
 import { apifyClient, APIFY_TOKEN_ENV } from "../apify/client.ts";
 import { readInstagramBio } from "../apify/instagramProfile.ts";
+import { readLinkedInPage } from "../apify/linkedinPage.ts";
 import { openaiKeyFor, readSocialBrand } from "../brand/research.ts";
 import { isPubliclyFetchable } from "../net/safeUrl.ts";
 import type { SocialIO } from "./socialRead.ts";
@@ -41,6 +42,7 @@ export function liveSocialIO(): SocialIO {
     customerProfiles: (customer) => listCustomerProfiles(customer),
     image,
     instagram: (handle, runId) => readInstagramBio(apifyClient({ token: env(APIFY_TOKEN_ENV) }), handle, { runId, waitSecs: 60 }),
+    linkedinPage: (url, runId) => readLinkedInPage(apifyClient({ token: env(APIFY_TOKEN_ENV) }), url, { runId, waitSecs: 60 }),
     openaiKey: (db) => openaiKeyFor(db),
     brandRead: (input) => readSocialBrand(input),
   };

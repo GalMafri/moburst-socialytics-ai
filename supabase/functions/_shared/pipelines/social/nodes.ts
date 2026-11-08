@@ -82,7 +82,7 @@ export function prepareBriefText(config: Any, file: { text?: unknown } = {}): An
   const fallback = String(body.brief_text || config.brief_text || "").trim();
   const hasFile = !!(body.brief_file_id || config.brief_file_id);
   const text = typeof file.text === "string" ? file.text.trim() : "";
-  const warning = hasFile && !text ? "The linked brief could not be read. Use a Google Doc, text file or text-based PDF, or paste the brief into client setup." : "";
+  const warning = hasFile && !text ? "The linked brief could not be read." : "";
   return {
     brief_text: text || fallback,
     brief_source: text ? "file" : fallback ? "client_setup" : "none",
@@ -1424,7 +1424,7 @@ export function generateRunSummary(a: SummaryInput): Any {
 
   const trendStatus = a.trendStatus || {};
   for (const [platform, state] of Object.entries(trendStatus)) {
-    if (state === "missing_keywords") warnings.push(`${platform === "tiktok" ? "TikTok" : "Instagram"} trend analysis could not run because there were no usable keywords. Add keywords in client setup.`);
+    if (state === "missing_keywords") warnings.push(`${platform === "tiktok" ? "TikTok" : "Instagram"} trends were not available this month.`);
   }
   const calendar: Any[] = aiAnalysis.content_calendar || [];
   return {

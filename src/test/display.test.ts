@@ -195,6 +195,7 @@ describe("what the product read from a client's social profiles (onboarding from
     expect(found("search_profile_link", "linkedin_company")).toBe("Found on Nov 3, 2026: the site links to the client's LinkedIn.");
     expect(found("bio_domain_name")).toBe("Found on Nov 3, 2026: the client's Instagram bio links to it.");
     expect(found("domain_name")).toBe("Found on Nov 3, 2026: the site's domain is the brand's name.");
+    expect(found("profile_website", "linkedin_company")).toBe("Found on Nov 3, 2026: the client's LinkedIn page lists it as its website.");
     expect(onboardingFacts(olo({ website_url: "https://www.olo.com", field_sources: { website_url: { by: "person" } } }), []).website).toBe("");
   });
   it("says which profile picture the logo is, and that the website's or an uploaded logo comes first", () => {
@@ -202,12 +203,24 @@ describe("what the product read from a client's social profiles (onboarding from
     expect(onboardingFacts(olo(picture), []).logo).toBe("From the client's LinkedIn profile picture, Nov 3, 2026. The website's logo replaces it once the website is found; a logo you upload is kept.");
     expect(onboardingFacts(olo({ logo_url: "https://olo.com/logo.svg", field_sources: { logo_url: { by: "lifecycle", from: "website" } } }), []).logo).toBe("");
   });
+  it("says a logo from the LinkedIn page is the logo on the client's LinkedIn page", () => {
+    const page = (website_url: string | null) => olo({ website_url, logo_url: "https://x/logo-linkedin.png", field_sources: { logo_url: { by: "lifecycle", at: NOW, from: "linkedin_page" } } });
+    expect(onboardingFacts(page(null), []).logo).toBe("From the logo on the client's LinkedIn page, Nov 3, 2026. The website's logo replaces it once the website is found; a logo you upload is kept.");
+    expect(onboardingFacts(page("https://olo.com"), []).logo).toBe("From the logo on the client's LinkedIn page, Nov 3, 2026. A logo you upload is kept.");
+    expect(onboardingFacts(olo({ logo_url: "https://x/mine.png", field_sources: { logo_url: { by: "person", at: NOW } } }), []).logo).toBe("");
+  });
   it("says where the time zone came from, or that it is not known yet", () => {
     expect(locationOrigin({ source: "profile_address", via: "google_my_business" })).toBe("the address on the client's Google Business Profile");
     expect(locationOrigin({ source: "post_text" })).toBe("an address in the client's posts");
     expect(locationOrigin({ source: "post_read" })).toBe("where the client's posts say the business is based");
     expect(locationOrigin({ source: "followers", locality: "Austin" })).toBe("where most of the client's followers are (Austin)");
     expect(locationOrigin({ source: "schema.org" })).toBe("the business address the website publishes");
+    expect(locationOrigin({ source: "profile_address", via: "linkedin_page", locality: "New York" })).toBe("the address on the client's LinkedIn page");
+    expect(locationOrigin({ source: "agency" })).toBe("the time zone most of the agency's clients use, until the client's own location is found");
+    expect(onboardingFacts(olo({ timezone: "America/New_York", location: { source: "profile_address", via: "linkedin_page", locality: "New York" }, field_sources: { timezone: { by: "lifecycle", from: "profile_address" } } }), [social]).timezone)
+      .toBe("Worked out from the address on the client's LinkedIn page. You can change it here.");
+    expect(onboardingFacts(olo({ timezone: "America/New_York", location: { source: "agency", country: null }, field_sources: { timezone: { by: "lifecycle", from: "agency" } } }), [social]).timezone)
+      .toBe("Worked out from the time zone most of the agency's clients use, until the client's own location is found. You can change it here.");
     expect(onboardingFacts(olo(), [social]).timezone).toBe("Not known yet: no address or location in the client's profiles or posts. Calendar times show in UTC until then.");
     expect(onboardingFacts(olo({ timezone: "America/Chicago", location: { source: "followers", locality: "Austin" }, field_sources: { timezone: { by: "lifecycle" } } }), [social]).timezone)
       .toBe("Worked out from where most of the client's followers are (Austin). You can change it here.");
@@ -230,12 +243,18 @@ describe("what the product read from a client's social profiles (onboarding from
       .toEqual({ names: ["Toast", "ChowNow", "Square"], tracking: "RivalIQ follows companies by their website, so tracking starts once the client's website is found." });
     expect(onboardingFacts(olo({ website_url: "https://olo.com" }), [chosen, { step: "tracking", status: "waiting", result: { waiting_for: "rivaliq_full" } }]).competitors.tracking)
       .toBe("The RivalIQ plan is full. Tracking starts when a place opens.");
+    expect(onboardingFacts(olo({ website_url: "https://www.moburst.com/services/organic/podcast-booking/" }), [chosen, { step: "tracking", status: "waiting", result: { waiting_for: "own_site" } }]).competitors.tracking)
+      .toBe("RivalIQ follows companies by their website, and the client's website is a page on another client's site, so tracking starts once the client has a site of its own.");
   });
   it("writes every line in plain words, with no step names, statuses or dashes", () => {
     const f = onboardingFacts(olo({ geo: "US,GB", language: "en,es", logo_url: "x", field_sources: { geo: { by: "lifecycle", from: "followers" }, language: { by: "lifecycle", from: "posts" }, logo_url: { by: "lifecycle", at: NOW, from: "profile_picture:instagram" } } }),
       [social, { step: "website", status: "waiting", result: { posts: 5, months: 12, searched_at: NOW } }, { step: "brief_pillars", status: "waiting", result: { waiting_for: "posts", text_posts: 2 } }]);
-    const text = [f.website, f.logo, f.timezone, f.regions, f.languages, f.brief, f.competitors.tracking].join(" ");
-    expect(text).not.toMatch(/social_read|brief_pillars|waiting|lifecycle|profile_picture|undefined|null|NaN|\u2014|\u2013/);
+    // The LinkedIn page's logo and the agency's time zone, worded the same way.
+    const g = onboardingFacts(olo({ timezone: "America/New_York", location: { source: "agency" }, logo_url: "x", field_sources: { timezone: { by: "lifecycle", from: "agency" }, logo_url: { by: "lifecycle", at: NOW, from: "linkedin_page" } } }), [social]);
+    const h = onboardingFacts(olo({ timezone: "America/New_York", location: { source: "profile_address", via: "linkedin_page" }, field_sources: { timezone: { by: "lifecycle", from: "profile_address" } } }), [social]);
+    const text = [f.website, f.logo, f.timezone, f.regions, f.languages, f.brief, f.competitors.tracking, g.logo, g.timezone, h.timezone].join(" ");
+    expect(g.logo && g.timezone && h.timezone).toBeTruthy();
+    expect(text).not.toMatch(/social_read|brief_pillars|waiting|lifecycle|profile_picture|linkedin_page|profile_address|local business|undefined|null|NaN|\u2014|\u2013/);
     expect(text).not.toMatch(/colour|organis|recognis/);
   });
 });

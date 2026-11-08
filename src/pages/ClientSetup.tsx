@@ -111,6 +111,7 @@ const PILLAR_SOURCES: Record<string, string> = {
   social_posts: "the client's own posts",
   brief: "the brief",
   site: "the website",
+  linkedin_page: "the client's LinkedIn page",
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

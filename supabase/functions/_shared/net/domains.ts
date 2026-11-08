@@ -97,3 +97,30 @@ export function siteKeyOf(value: string | null | undefined): string | null {
   if (!domain) return null;
   return SHARED_PLATFORMS[domain] ? hostOf(value).replace(/^www\./, "") : domain;
 }
+
+/** A URL's path as lowercase segments, without empty ones: [] for a homepage ("https://olo.com/"), a bare host or nothing. */
+export function pathSegments(value: string | null | undefined): string[] {
+  const s = String(value ?? "").trim();
+  if (!s) return [];
+  try {
+    return new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(s) ? s : `https://${s}`).pathname.toLowerCase().split("/").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * How a URL stands to a client's website: "host" when it is on the
+ * website's own host (www aside), "site" when it is elsewhere on the same
+ * site (siteKeyOf), null otherwise. A website on a subdomain of its own
+ * (uproar.moburst.com) is that host only, so the rest of its registrable
+ * domain is never its site; any other website keeps its subdomains
+ * (careers.moburst.com is on www.moburst.com's site).
+ */
+export function siteMatch(url: string | null | undefined, website: string | null | undefined): "host" | "site" | null {
+  const key = siteKeyOf(url);
+  if (!key || siteKeyOf(website) !== key) return null;
+  const own = hostOf(website).replace(/^www\./, "");
+  if (hostOf(url).replace(/^www\./, "") === own) return "host";
+  return own === registrableDomain(website) ? "site" : null;
+}

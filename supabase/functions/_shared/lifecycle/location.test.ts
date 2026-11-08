@@ -60,6 +60,14 @@ describe("sources from the client's profiles and posts (onboarding from social p
     expect(SOURCE_RANK.post_read).toBe(SOURCE_RANK.site_read);
     expect(SOURCE_RANK.followers).toBeGreaterThan(SOURCE_RANK.post_read);
     expect(SOURCE_RANK.country).toBeGreaterThan(SOURCE_RANK.followers);
+    expect(SOURCE_RANK.agency).toBeGreaterThan(SOURCE_RANK.country);
+  });
+  it("lets every real source replace the agency's zone, and never the other way round", () => {
+    for (const source of ["schema.org", "profile_address", "post_text", "post_read", "followers", "country"] as const) {
+      expect(replacesLocation({ source: "agency", website: null }, { source, website: null })).toBe(true);
+      expect(replacesLocation({ source, website: null }, { source: "agency", website: null })).toBe(false);
+    }
+    expect(replacesLocation({ source: "agency", website: null }, { source: "page_footer", website: "olo.com" })).toBe(true);
   });
   it("takes a profile's address first, then addresses in posts (ZIP or street number required), then where the posts say the business is", () => {
     const followers = { zone: "America/Los_Angeles", country: "US", city: "Los Angeles", share: 0.7 };

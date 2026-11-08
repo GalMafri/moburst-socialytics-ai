@@ -28,6 +28,16 @@
 // regions and the languages (posts outrank the site's language tag). The
 // result keeps the posts the brief and pillars read, labeled with their
 // multiple, and each post's multiple for the design references.
+//
+// Every look, a quiet week too and without moving the version, fills what is
+// still missing (pageFill; spec: docs/superpowers/specs/2026-11-08-onboarding-
+// profile-pages-and-no-n8n-design.md, sections D and E): the LinkedIn page's
+// logo when the client has no logo at all; the page's headquarters as a
+// profile address, only where no location is stored or the agency's is (a
+// client whose time zone is filled sees no change: the anti-goal wins over
+// section E's ranks); and, when no source places the client and its zone is
+// UTC or empty with no source, the zone most of the agency's clients have
+// from a real source (agencyZone.ts).
 
 import { engagementsOf, isPublishedPost } from "../competitive/reportMetrics.ts";
 import { ownedNetwork } from "../competitive/ownedMerge.ts";
@@ -36,8 +46,10 @@ import { followerLocations, profileAddress, type FollowerLocations } from "../sp
 import type { CustomerProfile } from "../sprout/profiles.ts";
 import { defaultSproutCustomerId } from "../sprout/customer.ts";
 import type { BioRead, InstagramBio } from "../apify/instagramProfile.ts";
+import { pageUrlOf, type LinkedInPage, type PageRead } from "../apify/linkedinPage.ts";
 import type { SocialBrandInput, SocialBrandRead } from "../brand/research.ts";
 import { countryCode, followersZone, regionsFor, replacesLocation, resolveSocialLocation, SOURCE_RANK, zoneOf, type Address, type Headquarters, type LocationSource } from "./location.ts";
+import { AGENCY_SOURCE, agencyZone, zoneFromAgency, zoneHasSource } from "./agencyZone.ts";
 import { lifecycleMayWrite, setBy, sourceOf, writeClientFields } from "./fields.ts";
 import { textHash } from "./names.ts";
 import type { StepOutcome, StepRow } from "./policy.ts";
@@ -363,6 +375,106 @@ export function statedInPosts(stated: Headquarters | null | undefined, texts: st
   return named(blob, stated.city) || named(blob, stated.country) || (code === "US" && /\b(usa|u\.s\.a?\.?)\b/i.test(blob)) ? stated : null;
 }
 
+// ── What the LinkedIn page and the agency fill when it is missing ──────────
+
+/** The source a value from the client's LinkedIn page records: field_sources.logo_url.from, and location.via for its headquarters. */
+export const PAGE_SOURCE = "linkedin_page";
+
+/** The client's stored location, when it has one. */
+const storedLocation = (client: Row): Row | null => (client.location && typeof client.location === "object" ? client.location as Row : null);
+const rankOf = (source: unknown): number => (typeof source === "string" ? SOURCE_RANK[source as LocationSource] ?? 99 : 99);
+
+/** The fields a location is compared on: the read's time and its vote counts are left out. */
+const LOCATION_KEYS = ["source", "timezone", "country", "region", "locality", "via", "website"];
+const sameLocation = (a: Row | null, b: Row) => !!a && LOCATION_KEYS.every((k) => (a[k] ?? null) === (b[k] ?? null));
+
+/** The page's headquarters as an address, when it names a region or a country. */
+function headquartersAddress(page: LinkedInPage | null): Address | null {
+  const hq = page?.headquarters;
+  return hq && (hq.region || hq.country) ? { locality: hq.city, region: hq.region, country: hq.country } : null;
+}
+
+/**
+ * True when the page's headquarters may stand as the client's location: the
+ * page's own earlier read, or no location stored or the agency's, with a time
+ * zone nothing else filled (UTC or empty with no source, the agency's, or a
+ * person's, which the write keeps). Any other stored source is kept, however
+ * low it ranks: a client whose time zone is filled sees no change (final
+ * review ruling, 8 Nov: the plan's "fills only missing fields").
+ */
+export function pageMayPlace(client: Row): boolean {
+  const stored = storedLocation(client);
+  if (stored?.via === PAGE_SOURCE) return true;
+  if (stored?.source && stored.source !== AGENCY_SOURCE) return false;
+  const fs = client.field_sources;
+  if (!lifecycleMayWrite(fs, "timezone") || zoneFromAgency(fs)) return true;
+  const zone = str(client.timezone);
+  return (!zone || zone.toUpperCase() === "UTC") && !zoneHasSource(fs);
+}
+
+/**
+ * True when the client's zone is open to the agency's: the lifecycle may
+ * write it, no stored location came from a real source, and the zone is UTC
+ * or empty with no source, or an earlier agency zone.
+ */
+export function agencyMayFill(client: Row): boolean {
+  const fs = client.field_sources;
+  if (!lifecycleMayWrite(fs, "timezone")) return false;
+  const stored = storedLocation(client);
+  if (stored?.source && stored.source !== AGENCY_SOURCE) return false;
+  const zone = str(client.timezone);
+  return zoneFromAgency(fs) || ((!zone || zone.toUpperCase() === "UTC") && !zoneHasSource(fs));
+}
+
+export interface PageFill {
+  /** The location and time zone to write. The logo is set by the step once the file is stored. */
+  fields: Record<string, unknown>;
+  from: Record<string, string>;
+  /** The page logo's address, to store as the client's logo; null when the client has a logo or the lifecycle may not write one. */
+  logoUrl: string | null;
+}
+
+/**
+ * What the LinkedIn page and the agency fill when it is missing. Pure: the
+ * step stores the logo file. Nothing is offered when nothing would change.
+ *  - The page logo, only when the client has no logo at all and the
+ *    lifecycle may write one: never over a person's, the website's or a
+ *    profile picture.
+ *  - The headquarters, as a profile address, only where pageMayPlace holds
+ *    (no location stored, the agency's, or the page's own earlier read, which
+ *    it replaces as replacesLocation allows). Every other stored location is
+ *    kept, a weaker one too.
+ *  - The agency's zone, only when the page places the client nowhere and
+ *    agencyMayFill holds. It records no country: it says nothing about where
+ *    the business is.
+ * The time zone follows the location given, never over a person's.
+ */
+export function pageFill(client: Row, page: LinkedInPage | null, agency: string | null): PageFill {
+  const fs = client.field_sources;
+  const fields: Record<string, unknown> = {};
+  const from: Record<string, string> = {};
+  const logoUrl = !str(client.logo_url) && lifecycleMayWrite(fs, "logo_url") && page?.logo?.url ? page.logo.url : null;
+  if (logoUrl) from.logo_url = PAGE_SOURCE;
+
+  const stored = storedLocation(client);
+  const address = headquartersAddress(page);
+  const hq = address ? resolveSocialLocation({ profileAddresses: [address], postTexts: [] }) : null;
+  let location: Row | null = null;
+  if (hq?.source) {
+    if (pageMayPlace(client) && replacesLocation(stored, { source: hq.source, website: null })) {
+      location = { ...hq, website: null, via: PAGE_SOURCE };
+    }
+  } else if (agency && agencyMayFill(client)) {
+    location = { timezone: agency, source: AGENCY_SOURCE, country: null, region: null, locality: null, agreeing: 0, found: 0, website: null };
+  }
+  if (location && !sameLocation(stored, location)) fields.location = location;
+  if (location?.timezone && lifecycleMayWrite(fs, "timezone") && (location.timezone !== str(client.timezone) || sourceOf(fs, "timezone") !== location.source)) {
+    fields.timezone = location.timezone;
+    from.timezone = String(location.source);
+  }
+  return { fields, from, logoUrl };
+}
+
 // ── The step ───────────────────────────────────────────────────────────────
 
 export interface SocialIO {
@@ -377,6 +489,8 @@ export interface SocialIO {
   image(url: string): Promise<Uint8Array | null>;
   /** The Instagram profile's bio through Apify, or the answer of a run started earlier. Throws when no run can be made. */
   instagram(handle: string, runId: string | null): Promise<BioRead>;
+  /** The client's LinkedIn company page through Apify, or the answer of a run started earlier. Throws when no run can be made. */
+  linkedinPage(url: string, runId: string | null): Promise<PageRead>;
   openaiKey(db: Db): Promise<string | null>;
   brandRead(input: Omit<SocialBrandInput, "fetchImpl">): Promise<SocialBrandRead>;
 }
@@ -392,6 +506,26 @@ export interface InstagramState {
   run_id?: string | null;
   status?: string;
 }
+
+export interface LinkedInPageState {
+  profile_id: string;
+  url: string;
+  /** The profile as it was read: its id and page name. A change reads the page again. */
+  key: string;
+  read_at: string | null;
+  page: LinkedInPage | null;
+  /** A run still going, read on the next look. */
+  run_id?: string | null;
+  status?: string;
+}
+
+/** The LinkedIn page the last social_read kept, for the steps after it. */
+export function pageOf(result: Row | null): LinkedInPage | null {
+  const state = result?.linkedin_page as LinkedInPageState | null | undefined;
+  return state?.page ?? null;
+}
+
+const PAGE_REREAD_DAYS = 30;
 
 /** The client's active Sprout profiles with what the read needs. */
 async function profilesOf(db: Db, clientId: string): Promise<ProfileRef[]> {
@@ -412,12 +546,28 @@ async function readPictures(posts: SocialPost[], io: SocialIO): Promise<Picture[
   return out;
 }
 
-/** The Instagram bio: the one read before while the profile is the same, else a new read (a run under way is collected first). Quiet: a read that cannot be made keeps the last one. */
+/** The page logo, kept in the project's storage (a network's file address can expire); its public address, or null when it cannot be read. */
+async function storePageLogo(db: Db, client: Row, url: string, io: SocialIO): Promise<string | null> {
+  const bytes = await io.image(url).catch(() => null);
+  const size = bytes ? imageSize(bytes) : null;
+  if (!bytes || !size) return null;
+  const path = `${client.id}/brand/logo-linkedin-${await sha16(bytes)}.${size.ext}`;
+  const { error } = await db.storage.from("generated-media").upload(path, bytes, { contentType: size.mime, upsert: true });
+  return error ? null : db.storage.from("generated-media").getPublicUrl(path).data.publicUrl;
+}
+
+/**
+ * The Instagram bio: the one read before while the profile is the same, else
+ * a new read (a run under way is collected first). Quiet: a read that cannot
+ * be made keeps the last one. A run that can no longer be collected (gone past
+ * Apify's keep time) is dropped with the read time, so the next look starts a
+ * new read; the older bio is kept meanwhile.
+ */
 async function readBio(profiles: ProfileRef[], pictures: Picture[], prev: InstagramState | null, io: SocialIO, now: Date): Promise<InstagramState | null> {
   const ig = profiles.find((p) => platformName(ownedNetwork(p.network_type)) === "Instagram" && p.native_name);
   if (!ig) return null;
   const key = `${ig.id}:${ig.native_name.toLowerCase()}:${pictures.find((p) => p.profileId === ig.id)?.hash ?? ""}`;
-  if (prev?.key === key && !prev.run_id) return prev;
+  if (prev?.key === key && !prev.run_id && prev.read_at) return prev;
   const pending = prev?.key === key ? prev.run_id ?? null : null;
   try {
     const got = await io.instagram(ig.native_name, pending);
@@ -427,7 +577,46 @@ async function readBio(profiles: ProfileRef[], pictures: Picture[], prev: Instag
     return { ...base, read_at: now.toISOString(), bio: got.bio };
   } catch (e) {
     console.warn("[social_read] Instagram bio not read:", e instanceof Error ? e.message : String(e));
-    return prev ? { ...prev } : null;
+    if (!prev) return null;
+    if (!pending) return { ...prev };
+    const { run_id: _lost, ...rest } = prev;
+    return { ...rest, read_at: null };
+  }
+}
+
+/**
+ * The LinkedIn company page: the one read before while the profile is the
+ * same and under 30 days old, else a new read (a run under way is collected
+ * first). Quiet: a read that cannot be made keeps the last one. A run that can
+ * no longer be collected (gone past Apify's keep time) is dropped with the
+ * read time, so the next look starts a new read. Not part of the evidence
+ * version.
+ */
+async function readPage(profiles: ProfileRef[], prev: LinkedInPageState | null, io: SocialIO, now: Date): Promise<LinkedInPageState | null> {
+  const li = profiles.find((p) => p.network_type === "linkedin_company" && p.native_name);
+  if (!li) return null;
+  const key = `${li.id}:${li.native_name.toLowerCase()}`;
+  const same = prev?.key === key;
+  const age = prev?.read_at ? now.getTime() - new Date(prev.read_at).getTime() : Infinity;
+  if (same && !prev.run_id && age < PAGE_REREAD_DAYS * DAY) return prev;
+  const url = pageUrlOf(li.native_name);
+  const base = { profile_id: li.id, url, key };
+  const last = same ? prev : null;
+  try {
+    const got = await io.linkedinPage(url, same ? prev.run_id ?? null : null);
+    if (got.state === "pending") return { ...base, read_at: last?.read_at ?? null, page: last?.page ?? null, run_id: got.run_id };
+    // A failed read, or one that found no page, is read again on the next look; the 30 days are for a page that was read.
+    if (got.state === "failed") return { ...base, read_at: null, page: last?.page ?? null, status: got.status };
+    if (!got.page) return { ...base, read_at: null, page: last?.page ?? null };
+    return { ...base, read_at: now.toISOString(), page: got.page };
+  } catch (e) {
+    console.warn("[social_read] LinkedIn page not read:", e instanceof Error ? e.message : String(e));
+    // The last page is kept only for the same profile; a changed profile has no page until it is read.
+    if (!prev) return null;
+    if (!same) return { ...base, read_at: null, page: null };
+    if (!prev.run_id) return { ...prev };
+    const { run_id: _lost, ...rest } = prev;
+    return { ...rest, read_at: null };
   }
 }
 
@@ -499,7 +688,11 @@ export async function runSocialRead(db: Db, client: Row, ctx: { rows: Map<string
   const local = meta.filter((p) => ids.includes(String(p.id))).map((p) => ({ address: profileAddress(p.network_metadata), network: p.network_type }))
     .filter((x): x is { address: Address; network: string } => !!x.address);
   const profileAddresses = local.map((x) => x.address);
-  const instagram = await readBio(profiles, pictures, (prev?.instagram ?? null) as InstagramState | null, io, now);
+  // The bio and the page are read together: each may wait up to a minute for its run, and each keeps its own failure.
+  const [instagram, linkedin_page] = await Promise.all([
+    readBio(profiles, pictures, (prev?.instagram ?? null) as InstagramState | null, io, now),
+    readPage(profiles, (prev?.linkedin_page ?? null) as LinkedInPageState | null, io, now),
+  ]);
   const langs = languageCounts(posts);
   const snapshot = snapshotOf(posts, now, {
     top: top.slice(0, TOP_POSTS).map((t) => t.post.id), languages: postLanguages(langs), topCountry: audience.countries[0]?.country ?? null,
@@ -508,20 +701,37 @@ export async function runSocialRead(db: Db, client: Row, ctx: { rows: Map<string
   const text = textPosts(posts).length;
   const base = {
     checked_at: now.toISOString(), window_days: windowDays, posts_read: rows.length, organic_posts: organic(posts).length, text_posts: text,
-    enough: text >= MIN_TEXT_POSTS, multiples, instagram,
+    enough: text >= MIN_TEXT_POSTS, multiples, instagram, linkedin_page,
   };
   const moved = versionMove(prev?.snapshot as Snapshot | undefined, snapshot, posts, now);
-  // A quiet week: no model call, no write; the evidence stays as its version set it.
-  if (!moved) return { status: "done", result: { ...(prev ?? {}), ...base, moved: null } };
+  const bio = instagram?.bio?.biography ?? "";
+  const postTexts = [...textPosts(posts).map((p) => p.text), ...(bio ? [bio] : [])];
+  const followers = followersZone(audience.cities);
+  const countries = audience.countries.map((c) => c.country);
+
+  // What the page and the agency fill when it is missing, on every look. The
+  // agency's zone is looked up only when it may be used: no profile, post or
+  // follower places the client (the model's read, on a move, outranks it too).
+  const placed = !!resolveSocialLocation({ profileAddresses, postTexts, followers, countries }).source;
+  const fill = pageFill(client, linkedin_page?.page ?? null, !placed && agencyMayFill(client) ? await agencyZone(db, client.id) : null);
+  const fillRank = fill.fields.location ? rankOf((fill.fields.location as Row).source) : 99;
+  const stamped = (l: unknown) => ({ ...(l as Row), read_at: now.toISOString() });
+
+  // A quiet week: no model call, and no write but the fill; the evidence stays as its version set it.
+  if (!moved) {
+    const fields: Record<string, unknown> = { ...fill.fields, ...(fill.fields.location ? { location: stamped(fill.fields.location) } : {}) };
+    const logoUrl = fill.logoUrl ? await storePageLogo(db, client, fill.logoUrl, io) : null;
+    if (logoUrl) fields.logo_url = logoUrl;
+    const written = await writeClientFields(db, client.id, fields as never, "lifecycle", fill.from as never);
+    return { status: "done", result: { ...(prev ?? {}), ...base, moved: null, filled: written.written } };
+  }
 
   const fs = client.field_sources;
   const may = (f: string) => lifecycleMayWrite(fs, f);
   const fields: Record<string, unknown> = {};
   const from: Record<string, string> = {};
-  const bio = instagram?.bio?.biography ?? "";
-  const postTexts = [...textPosts(posts).map((p) => p.text), ...(bio ? [bio] : [])];
-  const stored = client.location && typeof client.location === "object" ? client.location as Row : null;
-  const storedRank = stored?.source ? SOURCE_RANK[stored.source as LocationSource] ?? 99 : 99;
+  const stored = storedLocation(client);
+  const storedRank = rankOf(stored?.source);
 
   // The logo: a person's, then the website's, then a profile picture; a picture replaces only an earlier picture.
   let logoUrl: string | null = null;
@@ -539,7 +749,7 @@ export async function runSocialRead(db: Db, client: Row, ctx: { rows: Map<string
   const identityMay = may("brand_identity") && (!client.brand_identity || (setBy(fs, "brand_identity") === "lifecycle" && sourceOf(fs, "brand_identity") === "posts"));
   const exact = resolveSocialLocation({ profileAddresses, postTexts });
   const exactRank = exact.source && exact.source !== "country" ? SOURCE_RANK[exact.source] : 99;
-  const zoneMay = may("timezone") && storedRank > SOURCE_RANK.post_read && exactRank > SOURCE_RANK.post_text;
+  const zoneMay = may("timezone") && storedRank > SOURCE_RANK.post_read && fillRank > SOURCE_RANK.post_read && exactRank > SOURCE_RANK.post_text;
   let read: SocialBrandRead | null = null;
   const key = identityMay || zoneMay ? await io.openaiKey(db) : null;
   if (key) {
@@ -561,8 +771,7 @@ export async function runSocialRead(db: Db, client: Row, ctx: { rows: Map<string
 
   // Where the business is, and its time zone.
   const stated = statedInPosts(read?.stated, postTexts);
-  const followers = followersZone(audience.cities);
-  const location = resolveSocialLocation({ profileAddresses, postTexts, stated, followers, countries: audience.countries.map((c) => c.country) });
+  const location = resolveSocialLocation({ profileAddresses, postTexts, stated, followers, countries });
   if (location.source && replacesLocation(stored, { source: location.source, website: null })) {
     // A local profile's address names the profile it came from (a Google Business Profile, Yelp or Tripadvisor page).
     const via = location.source === "profile_address" ? (local.find((x) => zoneOf(x.address)?.zone === location.timezone) ?? local[0])?.network ?? null : null;
@@ -589,11 +798,38 @@ export async function runSocialRead(db: Db, client: Row, ctx: { rows: Map<string
     from.language = "posts";
   }
 
+  // The fill, merged: the move's own logo and location win; the page logo
+  // only when the move gives none, and the fill's location only when it ranks
+  // higher than the move's (on a tie the move's, so the next move does not
+  // change it back). The fill's zone goes with the fill's location.
+  const filled = new Set<string>();
+  if (!fields.logo_url && fill.logoUrl) {
+    const url = await storePageLogo(db, client, fill.logoUrl, io);
+    if (url) {
+      fields.logo_url = url;
+      from.logo_url = PAGE_SOURCE;
+      filled.add("logo_url");
+    }
+  }
+  if (fill.fields.location ? fillRank < (fields.location ? rankOf(location.source) : 99) : !fields.location) {
+    if (fill.fields.location) {
+      fields.location = stamped(fill.fields.location);
+      filled.add("location");
+    }
+    delete fields.timezone;
+    delete from.timezone;
+    if (fill.fields.timezone) {
+      fields.timezone = fill.fields.timezone;
+      from.timezone = fill.from.timezone;
+      filled.add("timezone");
+    }
+  }
+
   const written = await writeClientFields(db, client.id, fields as never, "lifecycle", from as never);
   return {
     status: "done",
     result: {
-      ...base, moved, version: (Number(prev?.version) || 0) + 1, version_at: now.toISOString(), snapshot,
+      ...base, moved, version: (Number(prev?.version) || 0) + 1, version_at: now.toISOString(), snapshot, filled: written.written.filter((k) => filled.has(k)),
       posts: evidencePosts(top, posts),
       logo: logo ? { platform: logo.platform, width: logo.width, height: logo.height, hash: logo.hash, url: logoUrl } : null,
       location: location.source ? { source: location.source, timezone: location.timezone, country: location.country, region: location.region, locality: location.locality } : null,

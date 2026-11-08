@@ -29,6 +29,7 @@ import { blockedFromCreation, clientWithSite, declineFor, declineReason, groupBr
 import { listBrandPosts, POSTS_WINDOW_DAYS, type SproutPost } from "../_shared/sprout/posts.ts";
 import { listCustomerGroups, listCustomerProfiles, type CustomerGroup } from "../_shared/sprout/profiles.ts";
 import { searchWebsite, webReader, websiteJoins, type SiteFact, type SiteReader, type WebsiteSearch } from "../_shared/sprout/website.ts";
+import { siteKeyOf } from "../_shared/net/domains.ts";
 import type { JobOutcome, ScheduledJob } from "../_shared/scheduled-jobs/types.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -284,7 +285,11 @@ async function decide(db: Db, brand: Brand, members: Brand[], looked: Evaluated[
   const clients = index.clients;
   const posts = looked.reduce((n, e) => n + e.posts, 0);
   const counts = new Map<string, number>();
-  for (const e of looked) for (const d of e.search?.domains ?? []) counts.set(d.domain, (counts.get(d.domain) ?? 0) + d.links);
+  for (const e of looked) for (const d of e.search?.domains ?? []) {
+    // The report lists hosts; the guard totals a site's hosts together (careers.moburst.com and www.moburst.com are one site).
+    const site = siteKeyOf(d.domain) ?? d.domain;
+    counts.set(site, (counts.get(site) ?? 0) + d.links);
+  }
   const mostLinked = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
   const confirmed = looked.find((e) => e.search?.website)?.search ?? null;
   const shown = confirmed ?? looked.find((e) => e.search)?.search ?? null;

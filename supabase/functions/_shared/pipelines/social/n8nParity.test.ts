@@ -100,7 +100,10 @@ describe("the brief", () => {
     for (const [req, file] of [[request, fileText], [request, ""], [{ ...request, brief_file_id: "" }, ""], [{ ...request, brief_text: "" }, ""]] as Array<[Any, string]>) {
       const cfg = workflowConfiguration(req, NOW);
       const n8n = await runNode(nodeCode("Prepare Brief Text"), { "Workflow Configuration": cfg }, [{ ...cfg, ...(file ? { text: file } : {}) }]);
-      expect(plain(prepareBriefText(cfg, { text: file || undefined }))).toEqual(n8n[0]);
+      // The app's unreadable-brief warning drops n8n's instruction to staff on purpose (reports never instruct people).
+      const instructed = "The linked brief could not be read. Use a Google Doc, text file or text-based PDF, or paste the brief into client setup.";
+      const expected = { ...n8n[0], brief_warning: String(n8n[0].brief_warning).replace(instructed, "The linked brief could not be read.") };
+      expect(plain(prepareBriefText(cfg, { text: file || undefined }))).toEqual(expected);
     }
     expect(plain(prepareBriefText(config, { text: fileText }))).toEqual(MOBURST.prepared_brief);
   });

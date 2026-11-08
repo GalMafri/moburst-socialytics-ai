@@ -1,11 +1,12 @@
 // @vitest-environment node
-// The engine switch and the pipeline registry: n8n unless a row asks for
-// more and this deployment can do it; shadow per client (Moburst); app only
-// with an app-capable pipeline whose secrets are set.
+// The engine switch and the pipeline registry: n8n only where a row asks for
+// it by hand; shadow per client (Moburst); app for everything else, run by an
+// app-capable pipeline whose secrets are set, or waiting for one. Nothing in
+// doubt goes to n8n.
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fakeDb } from "../lifecycle/fakeDb";
 import { readEngine, requestedEngine, resolveEngine, type EngineRow } from "./engine";
 import { makeRegistry, REGISTRY } from "./registry";
@@ -38,10 +39,17 @@ describe("requestedEngine", () => {
     expect(requestedEngine(rows, "competitive", MOBURST)).toBe("n8n");
   });
 
-  it("is n8n with no rows, no table, or a value it does not know", () => {
-    expect(requestedEngine([], "social", MOBURST)).toBe("n8n");
-    expect(requestedEngine(null, "social", MOBURST)).toBe("n8n");
-    expect(requestedEngine([{ kind: "social", client_id: null, engine: "lambda" }], "social", null)).toBe("n8n");
+  it("is app with no rows, no table, no row for the kind, or a value it does not know", () => {
+    expect(requestedEngine([], "social", MOBURST)).toBe("app");
+    expect(requestedEngine(null, "social", MOBURST)).toBe("app");
+    expect(requestedEngine([{ kind: "competitive", client_id: null, engine: "n8n" }], "social", MOBURST)).toBe("app");
+    expect(requestedEngine([{ kind: "social", client_id: null, engine: "lambda" }], "social", null)).toBe("app");
+    expect(requestedEngine([{ kind: "social", client_id: MOBURST, engine: "" }], "social", MOBURST)).toBe("app");
+  });
+
+  it("keeps an n8n row set by hand on n8n, for the kind or for one client", () => {
+    expect(requestedEngine([{ kind: "social", client_id: null, engine: "n8n" }], "social", OTHER)).toBe("n8n");
+    expect(requestedEngine([{ kind: "social", client_id: null, engine: "app" }, { kind: "social", client_id: MOBURST, engine: "n8n" }], "social", MOBURST)).toBe("n8n");
   });
 });
 
@@ -52,11 +60,13 @@ describe("resolveEngine", () => {
     expect(r.pipeline?.name).toBe("placeholder_competitive");
   });
 
-  it("refuses app while no app-capable pipeline of the kind has all its secrets set: n8n runs it", () => {
+  it("stays on app, with no pipeline and the reason, while no app-capable pipeline of the kind has all its secrets set: never n8n", () => {
     for (const kind of ["social", "competitive", "linkedin_source"] as const) {
       const r = resolveEngine("app", kind, REGISTRY, noEnv);
-      expect(r.engine).toBe("n8n");
+      expect(r.engine).toBe("app");
+      expect(r.pipeline).toBeUndefined();
       expect(r.refused).toContain("app-capable");
+      expect(r.refused).not.toContain("n8n");
     }
   });
 
@@ -66,24 +76,24 @@ describe("resolveEngine", () => {
     // The scrapers' token is awaited: a shadow waits for it, a real report never does.
     const noApify = (n: string) => (n === "APIFY_API_TOKEN" ? undefined : socialEnv(n));
     expect(resolveEngine("shadow", "social", REGISTRY, noApify).pipeline?.name).toBe("social_v1");
-    expect(resolveEngine("app", "social", REGISTRY, noApify).engine).toBe("n8n");
+    expect(resolveEngine("app", "social", REGISTRY, noApify)).toEqual({ engine: "app", refused: expect.stringContaining("app-capable") });
   });
 
-  it("refuses app while this deployment has no writer for the kind's real report", () => {
+  it("has no app pipeline while this deployment has no writer for the kind's real report", () => {
     const registry = makeRegistry(REGISTRY.all());
-    expect(resolveEngine("app", "social", registry, socialEnv).engine).toBe("n8n");
+    expect(resolveEngine("app", "social", registry, socialEnv)).toEqual({ engine: "app", refused: expect.stringContaining("app-capable") });
     expect(resolveEngine("shadow", "social", registry, socialEnv).pipeline?.name).toBe("social_v1");
   });
 
-  it("keeps a kind on n8n, and a shadow on the placeholder, while the real pipeline's secrets are missing", () => {
+  it("keeps app waiting with no pipeline, and a shadow on the placeholder, while the real pipeline's secrets are missing", () => {
     const env = (n: string) => (n === "ANTHROPIC_API_KEY" ? "k" : undefined);
-    expect(resolveEngine("app", "social", REGISTRY, env).engine).toBe("n8n");
+    expect(resolveEngine("app", "social", REGISTRY, env)).toEqual({ engine: "app", refused: expect.stringContaining("app-capable") });
     expect(resolveEngine("shadow", "social", REGISTRY, env).pipeline?.name).toBe("placeholder_social");
   });
 
   it("shadows the LinkedIn source with the in-app pipeline while APIFY_API_TOKEN is missing (it waits), and takes app only once the token is set", () => {
     expect(resolveEngine("shadow", "linkedin_source", REGISTRY, noEnv)).toMatchObject({ engine: "shadow", pipeline: { name: "linkedin_source_v1" } });
-    expect(resolveEngine("app", "linkedin_source", REGISTRY, noEnv).engine).toBe("n8n");
+    expect(resolveEngine("app", "linkedin_source", REGISTRY, noEnv)).toEqual({ engine: "app", refused: expect.stringContaining("app-capable") });
     const withToken = (n: string) => (n === "APIFY_API_TOKEN" ? "apify-token" : undefined);
     expect(resolveEngine("app", "linkedin_source", REGISTRY, withToken)).toMatchObject({ engine: "app", pipeline: { name: "linkedin_source_v1" } });
   });
@@ -91,14 +101,18 @@ describe("resolveEngine", () => {
   it("shadows the competitive analysis in-app once RivalIQ and Claude are set, and takes app only with the Apify token too", () => {
     const keys = (names: string[]) => (n: string) => (names.includes(n) ? "set" : undefined);
     expect(resolveEngine("shadow", "competitive", REGISTRY, keys(["RIVALIQ_API_KEY", "ANTHROPIC_API_KEY"]))).toMatchObject({ engine: "shadow", pipeline: { name: "competitive_v1" } });
-    expect(resolveEngine("app", "competitive", REGISTRY, keys(["RIVALIQ_API_KEY", "ANTHROPIC_API_KEY"])).engine).toBe("n8n");
+    expect(resolveEngine("app", "competitive", REGISTRY, keys(["RIVALIQ_API_KEY", "ANTHROPIC_API_KEY"]))).toEqual({ engine: "app", refused: expect.stringContaining("app-capable") });
     expect(resolveEngine("app", "competitive", REGISTRY, keys(["RIVALIQ_API_KEY", "ANTHROPIC_API_KEY", "APIFY_API_TOKEN"]))).toMatchObject({ engine: "app", pipeline: { name: "competitive_v1" } });
-    // Social needs Sprout and Gamma too: without them only its placeholder shadows, and app stays on n8n.
-    expect(resolveEngine("app", "social", REGISTRY, keys(["RIVALIQ_API_KEY", "ANTHROPIC_API_KEY", "APIFY_API_TOKEN"])).engine).toBe("n8n");
+    // Social needs Sprout and Gamma too: without them only its placeholder shadows, and app waits with no pipeline.
+    expect(resolveEngine("app", "social", REGISTRY, keys(["RIVALIQ_API_KEY", "ANTHROPIC_API_KEY", "APIFY_API_TOKEN"]))).toEqual({ engine: "app", refused: expect.stringContaining("app-capable") });
   });
 
   it("runs n8n for n8n", () => {
     expect(resolveEngine("n8n", "social", REGISTRY, noEnv)).toEqual({ engine: "n8n" });
+  });
+
+  it("keeps a shadow set by hand on n8n alone, with the reason, when no pipeline can run next to it", () => {
+    expect(resolveEngine("shadow", "social", makeRegistry([]), noEnv)).toEqual({ engine: "shadow", refused: expect.stringContaining("next to n8n") });
   });
 });
 
@@ -110,11 +124,21 @@ describe("readEngine", () => {
     expect((await readEngine(db, "social", OTHER, deps)).engine).toBe("n8n");
   });
 
-  it("is n8n when the table cannot be read or the read throws", async () => {
+  it("is app with no pipeline and the reason when the table cannot be read or the read throws, never n8n", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const failing = { from: () => ({ select: () => ({ eq: async () => ({ data: null, error: { message: "relation does not exist" } }) }) }) };
-    expect(await readEngine(failing, "social", MOBURST, deps)).toMatchObject({ engine: "n8n", refused: expect.stringContaining("relation does not exist") });
+    expect(await readEngine(failing, "social", MOBURST, { registry: REGISTRY, env: socialEnv })).toEqual({ engine: "app", refused: expect.stringContaining("relation does not exist"), unreadable: true });
     const throwing = { from: () => { throw new Error("network"); } };
-    expect((await readEngine(throwing, "competitive", MOBURST, deps)).engine).toBe("n8n");
+    expect(await readEngine(throwing, "competitive", MOBURST, deps)).toEqual({ engine: "app", refused: expect.stringContaining("network"), unreadable: true });
+    // Logged for the logs, each time.
+    expect(warn.mock.calls.map((c) => c.join(" "))).toEqual([expect.stringContaining("relation does not exist"), expect.stringContaining("network")]);
+    warn.mockRestore();
+  });
+
+  it("runs the app pipeline for a kind with no row, once its secrets are set", async () => {
+    const db = fakeDb({ report_engines: [{ kind: "competitive", client_id: null, engine: "n8n" }] });
+    expect(await readEngine(db, "social", MOBURST, { registry: REGISTRY, env: socialEnv })).toMatchObject({ engine: "app", pipeline: { name: "social_v1" } });
+    expect(await readEngine(db, "competitive", MOBURST, { registry: REGISTRY, env: socialEnv })).toEqual({ engine: "n8n" });
   });
 });
 

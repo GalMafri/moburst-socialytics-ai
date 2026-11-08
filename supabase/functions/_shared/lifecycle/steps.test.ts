@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { deps, settled, siteKey, STEPS, weeksFor } from "./steps";
 import { fakeDb, writeClientRpc } from "./fakeDb";
 import type { StepRow } from "./policy";
 
 const original = { ...deps };
-afterEach(() => Object.assign(deps, original));
+afterEach(() => { Object.assign(deps, original); vi.restoreAllMocks(); });
 
 const T = "2026-10-19T10:00:00.000Z";
 const row = (step: string, patch: Partial<StepRow> = {}): StepRow => ({
@@ -92,6 +92,101 @@ describe("website", () => {
     expect(await STEPS.brand_read.inputs(db, c, new Map())).toBe("olo.com");
     expect(await STEPS.website.inputs(db, c, new Map())).toBeNull();
   });
+  describe("the website the client's LinkedIn page states", () => {
+    const withPage = (website: string | null) => rowsOf(row("social_read", { result: { checked_at: T, linkedin_page: { profile_id: "7", url: "https://www.linkedin.com/company/x", key: "7:x", read_at: T, page: { url: "https://www.linkedin.com/company/x", name: "X", website, about: "", tagline: null, specialties: [], industries: [], logo: null } } } }));
+    it("is written as stated, with its subdomain, confirmed by the profile, and no search runs", async () => {
+      const c = olo();
+      const db = dbWith({ clients: [c], sprout_profiles: profiles() });
+      deps.listBrandPosts = fail("the post read");
+      deps.searchWeb = fail("the web search");
+      deps.siteReader = fail("the site reader") as never;
+      const rows = withPage("https://uproar.moburst.com/");
+      const out = await STEPS.website.run(db, c, ctx({ rows }));
+      expect(out).toMatchObject({ status: "done", result: { website: "https://uproar.moburst.com/", confirmed_by: "profile_website", written: ["website_url"] } });
+      expect(c.website_url).toBe("https://uproar.moburst.com/");
+      expect(c.field_sources.website_url).toMatchObject({ by: "lifecycle" });
+    });
+    it("keeps the path it states", async () => {
+      const c = olo();
+      deps.listBrandPosts = fail("the post read");
+      const out = await STEPS.website.run(dbWith({ clients: [c], sprout_profiles: profiles() }), c, ctx({ rows: withPage("https://www.moburst.com/services/organic/podcast-booking/") }));
+      expect(out).toMatchObject({ status: "done", result: { website: "https://www.moburst.com/services/organic/podcast-booking/", confirmed_by: "profile_website" } });
+      expect(c.website_url).toBe("https://www.moburst.com/services/organic/podcast-booking/");
+    });
+    describe("another client's own site, stated as it is (spec B)", () => {
+      // Moburst is a client, stored as it is today: a bare domain with no scheme.
+      const MOBURST = { id: "m", name: "Moburst", website_url: "Moburst.com", archived_at: null, demo_job_id: null };
+      it("is never written: the result records whose site it is, and the posts and the name are searched as if none were stated", async () => {
+        const c = olo();
+        const db = dbWith({ clients: [c, MOBURST], sprout_profiles: profiles() });
+        deps.now = () => new Date(T);
+        let read = 0;
+        deps.listBrandPosts = (async () => { read++; return [{ text: "Order ahead at https://www.olo.com/order", created_time: T, perma_link: null, profile_id: "7" }]; }) as never;
+        deps.siteReader = site({ "olo.com": `<a href="https://www.instagram.com/olo.hq/">ig</a>` }) as never;
+        deps.searchWeb = fail("the web search");
+        const out = await STEPS.website.run(db, c, ctx({ rows: withPage("https://www.moburst.com") }));
+        expect(read).toBe(1);
+        expect(out).toMatchObject({ status: "done", result: { website: "https://www.olo.com", confirmed_by: "profile_link", stated_website: "https://www.moburst.com/", stated_site_of: "Moburst" } });
+        expect(c.website_url).toBe("https://www.olo.com");
+      });
+      it("leaves the client with no website when the search finds none, and searches by name", async () => {
+        const c = olo();
+        const db = dbWith({ clients: [c, MOBURST], sprout_profiles: profiles() });
+        deps.now = () => new Date(T);
+        deps.listBrandPosts = (async () => [{ text: "Happy Friday", created_time: T, perma_link: null, profile_id: "7" }]) as never;
+        deps.siteReader = site({}) as never;
+        const asked: string[] = [];
+        deps.searchWeb = (async (q: string) => { asked.push(q); return []; }) as never;
+        const out = await STEPS.website.run(db, c, ctx({ rows: withPage("https://moburst.com/") }));
+        expect(out).toMatchObject({ status: "waiting", reason: "website", result: { stated_site_of: "Moburst" } });
+        expect(asked.length).toBeGreaterThan(0);
+        expect(c.website_url).toBeNull();
+        expect(c.field_sources.website_url).toBeUndefined();
+      });
+      it("still writes a site of the client's own, a subdomain of its own, and a page under another client's site", async () => {
+        for (const stated of ["https://olo.com/", "https://uproar.moburst.com/", "https://www.moburst.com/services/organic/podcast-booking/"]) {
+          const c = olo();
+          deps.listBrandPosts = fail("the post read");
+          deps.searchWeb = fail("the web search");
+          const out = await STEPS.website.run(dbWith({ clients: [c, MOBURST], sprout_profiles: profiles() }), c, ctx({ rows: withPage(stated) }));
+          expect(out, stated).toMatchObject({ status: "done", result: { website: stated, confirmed_by: "profile_website" } });
+          expect((out as { result: Record<string, unknown> }).result.stated_site_of, stated).toBeUndefined();
+          expect(c.website_url).toBe(stated);
+        }
+      });
+      it("is another client's site only while that client is active", async () => {
+        const c = olo();
+        deps.listBrandPosts = fail("the post read");
+        const archived = { ...MOBURST, archived_at: "2026-10-01T00:00:00Z" };
+        const out = await STEPS.website.run(dbWith({ clients: [c, archived], sprout_profiles: profiles() }), c, ctx({ rows: withPage("https://www.moburst.com/") }));
+        expect(out).toMatchObject({ status: "done", result: { website: "https://www.moburst.com/", confirmed_by: "profile_website" } });
+      });
+    });
+    it("never replaces a person's website, and ignores a social profile URL", async () => {
+      const kept = olo({ website_url: "https://olo-person.example", field_sources: person("website_url") });
+      deps.listBrandPosts = fail("the post read");
+      expect(await STEPS.website.run(dbWith({ clients: [kept], sprout_profiles: profiles() }), kept, ctx({ rows: withPage("https://uproar.moburst.com/") }))).toEqual({ status: "done", result: { kept: true } });
+      expect(kept.website_url).toBe("https://olo-person.example");
+      expect(await STEPS.website.inputs(dbWith({ sprout_profiles: profiles() }), kept, withPage("https://uproar.moburst.com/"))).toBeNull();
+      // A social profile is not a website: the posts are searched as before.
+      const c = olo();
+      deps.listBrandPosts = (async () => [{ text: "See https://partner.example", created_time: T, perma_link: null, profile_id: "7" }]) as never;
+      deps.siteReader = site({}) as never;
+      deps.searchWeb = async () => [];
+      const out = await STEPS.website.run(dbWith({ clients: [c], sprout_profiles: profiles() }), c, ctx({ rows: withPage("https://www.instagram.com/olo.hq") }));
+      expect(out).toMatchObject({ status: "waiting", reason: "website" });
+      expect(c.website_url).toBeNull();
+    });
+    it("changes the inputs key when the page's stated website appears", async () => {
+      const db = dbWith({ sprout_profiles: profiles() });
+      const before = await STEPS.website.inputs(db, olo(), withPage(null));
+      const after = await STEPS.website.inputs(db, olo(), withPage("https://uproar.moburst.com/"));
+      expect(before).toBe("profiles:7,8|name:olo");
+      expect(after).not.toBe(before);
+      expect(after).toContain("uproar.moburst.com");
+      expect(await STEPS.website.inputs(db, olo(), withPage("https://www.instagram.com/olo.hq"))).toBe(before);
+    });
+  });
   it("waits 7 days when no linked site is confirmed", async () => {
     const c = olo();
     deps.listBrandPosts = (async () => [{ text: "See https://partner.example", created_time: T, perma_link: null, profile_id: "7" }]) as never;
@@ -140,6 +235,24 @@ describe("brand_read", () => {
     expect(out).toMatchObject({ status: "done", result: { model_read: true, timezone: "America/Denver", timezone_source: "site_read" } });
     expect((out as { result: { written: string[] } }).result.written).not.toContain("timezone");
     expect(c).toMatchObject({ brand_identity: BRAND, logo_url: "https://moburst.com/logo.svg", timezone: "America/Chicago" });
+  });
+  it("labels a zone the agency gave by the website's source when the website finds the same zone, and leaves a real source's label", async () => {
+    const set = { ...person("brand_identity", "logo_url"), timezone: { by: "lifecycle", from: "agency" } };
+    const c = client({ timezone: "America/New_York", location: { source: "agency", website: null, timezone: "America/New_York" }, field_sources: set, brand_identity: BRAND, logo_url: "https://x/logo.png" });
+    deps.fetchSiteHtml = async () => ({ html: FOOTER_SITE, via: "direct" as const });
+    deps.researchBrand = fail("the brand read");
+    const out = await STEPS.brand_read.run(dbWith({ clients: [c] }), c, ctx());
+    expect((out as { result: { written: string[] } }).result.written).toContain("timezone");
+    expect(c.timezone).toBe("America/New_York");
+    expect(c.field_sources.timezone).toMatchObject({ by: "lifecycle", from: "page_footer" });
+    expect(c.location).toMatchObject({ source: "page_footer", website: "moburst.com" });
+
+    // A zone from a real source is not written again when the website finds the same one: only the location moves.
+    const d = client({ timezone: "America/New_York", location: { source: "post_text", website: null, timezone: "America/New_York" },
+      field_sources: { ...person("brand_identity", "logo_url"), timezone: { by: "lifecycle", from: "post_text" } }, brand_identity: BRAND, logo_url: "https://x/logo.png" });
+    const again = await STEPS.brand_read.run(dbWith({ clients: [d] }), d, ctx());
+    expect((again as { result: { written: string[] } }).result.written).toEqual(["location"]);
+    expect(d.field_sources.timezone).toMatchObject({ from: "post_text" });
   });
   it("tries again quietly when the site cannot be read", async () => {
     const { ResearchError } = await import("../brand/research");
@@ -382,6 +495,288 @@ describe("tracking", () => {
     expect(await STEPS.tracking.run(db, client(), ctx())).toMatchObject({ status: "waiting", reason: "selection" });
     deps.rivaliqKey = () => null;
     expect(await STEPS.tracking.run(db, client(), ctx())).toMatchObject({ status: "failed" });
+  });
+});
+
+// Kitcaster's LinkedIn page states a page on moburst.com, the website of
+// Moburst, another client (spec: docs/superpowers/specs/2026-11-08-onboarding-
+// profile-pages-and-no-n8n-design.md, section B): the page feeds the brief,
+// pillars, keywords and competitors, never Moburst's logo, brand, place,
+// profile links or RivalIQ company.
+describe("a page on another client's site is used for text only", () => {
+  const KITCASTER = "https://www.moburst.com/services/organic/podcast-booking/";
+  const MOBURST_SITE = `<html lang="en-US"><body><header><img class="logo" src="/logo.png"></header><h1>Growth done right</h1><footer>1250 Broadway, New York, NY 10001 <a href="https://www.linkedin.com/company/moburst/">in</a> <a href="https://www.instagram.com/moburst.agency/">ig</a></footer></body></html>`;
+  const moburst = () => ({ id: "m", name: "Moburst", website_url: "https://www.moburst.com", archived_at: null, demo_job_id: null });
+  const kit = (over: Record<string, unknown> = {}) => client({ id: "c1", name: "Kitcaster by Moburst", website_url: KITCASTER, ...over });
+  const set = (over = {}) => ({ id: "s1", client_id: "c1", status: "confirmed", confirmed_at: T, created_at: T, rivaliq_landscape_id: null, tracking_check: null, ...over });
+
+  it("brand_read writes no logo, location, timezone, brand identity or geo, and gives no profile links", async () => {
+    const c = kit({ geo: "" });
+    const db = dbWith({ clients: [moburst(), c] });
+    deps.fetchSiteHtml = async () => ({ html: MOBURST_SITE, via: "direct" as const });
+    deps.researchBrand = fail("the brand read");
+    const followers = rowsOf(row("social_read", { result: { follower_countries: [{ country: "GB", followers: 9, share: 0.9 }] } }));
+    const out = await STEPS.brand_read.run(db, c, ctx({ rows: followers }));
+    expect(out).toEqual({
+      status: "done",
+      result: {
+        website: "moburst.com/services/organic/podcast-booking", fetched_via: "direct", model_read: false,
+        timezone: null, timezone_source: null, country: null, language: "en", logo: "none", written: [], kept: [], site_profiles: [], parent_page: true,
+      },
+    });
+    expect(c).toMatchObject({ logo_url: null, brand_identity: null, location: null, timezone: "UTC", geo: "" });
+    expect(db.uploads.size).toBe(0);
+  });
+  it("brand_read asks the model only for the page's language, and takes nothing else it reads", async () => {
+    const c = kit({ language: "" });
+    const db = dbWith({ clients: [moburst(), c] });
+    deps.fetchSiteHtml = async () => ({ html: MOBURST_SITE.replace(' lang="en-US"', ""), via: "direct" as const });
+    deps.openaiKey = async () => "sk";
+    deps.researchBrand = (async () => ({ brand_identity: BRAND, headquarters: { city: "New York", region: "NY", country: "US" }, site_language: "en", logo: { url: "https://www.moburst.com/logo.svg" }, html: "", url: "", fetched_via: "direct", debug: {} })) as never;
+    const out = await STEPS.brand_read.run(db, c, ctx());
+    expect(out).toMatchObject({ status: "done", result: { model_read: true, written: ["language"], logo: "none", site_profiles: [], parent_page: true } });
+    expect(c).toMatchObject({ language: "en", logo_url: null, brand_identity: null, location: null, timezone: "UTC", geo: "US" });
+  });
+  it("accounts takes no profile links from the page, and never reads the page for them", async () => {
+    const c = kit();
+    const db = dbWith({ clients: [moburst(), c], sprout_profiles: [], sprout_profile_removals: [] });
+    deps.listCustomerProfiles = async () => [
+      { id: "5719052", name: "Moburst - Growth Done Right", native_name: "moburst", network_type: "linkedin_company", native_link: "", status: "active" },
+      { id: "5489335", name: "Moburst | Mobile-First Digital Agency", native_name: "moburst.agency", network_type: "fb_instagram_account", native_link: "", status: "active" },
+    ];
+    deps.fetchSiteHtml = fail("the page read");
+    // A brand read from before the page was another client's still lists Moburst's profiles; with no brand read, the page is not fetched.
+    for (const rows of [rowsOf(row("brand_read", { result: { site_profiles: ["linkedin:moburst", "instagram:moburst.agency"] } })), new Map<string, StepRow>()]) {
+      expect(await STEPS.accounts.run(db, c, ctx({ rows }))).toMatchObject({ status: "done", result: { matched: [], assigned: 0, platforms: [] } });
+    }
+    expect(db.tables.sprout_profiles).toEqual([]);
+  });
+  it("tracking waits for a site of its own, asking RivalIQ nothing", async () => {
+    deps.rivaliqKey = () => "rk";
+    deps.rivalIqApi = (() => async () => ({})) as never;
+    deps.advanceSetupOnServer = fail("the setup");
+    deps.syncTrackedHandles = fail("the handle sync");
+    expect(await STEPS.tracking.run(dbWith({ clients: [moburst(), kit()], competitor_sets: [set()] }), kit(), ctx())).toEqual({ status: "waiting", reason: "own_site", result: { set_id: "s1" } });
+    // A landscape linked earlier is not matched by the other client's website either.
+    expect(await STEPS.tracking.run(dbWith({ clients: [moburst(), kit()], competitor_sets: [set({ rivaliq_landscape_id: "L1" })] }), kit(), ctx())).toEqual({ status: "waiting", reason: "own_site", result: { set_id: "s1" } });
+  });
+  it("keys brand_read and tracking on the page being another client's, so the site is read again when that changes", async () => {
+    const other = moburst();
+    const db = dbWith({ clients: [other, kit()], competitor_sets: [set()], competitors: [] });
+    expect(await STEPS.brand_read.inputs(db, kit(), new Map())).toBe("moburst.com/services/organic/podcast-booking|text_only");
+    const tracked = await STEPS.tracking.inputs(db, kit(), new Map());
+    expect(tracked).toMatch(/\|moburst\.com\/services\/organic\/podcast-booking\|text_only$/);
+    // Once Moburst is archived, nobody else has the site: the page is the client's own and both keys move.
+    Object.assign(other, { archived_at: T });
+    expect(await STEPS.brand_read.inputs(db, kit(), new Map())).toBe("moburst.com/services/organic/podcast-booking");
+    expect(await STEPS.tracking.inputs(db, kit(), new Map())).toBe(tracked!.replace(/\|text_only$/, ""));
+  });
+  it("counts only a client that sits above the page: one stored beside it on the same site marks neither (fix round 1)", async () => {
+    const db = dbWith({ clients: [{ ...moburst(), website_url: "https://www.moburst.com/en/" }, kit()], competitor_sets: [set()], competitors: [] });
+    expect(await STEPS.brand_read.inputs(db, kit(), new Map())).toBe("moburst.com/services/organic/podcast-booking");
+    expect(await STEPS.brand_read.inputs(db, client({ id: "m", website_url: "https://www.moburst.com/en/" }), new Map())).toBe("moburst.com/en");
+    expect(await STEPS.tracking.inputs(db, kit(), new Map())).not.toMatch(/text_only/);
+  });
+  it("still feeds the page's text to the brief, pillars and competitors", async () => {
+    const db = dbWith({ clients: [moburst(), kit()], competitor_sets: [] });
+    expect(await STEPS.brief_pillars.inputs(db, kit(), rowsOf(row("brand_read", { result: { parent_page: true, site_profiles: [] } })))).toContain("|site:moburst.com/services/organic/podcast-booking|");
+    expect(await STEPS.competitors.inputs(db, kit(), rowsOf(row("brief_pillars")))).toMatch(/^site:moburst\.com\/services\/organic\/podcast-booking\|notes:/);
+    const c = kit();
+    const scraped: string[] = [];
+    deps.scrapeMarkdown = async (url: string) => { scraped.push(url); return { markdown: "# Kitcaster books founders, executives and experts on the podcasts their buyers already listen to every week.", title: "Kitcaster" }; };
+    deps.anthropicKey = async () => "key";
+    deps.now = () => new Date(T);
+    deps.derivePillars = (async () => ({ pillars: [{ name: "Podcast booking", description: "d", rationale: "r" }], keywords: ["podcast guesting"], notes: "", sources: ["brief"], source: "brief", derived_at: T })) as never;
+    const out = await STEPS.brief_pillars.run(dbWith({ clients: [moburst(), c] }), c, ctx({ rows: rowsOf(row("brand_read")) }));
+    expect(scraped).toEqual([KITCASTER]);
+    expect(out).toMatchObject({ status: "done", result: { brief: "drafted", pillars: "derived" } });
+  });
+});
+
+// Review Focus 5: a client whose website is a plain domain behaves exactly as
+// before the parent-page rule, even when another client has a page on its
+// site, and the rule reads no client for it.
+describe("a plain-domain client is unchanged by the parent-page rule", () => {
+  const OLO_SITE = `<html lang="en-US"><body><header><img class="logo" src="/logo.png"></header><footer>1250 Broadway, New York, NY 10001 <a href="https://www.linkedin.com/company/olo/">in</a></footer></body></html>`;
+  const others = () => [{ id: "k2", name: "Olo Careers", website_url: "https://www.olo.com/careers/", archived_at: null, demo_job_id: null }];
+  const olo = (over: Record<string, unknown> = {}) => client({ id: "c1", name: "Olo", website_url: "https://www.olo.com/", ...over });
+  const watched = (db: ReturnType<typeof dbWith>) => {
+    const tables: string[] = [];
+    const from = db.from.bind(db);
+    db.from = (t: string) => { tables.push(t); return from(t); };
+    return tables;
+  };
+
+  it("brand_read, accounts and tracking give today's results and keys, and read no client", async () => {
+    const c = olo();
+    const db = dbWith({ clients: [...others(), c], sprout_profiles: [], sprout_profile_removals: [], competitor_sets: [{ id: "s1", client_id: "c1", status: "confirmed", confirmed_at: T, created_at: T, rivaliq_landscape_id: null, tracking_check: null }], competitors: [] });
+    const tables = watched(db);
+    deps.fetchSiteHtml = async () => ({ html: OLO_SITE, via: "direct" as const });
+    deps.openaiKey = async () => "sk";
+    deps.researchBrand = (async () => ({ brand_identity: BRAND, headquarters: { city: "New York", region: "NY", country: "US" }, site_language: "en", logo: { url: "https://www.olo.com/logo.svg" }, html: "", url: "", fetched_via: "direct", debug: {} })) as never;
+
+    expect(await STEPS.brand_read.inputs(db, c, new Map())).toBe("olo.com");
+    const read = await STEPS.brand_read.run(db, c, ctx());
+    expect(read).toEqual({
+      status: "done",
+      result: {
+        website: "olo.com", fetched_via: "direct", model_read: true, timezone: "America/New_York", timezone_source: "page_footer", country: "US", language: "en",
+        logo: "file", written: ["brand_identity", "logo_url", "location", "timezone"], kept: [], site_profiles: ["linkedin:olo"],
+      },
+    });
+    expect(c).toMatchObject({ brand_identity: BRAND, logo_url: "https://www.olo.com/logo.svg", timezone: "America/New_York", location: { source: "page_footer", website: "olo.com" } });
+
+    const rows = rowsOf(row("brand_read", { result: (read as { result: Record<string, unknown> }).result }));
+    deps.listCustomerProfiles = async () => [{ id: "7", name: "Olo - Skip the Line", native_name: "olo", network_type: "linkedin_company", native_link: "", status: "active" }];
+    const accounts = await STEPS.accounts.run(db, c, ctx({ rows }));
+    expect(accounts).toMatchObject({ status: "done", result: { profiles: 1, matched: [{ id: "7", network: "linkedin_company", handle: "olo", by: ["site_link"] }], assigned: 1, platforms: ["LinkedIn"], written: ["primary_platforms"] } });
+    expect(Object.keys((accounts as { result: Record<string, unknown> }).result).sort()).toEqual(["assigned", "list", "matched", "platforms", "profiles", "written"]);
+
+    const { FollowFailure } = await import("../competitive/rivaliqFollowFailure");
+    let asked = 0;
+    deps.rivaliqKey = () => "rk";
+    deps.rivalIqApi = (() => async () => ({})) as never;
+    deps.advanceSetupOnServer = async () => { asked++; throw new FollowFailure("RivalIQ's plan tracks 40 distinct companies and 40 are in use, so Olo could not be added.", true); };
+    expect(await STEPS.tracking.inputs(db, c, new Map())).toMatch(/^s1\|none\|\|[^|]+\|olo\.com$/);
+    expect(await STEPS.tracking.run(db, c, ctx())).toEqual({ status: "waiting", reason: "rivaliq_full", recheckDays: 1, result: { set_id: "s1" } });
+    expect(asked).toBe(1);
+    expect(tables).not.toContain("clients");
+  });
+});
+
+// Kitcaster on 8 Nov: its posts are mostly about its podcast guests, no pillar
+// stood on them alone, the keywords were thrown away with the pillars and the
+// step's inputs never changed, so it waited for good.
+describe("brief, pillars and keywords from the LinkedIn page", () => {
+  const NOW = "2026-11-08T10:00:00.000Z";
+  const KITCASTER = "https://www.moburst.com/services/organic/podcast-booking/";
+  const ABOUT = "Kitcaster by Moburst is the podcast booking division of Moburst. We book founders, executives and experts on the podcasts their buyers already listen to.";
+  const PAGE = { url: "https://www.linkedin.com/company/kitcaster-by-moburst/", name: "Kitcaster by Moburst", website: KITCASTER, about: ABOUT, tagline: "Strategic podcast booking for B2B leaders", specialties: ["podcast booking"], industries: ["Marketing Services"], logo: null, headquarters: null };
+  const POSTS = [
+    { id: "P1", platform: "LinkedIn", format: "image", date: "2026-10-20", text: "This week's guest: a SaaS founder on hiring", label: null, top: false },
+    { id: "P2", platform: "LinkedIn", format: "image", date: "2026-10-27", text: "Our guest on the Growth Show talks pricing", label: null, top: false },
+  ];
+  const social = (page: Record<string, unknown> | null, over: Record<string, unknown> = {}) => row("social_read", { result: {
+    checked_at: NOW, version: 1, window_days: 90, text_posts: 8, enough: true, posts: POSTS,
+    linkedin_page: page ? { profile_id: "7", url: PAGE.url, key: "7:kitcaster-by-moburst", read_at: NOW, page } : null, ...over,
+  } });
+  const kit = (over: Record<string, unknown> = {}) => client({ id: "c1", name: "Kitcaster by Moburst", website_url: KITCASTER, ...over });
+  const complete = (over: Record<string, unknown> = {}) => kit({ content_pillars: [{ name: "Podcast booking", description: "d" }], social_keywords: ["podcast guesting"], field_sources: { content_pillars: { by: "lifecycle" }, social_keywords: { by: "lifecycle" } }, ...over });
+  const derived = (o: Partial<{ pillars: unknown[]; keywords: string[]; sources: string[]; source: string; brief: string | null }> = {}) =>
+    ({ pillars: [{ name: "Podcast booking", description: "d", rationale: "r" }], keywords: ["podcast guesting"], notes: "", sources: ["social_posts", "linkedin_page"], source: "social_posts", derived_at: NOW, ...o });
+
+  it("keys on the page's text while the client has no pillars and keywords, so a page read runs the step again", async () => {
+    const db = dbWith();
+    const none = await STEPS.brief_pillars.inputs(db, kit(), rowsOf(row("brand_read"), social(null)));
+    const withPage = await STEPS.brief_pillars.inputs(db, kit(), rowsOf(row("brand_read"), social(PAGE)));
+    expect(withPage).toMatch(/\|page:[0-9a-f]{8}$/);
+    expect(withPage!.startsWith(`${none}|page:`)).toBe(true);
+    expect(await STEPS.brief_pillars.inputs(db, kit(), rowsOf(row("brand_read"), social({ ...PAGE, about: `${ABOUT} Since 2017.` })))).not.toBe(withPage);
+    // Keywords alone are not complete: the page still counts.
+    expect(await STEPS.brief_pillars.inputs(db, kit({ social_keywords: ["podcast guesting"] }), rowsOf(row("brand_read"), social(PAGE)))).toMatch(/\|page:[0-9a-f]{8}$/);
+  });
+  it("leaves a complete client's key as it is when a page is read, and the run that completes a client sets off no other", async () => {
+    const db = dbWith();
+    // A client with pillars and keywords from before the page reader: its key has no page, and a page read changes nothing.
+    const before = await STEPS.brief_pillars.inputs(db, complete(), rowsOf(row("brand_read"), social(null)));
+    const ranOn = row("brief_pillars", { inputs_key: before });
+    expect(await STEPS.brief_pillars.inputs(db, complete(), rowsOf(row("brand_read"), ranOn, social(PAGE)))).toBe(before);
+    expect(await STEPS.brief_pillars.inputs(db, complete(), rowsOf(row("brand_read"), ranOn, social({ ...PAGE, about: "Something else entirely, written later on the page." })))).toBe(before);
+    // Kitcaster ran on the page and its run wrote pillars and keywords: the key it ran on stays its key, whatever the page says next.
+    const incomplete = await STEPS.brief_pillars.inputs(db, kit(), rowsOf(row("brand_read"), social(PAGE)));
+    const ran = row("brief_pillars", { status: "waiting", inputs_key: incomplete });
+    expect(await STEPS.brief_pillars.inputs(db, complete(), rowsOf(row("brand_read"), ran, social(PAGE)))).toBe(incomplete);
+    expect(await STEPS.brief_pillars.inputs(db, complete(), rowsOf(row("brand_read"), ran, social({ ...PAGE, about: "Something else entirely, written later on the page." })))).toBe(incomplete);
+  });
+  it("drafts the brief from the page's about text when there is no document and no site text, and reads the page for the pillars", async () => {
+    const c = kit();
+    const db = dbWith({ clients: [c] });
+    deps.now = () => new Date(NOW);
+    deps.anthropicKey = async () => "key";
+    deps.scrapeMarkdown = async () => null;
+    deps.fetchSiteText = async () => "";
+    let given: { evidence?: { brief_text?: string }; opts?: Record<string, unknown> } = {};
+    deps.derivePillars = (async (_db: unknown, evidence: { brief_text: string }, _k: string, opts: Record<string, unknown>) => { given = { evidence, opts }; return derived(); }) as never;
+    const out = await STEPS.brief_pillars.run(db, c, ctx({ rows: rowsOf(row("brand_read"), social(PAGE)) }));
+    expect(c.brief_text).toBe(`Drafted from the LinkedIn page on 2026-11-08:\n\n${ABOUT}`);
+    expect(c.field_sources.brief_text).toMatchObject({ by: "lifecycle", from: "linkedin_page" });
+    expect(out).toMatchObject({ status: "done", result: { brief: "from_page", pillars: "derived", keywords: 1 } });
+    // The page is given once, as the page; no brief is asked of the posts.
+    expect(given.evidence?.brief_text).toBe("");
+    expect(given.opts).toMatchObject({ page: PAGE, posts: POSTS, briefFromPosts: false });
+    // Run again on the same page: the brief it drafted is kept as it is.
+    const again = await STEPS.brief_pillars.run(db, c, ctx({ rows: rowsOf(row("brand_read"), social(PAGE)) }));
+    expect(again).toMatchObject({ status: "done", result: { brief: "from_page", written: ["content_pillars", "pillars_source", "pillars_derived_at", "social_keywords"] } });
+  });
+  it("replaces a brief it drafted from the posts earlier with the page's", async () => {
+    const c = kit({ brief_text: "Drafted from the client's posts on 2026-11-01:\n\nKitcaster books guests.", field_sources: { brief_text: { by: "lifecycle", from: "posts" } } });
+    Object.assign(deps, { now: () => new Date(NOW), anthropicKey: async () => "key", scrapeMarkdown: async () => null, fetchSiteText: async () => "", derivePillars: async () => derived() });
+    await STEPS.brief_pillars.run(dbWith({ clients: [c] }), c, ctx({ rows: rowsOf(row("brand_read"), social(PAGE)) }));
+    expect([c.brief_text, c.field_sources.brief_text.from]).toEqual([`Drafted from the LinkedIn page on 2026-11-08:\n\n${ABOUT}`, "linkedin_page"]);
+  });
+  it("reads a client with no website and too few posts once it has a page with text, and keys it as before", async () => {
+    // Uproar-shaped: no website, no document, no brief, 2 posts with text.
+    const few = (page: Record<string, unknown> | null) => social(page, { text_posts: 2, enough: false, window_days: 365 });
+    const uproar = (over: Record<string, unknown> = {}) => kit({ name: "Uproar by Moburst", website_url: null, ...over });
+    deps.derivePillars = fail("the derivation");
+    expect(await STEPS.brief_pillars.run(dbWith({ clients: [uproar()] }), uproar(), ctx({ rows: rowsOf(few(null)) }))).toMatchObject({ status: "waiting", reason: "posts" });
+    expect(await STEPS.brief_pillars.run(dbWith({ clients: [uproar()] }), uproar(), ctx({ rows: rowsOf(few({ ...PAGE, about: "", tagline: null })) }))).toMatchObject({ status: "waiting", reason: "posts" });
+    const c = uproar();
+    Object.assign(deps, { now: () => new Date(NOW), anthropicKey: async () => "key", scrapeMarkdown: fail("the scrape") });
+    let opts: Record<string, unknown> = {};
+    deps.derivePillars = (async (_db: unknown, _c: unknown, _k: string, o: Record<string, unknown>) => { opts = o; return derived(); }) as never;
+    expect(await STEPS.brief_pillars.run(dbWith({ clients: [c] }), c, ctx({ rows: rowsOf(few(PAGE)) }))).toMatchObject({ status: "done", result: { brief: "from_page", pillars: "derived", posts: 2 } });
+    expect(opts).toMatchObject({ page: PAGE, posts: POSTS });
+    // The key: the posts' version stays in it as for any client with only its posts, and the page joins it while pillars or keywords are missing.
+    const db = dbWith();
+    const before = await STEPS.brief_pillars.inputs(db, uproar(), rowsOf(few(null)));
+    const withPage = await STEPS.brief_pillars.inputs(db, uproar(), rowsOf(few(PAGE)));
+    expect(before).toMatch(/\|social:1$/);
+    expect(withPage).toMatch(new RegExp(`^${before!.replace(/[|]/g, "\\|")}\\|page:[0-9a-f]{8}$`));
+    expect(await STEPS.brief_pillars.inputs(db, c, rowsOf(row("brief_pillars", { inputs_key: withPage }), few(PAGE)))).toBe(withPage);
+    // A client complete from its posts alone keeps its key, the posts' version included, when a page is read.
+    const done = uproar({ content_pillars: [{ name: "Launches", description: "d" }], social_keywords: ["pr"] });
+    const keyed = await STEPS.brief_pillars.inputs(db, done, rowsOf(few(null)));
+    expect(await STEPS.brief_pillars.inputs(db, done, rowsOf(row("brief_pillars", { inputs_key: keyed }), few(PAGE)))).toBe(keyed);
+  });
+  it("keeps today's order: the website's text first, the page after it, the posts last", async () => {
+    deps.now = () => new Date(NOW);
+    deps.anthropicKey = async () => "key";
+    // The site has text: the brief is the site's, and the page is still read for the pillars.
+    const site = kit();
+    deps.scrapeMarkdown = async () => ({ markdown: "# Kitcaster books founders, executives and experts on the podcasts their buyers already listen to every week.", title: "Kitcaster" });
+    let opts: Record<string, unknown> = {};
+    deps.derivePillars = (async (_db: unknown, _c: unknown, _k: string, o: Record<string, unknown>) => { opts = o; return derived(); }) as never;
+    expect(await STEPS.brief_pillars.run(dbWith({ clients: [site] }), site, ctx({ rows: rowsOf(row("brand_read"), social(PAGE)) }))).toMatchObject({ result: { brief: "drafted" } });
+    expect(site.brief_text).toMatch(/^Drafted from the website on 2026-11-08:/);
+    expect(opts.page).toEqual(PAGE);
+    // A page with no about text to speak of: the brief comes from the posts.
+    const posts = kit();
+    deps.scrapeMarkdown = async () => null;
+    deps.fetchSiteText = async () => "";
+    deps.derivePillars = (async () => derived({ brief: "Kitcaster books guests on podcasts." })) as never;
+    expect(await STEPS.brief_pillars.run(dbWith({ clients: [posts] }), posts, ctx({ rows: rowsOf(row("brand_read"), social({ ...PAGE, about: "Podcast booking." })) }))).toMatchObject({ result: { brief: "from_posts" } });
+    expect(posts.brief_text).toBe("Drafted from the client's posts on 2026-11-08:\n\nKitcaster books guests on podcasts.");
+  });
+  it("never replaces a brief, pillars or keywords a person set", async () => {
+    const c = kit({ brief_text: "Our brief, written by the account team.", content_pillars: [{ name: "Ours" }], social_keywords: ["ours"], field_sources: person("brief_text", "content_pillars", "social_keywords") });
+    deps.scrapeMarkdown = fail("the scrape");
+    deps.derivePillars = fail("the derivation");
+    expect(await STEPS.brief_pillars.run(dbWith({ clients: [c] }), c, ctx({ rows: rowsOf(row("brand_read"), social(PAGE)) }))).toEqual({ status: "done", result: { brief: "kept", pillars: "kept" } });
+    expect(c).toMatchObject({ brief_text: "Our brief, written by the account team.", content_pillars: [{ name: "Ours" }], social_keywords: ["ours"] });
+  });
+  it("writes the keywords when no pillar stands, then waits for evidence", async () => {
+    const c = kit();
+    const db = dbWith({ clients: [c] });
+    deps.now = () => new Date(NOW);
+    deps.anthropicKey = async () => "key";
+    deps.scrapeMarkdown = async () => ({ markdown: "# Kitcaster books founders, executives and experts on the podcasts their buyers already listen to every week.", title: "Kitcaster" });
+    deps.derivePillars = (async () => derived({ pillars: [], keywords: ["podcast guesting", "b2b podcasts"], sources: ["social_posts", "brief"] })) as never;
+    const out = await STEPS.brief_pillars.run(db, c, ctx({ rows: rowsOf(row("brand_read"), social(null)) }));
+    expect(out).toMatchObject({ status: "waiting", reason: "evidence", recheckDays: 7, result: { brief: "drafted", pillars: "none", keywords: 2, written: ["brief_text", "social_keywords"] } });
+    expect(c).toMatchObject({ content_pillars: [], social_keywords: ["podcast guesting", "b2b podcasts"] });
+    expect(c.brief_text).toMatch(/^Drafted from the website on 2026-11-08:/);
+    expect(c.field_sources.social_keywords).toMatchObject({ by: "lifecycle" });
   });
 });
 
@@ -857,10 +1252,14 @@ describe("design_refs (references that refresh themselves)", () => {
     const c = refsClient({ harvested_design_references: before });
     const { db, libraryWrites } = world(c, ["ig"]);
     fakeIO(() => igWeek.map((d, i) => post(`ig:${i}`, d)), { review: async () => { throw new Error("overloaded"); } });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(await STEPS.design_refs.run(db, c, ctx())).toMatchObject({ status: "failed" });
     expect(c.harvested_design_references).toBe(before);
     expect(libraryWrites).toEqual([]);
     expect(db.tables.design_reference_reviews).toEqual([]);
+    // Each review that did not finish is noted for developers, off the output here.
+    expect(warn.mock.calls.length).toBeGreaterThan(0);
+    for (const call of warn.mock.calls) expect(call).toEqual(["[brand-discovery] review did not finish", expect.any(String), "overloaded"]);
   });
 });
 

@@ -151,6 +151,37 @@ describe("which unmatched brands become clients (section 3)", () => {
     expect(blockedFromCreation(olo, { posts: 4, mostLinked: "careers.moburst.com" }, clients)).toMatchObject({ decision: "client_website" });
     expect(clientWithSite("moburst.co", clients)).toBeNull();
   });
+  it("matches a client whose website is a subdomain of its own by its full host (Uproar on uproar.moburst.com)", () => {
+    const moburst = client({ id: "m", name: "Moburst", website_url: "https://moburst.com" });
+    const uproar = client({ id: "u", name: "Uproar", website_url: "https://uproar.moburst.com/" });
+    // Uproar's site is its own host: moburst.com and its other subdomains are not Uproar's.
+    expect(clientWithSite("https://moburst.com", [uproar])).toBeNull();
+    expect(clientWithSite("careers.moburst.com", [uproar])).toBeNull();
+    expect(clientWithSite("https://www.uproar.moburst.com/press", [uproar])?.id).toBe("u");
+    // Its host is Uproar's, whichever client comes first; the rest of moburst.com stays Moburst's.
+    expect(clientWithSite("https://uproar.moburst.com/", [moburst, uproar])?.id).toBe("u");
+    expect(clientWithSite("https://uproar.moburst.com/", [uproar, moburst])?.id).toBe("u");
+    expect(clientWithSite("moburst.com", [uproar, moburst])?.id).toBe("m");
+    // With no client on the subdomain, a plain-domain client keeps its subdomains, as careers.moburst.com above.
+    expect(clientWithSite("https://uproar.moburst.com/", [moburst])?.id).toBe("m");
+    expect(blockedFromCreation(olo, { posts: 4, mostLinked: "moburst.com" }, [uproar])).toBeNull();
+  });
+  it("names the client with the shortest website path on the site, a root site before a page on it (fix round 1)", () => {
+    const kitcaster = client({ id: "k", name: "Kitcaster by Moburst", website_url: "https://www.moburst.com/services/organic/podcast-booking/" });
+    const moburst = client({ id: "m", name: "Moburst", website_url: "https://moburst.com" });
+    expect(clientWithSite("https://moburst.com", [kitcaster, moburst])?.id).toBe("m");
+    expect(clientWithSite("careers.moburst.com", [kitcaster, moburst])?.id).toBe("m");
+    expect(blockedFromCreation(olo, { posts: 4, mostLinked: "moburst.com" }, [kitcaster, moburst])).toMatchObject({ decision: "client_website", client_id: "m" });
+    // A client on the subdomain's own host still comes first.
+    expect(clientWithSite("https://uproar.moburst.com/", [kitcaster, moburst, client({ id: "u", name: "Uproar", website_url: "https://uproar.moburst.com/" })])?.id).toBe("u");
+  });
+  it("still matches a plain-domain client by any of its subdomains (Review Focus 5)", () => {
+    const oloClient = client({ id: "o", name: "Olo", website_url: "https://olo.com" });
+    expect(clientWithSite("https://shop.olo.com", [oloClient])?.id).toBe("o");
+    expect(clientWithSite("https://www.olo.com/order", [oloClient])?.id).toBe("o");
+    expect(clientWithSite("https://shop.olo.com", [client({ id: "w", name: "Olo", website_url: "https://www.olo.com/" })])?.id).toBe("w");
+    expect(clientWithSite("https://olo.co", [oloClient])).toBeNull();
+  });
   it("lets a brand through when all three hold, a demo copy's website being no client's", () => {
     expect(blockedFromCreation(olo, { posts: 4, mostLinked: "olo.com" }, clients)).toBeNull();
     expect(blockedFromCreation(olo, { posts: 4, mostLinked: null }, clients)).toBeNull();

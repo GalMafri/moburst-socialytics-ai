@@ -24,8 +24,16 @@
 // business is with the site read. Below them, and only when the profiles and
 // posts state no location (Lital, 3 Nov 2026), the city most followers are
 // in, when one zone holds half or more of the followers with a known city;
-// then the country's main zone. Below all of them the time zone stays empty:
-// nothing writes UTC. Free of Deno and network imports so it can be tested.
+// then the country's main zone. The headquarters on the client's LinkedIn
+// page is an address the brand set on its own profile, ranked with the other
+// profile addresses (spec: docs/superpowers/specs/2026-11-08-onboarding-
+// profile-pages-and-no-n8n-design.md, section E), and used only where no
+// location is stored or the agency's is (socialRead.ts pageMayPlace: a
+// client whose time zone is filled sees no change). Below all of them, a client
+// no source places takes the zone most of the agency's clients have from a
+// real source (`agency`, agencyZone.ts), which any other source replaces;
+// with no such zone the time zone stays empty: nothing writes UTC. Free of
+// Deno and network imports so it can be tested.
 
 /** US state or territory: [name, IANA zone of most of its people]. */
 const US: Record<string, [string, string]> = {
@@ -239,10 +247,10 @@ export function domainCountry(website: string | null | undefined): string | null
   return COUNTRIES[code] ? code : null;
 }
 
-export type LocationSource = "schema.org" | "profile_address" | "page_footer" | "page_text" | "post_text" | "site_read" | "post_read" | "followers" | "country";
-/** How exact each source is: a lower rank replaces a higher one, never the other way round. */
+export type LocationSource = "schema.org" | "profile_address" | "page_footer" | "page_text" | "post_text" | "site_read" | "post_read" | "followers" | "country" | "agency";
+/** How exact each source is: a lower rank replaces a higher one, never the other way round. The agency's zone says nothing about the client, so it is last. */
 export const SOURCE_RANK: Record<LocationSource, number> = {
-  "schema.org": 1, profile_address: 1, page_footer: 2, page_text: 3, post_text: 3, site_read: 4, post_read: 4, followers: 5, country: 6,
+  "schema.org": 1, profile_address: 1, page_footer: 2, page_text: 3, post_text: 3, site_read: 4, post_read: 4, followers: 5, country: 6, agency: 7,
 };
 
 export interface ResolvedLocation {

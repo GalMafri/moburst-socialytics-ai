@@ -1,10 +1,12 @@
 // The competitor feed page's refresh (staff, scoped to the client) and the
 // shared-secret caller. The refresh itself lives in
 // _shared/competitive/refreshFeed.ts, which the scheduled-jobs worker also runs
-// in-process for the weekly refresh.
+// in-process for the weekly refresh. A refresh that saved the feed without its
+// LinkedIn posts answers with that feed and queues the feed job that collects
+// them again.
 
 import { createClient } from "../_shared/supabase.ts";
-import { FeedRefreshError, refreshCompetitorFeed } from "../_shared/competitive/refreshFeed.ts";
+import { FeedRefreshError, refreshCompetitorFeedOnDemand } from "../_shared/competitive/refreshFeed.ts";
 import { requireStaff } from "../_shared/auth/requireStaff.ts";
 import { secretEquals } from "../_shared/auth/secretEquals.ts";
 
@@ -27,7 +29,7 @@ Deno.serve(async (req) => {
     if (!viaSecret) await requireStaff(req, { writeClientId: clientId });
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    const result = await refreshCompetitorFeed(admin, clientId, {
+    const result = await refreshCompetitorFeedOnDemand(admin, clientId, {
       rivaliqKey: Deno.env.get("RIVALIQ_API_KEY"),
       anthropicKey: Deno.env.get("ANTHROPIC_API_KEY"),
       secret,

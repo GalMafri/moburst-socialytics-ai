@@ -4,23 +4,38 @@
 // 2026-11-02-sprout-auto-onboarding-design.md, section 4). Sprout's profile
 // list has no website, so the search reads the links in the brand's posts
 // of the last 90 days: each link followed through its redirects, and
-// counted under the registrable domain it lands on (app.olo.com is olo.com,
-// net/domains.ts), most-linked first, and links to a shared platform (a
+// counted under the host it lands on (www dropped: shop.olo.com stays
+// shop.olo.com), most-linked first, and links to a shared platform (a
 // social network, store, podcast host, press-release site, site builder:
 // net/domains.ts SHARED_PLATFORMS) never counted. A domain is accepted only
 // on an exact fact: its homepage links to one of the brand's profiles, its
 // registered name is one of the brand's names (nameLabels), or its
-// og:site_name is the brand name. Up to three domains are tried, each at its
-// registrable domain's homepage. The weekly onboarding job and the
+// og:site_name is the brand name. The hosts are grouped by site (their
+// registrable domain, net/domains.ts: olo.com for shop.olo.com), and up to
+// three sites are tried, the most-linked first (the links to all its hosts
+// summed), so many subdomains of one site never push another site out. A
+// site's homepages are read where the posts link them most: its most-linked
+// subdomain and the registrable domain itself, two reads at most, six in all.
+// A subdomain is confirmed as itself only by a fact read from its own page (a
+// profile link or its site name), and by its registered name only as the
+// registrable domain. When a subdomain confirms, the registrable domain's
+// homepage is read too, and the registrable domain is the website when that
+// homepage links to the brand's own profiles as well (olo.com for posts
+// linking shop.olo.com, as before subdomains were tried); otherwise the
+// subdomain is (Uproar on uproar.moburst.com, whose moburst.com links to
+// Moburst's profiles). The weekly onboarding job and the
 // lifecycle's website step run this same search.
 //
 // When the posts confirm none, the lifecycle's website step searches the web
 // for the brand by name (spec: docs/superpowers/specs/2026-11-03-onboarding-
 // complete-design.md, section 4): up to three searches (the name and each
-// distinct handle), shared platforms and the domains the post search tried
-// dropped, three new domains read at most. A searched domain counts only
-// when its homepage links to one of the brand's own profiles: a short name
-// finds other companies, so a name match alone never does.
+// distinct handle), shared platforms and the hosts the post search read
+// dropped, three new sites at most (one result's host per registrable domain,
+// read at its own homepage, then at its registrable domain's when that is a
+// different one the post search did not read: two reads a site, six in all).
+// A searched domain counts only when its homepage links to one of the brand's
+// own profiles: a short name finds other companies, so a name match alone
+// never does. The registrable domain wins over its subdomain when both do.
 //
 // The network is behind SiteReader, so everything else here is pure and can
 // be tested; webReader is the real one. It follows redirects itself, one hop
@@ -32,6 +47,7 @@ import { profileKeyOf, siteProfileLinks, type SproutProfile } from "../lifecycle
 import { sameName } from "../lifecycle/names.ts";
 import { registrableDomain, sharedPlatformKind, siteKeyOf } from "../net/domains.ts";
 import { isPubliclyFetchable } from "../net/safeUrl.ts";
+import type { LinkedInPage } from "../apify/linkedinPage.ts";
 import type { Brand } from "./brands.ts";
 
 export type SiteFact = "profile_link" | "domain_name" | "site_name";
@@ -49,6 +65,39 @@ export const MAX_SITES_TRIED = 3;
 export const MAX_LINKS_FOLLOWED = 30;
 
 const hostOf = (url: string) => { try { return new URL(url).hostname.toLowerCase(); } catch { return ""; } };
+/** A link's landing host as the search counts it: lowercase, without www. */
+const siteHost = (url: string) => hostOf(url).replace(/^www\./, "");
+
+type Homepage = { html: string; url: string };
+
+/** The homepage's address after its redirects, unless they led onto a shared platform (a store, a link page): then the address itself. */
+function addressOf(domain: string, page: Homepage | null): string {
+  try {
+    if (page && !sharedPlatformKind(page.url)) return new URL(page.url).origin;
+  } catch { /* the address itself */ }
+  return `https://${domain}`;
+}
+
+/**
+ * The website a client's LinkedIn page states, exactly as stated (subdomain
+ * and path kept; a query or fragment dropped), or null: nothing stated, not an http(s) address, or a
+ * shared platform (a social profile, a link-in-bio page). The page's own
+ * word is the fact, so no homepage is read to confirm it.
+ */
+export function statedWebsite(page: Pick<LinkedInPage, "website"> | null): string | null {
+  const raw = String(page?.website ?? "").trim();
+  if (!raw) return null;
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+  if (!registrableDomain(raw) || sharedPlatformKind(raw)) return null;
+  // Scheme, host and path as stated; a tracking query or a fragment is not part of the site's address.
+  return `${u.protocol}//${u.host}${u.pathname}`;
+}
 
 /** Every link in a post's text: with a scheme, or a bare www. address. */
 export function postLinks(text: string | null | undefined): string[] {
@@ -61,12 +110,14 @@ export function postLinks(text: string | null | undefined): string[] {
 }
 
 export interface LinkedDomain {
+  /** The host the links land on, without www ("shop.olo.com", "olo.com"). */
   domain: string;
   links: number;
 }
 
 /**
- * The registrable domains the posts link to, most-linked first (the first
+ * The hosts the posts link to (www dropped, any other subdomain kept:
+ * searchWebsite groups them by site), most-linked first (the first
  * linked on a tie), where each link lands after its redirects. A link to a
  * shared platform is dropped unread, except a link shortener (lnkd.in and
  * t.co wrap every link on LinkedIn and X), which is followed and dropped
@@ -89,7 +140,7 @@ export async function linkedDomains(posts: Array<{ text?: string | null }>, read
   for (const url of occurrences) {
     const shortened = sharedPlatformKind(url) === "shortener";
     const at = landed.get(url) ?? (shortened ? null : url);
-    const domain = at && !sharedPlatformKind(at) ? registrableDomain(at) : null;
+    const domain = at && !sharedPlatformKind(at) && registrableDomain(at) ? siteHost(at) : null;
     if (domain) counts.set(domain, (counts.get(domain) ?? 0) + 1);
   }
   return [...counts.entries()].map(([domain, links]) => ({ domain, links })).sort((a, b) => b.links - a.links);
@@ -151,12 +202,15 @@ type BrandLike = Pick<Brand, "name" | "profiles"> & { group?: Brand["group"] };
 /** Every name of the brand: its own, its Sprout group's and each profile's. */
 const namesOf = (brand: BrandLike) => [...new Set([brand.name, brand.group?.name, ...brand.profiles.map((p) => p.name)].map((n) => String(n || "").trim()).filter(Boolean))];
 
+/** True when a homepage links to one of the brand's own profiles. */
+function linksToBrand(brand: BrandLike, html: string): boolean {
+  const linked = new Set(siteProfileLinks(html));
+  return brand.profiles.some((p: SproutProfile) => { const k = profileKeyOf(p); return !!k && linked.has(k); });
+}
+
 /** The exact fact that makes this domain the brand's website, or null. The domain-name fact needs no page. */
 export function confirmingFact(brand: BrandLike, domain: string, html: string | null, finalHost?: string | null): SiteFact | null {
-  if (html) {
-    const linked = new Set(siteProfileLinks(html));
-    if (brand.profiles.some((p: SproutProfile) => { const k = profileKeyOf(p); return !!k && linked.has(k); })) return "profile_link";
-  }
+  if (html && linksToBrand(brand, html)) return "profile_link";
   const names = nameLabels(namesOf(brand));
   const labels = [domainLabel(domain), finalHost ? domainLabel(finalHost) : ""].filter(Boolean);
   if (labels.some((l) => names.has(l))) return "domain_name";
@@ -177,26 +231,70 @@ export interface WebsiteSearch {
   site_profiles: string[];
 }
 
+/** A site the posts link to: its registrable domain, the links to all its hosts, and its hosts most-linked first. */
+export interface LinkedSite {
+  domain: string;
+  links: number;
+  hosts: string[];
+}
+
+/**
+ * The linked hosts by site (registrable domain), the most-linked site first:
+ * its hosts' links summed, and on a tie the site whose host the posts link
+ * most first.
+ */
+export function linkedSites(domains: LinkedDomain[]): LinkedSite[] {
+  const sites = new Map<string, LinkedSite>();
+  for (const { domain: host, links } of domains) {
+    const domain = registrableDomain(host) ?? host;
+    const site = sites.get(domain) ?? { domain, links: 0, hosts: [] };
+    site.links += links;
+    site.hosts.push(host);
+    sites.set(domain, site);
+  }
+  return [...sites.values()].sort((a, b) => b.links - a.links);
+}
+
+/**
+ * A site's homepages to read, two at most, in the order the posts link them
+ * most: its most-linked subdomain and the registrable domain itself, which is
+ * read last when no post links it.
+ */
+function readOrder(site: LinkedSite): string[] {
+  const sub = site.hosts.find((h) => h !== site.domain);
+  const order = site.hosts.filter((h) => h === site.domain || h === sub);
+  return order.includes(site.domain) ? order : [...order, site.domain];
+}
+
 /** The brand's website from its posts, or null with what was tried. */
 export async function searchWebsite(brand: BrandLike, posts: Array<{ text?: string | null }>, reader: SiteReader): Promise<WebsiteSearch> {
   const domains = await linkedDomains(posts, reader);
   const tried: WebsiteSearch["tried"] = [];
-  for (const { domain } of domains.slice(0, MAX_SITES_TRIED)) {
-    const page = await reader.homepage(`https://${domain}`).catch(() => null);
-    const fact = confirmingFact(brand, domain, page?.html ?? null, page ? hostOf(page.url) : null);
-    tried.push({ domain, read: !!page, fact });
-    if (!fact) continue;
-    // The homepage's address after its redirects, unless they led onto a shared platform (a store, a link page): then the domain itself.
-    let website = `https://${domain}`;
-    try {
-      if (page && !sharedPlatformKind(page.url)) website = new URL(page.url).origin;
-    } catch { /* the domain itself */ }
-    return { website, confirmed_by: fact, most_linked: domains[0].domain, domains, tried, site_profiles: page ? siteProfileLinks(page.html) : [] };
+  const found = (domain: string, page: Homepage | null, fact: SiteFact): WebsiteSearch =>
+    ({ website: addressOf(domain, page), confirmed_by: fact, most_linked: domains[0].domain, domains, tried, site_profiles: page ? siteProfileLinks(page.html) : [] });
+  for (const site of linkedSites(domains).slice(0, MAX_SITES_TRIED)) {
+    for (const host of readOrder(site)) {
+      const page = await reader.homepage(`https://${host}`).catch(() => null);
+      const sub = host !== site.domain;
+      // A subdomain is the site itself only by a fact read from its own page (a link to a profile, its site name). The brand's name as the registered name holds for every subdomain of the domain, so it confirms the registrable domain only.
+      let fact = confirmingFact(brand, host, page?.html ?? null, page ? hostOf(page.url) : null);
+      if (fact === "domain_name" && sub) fact = null;
+      tried.push({ domain: host, read: !!page, fact });
+      if (!fact) continue;
+      // A subdomain confirms: the registrable domain, unless read already, is the site when its homepage links to the brand's own profiles too.
+      if (sub && !tried.some((t) => t.domain === site.domain)) {
+        const main = await reader.homepage(`https://${site.domain}`).catch(() => null);
+        const linked = !!main && linksToBrand(brand, main.html);
+        tried.push({ domain: site.domain, read: !!main, fact: linked ? "profile_link" : null });
+        if (linked) return found(site.domain, main, "profile_link");
+      }
+      return found(host, page, fact);
+    }
   }
   return { website: null, confirmed_by: null, most_linked: domains[0]?.domain ?? null, domains, tried, site_profiles: [] };
 }
 
-/** At most this many web searches for a brand's website, and this many new domains read from them. */
+/** At most this many web searches for a brand's website, and this many new sites (registrable domains) read from them. */
 export const MAX_NAME_SEARCHES = 3;
 export const MAX_SEARCHED_SITES = 3;
 
@@ -227,31 +325,42 @@ export interface NameSearch {
   site_profiles: string[];
 }
 
-/** The brand's website searched by name: the first new domain whose homepage links to one of the brand's profiles. */
+/**
+ * The brand's website searched by name: the first new site whose homepage
+ * links to one of the brand's profiles. A host the post search read is not
+ * read again; a sibling subdomain of it is.
+ */
 export async function searchWebsiteByName(brand: BrandLike, engine: SearchEngine, reader: SiteReader, o: { skip?: string[] } = {}): Promise<NameSearch> {
   const skip = new Set((o.skip ?? []).map((d) => d.toLowerCase()));
   const queries = nameQueries(brand.name, brand.profiles.map((p) => p.native_name));
   const tried: NameSearch["tried"] = [];
   const asked: string[] = [];
-  const keys = new Set(brand.profiles.map((p: SproutProfile) => profileKeyOf(p)).filter(Boolean) as string[]);
+  /** The sites (registrable domains) looked at: each counts once against the cap, whichever of its results came first. */
+  const sites = new Set<string>();
+  const read = async (domain: string) => {
+    const page = await reader.homepage(`https://${domain}`).catch(() => null);
+    const linked = !!page && linksToBrand(brand, page.html);
+    tried.push({ domain, read: !!page, linked });
+    return { page, linked };
+  };
+  const found = (domain: string, page: Homepage | null): NameSearch =>
+    ({ website: addressOf(domain, page), confirmed_by: "profile_link", queries: asked, tried, site_profiles: page ? siteProfileLinks(page.html) : [] });
   for (const q of queries) {
     asked.push(q);
     const urls = await engine.search(q).catch(() => [] as string[]);
     for (const url of urls) {
-      if (tried.length >= MAX_SEARCHED_SITES) break;
-      const domain = registrableDomain(url);
-      if (!domain || sharedPlatformKind(url) || skip.has(domain) || tried.some((t) => t.domain === domain)) continue;
-      const page = await reader.homepage(`https://${domain}`).catch(() => null);
-      const linked = !!page && siteProfileLinks(page.html).some((k) => keys.has(k));
-      tried.push({ domain, read: !!page, linked });
-      if (!linked) continue;
-      let website = `https://${domain}`;
-      try {
-        if (page && !sharedPlatformKind(page.url)) website = new URL(page.url).origin;
-      } catch { /* the domain itself */ }
-      return { website, confirmed_by: "profile_link", queries: asked, tried, site_profiles: siteProfileLinks(page!.html) };
+      if (sites.size >= MAX_SEARCHED_SITES) break;
+      const host = siteHost(url);
+      const registrable = registrableDomain(url);
+      if (!host || !registrable || sharedPlatformKind(url) || sites.has(registrable) || skip.has(host)) continue;
+      sites.add(registrable);
+      // The host first; then its registrable domain when that is a different one the post search did not read. The registrable domain wins when both link to the brand.
+      const first = await read(host);
+      const main = registrable !== host && !skip.has(registrable) ? await read(registrable) : null;
+      if (main?.linked) return found(registrable, main.page);
+      if (first.linked) return found(host, first.page);
     }
-    if (tried.length >= MAX_SEARCHED_SITES) break;
+    if (sites.size >= MAX_SEARCHED_SITES) break;
   }
   return { website: null, confirmed_by: null, queries: asked, tried, site_profiles: [] };
 }
