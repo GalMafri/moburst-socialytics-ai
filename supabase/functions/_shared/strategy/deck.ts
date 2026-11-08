@@ -313,7 +313,12 @@ export function deckRequests(plan: DeckPlan, archetypes: ReturnType<typeof findA
       }
     }
   });
-  requests.push({ updateSlidesPosition: { slideObjectIds: ids, insertionIndex: 0 } });
+  // Google puts each copy right after the slide it copies, so a template
+  // slide used twice has its second copy before its first, and one move of
+  // every slide would list them out of their current order (refused 8 Nov
+  // 2026). Each slide moves alone to its place: with the slides before it
+  // already in place, it is never above its own index.
+  ids.forEach((id, i) => requests.push({ updateSlidesPosition: { slideObjectIds: [id], insertionIndex: i } }));
   for (const a of Object.values(archetypes)) requests.push({ deleteObject: { objectId: a.slideId } });
   return { requests, required };
 }
