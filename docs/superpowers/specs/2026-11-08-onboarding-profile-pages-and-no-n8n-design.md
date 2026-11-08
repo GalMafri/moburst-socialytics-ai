@@ -157,7 +157,12 @@ The page's headquarters joins the location sources as an address the brand
 set on its own profile (`profile_address`). Following today's ranks, it is
 used where the stored zone came from a weaker source or there is none.
 
-For a client with no location from any source, see open question 2.
+A client with no location from any source (Buzznow today) gets the timezone
+most of the agency's clients have from a real source: today America/New_York,
+all 11 such clients. It is recorded as a new weakest source (`agency`, below
+`country`), so any address, headquarters or follower data replaces it as soon
+as it appears. It is worked out from the clients each time, never written
+into code. *(Lital asked for my suggestion, 8 Nov; this is it.)*
 
 ### F. Reports never instruct people
 
@@ -178,8 +183,17 @@ month.
 - The `n8n` engine value keeps working until the 7 Dec reports run clean, so
   the switch can be turned back by hand. Then the n8n code paths are removed
   and the three workflows archived, with Lital's OK.
-- What happens when an occurrence closes without a report: see open
-  question 1.
+- **A report still not made 24 hours after its first attempt** gets one
+  Slack message to `#ai-products-issues` (private, `C0CG0ASL404`) that
+  mentions Lital (`<@U03AZ88435H>`): the client, the report (social or
+  competitive), its period, the reason in plain words and a link to the
+  client's reports page. Retries go on as before. When the report is made,
+  a second short message says so. One alert per report occurrence, never a
+  stream. *(Lital, 8 Nov: "me via a slack msg to: ai-products-issues".)*
+- The message is posted through a Slack incoming webhook, Slack's documented
+  way to post to one channel. The webhook URL is a secret,
+  `SLACK_ISSUES_WEBHOOK_URL`, kept in Lovable and never shown anywhere.
+  Without it, nothing is posted and the report keeps retrying.
 
 ### H. The switch
 
@@ -227,13 +241,29 @@ rewritten.
 - Reading other networks' stated websites (Facebook page, X profile) now or
   later; LinkedIn and the Instagram bio cover every current client.
 
-## Open questions for Lital
+## One-time setup by Lital (the only step a person does)
 
-1. **A report that is still not made when its occurrence closes** (3 hours
-   before the next scheduled run, after a day of quiet retries): who should
-   know, and how? The app cannot send Slack or email today, so any answer adds
-   a small piece. Options: an email to the AI team, a Slack message in a
-   channel you choose, or nothing.
-2. **A client with no location from any source** (Buzznow today: no address
-   on its site, no follower data from Sprout, no LinkedIn page): use US
-   Eastern, the agency's main market, or keep UTC until a source appears?
+The Slack webhook is a secret, so Lital creates and adds it herself, once:
+
+1. In Slack, open **api.slack.com/apps**, choose the workspace's app for AI
+   tools (or **Create New App > From scratch**, named `Socialytics`).
+2. Under **Incoming Webhooks**, switch it on, click **Add New Webhook to
+   Workspace**, pick `#ai-products-issues` and click **Allow**.
+3. Copy the webhook URL and add it in Lovable (**More > Settings >
+   Secrets**) as `SLACK_ISSUES_WEBHOOK_URL`. Do not paste it anywhere else.
+
+## Lital's answers (8 Nov)
+
+1. A report that is still not made: a Slack message to her in
+   `#ai-products-issues` (section G).
+2. A client with no location from any source: she asked for my suggestion;
+   it is in section E.
+
+## Tests added for the answers
+
+- An alert is posted once, at 24 hours, with the client, report, period,
+  reason and link, mentioning Lital; a second message when the report is
+  made; nothing without the secret; nothing for a report made within 24
+  hours.
+- The agency timezone is the most common sourced zone, is replaced by any
+  real source, and is never used while a real source exists.
