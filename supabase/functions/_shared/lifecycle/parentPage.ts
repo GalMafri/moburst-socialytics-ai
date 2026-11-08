@@ -52,6 +52,20 @@ async function otherClients(db: Db, clientId: string): Promise<Array<{ name: str
   return ((data ?? []) as Array<{ name: unknown; website_url: unknown }>).map((r) => ({ name: str(r.name), website_url: str(r.website_url) })).filter((r) => r.website_url);
 }
 
+/**
+ * The other active client whose own website is this very site: the same host
+ * (www aside, so "Moburst.com" is www.moburst.com) and the same path, two
+ * homepages included. A LinkedIn page that states it (a division's page
+ * stating its parent's homepage) does not make it this client's website:
+ * the client would take that client's logo, brand, place and RivalIQ
+ * company (spec B). Null when no other client has it.
+ */
+export async function sameSiteClient(db: Db, clientId: string, website: string | null): Promise<{ name: string; website_url: string } | null> {
+  if (!str(website)) return null;
+  const path = pathSegments(website).join("/");
+  return (await otherClients(db, clientId)).find((other) => siteMatch(website, other.website_url) === "host" && pathSegments(other.website_url).join("/") === path) ?? null;
+}
+
 /** The websites of the other clients: active (not archived), never a demo copy. */
 export async function otherClientSites(db: Db, clientId: string): Promise<string[]> {
   return (await otherClients(db, clientId)).map((c) => c.website_url);

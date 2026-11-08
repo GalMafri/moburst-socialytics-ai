@@ -4,7 +4,7 @@
 // design.md, section B): Kitcaster's LinkedIn page states a page on
 // moburst.com, the website of Moburst, another client.
 import { describe, expect, it } from "vitest";
-import { isParentPage, otherClientSites, parentClientFor, parentPageFor } from "./parentPage";
+import { isParentPage, otherClientSites, parentClientFor, parentPageFor, sameSiteClient } from "./parentPage";
 import { fakeDb } from "./fakeDb";
 
 const KITCASTER = "https://www.moburst.com/services/organic/podcast-booking/";
@@ -108,5 +108,26 @@ describe("parentClientFor", () => {
     expect(await parentClientFor(db, { id: "p", website_url: "https://www.moburst.com/en/podcasts/" })).toEqual({ name: "Moburst EN", website_url: "https://www.moburst.com/en/" });
     expect(await parentClientFor(db, { id: "o", website_url: "https://lega.bot/en/" })).toBeNull();
     expect(await parentClientFor({ from: () => { throw new Error("no read expected"); } }, { id: "o", website_url: "https://olo.com" })).toBeNull();
+  });
+});
+
+describe("sameSiteClient", () => {
+  // Moburst is stored as it is today: a bare domain with no scheme.
+  const db = () => fakeDb({ clients: [
+    { id: "m", name: "Moburst", website_url: "Moburst.com", archived_at: null, demo_job_id: null },
+    { id: "e", name: "Moburst EN", website_url: "https://www.moburst.com/en/", archived_at: null, demo_job_id: null },
+    { id: "x", name: "Old Olo", website_url: "https://olo.com", archived_at: "2026-10-01T00:00:00Z", demo_job_id: null },
+  ] });
+  it("is the other active client whose site is the same host and the same path, two homepages included", async () => {
+    for (const site of ["https://www.moburst.com", "https://moburst.com/", "http://www.Moburst.com/?utm_source=linkedin"]) {
+      expect(await sameSiteClient(db(), "k", site), site).toMatchObject({ name: "Moburst" });
+    }
+    expect(await sameSiteClient(db(), "k", "https://www.moburst.com/EN")).toMatchObject({ name: "Moburst EN" });
+  });
+  it("is nobody for a page under a client's site, a subdomain of its own, another site, an archived client or the client itself", async () => {
+    for (const site of [KITCASTER, "https://uproar.moburst.com/", "https://olo.com/", "https://moburst.co/", null, ""]) {
+      expect(await sameSiteClient(db(), "k", site), String(site)).toBeNull();
+    }
+    expect(await sameSiteClient(db(), "m", "https://www.moburst.com/")).toBeNull();
   });
 });

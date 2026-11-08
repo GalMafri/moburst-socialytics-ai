@@ -113,6 +113,55 @@ describe("website", () => {
       expect(out).toMatchObject({ status: "done", result: { website: "https://www.moburst.com/services/organic/podcast-booking/", confirmed_by: "profile_website" } });
       expect(c.website_url).toBe("https://www.moburst.com/services/organic/podcast-booking/");
     });
+    describe("another client's own site, stated as it is (spec B)", () => {
+      // Moburst is a client, stored as it is today: a bare domain with no scheme.
+      const MOBURST = { id: "m", name: "Moburst", website_url: "Moburst.com", archived_at: null, demo_job_id: null };
+      it("is never written: the result records whose site it is, and the posts and the name are searched as if none were stated", async () => {
+        const c = olo();
+        const db = dbWith({ clients: [c, MOBURST], sprout_profiles: profiles() });
+        deps.now = () => new Date(T);
+        let read = 0;
+        deps.listBrandPosts = (async () => { read++; return [{ text: "Order ahead at https://www.olo.com/order", created_time: T, perma_link: null, profile_id: "7" }]; }) as never;
+        deps.siteReader = site({ "olo.com": `<a href="https://www.instagram.com/olo.hq/">ig</a>` }) as never;
+        deps.searchWeb = fail("the web search");
+        const out = await STEPS.website.run(db, c, ctx({ rows: withPage("https://www.moburst.com") }));
+        expect(read).toBe(1);
+        expect(out).toMatchObject({ status: "done", result: { website: "https://www.olo.com", confirmed_by: "profile_link", stated_website: "https://www.moburst.com/", stated_site_of: "Moburst" } });
+        expect(c.website_url).toBe("https://www.olo.com");
+      });
+      it("leaves the client with no website when the search finds none, and searches by name", async () => {
+        const c = olo();
+        const db = dbWith({ clients: [c, MOBURST], sprout_profiles: profiles() });
+        deps.now = () => new Date(T);
+        deps.listBrandPosts = (async () => [{ text: "Happy Friday", created_time: T, perma_link: null, profile_id: "7" }]) as never;
+        deps.siteReader = site({}) as never;
+        const asked: string[] = [];
+        deps.searchWeb = (async (q: string) => { asked.push(q); return []; }) as never;
+        const out = await STEPS.website.run(db, c, ctx({ rows: withPage("https://moburst.com/") }));
+        expect(out).toMatchObject({ status: "waiting", reason: "website", result: { stated_site_of: "Moburst" } });
+        expect(asked.length).toBeGreaterThan(0);
+        expect(c.website_url).toBeNull();
+        expect(c.field_sources.website_url).toBeUndefined();
+      });
+      it("still writes a site of the client's own, a subdomain of its own, and a page under another client's site", async () => {
+        for (const stated of ["https://olo.com/", "https://uproar.moburst.com/", "https://www.moburst.com/services/organic/podcast-booking/"]) {
+          const c = olo();
+          deps.listBrandPosts = fail("the post read");
+          deps.searchWeb = fail("the web search");
+          const out = await STEPS.website.run(dbWith({ clients: [c, MOBURST], sprout_profiles: profiles() }), c, ctx({ rows: withPage(stated) }));
+          expect(out, stated).toMatchObject({ status: "done", result: { website: stated, confirmed_by: "profile_website" } });
+          expect((out as { result: Record<string, unknown> }).result.stated_site_of, stated).toBeUndefined();
+          expect(c.website_url).toBe(stated);
+        }
+      });
+      it("is another client's site only while that client is active", async () => {
+        const c = olo();
+        deps.listBrandPosts = fail("the post read");
+        const archived = { ...MOBURST, archived_at: "2026-10-01T00:00:00Z" };
+        const out = await STEPS.website.run(dbWith({ clients: [c, archived], sprout_profiles: profiles() }), c, ctx({ rows: withPage("https://www.moburst.com/") }));
+        expect(out).toMatchObject({ status: "done", result: { website: "https://www.moburst.com/", confirmed_by: "profile_website" } });
+      });
+    });
     it("never replaces a person's website, and ignores a social profile URL", async () => {
       const kept = olo({ website_url: "https://olo-person.example", field_sources: person("website_url") });
       deps.listBrandPosts = fail("the post read");

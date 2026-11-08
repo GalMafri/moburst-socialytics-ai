@@ -48,7 +48,7 @@ import { matchProfiles, platformsOf, profileKeyOf, profileListKey, siteProfileLi
 import { libraryPaths, MAX_REFS, pickBackground, placementFor } from "./designSettings.ts";
 import { referencesFor } from "../design-prompts/designRefs.ts";
 import { lifecycleMayWrite, setBy, sourceOf, writeClientFields } from "./fields.ts";
-import { parentPageFor } from "./parentPage.ts";
+import { parentPageFor, sameSiteClient } from "./parentPage.ts";
 import { zoneFromAgency } from "./agencyZone.ts";
 import { countryCode, htmlLanguage, regionsFor, replacesLocation, resolveLocation, SOURCE_RANK, zoneCountry } from "./location.ts";
 import { normName, slugify, textHash } from "./names.ts";
@@ -291,7 +291,10 @@ export const STEPS: Record<string, StepDef> = {
   // monthly while there is none, a web search by name that counts only a
   // site linking to one of the client's profiles. Looked at again every 7
   // days as posts arrive. A website the client's LinkedIn page states comes
-  // first, as stated (subdomain and path kept) and with no search. The website it confirms is brand_read's input; a
+  // first, as stated (subdomain and path kept) and with no search, unless it
+  // is another active client's own site (the same host and path,
+  // parentPage.ts sameSiteClient): that is recorded on the result and the
+  // search goes on as if none were stated. The website it confirms is brand_read's input; a
   // website the client has, or one a person set, is never replaced.
   website: {
     policy: { recheckDays: 7 },
@@ -305,8 +308,11 @@ export const STEPS: Record<string, StepDef> = {
     async run(db, client, { previous, rows }) {
       if (siteKey(client.website_url) || !lifecycleMayWrite(client.field_sources, "website_url")) return { status: "done", result: { kept: true } };
       // The website the client's LinkedIn page states is the first evidence: it is kept as stated, with no search.
+      // Another active client's own site is that client's: recorded, and searched past as if none were stated.
       const stated = statedWebsite(pageOf(socialResult(rows)));
-      if (stated) {
+      const owner = stated ? await sameSiteClient(db, client.id, stated) : null;
+      const statedOther = owner ? { stated_website: stated, stated_site_of: owner.name } : {};
+      if (stated && !owner) {
         const at = deps.now();
         const written = await writeClientFields(db, client.id, { website_url: stated });
         return { status: "done", result: { website: stated, confirmed_by: "profile_website", linked_network: "linkedin_company", found_at: at.toISOString(), written: written.written, kept: written.skipped } };
@@ -350,12 +356,12 @@ export const STEPS: Record<string, StepDef> = {
       }
       const search = searched ?? (searchedAt ? { searched_at: searchedAt, queries: before?.queries ?? [], tried: before?.searched ?? [] } : null);
       const looked = { posts: posts.length, months: 12, ...(search ? { searched_at: search.searched_at, queries: search.queries, searched: search.tried } : {}) };
-      if (!website) return { status: "waiting", reason: "website", recheckDays: 7, result: { ...looked, most_linked: found.most_linked, tried } };
+      if (!website) return { status: "waiting", reason: "website", recheckDays: 7, result: { ...looked, most_linked: found.most_linked, tried, ...statedOther } };
       // Which of the client's profiles the site links to, for the setup page's line.
       const keys = new Set(linked);
       const linkedNetwork = profiles.map((p) => ({ p, k: profileKeyOf(p) })).find((x) => x.k && keys.has(x.k))?.p.network_type ?? null;
       const written = await writeClientFields(db, client.id, { website_url: website });
-      return { status: "done", result: { ...looked, website, confirmed_by: confirmedBy, linked_network: linkedNetwork, found_at: now.toISOString(), written: written.written, kept: written.skipped } };
+      return { status: "done", result: { ...looked, website, confirmed_by: confirmedBy, linked_network: linkedNetwork, found_at: now.toISOString(), written: written.written, kept: written.skipped, ...statedOther } };
     },
   },
 
