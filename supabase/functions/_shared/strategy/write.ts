@@ -42,7 +42,7 @@ import { loadClientVoice } from "../voice/load.ts";
 import { voicePromptBlock, type VoiceExample } from "../voice/voice.ts";
 import { baselineOf, pillarSectionKey, platformKey, platformSectionKey, platformStates, type Cadence, type StrategyPlatform, type WrittenPlatform, type WrittenState } from "./platforms.ts";
 import { baselineFor, basisOf, basisWords, metricsFor, rateKindOf, type PlatformFigures } from "./basis.ts";
-import { feedPosts, figures, READ_DAYS, type CompanyFigures, type PublicPost, type PublicReadState } from "./publicRead.ts";
+import { feedPosts, figures, fromCompetitorSet, READ_DAYS, type CompanyFigures, type PublicPost, type PublicReadState } from "./publicRead.ts";
 import { AVOID_SOURCES, DIRECTIONS, GOAL_METRICS, metricWords, sectionLines, STRATEGY_SHAPE, type AvoidSource, type Direction, type Goal, type GoalMetric, type WorkedPost } from "./sections.ts";
 
 export type { WrittenPlatform };
@@ -118,7 +118,7 @@ export interface StrategyIO {
   trackedRates(db: Db): Promise<Record<string, number>>;
   voiceBlock(db: Db, clientId: string, opts: { platforms: string[]; examples: Record<string, VoiceExample[]> }): Promise<string>;
   competitiveBrief(db: Db, clientId: string): Promise<string>;
-  competitorSet(db: Db, clientId: string): Promise<Array<{ name: string }>>;
+  competitorSet(db: Db, clientId: string): Promise<Array<{ name: string; rivaliq_company_id?: string | null }>>;
   siteText(url: string): Promise<string>;
   /** The client's weekly competitor feeds (rivaliq_snapshots, endpoint feed), newest first. */
   feedSnapshots(db: Db, clientId: string): Promise<Array<{ payload: Any }>>;
@@ -261,7 +261,9 @@ export async function strategyEvidence(db: Db, client: Any, now: Date, io: Strat
   const site = website ? clip(await tryOr(() => io.siteText(website), ""), SITE_CHARS) : "";
   const brief = clip(str(client.brief_text), BRIEF_CHARS);
   const brandBook = clip(str(extras?.brand_book_text), BOOK_CHARS);
-  const competitors = (await tryOr(() => io.competitorSet(db, client.id), [])).map((c) => str(c.name)).filter(Boolean);
+  const set = await tryOr(() => io.competitorSet(db, client.id), []);
+  const competitors = set.map((c) => str(c.name)).filter(Boolean);
+  const tracked = fromCompetitorSet(set);
   const posting = platforms.filter((p) => p.state === "posting").map((p) => p.platform);
   const languages = list(client.language);
   const inPlay = keysInPlay(platforms, pillars);
@@ -279,7 +281,7 @@ export async function strategyEvidence(db: Db, client: Any, now: Date, io: Strat
     competitive_brief: await tryOr(() => io.competitiveBrief(db, client.id), ""),
     profile: { audience: str(profile.audience), fit_rubric: str(profile.fit_rubric), exclusions: terms.exclusions.map((t) => ({ term: t.term, reason: t.reason })) },
     platforms,
-    competitor_figures: figures(publicPosts.filter((p) => !p.client), now),
+    competitor_figures: figures(publicPosts.filter((p) => !p.client && tracked(p)), now),
     window,
     written_on: day(now),
     evidence,

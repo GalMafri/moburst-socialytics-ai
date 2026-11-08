@@ -49,22 +49,52 @@ export function startChart(a: { platform: string; posts: RankedRow[]; engagement
   return { svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${first.svg}${second.svg}</svg>`, width: w };
 }
 
-/** The pillar mix: each pillar's share of posts over the last 8 weeks (white 25%) against its planned share (gold). */
-export function mixChart(pillars: Array<{ name: string; current: number | null; planned: number }>, scale = 2): { svg: string; width: number } {
+/** A text's width at a size and weight, in the chart's units: the deck passes Geist's own metrics. */
+export type ChartMeasure = (text: string, size: number, weight: "Light" | "Medium" | "Bold") => number;
+/** About half an em a character, for a chart drawn without the deck's metrics. */
+const roughMeasure: ChartMeasure = (text, size) => text.length * 0.55 * size;
+
+/** A name in lines that fit a width, broken between words, never cut. */
+function wrap(measure: ChartMeasure, text: string, size: number, width: number): string[] {
+  const lines: string[] = [];
+  let cur = "";
+  for (const word of String(text).split(/\s+/).filter(Boolean)) {
+    const next = cur ? `${cur} ${word}` : word;
+    if (!cur || measure(next, size, "Medium") <= width) cur = next;
+    else { lines.push(cur); cur = word; }
+  }
+  if (cur) lines.push(cur);
+  return lines.length ? lines : [""];
+}
+
+/**
+ * The pillar mix: each pillar's share of posts over the last 8 weeks (white
+ * 25%) against its planned share (gold). The chart keeps the shape of its box
+ * on the slide (646 by 78); a long pillar name wraps onto more lines in its
+ * column, and the bars, scaled to the largest share with every share written
+ * on its bar, take the height the names leave.
+ */
+export function mixChart(pillars: Array<{ name: string; current: number | null; planned: number }>, scale = 2, measure: ChartMeasure = roughMeasure): { svg: string; width: number } {
   const w = 646 * scale, h = 78 * scale, n = Math.max(pillars.length, 1);
-  const col = w / n, barW = 18 * scale, base = h - 18 * scale, top = 16 * scale;
-  const max = Math.max(100, ...pillars.map((p) => Math.max(p.planned, p.current ?? 0)));
+  const col = w / n, barW = 18 * scale, top = 16 * scale;
+  const size = 10 * scale, lineH = 12 * scale;
+  const labels = pillars.map((p) => wrap(measure, p.name, size, col - 8 * scale));
+  const lines = Math.max(1, ...labels.map((l) => l.length));
+  const base = h - 6 * scale - lines * lineH;
+  const max = Math.max(1, ...pillars.map((p) => Math.max(p.planned, p.current ?? 0)));
   const parts: string[] = [];
   pillars.forEach((p, i) => {
     const cx = i * col + col / 2;
     const bar = (v: number, x: number, fill: string) => {
       const bh = ((base - top) * v) / max;
       parts.push(`<rect x="${x}" y="${(base - bh).toFixed(1)}" width="${barW}" height="${bh.toFixed(1)}" rx="${2 * scale}" fill="${fill}"/>`);
-      parts.push(`<text x="${x + barW / 2}" y="${(base - bh - 4 * scale).toFixed(1)}" text-anchor="middle" font-family="${FONT}" font-weight="300" font-size="${10 * scale}" fill="${INK}">${v}%</text>`);
+      parts.push(`<text x="${x + barW / 2}" y="${(base - bh - 4 * scale).toFixed(1)}" text-anchor="middle" font-family="${FONT}" font-weight="300" font-size="${size}" fill="${INK}">${v}%</text>`);
     };
     if (p.current !== null) bar(p.current, cx - barW - 2 * scale, MUTED);
     bar(p.planned, p.current !== null ? cx + 2 * scale : cx - barW / 2, GOLD);
-    parts.push(`<text x="${cx}" y="${h - 3 * scale}" text-anchor="middle" font-family="${FONT}" font-weight="500" font-size="${10 * scale}" fill="${INK}">${esc(p.name.length > 26 ? `${p.name.slice(0, 25)}…` : p.name)}</text>`);
+    labels[i].forEach((line, k) => {
+      parts.push(`<text x="${cx}" y="${base + (k + 1) * lineH}" text-anchor="middle" font-family="${FONT}" font-weight="500" font-size="${size}" fill="${INK}">${esc(line)}</text>`);
+    });
   });
   const legend = pillars.some((p) => p.current !== null)
     ? `<rect x="0" y="0" width="${9 * scale}" height="${9 * scale}" fill="${MUTED}"/><text x="${13 * scale}" y="${8 * scale}" font-family="${FONT}" font-weight="300" font-size="${9 * scale}" fill="${SOFT}">Last 8 weeks</text><rect x="${92 * scale}" y="0" width="${9 * scale}" height="${9 * scale}" fill="${GOLD}"/><text x="${105 * scale}" y="${8 * scale}" font-family="${FONT}" font-weight="300" font-size="${9 * scale}" fill="${SOFT}">Planned</text>`

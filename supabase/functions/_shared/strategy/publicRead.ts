@@ -52,6 +52,8 @@ const TEXT_CHARS = 400;
 
 export interface PublicPost {
   company: string;
+  /** RivalIQ's id for the company, on a feed post from a competitor; a public read has none. */
+  companyId?: string | null;
   client: boolean;
   /** Display name: Instagram, LinkedIn, TikTok. */
   platform: string;
@@ -198,7 +200,7 @@ export function feedPosts(snapshots: Array<{ payload: Any }>, clientName: string
       if (!id || !at || !platform || at.slice(0, 10) < since || out.has(id)) continue;
       const client = isClientPost(p, clientCompany, clientName);
       out.set(id, {
-        company: client ? clientName : String(p?.companyName ?? ""), client, platform, id, publishedAt: at,
+        company: client ? clientName : String(p?.companyName ?? ""), companyId: client ? null : String(p?.companyId ?? "").trim() || null, client, platform, id, publishedAt: at,
         text: clipPost(String(p?.message ?? "")), link: p?.postLink ?? null, format: String(p?.type || "unknown"),
         engagement: Number(p?.engagementTotal) || 0, views: num(p?.tiktokViews ?? p?.youtubeViews ?? p?.views),
         followers: num(p?.presenceReach), boosted: isBoosted(p?.facebookLikelyBoosted), source: "feed",
@@ -206,6 +208,18 @@ export function feedPosts(snapshots: Array<{ payload: Any }>, clientName: string
     }
   }
   return [...out.values()].filter((p) => p.company);
+}
+
+/**
+ * Whether a competitor's post is from the client's current competitor set:
+ * by RivalIQ's company id, or by name (a public read carries no id, and a
+ * company added by hand may have none yet). The weekly feed keeps 90 days of
+ * snapshots, so a company dropped from the set stays in it for weeks.
+ */
+export function fromCompetitorSet(set: Array<{ name: string; rivaliq_company_id?: string | null }>): (p: PublicPost) => boolean {
+  const ids = new Set(set.map((c) => String(c.rivaliq_company_id ?? "").trim()).filter(Boolean));
+  const names = new Set(set.map((c) => companyKey(c.name)).filter(Boolean));
+  return (p) => (!!p.companyId && ids.has(p.companyId)) || names.has(companyKey(p.company));
 }
 
 export interface Profile { company: string; client: boolean; platform: string; handle: string; url: string | null }
