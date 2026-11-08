@@ -6,6 +6,7 @@
 // against Sprout's documented answers.
 
 import { publishProblems } from "../_shared/sprout/publishRules.ts";
+import { fitImage, ImageTooLarge } from "../_shared/sprout/media.ts";
 import { createDraftPost, earliestSendTime, profileGroupId, publishingToken, sproutMinute, SproutRefusal, uploadMediaFromUrl, type SproutMediaType } from "../_shared/sprout/publishing.ts";
 
 export interface SendRequest {
@@ -73,6 +74,17 @@ export async function sendToSprout(req: SendRequest, store: SentStore, opts: { f
     if (already) return { status: 200, body: { success: true, already: true, recorded: true, status, scheduled_time: already } };
   }
 
+  // Each image fitted to what the network takes through Sprout
+  // (_shared/sprout/media.ts): an image over the limit goes as a smaller
+  // version of itself, and one that cannot be made to fit stops the post.
+  const mediaUrls: string[] = [];
+  try {
+    for (const url of req.mediaUrls) mediaUrls.push(await fitImage(fetchImpl, url, req.profile.networkType || req.platform));
+  } catch (e) {
+    if (!(e instanceof ImageTooLarge)) throw e;
+    return { status: 422, body: { error: e.message, code: "not_publishable", problems: [e.message] } };
+  }
+
   // Until the post is made in Sprout, every step can be asked again: a
   // refusal here answers 502, which the dialog sends again quietly.
   let token: string;
@@ -86,7 +98,7 @@ export async function sendToSprout(req: SendRequest, store: SentStore, opts: { f
   }
   // Sprout makes posts inside a group (group_id is required); a profile in none cannot take one.
   if (!groupId) return { status: 409, body: { error: "The profile is in no Sprout group, so Sprout cannot make a post for it.", code: "profile_not_in_group" } };
-  for (const url of req.mediaUrls) {
+  for (const url of mediaUrls) {
     try {
       const uploaded = await uploadMediaFromUrl(fetchImpl, req.customerId, token, url, opts.waits);
       media.push({ media_id: uploaded.media_id, media_type: uploaded.media_type });
@@ -95,8 +107,8 @@ export async function sendToSprout(req: SendRequest, store: SentStore, opts: { f
     }
   }
   // Every file must make it: a post never goes to Sprout without the creative it was sent with.
-  if (media.length < req.mediaUrls.length) {
-    return { status: 502, body: { error: "Sprout did not take every attached file, so nothing was sent.", code: "media_not_taken", media_requested: req.mediaUrls.length, media_attached: media.length } };
+  if (media.length < mediaUrls.length) {
+    return { status: 502, body: { error: "Sprout did not take every attached file, so nothing was sent.", code: "media_not_taken", media_requested: mediaUrls.length, media_attached: media.length } };
   }
 
   // Sent now: the earliest minute Sprout takes, worked out once the files are in.

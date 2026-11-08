@@ -68,13 +68,15 @@ describe("scheduling a post to Sprout", () => {
     const reply = await sendToSprout(request, s, { fetchImpl, ...NO_WAIT });
     expect(reply.status).toBe(200);
     expect(sent.map((x) => `${x.method} ${x.url}`)).toEqual([
+      // The design's size, so it is fitted to LinkedIn's limit first (this storage gives none, so it goes as it is).
+      `HEAD ${DESIGN_URL}`,
       "POST https://identity.sproutsocial.com/oauth2/84e39c75-d770-45d9-90a9-7b79e3037d2c/v1/token",
       "GET https://api.sproutsocial.com/v1/1676448/metadata/customer",
       "POST https://api.sproutsocial.com/v1/1676448/media/",
       "POST https://api.sproutsocial.com/v1/1676448/publishing/posts",
     ]);
-    expect((sent[2].body as FormData).get("media_url")).toBe(DESIGN_URL);
-    expect(JSON.parse(String(sent[3].body))).toEqual({
+    expect((sent[3].body as FormData).get("media_url")).toBe(DESIGN_URL);
+    expect(JSON.parse(String(sent[4].body))).toEqual({
       group_id: 1330748,
       customer_profile_ids: [5719052],
       is_draft: true,
@@ -111,6 +113,32 @@ describe("scheduling a post to Sprout", () => {
     const reply = await sendToSprout(request, store().s, { fetchImpl, ...NO_WAIT });
     expect(reply).toMatchObject({ status: 409, body: { code: "profile_not_in_group" } });
     expect(sent.some((x) => x.url.endsWith("/publishing/posts") || x.url.endsWith("/media/"))).toBe(false);
+  });
+
+  it("hands Sprout a smaller version of a design over LinkedIn's 5 MB, and refuses one that no version fits", async () => {
+    // 3 Nov 2026: every slide of a LinkedIn carousel was a 6 MB PNG and Sprout took none of them.
+    const RENDERED = DESIGN_URL.replace("/object/public/", "/render/image/public/") + "?format=origin";
+    const sizes = (original: number, rendered: number, narrower: number) => {
+      const { sent, fetchImpl: toSprout } = sprout();
+      const fetchImpl = (async (url: string, init: RequestInit) => {
+        if (init?.method === "HEAD") {
+          const bytes = url === DESIGN_URL ? original : url === RENDERED ? rendered : url.includes("width=1080") ? narrower : null;
+          return new Response(null, { status: bytes ? 200 : 404, headers: bytes ? { "content-length": String(bytes), "content-type": "image/png" } : {} });
+        }
+        return toSprout(url, init);
+      }) as unknown as typeof fetch;
+      return { sent, fetchImpl };
+    };
+    const fits = sizes(6_000_772, 3_575_179, 2_606_155);
+    const reply = await sendToSprout(request, store().s, { fetchImpl: fits.fetchImpl, ...NO_WAIT });
+    expect(reply.status).toBe(200);
+    expect((fits.sent.find((x) => x.url.endsWith("/media/"))!.body as FormData).get("media_url")).toBe(RENDERED);
+    const tooBig = sizes(9_000_000, 7_000_000, 5_100_000);
+    const { rows, s } = store();
+    const refused = await sendToSprout(request, s, { fetchImpl: tooBig.fetchImpl, ...NO_WAIT });
+    expect(refused).toMatchObject({ status: 422, body: { code: "not_publishable", error: "An image is larger than LinkedIn takes through Sprout (5 MB), even made smaller, so nothing was sent." } });
+    expect(tooBig.sent).toHaveLength(0);
+    expect(rows).toHaveLength(0);
   });
 
   it("makes no post when Sprout does not take a file", async () => {
