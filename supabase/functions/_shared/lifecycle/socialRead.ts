@@ -468,11 +468,15 @@ async function readPage(profiles: ProfileRef[], prev: LinkedInPageState | null, 
   try {
     const got = await io.linkedinPage(url, same ? prev.run_id ?? null : null);
     if (got.state === "pending") return { ...base, read_at: last?.read_at ?? null, page: last?.page ?? null, run_id: got.run_id };
-    if (got.state === "failed") return { ...base, read_at: now.toISOString(), page: last?.page ?? null, status: got.status };
+    // A failed read, or one that found no page, is read again on the next look; the 30 days are for a page that was read.
+    if (got.state === "failed") return { ...base, read_at: null, page: last?.page ?? null, status: got.status };
+    if (!got.page) return { ...base, read_at: null, page: last?.page ?? null };
     return { ...base, read_at: now.toISOString(), page: got.page };
   } catch (e) {
     console.warn("[social_read] LinkedIn page not read:", e instanceof Error ? e.message : String(e));
-    return prev ? { ...prev } : null;
+    // The last page is kept only for the same profile; a changed profile has no page until it is read.
+    if (!prev) return null;
+    return same ? { ...prev } : { ...base, read_at: null, page: null };
   }
 }
 

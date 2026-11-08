@@ -382,4 +382,37 @@ describe("snapshotOf", () => {
     expect(quiet.calls.brandRead).toBe(0);
     expect(db.rpcCalls.length).toBe(writes);
   });
+
+  it("reads a failed or empty page again on the next look", async () => {
+    const c = oloClient();
+    const db = world(c);
+    for (const miss of [{ state: "failed", run_id: "p1", status: "FAILED" }, { state: "read", run_id: "p1", usd: null, page: null }] as const) {
+      const failed = io({ linkedinPage: async () => miss });
+      const out = await runSocialRead(db, c, { rows: new Map() }, failed.fake);
+      const result = (out as { result: Record<string, unknown> }).result;
+      expect(result.linkedin_page).toMatchObject({ page: null, read_at: null });
+      const next = io();
+      const again = await runSocialRead(db, c, { rows: new Map([["social_read", stepRow(result)]]) }, next.fake);
+      expect(next.calls.linkedinPage.length).toBe(1);
+      expect(pageOf((again as { result: Record<string, unknown> }).result)).toMatchObject({ name: "Olo" });
+    }
+  });
+
+  it("returns no old page after the profile changed and the new read failed or threw", async () => {
+    const c = oloClient();
+    const db = world(c);
+    const out = await runSocialRead(db, c, { rows: new Map() }, io().fake);
+    const result = (out as { result: Record<string, unknown> }).result;
+    const old = { ...result, linkedin_page: { ...(result.linkedin_page as object), key: "7:olo-old", read_at: ago(1) } };
+    expect(pageOf(old)).toMatchObject({ name: "Olo" });
+    for (const fake of [
+      io({ linkedinPage: async () => ({ state: "failed", run_id: "p2", status: "FAILED" }) }),
+      io({ linkedinPage: async () => { throw new Error("boom"); } }),
+    ]) {
+      const got = await runSocialRead(db, c, { rows: new Map([["social_read", stepRow(old)]]) }, fake.fake);
+      const r = (got as { result: Record<string, unknown> }).result;
+      expect(pageOf(r)).toBeNull();
+      expect(r.linkedin_page).toMatchObject({ key: "7:olo", read_at: null });
+    }
+  });
 });
