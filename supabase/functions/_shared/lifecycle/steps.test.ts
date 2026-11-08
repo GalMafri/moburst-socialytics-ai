@@ -454,6 +454,33 @@ describe("content_strategy", () => {
     expect(await STEPS.content_strategy.inputs(db, c(), rows)).not.toBe(withTikTok);
   });
 
+  // Lital, 8 Nov 2026: a strategy follows the client's competitors. Moburst
+  // swapped SplitMetrics for Thrive on 2 Nov; the strategy keyed on nothing
+  // about the set, so it would have kept the old one for 30 days.
+  it("keys on the current set's competitors, so a swap rewrites the strategy and the same companies again do not", async () => {
+    deps.trendIO = trendIO;
+    const db = dbWith({
+      ...tables(),
+      competitor_sets: [{ id: "s1", client_id: "c1", status: "complete", confirmed_at: "2026-10-01T00:00:00Z", created_at: "2026-10-01T00:00:00Z" }],
+      competitors: [
+        { id: "k1", set_id: "s1", name: "TeamSnap", is_selected: true },
+        { id: "k2", set_id: "s1", name: "BenchApp", is_selected: true },
+        { id: "k3", set_id: "s1", name: "Spond", is_selected: false },
+      ],
+    });
+    const rows = await current(db);
+    const key = (await STEPS.content_strategy.inputs(db, c(), rows))!;
+    expect(key).toMatch(/\|public:[^|]+\|set:benchapp,teamsnap$/);
+    // The same companies in a new set, named a little differently: no rewrite.
+    db.tables.competitor_sets.push({ id: "s2", client_id: "c1", status: "confirmed", confirmed_at: "2026-11-01T00:00:00Z", created_at: "2026-11-01T00:00:00Z" });
+    db.tables.competitors.push({ id: "k4", set_id: "s2", name: "Teamsnap, Inc.", is_selected: true }, { id: "k5", set_id: "s2", name: "BenchApp", is_selected: true });
+    expect(await STEPS.content_strategy.inputs(db, c(), rows)).toBe(key);
+    // A competitor swapped: a new strategy.
+    db.tables.competitors.find((r) => r.id === "k4")!.is_selected = false;
+    db.tables.competitors.push({ id: "k6", set_id: "s2", name: "Spond", is_selected: true });
+    expect(await STEPS.content_strategy.inputs(db, c(), rows)).toMatch(/\|set:benchapp,spond$/);
+  });
+
   it("refreshes monthly and comes after the trend steps", () => {
     expect(STEPS.content_strategy.policy).toEqual({ refreshDays: 30 });
     const order = Object.keys(STEPS);

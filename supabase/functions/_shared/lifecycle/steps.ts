@@ -53,6 +53,7 @@ import { normName, slugify, textHash } from "./names.ts";
 import { cleanSiteText } from "./siteText.ts";
 import { anthropicMessages } from "../anthropic.ts";
 import { competitorSet, feedSnapshots, ownPosts } from "../calendar/runWeek.ts";
+import { companyKey } from "../calendar/evidence.ts";
 import { activeTerms, askTwice, evidenceKey, hashtagsRequest, monthIn, parseHashtags, parseProfile, profileEvidence, profileRequest, syncLifecycleTerms, writeTrendProfile, type ProfileIO } from "../trends/profile.ts";
 import { HASHTAG_PLATFORMS } from "../trends/types.ts";
 import { liveStrategyIO, readPending, savePending, saveStrategy, startStrategy, strategyEvidence, strategyPhase, type StrategyIO } from "../strategy/write.ts";
@@ -210,6 +211,20 @@ async function currentSet(db: Db, clientId: string): Promise<Record<string, any>
     .order("confirmed_at", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }).limit(1).maybeSingle();
   if (error) throw new Error(`Could not read the client's competitor set: ${error.message}`);
   return data ?? null;
+}
+
+/**
+ * The current set's chosen competitors as a strategy names them, for its
+ * inputs key: a competitor swapped in or out is a new strategy, the same
+ * companies in a new set (or named a little differently) are not.
+ */
+async function competitorsKey(db: Db, clientId: string): Promise<string> {
+  const set = await currentSet(db, clientId);
+  if (!set) return "none";
+  const { data, error } = await db.from("competitors").select("name").eq("set_id", set.id).eq("is_selected", true);
+  if (error) throw new Error(`Could not read the client's competitors: ${error.message}`);
+  const names = [...new Set((data ?? []).map((c: { name: unknown }) => companyKey(c.name)).filter(Boolean))].sort();
+  return names.length ? names.join(",") : "none";
 }
 
 /** This week's Monday and the next, in the client's timezone, and whether this week has a day after today. */
@@ -842,7 +857,7 @@ export const STEPS: Record<string, StepDef> = {
       const networks = [...new Set((data ?? []).map((r: { network_type: unknown }) => String(r.network_type ?? "")))].filter(Boolean).sort().join(",");
       // Version 2 (fields, public reads): each client gets one rewrite after release, and another when its public profiles change.
       const profiles = desiredProfiles(await profileInputs(db, { id: client.id, name: client.name }, { tracking: rows.get("tracking")?.result ?? null, brand_read: rows.get("brand_read")?.result ?? null }));
-      return `v2|profile:${p.written_at}|networks:${networks}|rhythm:${textHash(JSON.stringify(client.posting_rhythm ?? null))}|public:${profilesKey(profiles)}${socialVersionKey(rows, postsOnly(client))}`;
+      return `v2|profile:${p.written_at}|networks:${networks}|rhythm:${textHash(JSON.stringify(client.posting_rhythm ?? null))}|public:${profilesKey(profiles)}|set:${await competitorsKey(db, client.id)}${socialVersionKey(rows, postsOnly(client))}`;
     },
     async run(db, client, { rows }) {
       const key = await deps.anthropicKey(db);
