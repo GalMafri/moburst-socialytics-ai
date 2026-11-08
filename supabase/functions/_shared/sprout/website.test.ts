@@ -84,9 +84,76 @@ describe("judging the registrable domain (the 2 Nov dry run: app.olo.com 7 times
     const uproar = groupBrands([p("21", "Uproar", "uproar", "linkedin_company")])[0];
     const linked = reader({}, { "uproar.moburst.com": `<a href="https://www.linkedin.com/company/uproar/">in</a>`, "moburst.com": "<p>Moburst</p>" });
     expect(await searchWebsite(uproar, [post("https://uproar.moburst.com/x")], linked)).toMatchObject({ website: "https://www.uproar.moburst.com", confirmed_by: "profile_link" });
-    expect(linked.read).toEqual(["https://uproar.moburst.com"]);
+    // The registrable domain's homepage is read too: it does not link to Uproar's profiles, so the subdomain stays.
+    expect(linked.read).toEqual(["https://uproar.moburst.com", "https://moburst.com"]);
     const named = reader({}, { "app.example.com": `<meta property="og:site_name" content="Uproar">` });
     expect(await searchWebsite(uproar, [post("https://app.example.com/x")], named)).toMatchObject({ website: "https://www.app.example.com", confirmed_by: "site_name" });
+  });
+  describe("a subdomain that confirms, and its registrable domain (final review, Important 2)", () => {
+    const IG = `<footer><a href="https://www.instagram.com/olo.hq/">ig</a></footer>`;
+    it("takes the registrable domain when its homepage links to the brand's own profiles too (today's main-domain find)", async () => {
+      const r = reader({}, { "shop.olo.com": IG, "olo.com": IG });
+      const out = await searchWebsite(OLO, Array.from({ length: 5 }, (_, i) => post(`https://shop.olo.com/item/${i}`)), r);
+      expect(r.read).toEqual(["https://shop.olo.com", "https://olo.com"]);
+      expect(out.tried).toEqual([{ domain: "shop.olo.com", read: true, fact: "profile_link" }, { domain: "olo.com", read: true, fact: "profile_link" }]);
+      expect(out).toMatchObject({ website: "https://www.olo.com", confirmed_by: "profile_link", most_linked: "shop.olo.com", site_profiles: ["instagram:olo.hq"] });
+    });
+    it("keeps the subdomain when the registrable domain's homepage links to another brand's profiles (Uproar on moburst.com)", async () => {
+      const uproar = groupBrands([p("21", "Uproar", "uproar", "linkedin_company"), p("22", "Uproar", "uproar.agency", "fb_instagram_account")])[0];
+      const r = reader({}, {
+        "uproar.moburst.com": `<a href="https://www.linkedin.com/company/uproar/">in</a><a href="https://www.instagram.com/uproar.agency/">ig</a>`,
+        "moburst.com": `<a href="https://www.linkedin.com/company/moburst/">in</a><a href="https://www.instagram.com/moburst/">ig</a>`,
+      });
+      const out = await searchWebsite(uproar, [post("https://uproar.moburst.com/work https://uproar.moburst.com/team")], r);
+      expect(r.read).toEqual(["https://uproar.moburst.com", "https://moburst.com"]);
+      expect(out).toMatchObject({ website: "https://www.uproar.moburst.com", confirmed_by: "profile_link", site_profiles: ["instagram:uproar.agency", "linkedin:uproar"] });
+      expect(out.tried).toEqual([{ domain: "uproar.moburst.com", read: true, fact: "profile_link" }, { domain: "moburst.com", read: true, fact: null }]);
+    });
+    it("keeps the subdomain when the registrable domain does not answer", async () => {
+      const r = reader({}, { "shop.olo.com": IG });
+      expect(await searchWebsite(OLO, [post("https://shop.olo.com/x")], r)).toMatchObject({ website: "https://www.shop.olo.com", confirmed_by: "profile_link" });
+      expect(r.read).toEqual(["https://shop.olo.com", "https://olo.com"]);
+    });
+    it("counts the posts' links per registrable domain, so another site's many subdomains never push the brand's own domain out", async () => {
+      const posts = ["news", "blog", "events"].flatMap((sub) => Array.from({ length: 3 }, (_, i) => post(`https://${sub}.partner.example/${i}`)));
+      const r = reader({}, { "olo.com": "<p>Olo</p>" });
+      const out = await searchWebsite(OLO, [...posts, post("https://olo.com/a https://olo.com/b")], r);
+      // partner.example's most-linked subdomain and the domain itself, then olo.com.
+      expect(r.read).toEqual(["https://news.partner.example", "https://partner.example", "https://olo.com"]);
+      expect(out).toMatchObject({ website: "https://www.olo.com", confirmed_by: "domain_name", most_linked: "news.partner.example" });
+    });
+    it("reads a site's homepage where the posts link it most: the domain itself first when it is the most linked", async () => {
+      // olo.com is linked more than shop.olo.com and confirms by its name: shop.olo.com is never needed.
+      const r = reader({}, { "shop.olo.com": IG, "olo.com": "<p>Olo</p>" });
+      const out = await searchWebsite(OLO, [post("https://olo.com/a https://olo.com/b https://shop.olo.com/c")], r);
+      expect(r.read).toEqual(["https://olo.com"]);
+      expect(out).toMatchObject({ website: "https://www.olo.com", confirmed_by: "domain_name" });
+    });
+    it("reads at most two homepages for each of three sites: six in all", async () => {
+      const posts = ["a", "b", "c", "d"].map((site, i) => post(Array.from({ length: 5 - i }, () => `https://www.${site}.example/x https://shop.${site}.example/y`).join(" ")));
+      const r = reader({}, {});
+      const out = await searchWebsite(OLO, posts, r);
+      expect(out.website).toBeNull();
+      expect(r.read).toEqual(["https://a.example", "https://shop.a.example", "https://b.example", "https://shop.b.example", "https://c.example", "https://shop.c.example"]);
+    });
+    it("searches by name the same way: the registrable domain wins when it links to the brand's profiles, and one host is read per site", async () => {
+      const both = reader({}, { "shop.olo.com": IG, "olo.com": IG });
+      expect(await searchWebsiteByName(OLO, { search: async () => ["https://shop.olo.com/menu"] }, both)).toMatchObject({ website: "https://www.olo.com", confirmed_by: "profile_link" });
+      expect(both.read).toEqual(["https://shop.olo.com", "https://olo.com"]);
+      const sub = reader({}, { "shop.olo.com": IG, "olo.com": "<p>Olo</p>" });
+      expect(await searchWebsiteByName(OLO, { search: async () => ["https://shop.olo.com/menu"] }, sub)).toMatchObject({ website: "https://www.shop.olo.com", confirmed_by: "profile_link" });
+      // Three results on one site count once, so olo.com is still read.
+      const many = reader({}, { "olo.com": IG });
+      const engine = { search: async () => ["https://blog.partner.example/a", "https://news.partner.example/b", "https://events.partner.example/c", "https://olo.com/"] };
+      expect(await searchWebsiteByName(OLO, engine, many)).toMatchObject({ website: "https://www.olo.com" });
+      expect(many.read).toEqual(["https://blog.partner.example", "https://partner.example", "https://olo.com"]);
+    });
+    it("reads a sibling subdomain the post search never read, without reading its domain again", async () => {
+      const r = reader({}, { "shop.olo.com": IG });
+      const out = await searchWebsiteByName(OLO, { search: async () => ["https://app.olo.com/x", "https://shop.olo.com/menu"] }, r, { skip: ["app.olo.com", "olo.com"] });
+      expect(r.read).toEqual(["https://shop.olo.com"]);
+      expect(out).toMatchObject({ website: "https://www.shop.olo.com", confirmed_by: "profile_link" });
+    });
   });
   it("searches by name the same way: the host first, then its registrable domain", async () => {
     const link = `<a href="https://www.instagram.com/oloapp/">ig</a>`;
