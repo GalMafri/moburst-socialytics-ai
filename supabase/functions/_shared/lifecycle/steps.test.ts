@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { deps, settled, siteKey, STEPS, weeksFor } from "./steps";
 import { fakeDb, writeClientRpc } from "./fakeDb";
 import type { StepRow } from "./policy";
 
 const original = { ...deps };
-afterEach(() => Object.assign(deps, original));
+afterEach(() => { Object.assign(deps, original); vi.restoreAllMocks(); });
 
 const T = "2026-10-19T10:00:00.000Z";
 const row = (step: string, patch: Partial<StepRow> = {}): StepRow => ({
@@ -1252,10 +1252,14 @@ describe("design_refs (references that refresh themselves)", () => {
     const c = refsClient({ harvested_design_references: before });
     const { db, libraryWrites } = world(c, ["ig"]);
     fakeIO(() => igWeek.map((d, i) => post(`ig:${i}`, d)), { review: async () => { throw new Error("overloaded"); } });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(await STEPS.design_refs.run(db, c, ctx())).toMatchObject({ status: "failed" });
     expect(c.harvested_design_references).toBe(before);
     expect(libraryWrites).toEqual([]);
     expect(db.tables.design_reference_reviews).toEqual([]);
+    // Each review that did not finish is noted for developers, off the output here.
+    expect(warn.mock.calls.length).toBeGreaterThan(0);
+    for (const call of warn.mock.calls) expect(call).toEqual(["[brand-discovery] review did not finish", expect.any(String), "overloaded"]);
   });
 });
 
