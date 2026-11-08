@@ -167,6 +167,8 @@ function harness(w: ReturnType<typeof world>, transport: Transport = "accept", o
     },
     async checkLandscape(client, set) { checks.push(`${client.id}:${set.id}`); return opts.tracking ?? TRACKED; },
     async saveJob(patch) { saved.push(patch); Object.assign(job, patch); },
+    // These rules are checked on the n8n route, a switch set by hand; the app route is in dispatch.engine.test.ts.
+    async engine() { return { engine: "n8n" as const }; },
   });
   /** One lease of the job, written back the way the worker's finish() does. */
   const run = async (job: ScheduledJob): Promise<JobOutcome> => {

@@ -49,9 +49,10 @@
 // 90-minute clock: a run the worker is still taking step by step is not
 // stuck however long it takes, and a run that stopped, or that nothing has
 // touched for 90 minutes, ends this run of the report. n8n is never the
-// backup: however many in-app runs stop, a switch that cannot be read, or an
-// app with no pipeline that can run in this deployment, the occurrence runs
-// again in the app later, with the waits and the closing rule above.
+// backup: however many in-app runs stop, a switch that is missing or cannot
+// be read, or an app with no pipeline that can run in this deployment, the
+// occurrence runs again in the app later, with the waits and the closing
+// rule above.
 
 import { nextRun, rangeForSchedule, type ReportRange } from "../_shared/reports/schedule.ts";
 import { STUCK_AFTER_MINUTES } from "../_shared/reports/payloads.ts";
@@ -202,13 +203,12 @@ export interface DispatchDeps {
   dryRun?: boolean;
   /**
    * The engine switch for this report kind and client (_shared/pipelines/engine.ts
-   * readEngine). An app with no pipeline cannot run now; a throw reads as that.
-   * A dispatch given no switch, or no way to start a pipeline, sends to n8n
-   * as it did before the switch existed (the rules' own tests); the function
-   * always gives both.
+   * readEngine). An app with no pipeline cannot run now; a throw, or no
+   * switch given at all, reads as that. Only a switch that answers n8n (or
+   * shadow) sends a request to n8n.
    */
   engine?(kind: "social" | "competitive", clientId: string): Promise<{ engine: Engine; pipeline?: PipelineDefinition; refused?: string }>;
-  /** Queue the report's in-app pipeline run (_shared/pipelines/shadow.ts). Throws when it could not be queued. */
+  /** Queue the report's in-app pipeline run (_shared/pipelines/shadow.ts). Throws when it could not be queued; absent, nothing can be queued. */
   startPipeline?(args: ReportPipelineStart): Promise<{ run_id: string }>;
   /** The in-app run that makes a report (app engine), or null. Without it the job watches the report's own 90-minute clock. */
   pipelineRun?(reportId: string): Promise<AppRunView | null>;
@@ -418,14 +418,15 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
   /**
    * The engine switch, read once, when the request is about to go out (or
    * when a webhook is missing, to know whether it is needed). n8n and shadow
-   * only where a row asks for them; a switch that cannot be read is app with
-   * no pipeline, so nothing goes out and the occurrence runs again later.
+   * only where a row asks for them; no switch, or one that cannot be read,
+   * is app with no pipeline, so nothing goes out and the occurrence runs
+   * again later.
    */
   type Route = { engine: Engine; pipeline?: PipelineDefinition; refused?: string };
   let route: Route | null = null;
   const routeOf = async (): Promise<Route> => {
     if (route) return route;
-    if (!d.engine || !d.startPipeline) return (route = { engine: "n8n" });
+    if (!d.engine) return (route = { engine: "app", refused: "No engine switch is given to this dispatch." });
     try {
       route = await d.engine(competitive ? "competitive" : "social", client.id);
     } catch (e) {
@@ -445,7 +446,8 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
   const startApp = async (pipeline: PipelineDefinition, payload: Record<string, unknown>, result: DispatchMemory): Promise<JobOutcome> => {
     let runId: string;
     try {
-      runId = (await d.startPipeline!(pipelineStart("app", pipeline, payload, result))).run_id;
+      if (!d.startPipeline) throw new Error("nothing can queue it in this dispatch");
+      runId = (await d.startPipeline(pipelineStart("app", pipeline, payload, result))).run_id;
     } catch (e) {
       // Nothing started: this run ends and the occurrence runs again.
       Object.assign(memory, result);
@@ -461,8 +463,9 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
 
   /** The shadow: queued once n8n has the request. It never changes this job's outcome. */
   const startShadow = async (pipeline: PipelineDefinition, payload: Record<string, unknown>, result: DispatchMemory) => {
+    if (!d.startPipeline) return;
     try {
-      await d.startPipeline!(pipelineStart("shadow", pipeline, payload, result));
+      await d.startPipeline(pipelineStart("shadow", pipeline, payload, result));
     } catch (e) {
       console.warn(`[dispatch] shadow run not queued for ${reportId}: ${message(e)}`);
     }

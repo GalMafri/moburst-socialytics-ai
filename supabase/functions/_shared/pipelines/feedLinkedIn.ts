@@ -9,11 +9,12 @@
 //           the time the n8n call had (100 s); its answer passes the same
 //           checks the n8n answer passes. n8n is never called.
 //
-// On app, a run that stops throws, and the refresh saves the feed without
-// LinkedIn posts (refreshFeed.ts); the next feed refresh collects LinkedIn
-// again. This refresh gets no LinkedIn posts, and runs nothing, when there
-// is no pipeline to run, when the window's run history cannot be read, or
-// once LINKEDIN_STOPS_PER_WINDOW in-app runs for the window have stopped.
+// On app, a run that stops throws, and so does an app with no pipeline to
+// run (the Apify token is not set, or the switch could not be read). The
+// refresh then saves the feed without LinkedIn posts and says so
+// (refreshFeed.ts), and the feed job runs it again in 10 minutes while its
+// attempts last (run-scheduled-jobs/feed.ts). Each try runs at most one
+// in-app run, so the job's attempts bound what a window costs.
 
 import { checkLinkedInAnswer, type LinkedInSource } from "../competitive/linkedinSource.ts";
 import type { ResolvedEngine } from "./engine.ts";
@@ -27,12 +28,6 @@ type Answer = { socialPosts: unknown[]; additional_metrics: Record<string, unkno
 /** The time the in-app collection has in a refresh: what the n8n call was given. */
 export const LINKEDIN_INLINE_BUDGET_MS = 100_000;
 
-/** In-app runs of one feed window that may stop; after that, refreshes of the window go without LinkedIn posts. */
-export const LINKEDIN_STOPS_PER_WINDOW = 2;
-
-/** A refresh with no LinkedIn posts: what the n8n call answered for a set with no reviewed pages. */
-const noPosts = (): Answer => ({ socialPosts: [], additional_metrics: {} });
-
 export interface FeedLinkedInArgs {
   clientId: string;
   sources: LinkedInSource[];
@@ -43,44 +38,16 @@ export interface FeedLinkedInArgs {
   inline?: Partial<InlineDeps>;
 }
 
-/** An in-app run still marked running after this long was cut off with its refresh: it counts as stopped. */
-export const INLINE_RUN_CUT_OFF_MS = 5 * 60_000;
-
-/** In-app runs of this client's window that stopped, or that their refresh was cut off in. */
-export async function stoppedAppRuns(db: Db, clientId: string, period: { start: string; end: string }, now: Date = new Date()): Promise<number> {
-  const { data, error } = await db.from("report_pipeline_runs").select("status, input, heartbeat_at")
-    .eq("kind", "linkedin_source").eq("mode", "app").eq("client_id", clientId).in("status", ["stopped", "running"])
-    .order("started_at", { ascending: false }).limit(50);
-  if (error) throw new Error(`The in-app LinkedIn runs could not be read: ${error.message}`);
-  type Row = { status: string; heartbeat_at?: string | null; input?: { period?: { start?: string; end?: string } } };
-  const cutOff = (r: Row) => r.status === "running" && now.getTime() - Date.parse(String(r.heartbeat_at ?? "")) > INLINE_RUN_CUT_OFF_MS;
-  return (data ?? []).filter((r: Row) => (r.status === "stopped" || cutOff(r)) && r.input?.period?.start === period.start && r.input?.period?.end === period.end).length;
-}
-
 /**
  * The LinkedIn source's answer for a feed refresh, from the engine the
  * switch picked. n8n() is the n8n workflow call, made only for a switch set
- * to n8n or shadow. On app it throws when the in-app run stops.
+ * to n8n or shadow. On app it throws when LinkedIn could not be collected.
  */
 export async function feedLinkedInAnswer(db: Db, engine: ResolvedEngine, a: FeedLinkedInArgs, n8n: () => Promise<Answer>): Promise<Answer> {
   if (engine.engine !== "app") return await n8n();
-  if (!a.sources.length) return noPosts();
-  const skip = (why: string): Answer => {
-    console.warn(`[feed] ${a.clientId}: ${why}; this refresh has no LinkedIn posts.`);
-    return noPosts();
-  };
-  if (!engine.pipeline) return skip(engine.refused ?? "no in-app LinkedIn pipeline can run");
+  if (!a.sources.length) return { socialPosts: [], additional_metrics: {} };
+  if (!engine.pipeline) throw new Error(engine.refused ?? "No in-app LinkedIn pipeline can run.");
   const now = a.now ?? (() => new Date());
-  let stops = 0;
-  try {
-    stops = await stoppedAppRuns(db, a.clientId, a.period, now());
-  } catch (e) {
-    // Whether this window's runs keep stopping is not known, so none is started.
-    return skip(e instanceof Error ? e.message : String(e));
-  }
-  if (stops >= LINKEDIN_STOPS_PER_WINDOW) {
-    return skip(`${stops} in-app LinkedIn runs for ${a.period.start} to ${a.period.end} stopped`);
-  }
   // deno-lint-ignore no-explicit-any
   const env = a.env ?? ((name: string) => (globalThis as any).Deno?.env?.get(name));
   const at = now();

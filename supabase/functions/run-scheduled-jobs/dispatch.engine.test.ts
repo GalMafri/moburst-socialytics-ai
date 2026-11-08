@@ -1,11 +1,12 @@
 // @vitest-environment node
 // The dispatch under the engine switch. With the switch on n8n (set by hand),
-// every scenario makes the same requests, writes, job saves and outcomes as a
-// dispatch with no switch at all. Then shadow (n8n for real, plus an in-app
-// run queued once n8n has the request) and app (no n8n request; the job
-// watches the in-app run's heartbeat instead of the 90-minute clock). Nothing
-// else ever goes to n8n: an unreadable switch, a missing pipeline, stopped
-// app runs and a repeated request all run again in the app.
+// every scenario makes the same requests, writes, job saves and outcomes
+// whether or not the in-app hooks are wired. Then shadow (n8n for real, plus
+// an in-app run queued once n8n has the request) and app (no n8n request; the
+// job watches the in-app run's heartbeat instead of the 90-minute clock).
+// Nothing else ever goes to n8n: no switch reader, an unreadable switch, a
+// missing pipeline, stopped app runs and a repeated request all run again in
+// the app.
 import { describe, expect, it } from "vitest";
 import { RETRY_FIRST_MINUTES, runDispatch, type DispatchDeps, type DispatchStore, type ScheduleRow } from "./dispatch";
 import type { JobOutcome, ScheduledJob } from "../_shared/scheduled-jobs/types";
@@ -70,7 +71,8 @@ const TRACKED: LandscapeCheck = {
   landscape: { id: "ls-1", name: "Fixture", focusCompanyId: 1, companies: [] },
 };
 
-type Switch = "none" | "n8n" | "unreadable" | "shadow" | "app" | "app-no-watch" | "app-no-pipeline";
+/** none: no switch reader at all. n8n-bare: a reader that answers n8n, and no in-app hooks. */
+type Switch = "none" | "n8n-bare" | "n8n" | "unreadable" | "shadow" | "app" | "app-no-watch" | "app-no-pipeline";
 const placeholder = (kind: "social" | "competitive") => REGISTRY.get(`placeholder_${kind}`)!;
 const appPipeline = (kind: "social" | "competitive"): PipelineDefinition => ({ ...placeholder(kind), name: `real_${kind}`, modes: ["shadow", "app"], appCapable: true });
 
@@ -82,6 +84,7 @@ function harness(w: ReturnType<typeof world>, sw: Switch, opts: { transport?: "a
   let transport = opts.transport ?? "accept";
   const engineDeps = (): Partial<DispatchDeps> => {
     if (sw === "none") return {};
+    if (sw === "n8n-bare") return { async engine() { return { engine: "n8n" as const }; } };
     const resolve = async (kind: "social" | "competitive"): Promise<{ engine: Engine; pipeline?: PipelineDefinition; refused?: string }> => {
       if (sw === "unreadable") throw new Error("report_engines does not exist");
       if (sw === "n8n") return { engine: "n8n" };
@@ -186,8 +189,9 @@ async function observe(name: string, sw: Switch) {
 
 describe("with every switch on n8n, nothing changes", () => {
   for (const name of Object.keys(SCENARIOS)) {
-    it(`${name}: the same requests, writes, saves and outcomes as with no switch`, async () => {
-      const before = await observe(name, "none");
+    it(`${name}: the same requests, writes, saves and outcomes as with no in-app hooks`, async () => {
+      const before = await observe(name, "n8n-bare");
+      expect(before.trace.posts.length).toBeGreaterThan(0);
       const after = await observe(name, "n8n");
       expect(after.trace).toEqual(before.trace);
       expect(after.starts).toEqual([]);
@@ -204,7 +208,7 @@ describe("with every switch on n8n, nothing changes", () => {
 describe("shadow: n8n runs for real, and an in-app run is queued next to it", () => {
   it("sends n8n exactly what it sends today, then queues the shadow with the same request", async () => {
     const name = "a social report that runs and completes";
-    const n8n = await observe(name, "none");
+    const n8n = await observe(name, "n8n-bare");
     const shadow = await observe(name, "shadow");
     expect(shadow.trace).toEqual(n8n.trace);
     expect(shadow.starts).toEqual([{
@@ -237,7 +241,7 @@ describe("shadow: n8n runs for real, and an in-app run is queued next to it", ()
     const outcome = await h.run(job("social"));
     expect(outcome).toMatchObject({ status: "waiting", reason: "The report is running." });
     expect(h.posts).toEqual(["https://n8n.fixture/social"]);
-    const base = await observe("a social report that runs and completes", "none");
+    const base = await observe("a social report that runs and completes", "n8n-bare");
     expect(outcome).toEqual(base.trace.outcomes[0]);
   });
 });
@@ -313,6 +317,41 @@ describe("app: the in-app pipeline makes the report", () => {
 });
 
 describe("no automatic hand-off to n8n", () => {
+  it("a dispatch with no switch reader sends nothing to n8n: like an app with no pipeline, the occurrence runs again later", async () => {
+    for (const kind of ["social", "competitive"] as const) {
+      const w = world([kind]);
+      w.store.webhooks = async () => ({ social: null, competitive: null });
+      const h = harness(w, "none");
+      const outcome = await h.run(job(kind));
+      expect(outcome.status).toBe("queued");
+      expect(outcome.available_at).toBe(minutes(RETRY_FIRST_MINUTES).toISOString());
+      expect(h.posts).toEqual([]);
+      expect(w.writes).toContain(`drop ${kind === "social" ? "reports social-1" : "competitive_reports comp-1"}`);
+    }
+    // With the webhooks set too, nothing is posted.
+    const w = world(["social"]);
+    const h = harness(w, "none");
+    expect((await h.run(job("social"))).status).toBe("queued");
+    expect(h.posts).toEqual([]);
+  });
+
+  it("an app route with no way to queue the in-app run runs again later, sending nothing to n8n", async () => {
+    const w = world(["social"]);
+    const h = harness(w, "app");
+    const outcome = await runDispatch(job("social"), {
+      store: w.store, now: () => w.tables.clock,
+      async post(url) { h.posts.push(url); return { ok: true, status: 200 }; },
+      async buildSocialPayload(a) { return { report_id: a.reportId }; },
+      async buildCompetitivePayload(a) { return { report_id: a.reportId }; },
+      async checkLandscape() { return TRACKED; },
+      async saveJob() {},
+      async engine(kind) { return { engine: "app", pipeline: appPipeline(kind) }; },
+    });
+    expect(outcome.status).toBe("queued");
+    expect(outcome.reason).toContain("could not be queued");
+    expect(h.posts).toEqual([]);
+  });
+
   it("runs again in the app, with the same waits, however many in-app runs of one report have stopped", async () => {
     const w = world(["social"]);
     const h = harness(w, "app", { appRun: () => ({ status: "stopped", heartbeat_at: w.tables.clock.toISOString(), outcome: "Step fetch did not finish in 5 tries" }) });

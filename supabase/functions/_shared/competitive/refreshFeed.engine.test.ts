@@ -5,8 +5,10 @@
 // it does all of that too, and queues an in-app run that keeps what n8n
 // answered. Anything else is app: the in-app pipeline, and when its
 // collection stops or cannot run, the feed is saved with the RivalIQ posts
-// and no LinkedIn posts, and n8n is never called. RivalIQ, the LinkedIn
-// workflow and Sprout are stand-ins here: nothing leaves the test.
+// and no LinkedIn posts, the refresh says so, and the feed job tries again in
+// 10 minutes; n8n is never called. A person's refresh does not fail. RivalIQ,
+// the LinkedIn workflow, Apify and Sprout are stand-ins here: nothing leaves
+// the test.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeDb } from "../lifecycle/fakeDb";
 
@@ -34,6 +36,8 @@ vi.mock("./ownedSource", () => ({
 
 const { refreshCompetitorFeed } = await import("./refreshFeed");
 const { checkClientLandscape } = await import("./landscapeCheck");
+const { runFeedJob, FEED_RETRY_MINUTES, LINKEDIN_NOT_COLLECTED } = await import("../../run-scheduled-jobs/feed");
+import type { ScheduledJob } from "../scheduled-jobs/types";
 
 const MOBURST = "d00ce604-2bcc-455a-9826-f80250db75cf";
 const DEFAULTS = [
@@ -63,6 +67,30 @@ const snapshot = (db: ReturnType<typeof admin>) => {
 };
 
 const ENV = { rivaliqKey: "rq", anthropicKey: undefined, secret: "fixture-secret" };
+const APP = [...DEFAULTS, { kind: "linkedin_source", client_id: MOBURST, engine: "app" }];
+const withToken = () => vi.stubGlobal("Deno", { env: { get: (n: string) => (n === "APIFY_API_TOKEN" ? "apify-token" : undefined) } });
+
+/** Apify: refuses the start while down; otherwise one run that succeeds with one post on the reviewed page. */
+function apify(state: { up: boolean }) {
+  const day = new Date(Date.now() - 2 * 86400000).toISOString();
+  const row = { type: "post", id: "p1", query: { targetUrl: SOURCES[0].profile_url }, author: { type: "company", linkedinUrl: SOURCES[0].profile_url }, postedAt: { date: day }, linkedinUrl: "https://www.linkedin.com/posts/peer-p1", content: "Launch #news", engagement: { likes: 3, comments: 1, shares: 0 } };
+  const f = vi.fn(async (url: string) => {
+    if (url.includes("/acts/")) return state.up ? new Response(JSON.stringify({ data: { id: "r1", status: "RUNNING", defaultDatasetId: "d1" } })) : new Response(JSON.stringify({ error: { message: "invalid input" } }), { status: 400 });
+    if (url.includes("/actor-runs/")) return new Response(JSON.stringify({ data: { id: "r1", status: "SUCCEEDED", defaultDatasetId: "d1" } }));
+    if (url.includes("/datasets/d1/items")) return new Response(JSON.stringify([row]));
+    throw new Error(`unexpected ${url}`);
+  });
+  vi.stubGlobal("fetch", f);
+  return f;
+}
+
+const T = new Date("2026-11-08T07:00:00Z");
+const feedJob = (attempts: number): ScheduledJob => ({
+  id: "feed-1", kind: "feed_refresh", client_id: MOBURST, schedule_id: null, occurrence: null, priority: 10, stagger_seconds: 0,
+  status: "running", phase: null, report_id: null, attempts, max_attempts: 3, available_at: T.toISOString(), lease_until: null,
+  reason: null, result: null, created_at: T.toISOString(), started_at: T.toISOString(), finished_at: null,
+});
+const postLinks = (db: ReturnType<typeof admin>, i: number) => (db.tables.rivaliq_snapshots[i].payload as { socialPosts: Array<{ postLink?: string; postId?: string }> }).socialPosts.map((p) => p.postId ?? p.postLink);
 
 beforeEach(() => collect.mockClear());
 afterEach(() => vi.unstubAllGlobals());
@@ -70,7 +98,8 @@ afterEach(() => vi.unstubAllGlobals());
 describe("refreshCompetitorFeed and the LinkedIn source switch", () => {
   it("on n8n, calls the n8n workflow as before and queues nothing", async () => {
     const db = admin(DEFAULTS);
-    await refreshCompetitorFeed(db, MOBURST, ENV);
+    const result = await refreshCompetitorFeed(db, MOBURST, ENV);
+    expect(result).not.toHaveProperty("linkedin_not_collected");
     expect(collect).toHaveBeenCalledTimes(1);
     expect(collect.mock.calls[0]).toEqual([SOURCES, expect.objectContaining({ start: expect.any(String), end: expect.any(String) }), "fixture-secret", "https://moburst.app.n8n.cloud/webhook/socialytics-linkedin-source"]);
     expect(db.rpcCalls).toEqual([]);
@@ -117,6 +146,7 @@ describe("refreshCompetitorFeed and the LinkedIn source switch", () => {
     // The database allows app only after a finished shadow run; this stands for that state.
     const db = admin([...DEFAULTS, { kind: "linkedin_source", client_id: MOBURST, engine: "app" }]);
     const result = await refreshCompetitorFeed(db, MOBURST, ENV);
+    expect(result).not.toHaveProperty("linkedin_not_collected");
     expect(collect).not.toHaveBeenCalled();
     expect(apify.mock.calls.map((c) => new URL(String(c[0])).pathname)).toEqual(["/v2/acts/WI0tj4Ieb5Kq458gB/runs", "/v2/actor-runs/r1", "/v2/datasets/d1/items"]);
     const saved = db.tables.rivaliq_snapshots[0].payload as { socialPosts: Array<{ postId: string }>; additional_metrics: Record<string, { coverage: string }> };
@@ -137,6 +167,7 @@ describe("refreshCompetitorFeed and the LinkedIn source switch", () => {
       expect(saved.socialPosts.map((p) => p.postLink)).toEqual(["https://instagram.com/p/1"]);
       expect(saved.additional_metrics).toEqual({});
       expect(result.posts).toBe(1);
+      expect(result.linkedin_not_collected).toContain("No app-capable linkedin_source pipeline");
     }
   });
 
@@ -149,7 +180,9 @@ describe("refreshCompetitorFeed and the LinkedIn source switch", () => {
     });
     vi.stubGlobal("fetch", apify);
     const db = admin([...DEFAULTS, { kind: "linkedin_source", client_id: MOBURST, engine: "app" }]);
-    await refreshCompetitorFeed(db, MOBURST, ENV);
+    // A person's refresh does not fail: it answers with the feed it saved.
+    const result = await refreshCompetitorFeed(db, MOBURST, ENV);
+    expect(result.linkedin_not_collected).toContain("run stopped");
     expect(collect).not.toHaveBeenCalled();
     expect(db.tables.report_pipeline_runs[0]).toMatchObject({ kind: "linkedin_source", mode: "app", status: "stopped" });
     expect(db.tables.rivaliq_snapshots).toHaveLength(1);
@@ -169,10 +202,53 @@ describe("refreshCompetitorFeed and the LinkedIn source switch", () => {
       q.insert = () => { throw new Error("report_pipeline_runs is read-only"); };
       return q;
     };
-    await refreshCompetitorFeed(db, MOBURST, ENV);
+    const result = await refreshCompetitorFeed(db, MOBURST, ENV);
+    expect(result.linkedin_not_collected).toContain("read-only");
     expect(collect).not.toHaveBeenCalled();
     const saved = db.tables.rivaliq_snapshots[0].payload as { socialPosts: Array<{ postLink: string }> };
     expect(saved.socialPosts.map((p) => p.postLink)).toEqual(["https://instagram.com/p/1"]);
+  });
+
+  it("the feed job: a stopped LinkedIn run on app saves the RivalIQ posts and is queued 10 minutes later; the retry that gets the LinkedIn posts saves them", async () => {
+    withToken();
+    const state = { up: false };
+    const f = apify(state);
+    const db = admin(APP);
+    const refreshFeed = (clientId: string) => refreshCompetitorFeed(db, clientId, ENV);
+    const first = await runFeedJob(feedJob(1), { now: () => T, refreshFeed });
+    expect(first).toMatchObject({ status: "queued", reason: LINKEDIN_NOT_COLLECTED, available_at: new Date(T.getTime() + FEED_RETRY_MINUTES * 60_000).toISOString() });
+    expect(postLinks(db, 0)).toEqual(["https://instagram.com/p/1"]);
+    state.up = true;
+    const retry = await runFeedJob(feedJob(2), { now: () => T, refreshFeed });
+    expect(retry.status).toBe("done");
+    expect(db.tables.rivaliq_snapshots).toHaveLength(2);
+    expect(postLinks(db, 1)).toEqual(expect.arrayContaining(["https://instagram.com/p/1", "linkedin:2:p1"]));
+    expect(db.tables.report_pipeline_runs.map((r) => r.status)).toEqual(["stopped", "done"]);
+    expect(f.mock.calls.filter((c) => String(c[0]).includes("/acts/"))).toHaveLength(2);
+    expect(collect).not.toHaveBeenCalled();
+  });
+
+  it("the feed job: an unreadable switch saves the RivalIQ posts and queues a retry, never n8n", async () => {
+    withToken();
+    const db = admin(APP);
+    const from = db.from.bind(db);
+    db.from = (t: string) => { if (t === "report_engines") throw new Error("relation does not exist"); return from(t); };
+    const outcome = await runFeedJob(feedJob(1), { now: () => T, refreshFeed: (id) => refreshCompetitorFeed(db, id, ENV) });
+    expect(outcome.status).toBe("queued");
+    expect((outcome.result as { linkedin_not_collected: string }).linkedin_not_collected).toContain("could not be read");
+    expect(postLinks(db, 0)).toEqual(["https://instagram.com/p/1"]);
+    expect(collect).not.toHaveBeenCalled();
+  });
+
+  it("the feed job: the last attempt ends failed with the feed already saved with the RivalIQ posts", async () => {
+    withToken();
+    apify({ up: false });
+    const db = admin(APP);
+    const outcome = await runFeedJob(feedJob(3), { now: () => T, refreshFeed: (id) => refreshCompetitorFeed(db, id, ENV) });
+    expect(outcome).toMatchObject({ status: "failed", reason: LINKEDIN_NOT_COLLECTED });
+    expect(db.tables.rivaliq_snapshots).toHaveLength(1);
+    expect(postLinks(db, 0)).toEqual(["https://instagram.com/p/1"]);
+    expect(collect).not.toHaveBeenCalled();
   });
 
   it("asks the landscape check by name only for a client whose website is a page on another client's site", async () => {

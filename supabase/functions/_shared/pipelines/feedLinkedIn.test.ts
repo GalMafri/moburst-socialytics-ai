@@ -2,14 +2,14 @@
 // The competitor feed's LinkedIn posts under the LinkedIn source's switch.
 // n8n and shadow (set by hand): the n8n workflow answers the feed, exactly as
 // before. app: the in-app pipeline runs inside the refresh, recorded as an app
-// run with its step log, its answer checked as n8n's is. A run that stops
-// throws and counts; after LINKEDIN_STOPS_PER_WINDOW stops for the window, an
-// unreadable run history, or no pipeline to run, the refresh gets no LinkedIn
-// posts. n8n is never called on app.
+// run with its step log, its answer checked as n8n's is. A run that stops, or
+// no pipeline to run, throws: the refresh saves the feed without LinkedIn
+// posts and its job tries again, and each try runs the pipeline again. n8n is
+// never called on app.
 import { describe, expect, it, vi } from "vitest";
 import { fakeDb } from "../lifecycle/fakeDb";
 import { linkedInSourcePipeline } from "./definitions/linkedinSource";
-import { feedLinkedInAnswer, LINKEDIN_INLINE_BUDGET_MS, LINKEDIN_STOPS_PER_WINDOW } from "./feedLinkedIn";
+import { feedLinkedInAnswer, LINKEDIN_INLINE_BUDGET_MS } from "./feedLinkedIn";
 import { InlineRunStopped } from "./inline";
 import { fakeActor, POSTS } from "../../../fixtures/pipelines/moburst";
 
@@ -17,7 +17,6 @@ const MOBURST = "d00ce604-2bcc-455a-9826-f80250db75cf";
 const SOURCES = POSTS.linkedin_sources;
 const PERIOD = { start: "2026-09-22", end: "2026-09-28" };
 const N8N_ANSWER = { socialPosts: [{ postId: "linkedin:n8n" }], additional_metrics: {} };
-const NO_POSTS = { socialPosts: [], additional_metrics: {} };
 
 function setup(statuses: Parameters<typeof fakeActor>[0] = ["RUNNING", "SUCCEEDED"], runs: Array<Record<string, unknown>> = []) {
   const db = fakeDb({ report_pipeline_runs: runs, report_pipeline_steps: [], pipeline_payloads: [] });
@@ -54,47 +53,27 @@ describe("feedLinkedInAnswer", () => {
     expect(s.db.tables.pipeline_payloads.map((p) => p.key).sort()).toEqual(["apify.dataset", "result"]);
   });
 
-  it("on app, a run that stops throws for the refresh, and once two have stopped the window gets no LinkedIn posts, with no run and no n8n call", async () => {
-    expect(LINKEDIN_STOPS_PER_WINDOW).toBe(2);
+  it("on app, a run that stops throws every time, so each try of the refresh runs the pipeline again, and n8n is never called", async () => {
     const s = setup(["FAILED"]);
-    for (let i = 0; i < LINKEDIN_STOPS_PER_WINDOW; i++) {
+    for (let i = 0; i < 3; i++) {
       await expect(feedLinkedInAnswer(s.db, { engine: "app", pipeline: s.pipeline }, s.args, s.n8n)).rejects.toBeInstanceOf(InlineRunStopped);
     }
-    expect(s.db.tables.report_pipeline_runs.map((r) => r.status)).toEqual(["stopped", "stopped"]);
-    expect(await feedLinkedInAnswer(s.db, { engine: "app", pipeline: s.pipeline }, s.args, s.n8n)).toEqual(NO_POSTS);
-    expect(s.db.tables.report_pipeline_runs).toHaveLength(2);
-    expect(s.n8n).not.toHaveBeenCalled();
-    // The next window is collected in-app again.
+    expect(s.db.tables.report_pipeline_runs.map((r) => r.status)).toEqual(["stopped", "stopped", "stopped"]);
+    // The same window, after earlier runs stopped, is collected when Apify answers.
     const next = setup(["SUCCEEDED"], s.db.tables.report_pipeline_runs);
-    const answer = await feedLinkedInAnswer(next.db, { engine: "app", pipeline: next.pipeline }, { ...next.args, period: { start: "2026-09-23", end: "2026-09-29" } }, next.n8n);
+    const answer = await feedLinkedInAnswer(next.db, { engine: "app", pipeline: next.pipeline }, next.args, next.n8n);
     expect(answer.linkedin_posts).toBeGreaterThan(0);
+    expect(s.n8n).not.toHaveBeenCalled();
     expect(next.n8n).not.toHaveBeenCalled();
   });
 
-  it("on app, an unreadable run history gives no LinkedIn posts for this refresh, with no run and no n8n call", async () => {
-    const s = setup();
-    const db = { ...s.db, from: (t: string) => { if (t === "report_pipeline_runs") throw new Error("relation does not exist"); return s.db.from(t); } };
-    expect(await feedLinkedInAnswer(db, { engine: "app", pipeline: s.pipeline }, s.args, s.n8n)).toEqual(NO_POSTS);
-    expect(s.n8n).not.toHaveBeenCalled();
-    expect(s.calls).toEqual([]);
-  });
-
-  it("on app with no pipeline to run (its secret is not set), gives no LinkedIn posts, with no run and no n8n call", async () => {
-    const s = setup();
-    expect(await feedLinkedInAnswer(s.db, { engine: "app", refused: "No app-capable linkedin_source pipeline with its secrets set is in this deployment." }, s.args, s.n8n)).toEqual(NO_POSTS);
-    expect(s.n8n).not.toHaveBeenCalled();
-    expect(s.db.tables.report_pipeline_runs).toEqual([]);
-  });
-
-  it("on app, counts a run its refresh was cut off in (still marked running long after) as stopped", async () => {
-    const cut = (minutesAgo: number) => ({ id: `cut-${minutesAgo}`, kind: "linkedin_source", mode: "app", client_id: MOBURST, status: "running", input: { sources: SOURCES, period: PERIOD }, heartbeat_at: new Date(Date.parse("2026-09-29T06:00:00Z") - minutesAgo * 60_000).toISOString(), started_at: "2026-09-29T05:00:00Z" });
-    const s = setup(["SUCCEEDED"], [cut(30), cut(20)]);
-    expect(await feedLinkedInAnswer(s.db, { engine: "app", pipeline: s.pipeline }, s.args, s.n8n)).toEqual(NO_POSTS);
-    expect(s.n8n).not.toHaveBeenCalled();
-    // One cut off long ago and one still within its time: the second is not counted, so the app runs it.
-    const t = setup(["SUCCEEDED"], [cut(30), cut(1)]);
-    await feedLinkedInAnswer(t.db, { engine: "app", pipeline: t.pipeline }, t.args, t.n8n);
-    expect(t.n8n).not.toHaveBeenCalled();
+  it("on app with no pipeline to run (its secret is not set, or the switch could not be read), throws for the refresh's retry, with no run and no n8n call", async () => {
+    for (const refused of ["No app-capable linkedin_source pipeline with its secrets set is in this deployment.", "The engine switch could not be read (network)."]) {
+      const s = setup();
+      await expect(feedLinkedInAnswer(s.db, { engine: "app", refused }, s.args, s.n8n)).rejects.toThrow(refused);
+      expect(s.n8n).not.toHaveBeenCalled();
+      expect(s.db.tables.report_pipeline_runs).toEqual([]);
+    }
   });
 
   it("on app, stops a run that does not finish in the time the n8n call had", async () => {

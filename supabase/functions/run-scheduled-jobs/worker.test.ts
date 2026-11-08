@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { runFeedJob, FEED_RETRY_MINUTES } from "./feed";
+import { runFeedJob, FEED_RETRY_MINUTES, LINKEDIN_NOT_COLLECTED } from "./feed";
 import { repairsFor, summarize, workerTick, START_WINDOW_MS } from "./worker";
 import type { JobOutcome, ScheduledJob } from "../_shared/scheduled-jobs/types";
 
@@ -41,6 +41,22 @@ describe("runFeedJob", () => {
     expect(first.available_at).toBe(new Date(T0.getTime() + FEED_RETRY_MINUTES * 60000).toISOString());
     const last = await runFeedJob(job("j", { attempts: 3 }), { now: () => T0, refreshFeed: boom });
     expect(last.status).toBe("failed");
+  });
+  it("refreshes again in 10 minutes, keeping what it saved, when the feed was saved without LinkedIn posts", async () => {
+    const saved = { posts: 1, alerts: 0, linkedin_not_collected: "The in-app linkedin_source run stopped: Apify run r1 ended FAILED." };
+    const r = await runFeedJob(job("j", { attempts: 1 }), { now: () => T0, refreshFeed: async () => saved });
+    expect(r).toEqual({ status: "queued", reason: LINKEDIN_NOT_COLLECTED, available_at: new Date(T0.getTime() + FEED_RETRY_MINUTES * 60000).toISOString(), result: saved });
+    expect(LINKEDIN_NOT_COLLECTED).toBe("LinkedIn posts were not collected.");
+  });
+  it("ends failed on its last attempt when LinkedIn was still not collected, with the feed saved, and the daily sweep lists it", async () => {
+    const saved = { posts: 1, alerts: 0, linkedin_not_collected: "The in-app linkedin_source run stopped." };
+    const r = await runFeedJob(job("j", { attempts: 3 }), { now: () => T0, refreshFeed: async () => saved });
+    expect(r).toEqual({ status: "failed", reason: LINKEDIN_NOT_COLLECTED, result: saved });
+    expect(summarize([{ ...job("j"), status: "failed", finished_at: T0.toISOString(), reason: r.reason ?? null }], T0).failed.map((j) => j.id)).toEqual(["j"]);
+  });
+  it("is done once a try collects LinkedIn", async () => {
+    const r = await runFeedJob(job("j", { attempts: 2 }), { now: () => T0, refreshFeed: async () => ({ posts: 3, alerts: 1 }) });
+    expect(r).toEqual({ status: "done", result: { posts: 3, alerts: 1 } });
   });
   it("fails without running again when it keeps stopping mid-refresh", async () => {
     let ran = false;

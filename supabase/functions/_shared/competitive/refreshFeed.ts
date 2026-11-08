@@ -316,21 +316,25 @@ export async function refreshCompetitorFeed(admin: any, clientId: string, env: F
   // fails the refresh, as before. shadow: the same, and an in-app run queued
   // after it answered. Anything else is app: the in-app pipeline, in this
   // refresh (_shared/pipelines/feedLinkedIn.ts), never n8n. When the app's
-  // collection stops or throws, the feed is saved with the RivalIQ and owned
-  // posts and no LinkedIn posts, and the next refresh collects LinkedIn again.
+  // collection stops or cannot run, the feed is saved with the RivalIQ and
+  // owned posts and no LinkedIn posts, and the answer says why in
+  // linkedin_not_collected: the feed job then runs the refresh again
+  // (run-scheduled-jobs/feed.ts), and a person's refresh does not fail.
   const linkedinEngine = readEngine(admin, "linkedin_source", clientId, pipelineEngineDeps());
   const collectLinkedIn = async () => {
     const engine = await linkedinEngine;
     try {
-      return await feedLinkedInAnswer(admin, engine, { clientId, sources: plan.sources, period: window },
+      const answer = await feedLinkedInAnswer(admin, engine, { clientId, sources: plan.sources, period: window },
         () => collectLinkedInSource(plan.sources, window, env.secret || '', setting?.value || ''));
+      return { answer, notCollected: null };
     } catch (e) {
       if (engine.engine !== "app") throw e;
-      console.warn(`[refresh-competitor-feed] ${clientId}: LinkedIn was not collected (${e instanceof Error ? e.message : String(e)}); the feed is saved without LinkedIn posts.`);
-      return { socialPosts: [], additional_metrics: {} };
+      const why = e instanceof Error ? e.message : String(e);
+      console.warn(`[refresh-competitor-feed] ${clientId}: LinkedIn was not collected (${why}); the feed is saved without LinkedIn posts.`);
+      return { answer: { socialPosts: [], additional_metrics: {} }, notCollected: why };
     }
   };
-  const [linkedin,owned] = await Promise.all([collectLinkedIn(),collectOwnedCompetitive(admin,client,window)]);
+  const [{ answer: linkedin, notCollected }, owned] = await Promise.all([collectLinkedIn(),collectOwnedCompetitive(admin,client,window)]);
   await shadowLinkedInSource(admin, await linkedinEngine, { clientId, sources: plan.sources, period: window, real: linkedin });
   const selectedIds = new Set(plan.companyIds);
   const socialPosts = mergeOwnedCompetitivePosts([...rivalPosts.filter(p=>selectedIds.has(String(p.companyId))), ...linkedin.socialPosts],owned,{id:match.client_company_id,name:client.name});
@@ -399,5 +403,9 @@ export async function refreshCompetitorFeed(admin: any, clientId: string, env: F
     else if (!t.dismissed) saved += 1;
   }
 
-  return { client_id: clientId, landscape_id: landscapeId, window, posts: socialPosts.length, truncated: socialPosts.length >= PAGE_LIMIT, alerts: saved, design_refs: harvest };
+  return {
+    client_id: clientId, landscape_id: landscapeId, window, posts: socialPosts.length, truncated: socialPosts.length >= PAGE_LIMIT, alerts: saved, design_refs: harvest,
+    // Set only when the feed was saved without LinkedIn posts: why they were not collected.
+    ...(notCollected ? { linkedin_not_collected: notCollected } : {}),
+  };
 }
