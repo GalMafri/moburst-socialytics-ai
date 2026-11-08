@@ -187,6 +187,24 @@ describe("brand_read", () => {
     expect((out as { result: { written: string[] } }).result.written).not.toContain("timezone");
     expect(c).toMatchObject({ brand_identity: BRAND, logo_url: "https://moburst.com/logo.svg", timezone: "America/Chicago" });
   });
+  it("labels a zone the agency gave by the website's source when the website finds the same zone, and leaves a real source's label", async () => {
+    const set = { ...person("brand_identity", "logo_url"), timezone: { by: "lifecycle", from: "agency" } };
+    const c = client({ timezone: "America/New_York", location: { source: "agency", website: null, timezone: "America/New_York" }, field_sources: set, brand_identity: BRAND, logo_url: "https://x/logo.png" });
+    deps.fetchSiteHtml = async () => ({ html: FOOTER_SITE, via: "direct" as const });
+    deps.researchBrand = fail("the brand read");
+    const out = await STEPS.brand_read.run(dbWith({ clients: [c] }), c, ctx());
+    expect((out as { result: { written: string[] } }).result.written).toContain("timezone");
+    expect(c.timezone).toBe("America/New_York");
+    expect(c.field_sources.timezone).toMatchObject({ by: "lifecycle", from: "page_footer" });
+    expect(c.location).toMatchObject({ source: "page_footer", website: "moburst.com" });
+
+    // A zone from a real source is not written again when the website finds the same one: only the location moves.
+    const d = client({ timezone: "America/New_York", location: { source: "post_text", website: null, timezone: "America/New_York" },
+      field_sources: { ...person("brand_identity", "logo_url"), timezone: { by: "lifecycle", from: "post_text" } }, brand_identity: BRAND, logo_url: "https://x/logo.png" });
+    const again = await STEPS.brand_read.run(dbWith({ clients: [d] }), d, ctx());
+    expect((again as { result: { written: string[] } }).result.written).toEqual(["location"]);
+    expect(d.field_sources.timezone).toMatchObject({ from: "post_text" });
+  });
   it("tries again quietly when the site cannot be read", async () => {
     const { ResearchError } = await import("../brand/research");
     deps.fetchSiteHtml = async () => { throw new ResearchError("site_unreachable", "The website could not be read."); };
@@ -428,6 +446,146 @@ describe("tracking", () => {
     expect(await STEPS.tracking.run(db, client(), ctx())).toMatchObject({ status: "waiting", reason: "selection" });
     deps.rivaliqKey = () => null;
     expect(await STEPS.tracking.run(db, client(), ctx())).toMatchObject({ status: "failed" });
+  });
+});
+
+// Kitcaster's LinkedIn page states a page on moburst.com, the website of
+// Moburst, another client (spec: docs/superpowers/specs/2026-11-08-onboarding-
+// profile-pages-and-no-n8n-design.md, section B): the page feeds the brief,
+// pillars, keywords and competitors, never Moburst's logo, brand, place,
+// profile links or RivalIQ company.
+describe("a page on another client's site is used for text only", () => {
+  const KITCASTER = "https://www.moburst.com/services/organic/podcast-booking/";
+  const MOBURST_SITE = `<html lang="en-US"><body><header><img class="logo" src="/logo.png"></header><h1>Growth done right</h1><footer>1250 Broadway, New York, NY 10001 <a href="https://www.linkedin.com/company/moburst/">in</a> <a href="https://www.instagram.com/moburst.agency/">ig</a></footer></body></html>`;
+  const moburst = () => ({ id: "m", name: "Moburst", website_url: "https://www.moburst.com", archived_at: null, demo_job_id: null });
+  const kit = (over: Record<string, unknown> = {}) => client({ id: "c1", name: "Kitcaster by Moburst", website_url: KITCASTER, ...over });
+  const set = (over = {}) => ({ id: "s1", client_id: "c1", status: "confirmed", confirmed_at: T, created_at: T, rivaliq_landscape_id: null, tracking_check: null, ...over });
+
+  it("brand_read writes no logo, location, timezone, brand identity or geo, and gives no profile links", async () => {
+    const c = kit({ geo: "" });
+    const db = dbWith({ clients: [moburst(), c] });
+    deps.fetchSiteHtml = async () => ({ html: MOBURST_SITE, via: "direct" as const });
+    deps.researchBrand = fail("the brand read");
+    const followers = rowsOf(row("social_read", { result: { follower_countries: [{ country: "GB", followers: 9, share: 0.9 }] } }));
+    const out = await STEPS.brand_read.run(db, c, ctx({ rows: followers }));
+    expect(out).toEqual({
+      status: "done",
+      result: {
+        website: "moburst.com/services/organic/podcast-booking", fetched_via: "direct", model_read: false,
+        timezone: null, timezone_source: null, country: null, language: "en", logo: "none", written: [], kept: [], site_profiles: [], parent_page: true,
+      },
+    });
+    expect(c).toMatchObject({ logo_url: null, brand_identity: null, location: null, timezone: "UTC", geo: "" });
+    expect(db.uploads.size).toBe(0);
+  });
+  it("brand_read asks the model only for the page's language, and takes nothing else it reads", async () => {
+    const c = kit({ language: "" });
+    const db = dbWith({ clients: [moburst(), c] });
+    deps.fetchSiteHtml = async () => ({ html: MOBURST_SITE.replace(' lang="en-US"', ""), via: "direct" as const });
+    deps.openaiKey = async () => "sk";
+    deps.researchBrand = (async () => ({ brand_identity: BRAND, headquarters: { city: "New York", region: "NY", country: "US" }, site_language: "en", logo: { url: "https://www.moburst.com/logo.svg" }, html: "", url: "", fetched_via: "direct", debug: {} })) as never;
+    const out = await STEPS.brand_read.run(db, c, ctx());
+    expect(out).toMatchObject({ status: "done", result: { model_read: true, written: ["language"], logo: "none", site_profiles: [], parent_page: true } });
+    expect(c).toMatchObject({ language: "en", logo_url: null, brand_identity: null, location: null, timezone: "UTC", geo: "US" });
+  });
+  it("accounts takes no profile links from the page, and never reads the page for them", async () => {
+    const c = kit();
+    const db = dbWith({ clients: [moburst(), c], sprout_profiles: [], sprout_profile_removals: [] });
+    deps.listCustomerProfiles = async () => [
+      { id: "5719052", name: "Moburst - Growth Done Right", native_name: "moburst", network_type: "linkedin_company", native_link: "", status: "active" },
+      { id: "5489335", name: "Moburst | Mobile-First Digital Agency", native_name: "moburst.agency", network_type: "fb_instagram_account", native_link: "", status: "active" },
+    ];
+    deps.fetchSiteHtml = fail("the page read");
+    // A brand read from before the page was another client's still lists Moburst's profiles; with no brand read, the page is not fetched.
+    for (const rows of [rowsOf(row("brand_read", { result: { site_profiles: ["linkedin:moburst", "instagram:moburst.agency"] } })), new Map<string, StepRow>()]) {
+      expect(await STEPS.accounts.run(db, c, ctx({ rows }))).toMatchObject({ status: "done", result: { matched: [], assigned: 0, platforms: [] } });
+    }
+    expect(db.tables.sprout_profiles).toEqual([]);
+  });
+  it("tracking waits for a site of its own, asking RivalIQ nothing", async () => {
+    deps.rivaliqKey = () => "rk";
+    deps.rivalIqApi = (() => async () => ({})) as never;
+    deps.advanceSetupOnServer = fail("the setup");
+    deps.syncTrackedHandles = fail("the handle sync");
+    expect(await STEPS.tracking.run(dbWith({ clients: [moburst(), kit()], competitor_sets: [set()] }), kit(), ctx())).toEqual({ status: "waiting", reason: "own_site", result: { set_id: "s1" } });
+    // A landscape linked earlier is not matched by the other client's website either.
+    expect(await STEPS.tracking.run(dbWith({ clients: [moburst(), kit()], competitor_sets: [set({ rivaliq_landscape_id: "L1" })] }), kit(), ctx())).toEqual({ status: "waiting", reason: "own_site", result: { set_id: "s1" } });
+  });
+  it("keys brand_read and tracking on the page being another client's, so the site is read again when that changes", async () => {
+    const other = moburst();
+    const db = dbWith({ clients: [other, kit()], competitor_sets: [set()], competitors: [] });
+    expect(await STEPS.brand_read.inputs(db, kit(), new Map())).toBe("moburst.com/services/organic/podcast-booking|text_only");
+    const tracked = await STEPS.tracking.inputs(db, kit(), new Map());
+    expect(tracked).toMatch(/\|moburst\.com\/services\/organic\/podcast-booking\|text_only$/);
+    // Once Moburst is archived, nobody else has the site: the page is the client's own and both keys move.
+    Object.assign(other, { archived_at: T });
+    expect(await STEPS.brand_read.inputs(db, kit(), new Map())).toBe("moburst.com/services/organic/podcast-booking");
+    expect(await STEPS.tracking.inputs(db, kit(), new Map())).toBe(tracked!.replace(/\|text_only$/, ""));
+  });
+  it("still feeds the page's text to the brief, pillars and competitors", async () => {
+    const db = dbWith({ clients: [moburst(), kit()], competitor_sets: [] });
+    expect(await STEPS.brief_pillars.inputs(db, kit(), rowsOf(row("brand_read", { result: { parent_page: true, site_profiles: [] } })))).toContain("|site:moburst.com/services/organic/podcast-booking|");
+    expect(await STEPS.competitors.inputs(db, kit(), rowsOf(row("brief_pillars")))).toMatch(/^site:moburst\.com\/services\/organic\/podcast-booking\|notes:/);
+    const c = kit();
+    const scraped: string[] = [];
+    deps.scrapeMarkdown = async (url: string) => { scraped.push(url); return { markdown: "# Kitcaster books founders, executives and experts on the podcasts their buyers already listen to every week.", title: "Kitcaster" }; };
+    deps.anthropicKey = async () => "key";
+    deps.now = () => new Date(T);
+    deps.derivePillars = (async () => ({ pillars: [{ name: "Podcast booking", description: "d", rationale: "r" }], keywords: ["podcast guesting"], notes: "", sources: ["brief"], source: "brief", derived_at: T })) as never;
+    const out = await STEPS.brief_pillars.run(dbWith({ clients: [moburst(), c] }), c, ctx({ rows: rowsOf(row("brand_read")) }));
+    expect(scraped).toEqual([KITCASTER]);
+    expect(out).toMatchObject({ status: "done", result: { brief: "drafted", pillars: "derived" } });
+  });
+});
+
+// Review Focus 5: a client whose website is a plain domain behaves exactly as
+// before the parent-page rule, even when another client has a page on its
+// site, and the rule reads no client for it.
+describe("a plain-domain client is unchanged by the parent-page rule", () => {
+  const OLO_SITE = `<html lang="en-US"><body><header><img class="logo" src="/logo.png"></header><footer>1250 Broadway, New York, NY 10001 <a href="https://www.linkedin.com/company/olo/">in</a></footer></body></html>`;
+  const others = () => [{ id: "k2", name: "Olo Careers", website_url: "https://www.olo.com/careers/", archived_at: null, demo_job_id: null }];
+  const olo = (over: Record<string, unknown> = {}) => client({ id: "c1", name: "Olo", website_url: "https://www.olo.com/", ...over });
+  const watched = (db: ReturnType<typeof dbWith>) => {
+    const tables: string[] = [];
+    const from = db.from.bind(db);
+    db.from = (t: string) => { tables.push(t); return from(t); };
+    return tables;
+  };
+
+  it("brand_read, accounts and tracking give today's results and keys, and read no client", async () => {
+    const c = olo();
+    const db = dbWith({ clients: [...others(), c], sprout_profiles: [], sprout_profile_removals: [], competitor_sets: [{ id: "s1", client_id: "c1", status: "confirmed", confirmed_at: T, created_at: T, rivaliq_landscape_id: null, tracking_check: null }], competitors: [] });
+    const tables = watched(db);
+    deps.fetchSiteHtml = async () => ({ html: OLO_SITE, via: "direct" as const });
+    deps.openaiKey = async () => "sk";
+    deps.researchBrand = (async () => ({ brand_identity: BRAND, headquarters: { city: "New York", region: "NY", country: "US" }, site_language: "en", logo: { url: "https://www.olo.com/logo.svg" }, html: "", url: "", fetched_via: "direct", debug: {} })) as never;
+
+    expect(await STEPS.brand_read.inputs(db, c, new Map())).toBe("olo.com");
+    const read = await STEPS.brand_read.run(db, c, ctx());
+    expect(read).toEqual({
+      status: "done",
+      result: {
+        website: "olo.com", fetched_via: "direct", model_read: true, timezone: "America/New_York", timezone_source: "page_footer", country: "US", language: "en",
+        logo: "file", written: ["brand_identity", "logo_url", "location", "timezone"], kept: [], site_profiles: ["linkedin:olo"],
+      },
+    });
+    expect(c).toMatchObject({ brand_identity: BRAND, logo_url: "https://www.olo.com/logo.svg", timezone: "America/New_York", location: { source: "page_footer", website: "olo.com" } });
+
+    const rows = rowsOf(row("brand_read", { result: (read as { result: Record<string, unknown> }).result }));
+    deps.listCustomerProfiles = async () => [{ id: "7", name: "Olo - Skip the Line", native_name: "olo", network_type: "linkedin_company", native_link: "", status: "active" }];
+    const accounts = await STEPS.accounts.run(db, c, ctx({ rows }));
+    expect(accounts).toMatchObject({ status: "done", result: { profiles: 1, matched: [{ id: "7", network: "linkedin_company", handle: "olo", by: ["site_link"] }], assigned: 1, platforms: ["LinkedIn"], written: ["primary_platforms"] } });
+    expect(Object.keys((accounts as { result: Record<string, unknown> }).result).sort()).toEqual(["assigned", "list", "matched", "platforms", "profiles", "written"]);
+
+    const { FollowFailure } = await import("../competitive/rivaliqFollowFailure");
+    let asked = 0;
+    deps.rivaliqKey = () => "rk";
+    deps.rivalIqApi = (() => async () => ({})) as never;
+    deps.advanceSetupOnServer = async () => { asked++; throw new FollowFailure("RivalIQ's plan tracks 40 distinct companies and 40 are in use, so Olo could not be added.", true); };
+    expect(await STEPS.tracking.inputs(db, c, new Map())).toMatch(/^s1\|none\|\|[^|]+\|olo\.com$/);
+    expect(await STEPS.tracking.run(db, c, ctx())).toEqual({ status: "waiting", reason: "rivaliq_full", recheckDays: 1, result: { set_id: "s1" } });
+    expect(asked).toBe(1);
+    expect(tables).not.toContain("clients");
   });
 });
 

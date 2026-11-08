@@ -243,6 +243,8 @@ describe("what the product read from a client's social profiles (onboarding from
       .toEqual({ names: ["Toast", "ChowNow", "Square"], tracking: "RivalIQ follows companies by their website, so tracking starts once the client's website is found." });
     expect(onboardingFacts(olo({ website_url: "https://olo.com" }), [chosen, { step: "tracking", status: "waiting", result: { waiting_for: "rivaliq_full" } }]).competitors.tracking)
       .toBe("The RivalIQ plan is full. Tracking starts when a place opens.");
+    expect(onboardingFacts(olo({ website_url: "https://www.moburst.com/services/organic/podcast-booking/" }), [chosen, { step: "tracking", status: "waiting", result: { waiting_for: "own_site" } }]).competitors.tracking)
+      .toBe("RivalIQ follows companies by their website, and the client's website is a page on another client's site, so tracking starts once the client has a site of its own.");
   });
   it("writes every line in plain words, with no step names, statuses or dashes", () => {
     const f = onboardingFacts(olo({ geo: "US,GB", language: "en,es", logo_url: "x", field_sources: { geo: { by: "lifecycle", from: "followers" }, language: { by: "lifecycle", from: "posts" }, logo_url: { by: "lifecycle", at: NOW, from: "profile_picture:instagram" } } }),

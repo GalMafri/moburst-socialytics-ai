@@ -20,7 +20,7 @@
 
 import { profileKeyOf, type SproutProfile } from "../lifecycle/accounts.ts";
 import { normName, sameName } from "../lifecycle/names.ts";
-import { siteKeyOf } from "../net/domains.ts";
+import { siteKeyOf, siteMatch } from "../net/domains.ts";
 import type { CustomerGroup } from "./profiles.ts";
 import { networkKey } from "./publishRules.ts";
 
@@ -351,11 +351,16 @@ export function isBrandAccount(brand: Brand): boolean {
   return brand.profiles.some((p) => String(p.network_type || "").toLowerCase() !== "linkedin");
 }
 
-/** The client (never a demo copy) whose website is this site: the same registrable domain (net/domains.ts), so any subdomain counts. */
+/**
+ * The client (never a demo copy) whose website is this site (net/domains.ts
+ * siteMatch): a client on its host first, then one on its registrable
+ * domain, so any subdomain counts. A client whose website is a subdomain of
+ * its own (Uproar on uproar.moburst.com) is matched by that full host only.
+ */
 export function clientWithSite(site: string | null | undefined, clients: KnownClient[]): KnownClient | null {
-  const key = siteKeyOf(site);
-  if (!key) return null;
-  return clients.find((c) => !c.demo_job_id && siteKeyOf(c.website_url) === key) ?? null;
+  if (!siteKeyOf(site)) return null;
+  const real = clients.filter((c) => !c.demo_job_id);
+  return real.find((c) => siteMatch(site, c.website_url) === "host") ?? real.find((c) => siteMatch(site, c.website_url) === "site") ?? null;
 }
 
 export type CreationBlock = { decision: "person" | "no_posts" | "client_website"; reason: string; client_id?: string };

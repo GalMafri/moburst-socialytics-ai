@@ -592,7 +592,8 @@ export function onboardingFacts(client: Record<string, unknown> | null | undefin
   const picked = by("competitors")?.status === "done" && Array.isArray(result("competitors").selected) ? (result("competitors").selected as unknown[]).map(String) : [];
   const trackingWait = waitingFor("tracking");
   const tracking = trackingWait === "client_website" ? "RivalIQ follows companies by their website, so tracking starts once the client's website is found."
-    : trackingWait === "rivaliq_full" ? "The RivalIQ plan is full. Tracking starts when a place opens." : "";
+    : trackingWait === "rivaliq_full" ? "The RivalIQ plan is full. Tracking starts when a place opens."
+    : trackingWait === "own_site" ? "RivalIQ follows companies by their website, and the client's website is a page on another client's site, so tracking starts once the client has a site of its own." : "";
 
   return { website, logo, timezone, regions, languages, brief, competitors: { names: picked, tracking } };
 }
