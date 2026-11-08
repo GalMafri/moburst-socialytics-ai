@@ -47,9 +47,12 @@ export interface Reply {
 /** How long a post sent now counts as sent, so a second press or a resend does not send it again. */
 export const SEND_NOW_WINDOW_MS = 15 * 60_000;
 
+/** The statuses a sent post is recorded with; scheduled_posts' status rule must allow each (statuses.test.ts). */
+export const SENT_STATUSES = { scheduled: "scheduled", now: "sent_now" } as const;
+
 export async function sendToSprout(req: SendRequest, store: SentStore, opts: { fetchImpl?: typeof fetch; waits?: number[] } = {}): Promise<Reply> {
   const fetchImpl = opts.fetchImpl ?? fetch;
-  const status = req.sendNow ? "sent_now" : "scheduled";
+  const status = req.sendNow ? SENT_STATUSES.now : SENT_STATUSES.scheduled;
   let chosenAt: string | null = null;
   if (!req.sendNow) {
     try {
