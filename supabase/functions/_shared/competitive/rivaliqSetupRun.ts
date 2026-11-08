@@ -16,6 +16,7 @@
 import { rivalIqFetch } from "./rivaliqFetch.ts";
 import { advanceRivalIqSetup, publicCompanyUrl, type SetupJob, type SetupPlan } from "./rivaliqSetup.ts";
 import { companyToHandles, type RivalIqCompany } from "./rivaliqLandscape.ts";
+import { parentClientFor } from "../lifecycle/parentPage.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -35,7 +36,12 @@ export async function planFingerprint(plan: SetupPlan): Promise<string> {
   return [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** The companies RivalIQ should track for a set: the client first, then the three ranked competitors. */
+/**
+ * The companies RivalIQ should track for a set: the client first, then the
+ * three ranked competitors. A client whose website is a page on another
+ * client's site (lifecycle/parentPage.ts) has no company of its own to track:
+ * RivalIQ would take the other client's, so the plan is refused.
+ */
 export async function setupPlan(db: Db, setId: string): Promise<SetupPlan> {
   const { data: set, error: se } = await db.from("competitor_sets").select("id, client_id, status").eq("id", setId).maybeSingle();
   if (se) throw se;
@@ -43,6 +49,8 @@ export async function setupPlan(db: Db, setId: string): Promise<SetupPlan> {
   const { data: client, error: ce } = await db.from("clients").select("id, name, website_url, archived_at").eq("id", set.client_id).single();
   if (ce) throw ce;
   if (client.archived_at) throw new SetupError("archived", "Archived clients cannot start provider tracking.");
+  const parent = await parentClientFor(db, client);
+  if (parent) throw new SetupError("selection", `${client.name}'s website is a page on ${parent.name}'s site, so RivalIQ cannot track it as its own company.`);
   const { data: selected, error: pe } = await db.from("competitors").select("id, name, website_url, selected_rank").eq("set_id", setId).eq("is_selected", true).order("selected_rank");
   if (pe) throw pe;
   // deno-lint-ignore no-explicit-any

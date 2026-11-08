@@ -30,31 +30,52 @@ function above(other: string[], page: string[]): boolean {
   return other.length < page.length && other.every((segment, i) => segment === page[i]);
 }
 
+/** How far down the site the other website sits when it is above the page (0 for a homepage), or -1 when it is not above it. */
+function depthAbove(website: string | null, site: string | null): number {
+  const page = pathSegments(website);
+  const other = pathSegments(site);
+  return page.length && str(site) && siteMatch(website, site) !== null && above(other, page) ? other.length : -1;
+}
+
 /**
  * True when the website is a page under another client's website: on that
  * client's site, with that client's path a strict prefix of its own.
  */
 export function isParentPage(website: string | null, otherSites: Array<string | null>): boolean {
-  const page = pathSegments(website);
-  if (!page.length) return false;
-  return otherSites.some((site) => !!str(site) && siteMatch(website, site) !== null && above(pathSegments(site), page));
+  return otherSites.some((site) => depthAbove(website, site) >= 0);
+}
+
+/** The other clients with a website: active (not archived), never a demo copy. */
+async function otherClients(db: Db, clientId: string): Promise<Array<{ name: string; website_url: string }>> {
+  const { data, error } = await db.from("clients").select("name, website_url").is("archived_at", null).is("demo_job_id", null).neq("id", clientId).not("website_url", "is", null);
+  if (error) throw new Error(`Could not read the other clients' websites: ${error.message}`);
+  return ((data ?? []) as Array<{ name: unknown; website_url: unknown }>).map((r) => ({ name: str(r.name), website_url: str(r.website_url) })).filter((r) => r.website_url);
 }
 
 /** The websites of the other clients: active (not archived), never a demo copy. */
 export async function otherClientSites(db: Db, clientId: string): Promise<string[]> {
-  const { data, error } = await db.from("clients").select("website_url").is("archived_at", null).is("demo_job_id", null).neq("id", clientId).not("website_url", "is", null);
-  if (error) throw new Error(`Could not read the other clients' websites: ${error.message}`);
-  return ((data ?? []) as Array<{ website_url: unknown }>).map((r) => str(r.website_url)).filter(Boolean);
+  return (await otherClients(db, clientId)).map((c) => c.website_url);
 }
 
 /**
- * True when the client's website is a page on another client's site. The
- * other clients are read only for a website with a path, so a client whose
- * website is a homepage (a plain domain or a subdomain of its own) costs no
- * read and is never one.
+ * The client whose website the client's website is a page under, the
+ * nearest when several sit above it; null for a site of its own. The other
+ * clients are read only for a website with a path, so a client whose website
+ * is a homepage (a plain domain or a subdomain of its own) costs no read.
  */
-export async function parentPageFor(db: Db, client: { id?: unknown; website_url?: unknown }): Promise<boolean> {
+export async function parentClientFor(db: Db, client: { id?: unknown; website_url?: unknown }): Promise<{ name: string; website_url: string } | null> {
   const website = str(client.website_url);
-  if (!pathSegments(website).length) return false;
-  return isParentPage(website, await otherClientSites(db, String(client.id)));
+  if (!pathSegments(website).length) return null;
+  let nearest: { name: string; website_url: string } | null = null;
+  let depth = -1;
+  for (const other of await otherClients(db, String(client.id))) {
+    const d = depthAbove(website, other.website_url);
+    if (d > depth) [nearest, depth] = [other, d];
+  }
+  return nearest;
+}
+
+/** True when the client's website is a page on another client's site (parentClientFor). */
+export async function parentPageFor(db: Db, client: { id?: unknown; website_url?: unknown }): Promise<boolean> {
+  return (await parentClientFor(db, client)) !== null;
 }

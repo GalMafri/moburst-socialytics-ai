@@ -4,7 +4,7 @@
 // design.md, section B): Kitcaster's LinkedIn page states a page on
 // moburst.com, the website of Moburst, another client.
 import { describe, expect, it } from "vitest";
-import { isParentPage, otherClientSites, parentPageFor } from "./parentPage";
+import { isParentPage, otherClientSites, parentClientFor, parentPageFor } from "./parentPage";
 import { fakeDb } from "./fakeDb";
 
 const KITCASTER = "https://www.moburst.com/services/organic/podcast-booking/";
@@ -94,5 +94,19 @@ describe("parentPageFor", () => {
     expect(await parentPageFor(db, { id: "o", website_url: "https://olo.com" })).toBe(false);
     expect(await parentPageFor(db, { id: "u", website_url: "https://uproar.moburst.com/" })).toBe(false);
     expect(await parentPageFor(db, { id: "x", website_url: null })).toBe(false);
+  });
+});
+
+describe("parentClientFor", () => {
+  it("names the client the page sits under, the nearest when several sit above it, and nobody for a site of its own", async () => {
+    const db = fakeDb({ clients: [
+      { id: "m", name: "Moburst", website_url: "https://www.moburst.com/", archived_at: null, demo_job_id: null },
+      { id: "e", name: "Moburst EN", website_url: "https://www.moburst.com/en/", archived_at: null, demo_job_id: null },
+      { id: "x", name: "Old Moburst", website_url: "https://www.moburst.com/", archived_at: "2026-10-01T00:00:00Z", demo_job_id: null },
+    ] });
+    expect(await parentClientFor(db, { id: "k", website_url: KITCASTER })).toEqual({ name: "Moburst", website_url: "https://www.moburst.com/" });
+    expect(await parentClientFor(db, { id: "p", website_url: "https://www.moburst.com/en/podcasts/" })).toEqual({ name: "Moburst EN", website_url: "https://www.moburst.com/en/" });
+    expect(await parentClientFor(db, { id: "o", website_url: "https://lega.bot/en/" })).toBeNull();
+    expect(await parentClientFor({ from: () => { throw new Error("no read expected"); } }, { id: "o", website_url: "https://olo.com" })).toBeNull();
   });
 });
