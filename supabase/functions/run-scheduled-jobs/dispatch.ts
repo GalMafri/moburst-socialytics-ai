@@ -34,18 +34,24 @@
 //             this phase sends the same request again: the workflow writes
 //             into that one report (a competitive one is also fenced by
 //             attempt_started_at), so a repeat never makes a second report.
-//   sent      the workflow accepted the request. From here the job only
-//             watches its report.
+//             With the switch on app by then, the in-app run makes that same
+//             report instead.
+//   sent      the workflow accepted the request, or the in-app run was
+//             queued. From here the job only watches its report.
 //
 // Which engine makes the report is the engine switch (report_engines, read
-// through _shared/pipelines/engine.ts) at the moment the request is sent;
-// without the switch, or with it on n8n, everything above is exactly as it
-// was. shadow: the request goes to n8n as above, and once n8n has it an
-// in-app pipeline run is queued that writes only to shadow tables. app: no
-// request goes to n8n; the in-app run makes the report, and the job watches
-// that run instead of the 90-minute clock: a run the worker is still taking
-// step by step is not stuck however long it takes, and a run that stopped,
-// or that nothing has touched for 90 minutes, ends this run of the report.
+// through _shared/pipelines/engine.ts) when the request is about to go out.
+// n8n, a row set by hand: everything above is exactly as it was, webhook
+// included. shadow: the request goes to n8n as above, and once n8n has it an
+// in-app pipeline run is queued that writes only to shadow tables. Anything
+// else is app: no request goes to n8n and no webhook is needed; the in-app
+// run makes the report, and the job watches that run instead of the
+// 90-minute clock: a run the worker is still taking step by step is not
+// stuck however long it takes, and a run that stopped, or that nothing has
+// touched for 90 minutes, ends this run of the report. n8n is never the
+// backup: however many in-app runs stop, a switch that cannot be read, or an
+// app with no pipeline that can run in this deployment, the occurrence runs
+// again in the app later, with the waits and the closing rule above.
 
 import { nextRun, rangeForSchedule, type ReportRange } from "../_shared/reports/schedule.ts";
 import { STUCK_AFTER_MINUTES } from "../_shared/reports/payloads.ts";
@@ -53,7 +59,7 @@ import { isTrackingProblem, LANDSCAPE_MISSING, type LandscapeCheck } from "../_s
 import { HELD_REDOS } from "../_shared/competitive/reportEvidence.ts";
 import type { JobOutcome, ScheduledJob } from "../_shared/scheduled-jobs/types.ts";
 import { RETRY_MINUTES } from "./worker.ts";
-import { APP_STOPS_BEFORE_N8N, type Engine, type PipelineDefinition } from "../_shared/pipelines/types.ts";
+import type { Engine, PipelineDefinition } from "../_shared/pipelines/types.ts";
 import type { ReportPipelineStart } from "../_shared/pipelines/shadow.ts";
 import type { AppRunView } from "../_shared/pipelines/store.ts";
 
@@ -74,8 +80,6 @@ export const LAST_RUN_LEAD_MINUTES = 180;
 export const MANUAL_RUN_DAYS = 7;
 /** The wait before a held competitive analysis is made again. */
 export const HELD_REDO_MINUTES = 24 * 60;
-/** In-app runs of one occurrence that may stop before its next run goes to n8n, the backup (one rule with the LinkedIn source). */
-export { APP_STOPS_BEFORE_N8N };
 
 /** A run a person asked for, with no schedule behind it (scheduled_jobs.payload). */
 export interface ManualRun {
@@ -196,11 +200,17 @@ export interface DispatchDeps {
   saveJob(patch: Partial<Pick<ScheduledJob, "phase" | "report_id" | "result">>): Promise<void>;
   /** Read and build everything, write nothing, send nothing. */
   dryRun?: boolean;
-  /** The engine switch for this report kind and client. Absent, or anything in doubt: n8n. */
-  engine?(kind: "social" | "competitive", clientId: string): Promise<{ engine: Engine; pipeline?: PipelineDefinition }>;
+  /**
+   * The engine switch for this report kind and client (_shared/pipelines/engine.ts
+   * readEngine). An app with no pipeline cannot run now; a throw reads as that.
+   * A dispatch given no switch, or no way to start a pipeline, sends to n8n
+   * as it did before the switch existed (the rules' own tests); the function
+   * always gives both.
+   */
+  engine?(kind: "social" | "competitive", clientId: string): Promise<{ engine: Engine; pipeline?: PipelineDefinition; refused?: string }>;
   /** Queue the report's in-app pipeline run (_shared/pipelines/shadow.ts). Throws when it could not be queued. */
   startPipeline?(args: ReportPipelineStart): Promise<{ run_id: string }>;
-  /** The in-app run that makes a report (app engine), or null. */
+  /** The in-app run that makes a report (app engine), or null. Without it the job watches the report's own 90-minute clock. */
   pipelineRun?(reportId: string): Promise<AppRunView | null>;
 }
 
@@ -405,27 +415,24 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
     }
   }
 
-  /** The engine switch, read once, when the request is about to go out. Anything in doubt is n8n. */
-  type Route = { engine: Engine; pipeline?: PipelineDefinition };
+  /**
+   * The engine switch, read once, when the request is about to go out (or
+   * when a webhook is missing, to know whether it is needed). n8n and shadow
+   * only where a row asks for them; a switch that cannot be read is app with
+   * no pipeline, so nothing goes out and the occurrence runs again later.
+   */
+  type Route = { engine: Engine; pipeline?: PipelineDefinition; refused?: string };
   let route: Route | null = null;
   const routeOf = async (): Promise<Route> => {
     if (route) return route;
-    let r: Route = { engine: "n8n" };
-    if (d.engine && d.startPipeline) {
-      try {
-        r = await d.engine(competitive ? "competitive" : "social", client.id);
-      } catch (e) {
-        console.warn(`[dispatch] engine switch unreadable, n8n runs it: ${message(e)}`);
-      }
+    if (!d.engine || !d.startPipeline) return (route = { engine: "n8n" });
+    try {
+      route = await d.engine(competitive ? "competitive" : "social", client.id);
+    } catch (e) {
+      route = { engine: "app", refused: `The engine switch could not be read (${message(e)}).` };
+      console.warn(`[dispatch] ${route.refused}`);
     }
-    if (r.engine !== "n8n" && !r.pipeline) r = { engine: "n8n" };
-    if (r.engine === "app" && !d.pipelineRun) r = { engine: "n8n" };
-    // n8n is the backup: an occurrence whose in-app runs keep stopping is made by n8n.
-    if (r.engine === "app" && runs.filter((x) => x.engine === "app" && x.outcome === "stopped").length >= APP_STOPS_BEFORE_N8N) {
-      console.warn(`[dispatch] ${APP_STOPS_BEFORE_N8N} in-app runs of this report stopped; n8n makes it.`);
-      r = { engine: "n8n" };
-    }
-    return (route = r);
+    return route;
   };
 
   /** What the in-app run is given: the report, its range and the request n8n gets. */
@@ -462,14 +469,20 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
   };
 
   /** Send the request; a confirmed answer moves the job to watching its report. */
-  const send = async (url: string, payload: Record<string, unknown>, result: DispatchMemory): Promise<JobOutcome> => {
-    const { engine, pipeline } = await routeOf();
-    // A repeated request may already be with n8n, so it stays with n8n.
-    if (engine === "app" && pipeline && !repeat) return startApp(pipeline, payload, result);
+  const send = async (url: string | null, payload: Record<string, unknown>, result: DispatchMemory): Promise<JobOutcome> => {
+    const { engine, pipeline, refused } = await routeOf();
+    if (engine === "app") {
+      // A repeated request is made in the app too: the in-app run writes into the same report.
+      if (pipeline) return startApp(pipeline, payload, result);
+      // Nothing can make it in the app now: as after a run that stopped, the occurrence runs again later.
+      Object.assign(memory, result);
+      return runAgain(reportId, `the report could not start in the app (${(refused ?? "no in-app pipeline can run").replace(/\.$/, "")})`);
+    }
     await d.saveJob({ phase: "posting", result });
     let r: { ok: boolean; status: number };
     try {
-      r = await d.post(url, payload);
+      // The webhook is checked before anything is made, for every route but app.
+      r = await d.post(url!, payload);
     } catch (e) {
       // Unanswered: the workflow may have the request. It is sent again for
       // the same report shortly, which can never make a second report.
@@ -488,9 +501,11 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
 
   try {
     const hooks = await d.store.webhooks();
+    const url = competitive ? hooks.competitive : hooks.social;
+    // Only a request to n8n needs its webhook; the app makes the report without one.
+    if (!url && (await routeOf()).engine !== "app") throw new Error(competitive ? "competitive webhook URL not configured" : "n8n webhook URL not configured");
 
     if (competitive) {
-      if (!hooks.competitive) throw new Error("competitive webhook URL not configured");
       const set = await d.store.competitorSet(client.id);
       if (!set) {
         const reason = "Waiting for a confirmed competitor set. The paired social report goes ahead without it.";
@@ -550,11 +565,10 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
       }
       const payload = await d.buildCompetitivePayload({ client, reportId, set, range, attemptStartedAt, scheduled: !manual, staggerSeconds: job.stagger_seconds });
       if (d.dryRun) return { status: "done", reason: "dry run: would post", result: { ...result, payload_keys: Object.keys(payload) } };
-      return await send(hooks.competitive, payload, result);
+      return await send(url, payload, result);
     }
 
     // Social.
-    if (!hooks.social) throw new Error("n8n webhook URL not configured");
     let range = memory.range ?? (manual ? manual.range : rangeForSchedule(schedule!.range_mode, now));
     let wait: string | null = null;
     /** The competitive report this social report is built on, when it is the pinned one. */
@@ -609,7 +623,7 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
         ? { status: "waiting", reason: `dry run: ${wait}`, result: preview }
         : { status: "done", reason: "dry run: would post", result: preview };
     }
-    return await send(hooks.social, payload, result);
+    return await send(url, payload, result);
   } catch (err) {
     const msg = message(err);
     if (d.dryRun) return { status: "failed", reason: `dry run: ${msg}` };

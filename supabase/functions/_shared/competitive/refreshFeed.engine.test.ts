@@ -1,10 +1,12 @@
 // @vitest-environment node
 // The competitor feed refresh under the LinkedIn source's engine switch. With
-// the switch on n8n (or no switch table at all) the refresh calls the n8n
-// LinkedIn workflow exactly as before and saves the same snapshot; with
-// shadow for this client it does all of that too, and queues an in-app run
-// that keeps what n8n answered. RivalIQ, the LinkedIn workflow and Sprout
-// are stand-ins here: nothing leaves the test.
+// the switch on n8n (set by hand) the refresh calls the n8n LinkedIn workflow
+// exactly as before and saves the same snapshot; with shadow for this client
+// it does all of that too, and queues an in-app run that keeps what n8n
+// answered. Anything else is app: the in-app pipeline, and when its
+// collection stops or cannot run, the feed is saved with the RivalIQ posts
+// and no LinkedIn posts, and n8n is never called. RivalIQ, the LinkedIn
+// workflow and Sprout are stand-ins here: nothing leaves the test.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeDb } from "../lifecycle/fakeDb";
 
@@ -66,19 +68,22 @@ beforeEach(() => collect.mockClear());
 afterEach(() => vi.unstubAllGlobals());
 
 describe("refreshCompetitorFeed and the LinkedIn source switch", () => {
-  it("on n8n, or with no switch table, calls the n8n workflow as before and queues nothing", async () => {
-    const results = [];
-    for (const engines of [DEFAULTS, null]) {
-      collect.mockClear();
-      const db = admin(engines);
-      await refreshCompetitorFeed(db, MOBURST, ENV);
-      expect(collect).toHaveBeenCalledTimes(1);
-      expect(collect.mock.calls[0]).toEqual([SOURCES, expect.objectContaining({ start: expect.any(String), end: expect.any(String) }), "fixture-secret", "https://moburst.app.n8n.cloud/webhook/socialytics-linkedin-source"]);
-      expect(db.rpcCalls).toEqual([]);
-      expect(db.uploads.size).toBe(0);
-      results.push(snapshot(db));
-    }
-    expect(results[1]).toEqual(results[0]);
+  it("on n8n, calls the n8n workflow as before and queues nothing", async () => {
+    const db = admin(DEFAULTS);
+    await refreshCompetitorFeed(db, MOBURST, ENV);
+    expect(collect).toHaveBeenCalledTimes(1);
+    expect(collect.mock.calls[0]).toEqual([SOURCES, expect.objectContaining({ start: expect.any(String), end: expect.any(String) }), "fixture-secret", "https://moburst.app.n8n.cloud/webhook/socialytics-linkedin-source"]);
+    expect(db.rpcCalls).toEqual([]);
+    expect(db.uploads.size).toBe(0);
+    const saved = db.tables.rivaliq_snapshots[0].payload as { socialPosts: Array<{ postLink: string }> };
+    expect(saved.socialPosts.map((p) => p.postLink)).toEqual(["https://instagram.com/p/1", "https://www.linkedin.com/posts/peer-1"]);
+  });
+
+  it("on n8n, a LinkedIn workflow that fails still fails the refresh, as before, and saves nothing", async () => {
+    collect.mockImplementationOnce(async () => { throw new Error("LinkedIn source workflow failed [500]"); });
+    const db = admin(DEFAULTS);
+    await expect(refreshCompetitorFeed(db, MOBURST, ENV)).rejects.toThrow("LinkedIn source workflow failed");
+    expect(db.tables.rivaliq_snapshots).toEqual([]);
   });
 
   it("on shadow for this client, also queues an in-app run that keeps what n8n answered", async () => {
@@ -121,11 +126,53 @@ describe("refreshCompetitorFeed and the LinkedIn source switch", () => {
     expect(db.rpcCalls).toEqual([]);
   });
 
-  it("on app while the Apify token is not set, n8n answers the feed as before", async () => {
+  it("on app while the Apify token is not set, or with no switch table, saves the feed with the RivalIQ posts and no LinkedIn posts, and n8n is not called", async () => {
+    for (const engines of [[...DEFAULTS, { kind: "linkedin_source", client_id: MOBURST, engine: "app" }], null]) {
+      collect.mockClear();
+      const db = admin(engines);
+      const result = await refreshCompetitorFeed(db, MOBURST, ENV);
+      expect(collect).not.toHaveBeenCalled();
+      expect(db.tables.report_pipeline_runs ?? []).toEqual([]);
+      const saved = db.tables.rivaliq_snapshots[0].payload as { socialPosts: Array<{ postLink: string }>; additional_metrics: Record<string, unknown> };
+      expect(saved.socialPosts.map((p) => p.postLink)).toEqual(["https://instagram.com/p/1"]);
+      expect(saved.additional_metrics).toEqual({});
+      expect(result.posts).toBe(1);
+    }
+  });
+
+  it("on app, a LinkedIn collection that stops saves the feed with the RivalIQ posts, and n8n is not called", async () => {
+    vi.stubGlobal("Deno", { env: { get: (n: string) => (n === "APIFY_API_TOKEN" ? "apify-token" : undefined) } });
+    // Apify refuses the start: the in-app run stops at once.
+    const apify = vi.fn(async (url: string) => {
+      if (url.includes("/acts/")) return new Response(JSON.stringify({ error: { message: "invalid input" } }), { status: 400 });
+      throw new Error(`unexpected ${url}`);
+    });
+    vi.stubGlobal("fetch", apify);
     const db = admin([...DEFAULTS, { kind: "linkedin_source", client_id: MOBURST, engine: "app" }]);
     await refreshCompetitorFeed(db, MOBURST, ENV);
-    expect(collect).toHaveBeenCalledTimes(1);
-    expect(db.tables.report_pipeline_runs ?? []).toEqual([]);
+    expect(collect).not.toHaveBeenCalled();
+    expect(db.tables.report_pipeline_runs[0]).toMatchObject({ kind: "linkedin_source", mode: "app", status: "stopped" });
+    expect(db.tables.rivaliq_snapshots).toHaveLength(1);
+    const saved = db.tables.rivaliq_snapshots[0].payload as { socialPosts: Array<{ postLink: string }>; additional_metrics: Record<string, unknown> };
+    expect(saved.socialPosts.map((p) => p.postLink)).toEqual(["https://instagram.com/p/1"]);
+    expect(saved.additional_metrics).toEqual({});
+  });
+
+  it("on app, a LinkedIn collection that throws for any other reason saves the feed with the RivalIQ posts", async () => {
+    vi.stubGlobal("Deno", { env: { get: (n: string) => (n === "APIFY_API_TOKEN" ? "apify-token" : undefined) } });
+    const db = admin([...DEFAULTS, { kind: "linkedin_source", client_id: MOBURST, engine: "app" }]);
+    // The run's row cannot be made.
+    const from = db.from.bind(db);
+    db.from = (t: string) => {
+      if (t !== "report_pipeline_runs") return from(t);
+      const q = from(t);
+      q.insert = () => { throw new Error("report_pipeline_runs is read-only"); };
+      return q;
+    };
+    await refreshCompetitorFeed(db, MOBURST, ENV);
+    expect(collect).not.toHaveBeenCalled();
+    const saved = db.tables.rivaliq_snapshots[0].payload as { socialPosts: Array<{ postLink: string }> };
+    expect(saved.socialPosts.map((p) => p.postLink)).toEqual(["https://instagram.com/p/1"]);
   });
 
   it("asks the landscape check by name only for a client whose website is a page on another client's site", async () => {

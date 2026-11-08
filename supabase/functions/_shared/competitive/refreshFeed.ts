@@ -312,14 +312,24 @@ export async function refreshCompetitorFeed(admin: any, clientId: string, env: F
   const {data: setting, error: settingError} = await admin.from("app_settings").select("value").eq("key","competitive_linkedin_webhook_url").maybeSingle();
   if (settingError) throw new Error('Could not load the LinkedIn source connection.');
   // The LinkedIn source's engine switch (report_engines; reading it never
-  // throws, anything in doubt is n8n). n8n: the n8n workflow, as before.
-  // shadow: the n8n workflow, as before, and an in-app run queued after it
-  // answered. app: the in-app pipeline, in this refresh, with n8n as the
-  // backup after failures (_shared/pipelines/feedLinkedIn.ts). The database
-  // refuses app until an in-app LinkedIn run has finished a shadow.
+  // throws). n8n, set by hand: the n8n workflow, as before, and a failed call
+  // fails the refresh, as before. shadow: the same, and an in-app run queued
+  // after it answered. Anything else is app: the in-app pipeline, in this
+  // refresh (_shared/pipelines/feedLinkedIn.ts), never n8n. When the app's
+  // collection stops or throws, the feed is saved with the RivalIQ and owned
+  // posts and no LinkedIn posts, and the next refresh collects LinkedIn again.
   const linkedinEngine = readEngine(admin, "linkedin_source", clientId, pipelineEngineDeps());
-  const collectLinkedIn = async () => feedLinkedInAnswer(admin, await linkedinEngine, { clientId, sources: plan.sources, period: window },
-    () => collectLinkedInSource(plan.sources, window, env.secret || '', setting?.value || ''));
+  const collectLinkedIn = async () => {
+    const engine = await linkedinEngine;
+    try {
+      return await feedLinkedInAnswer(admin, engine, { clientId, sources: plan.sources, period: window },
+        () => collectLinkedInSource(plan.sources, window, env.secret || '', setting?.value || ''));
+    } catch (e) {
+      if (engine.engine !== "app") throw e;
+      console.warn(`[refresh-competitor-feed] ${clientId}: LinkedIn was not collected (${e instanceof Error ? e.message : String(e)}); the feed is saved without LinkedIn posts.`);
+      return { socialPosts: [], additional_metrics: {} };
+    }
+  };
   const [linkedin,owned] = await Promise.all([collectLinkedIn(),collectOwnedCompetitive(admin,client,window)]);
   await shadowLinkedInSource(admin, await linkedinEngine, { clientId, sources: plan.sources, period: window, real: linkedin });
   const selectedIds = new Set(plan.companyIds);

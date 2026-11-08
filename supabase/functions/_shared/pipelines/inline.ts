@@ -5,8 +5,9 @@
 // (up to 100 s). With the switch on app, the refresh runs the LinkedIn
 // source pipeline here, step after step, inside that same time. The run is
 // recorded like any other (report_pipeline_runs, mode app, with its step
-// log), so a run that stops counts toward the rule that sends the window to
-// n8n after APP_STOPS_BEFORE_N8N stops.
+// log), so a run that stops counts toward the rule that lets the window's
+// refreshes go without LinkedIn posts after LINKEDIN_STOPS_PER_WINDOW stops
+// (feedLinkedIn.ts).
 //
 // Each call of a step gets the time left, at most a queued step's
 // STEP_BUDGET_MS, and an abort signal at that time. A step that asks to be

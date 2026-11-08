@@ -1,12 +1,13 @@
 // @vitest-environment node
-// The dispatch under the engine switch. The proof that shipping changes
-// nothing: with the switch on n8n (or unreadable), every scenario makes the
-// same requests, writes, job saves and outcomes as a dispatch with no switch
-// at all. Then shadow (n8n for real, plus an in-app run queued once n8n has
-// the request) and app (no n8n request; the job watches the in-app run's
-// heartbeat instead of the 90-minute clock).
+// The dispatch under the engine switch. With the switch on n8n (set by hand),
+// every scenario makes the same requests, writes, job saves and outcomes as a
+// dispatch with no switch at all. Then shadow (n8n for real, plus an in-app
+// run queued once n8n has the request) and app (no n8n request; the job
+// watches the in-app run's heartbeat instead of the 90-minute clock). Nothing
+// else ever goes to n8n: an unreadable switch, a missing pipeline, stopped
+// app runs and a repeated request all run again in the app.
 import { describe, expect, it } from "vitest";
-import { APP_STOPS_BEFORE_N8N, runDispatch, type DispatchDeps, type DispatchStore, type ScheduleRow } from "./dispatch";
+import { RETRY_FIRST_MINUTES, runDispatch, type DispatchDeps, type DispatchStore, type ScheduleRow } from "./dispatch";
 import type { JobOutcome, ScheduledJob } from "../_shared/scheduled-jobs/types";
 import type { LandscapeCheck } from "../_shared/competitive/landscapeCheck";
 import type { ReportPipelineStart } from "../_shared/pipelines/shadow";
@@ -69,7 +70,7 @@ const TRACKED: LandscapeCheck = {
   landscape: { id: "ls-1", name: "Fixture", focusCompanyId: 1, companies: [] },
 };
 
-type Switch = "none" | "n8n" | "unreadable" | "shadow" | "app" | "app-no-watch";
+type Switch = "none" | "n8n" | "unreadable" | "shadow" | "app" | "app-no-watch" | "app-no-pipeline";
 const placeholder = (kind: "social" | "competitive") => REGISTRY.get(`placeholder_${kind}`)!;
 const appPipeline = (kind: "social" | "competitive"): PipelineDefinition => ({ ...placeholder(kind), name: `real_${kind}`, modes: ["shadow", "app"], appCapable: true });
 
@@ -81,10 +82,11 @@ function harness(w: ReturnType<typeof world>, sw: Switch, opts: { transport?: "a
   let transport = opts.transport ?? "accept";
   const engineDeps = (): Partial<DispatchDeps> => {
     if (sw === "none") return {};
-    const resolve = async (kind: "social" | "competitive"): Promise<{ engine: Engine; pipeline?: PipelineDefinition }> => {
+    const resolve = async (kind: "social" | "competitive"): Promise<{ engine: Engine; pipeline?: PipelineDefinition; refused?: string }> => {
       if (sw === "unreadable") throw new Error("report_engines does not exist");
       if (sw === "n8n") return { engine: "n8n" };
       if (sw === "shadow") return { engine: "shadow", pipeline: placeholder(kind) };
+      if (sw === "app-no-pipeline") return { engine: "app", refused: `No app-capable ${kind} pipeline with its secrets set is in this deployment.` };
       return { engine: "app", pipeline: appPipeline(kind) };
     };
     return {
@@ -186,11 +188,9 @@ describe("with every switch on n8n, nothing changes", () => {
   for (const name of Object.keys(SCENARIOS)) {
     it(`${name}: the same requests, writes, saves and outcomes as with no switch`, async () => {
       const before = await observe(name, "none");
-      for (const sw of ["n8n", "unreadable"] as const) {
-        const after = await observe(name, sw);
-        expect(after.trace).toEqual(before.trace);
-        expect(after.starts).toEqual([]);
-      }
+      const after = await observe(name, "n8n");
+      expect(after.trace).toEqual(before.trace);
+      expect(after.starts).toEqual([]);
     });
   }
 
@@ -304,38 +304,114 @@ describe("app: the in-app pipeline makes the report", () => {
     expect(w.writes).toContain("drop reports social-1");
   });
 
-  it("keeps a request that may already be with n8n on n8n", async () => {
-    const w = world(["social"]);
-    const h = harness(w, "app");
-    w.tables.reports.push({ id: "social-9", client_id: "client-1", status: "running", date_range_start: "2026-10-01", date_range_end: "2026-10-31", created_at: NOW.toISOString() });
-    const j = job("social", { phase: "posting", report_id: "social-9", result: { range: { start: "2026-10-01", end: "2026-10-31" }, runs: [{ report_id: "social-9", started_at: NOW.toISOString() }] } });
-    await h.run(j);
-    expect(h.posts).toEqual(["https://n8n.fixture/social"]);
-    expect(h.starts).toEqual([]);
+  it("watches the report itself when the app run cannot be watched, and still sends nothing to n8n", async () => {
+    const { starts, trace } = await observe("a social report that runs and completes", "app-no-watch");
+    expect(starts).toEqual([expect.objectContaining({ mode: "app", kind: "social", reportId: "social-1" })]);
+    expect(trace.posts).toEqual([]);
+    expect(trace.outcomes.map((o) => (o as JobOutcome).status)).toEqual(["waiting", "done"]);
   });
+});
 
-  it("goes back to n8n, the backup, once the in-app runs of one report have stopped twice", async () => {
+describe("no automatic hand-off to n8n", () => {
+  it("runs again in the app, with the same waits, however many in-app runs of one report have stopped", async () => {
     const w = world(["social"]);
-    const h = harness(w, "app", { appRun: () => ({ status: "stopped", heartbeat_at: NOW.toISOString(), outcome: "Step fetch did not finish in 5 tries" }) });
+    const h = harness(w, "app", { appRun: () => ({ status: "stopped", heartbeat_at: w.tables.clock.toISOString(), outcome: "Step fetch did not finish in 5 tries" }) });
     const j = job("social");
-    for (let i = 1; i <= APP_STOPS_BEFORE_N8N; i++) {
+    const waits: number[] = [];
+    for (let i = 1; i <= 4; i++) {
       await h.run(j);
       expect(h.starts).toHaveLength(i);
       w.tables.clock = minutes(i * 600);
       const again = await h.run({ ...j, status: "running" });
       expect(again.status).toBe("queued");
+      waits.push((Date.parse(again.available_at!) - w.tables.clock.getTime()) / 60_000);
       Object.assign(j, { status: "running", phase: null, report_id: null, result: again.result });
     }
-    await h.run(j);
-    expect(h.starts).toHaveLength(APP_STOPS_BEFORE_N8N);
-    expect(h.posts).toEqual(["https://n8n.fixture/social"]);
+    expect(waits).toEqual([30, 60, 120, 240]);
+    expect(h.posts).toEqual([]);
     const runs = (j.result as { runs: Array<{ engine?: string; outcome?: string }> }).runs;
-    expect(runs.map((r) => [r.engine ?? "n8n", r.outcome ?? "open"])).toEqual([["app", "stopped"], ["app", "stopped"], ["n8n", "open"]]);
+    expect(runs.map((r) => [r.engine ?? "n8n", r.outcome ?? "open"])).toEqual([["app", "stopped"], ["app", "stopped"], ["app", "stopped"], ["app", "stopped"]]);
   });
 
-  it("stays on n8n when the run could not be watched", async () => {
-    const { starts, trace } = await observe("a social report that runs and completes", "app-no-watch");
-    expect(starts).toEqual([]);
-    expect(trace.posts).toEqual(["https://n8n.fixture/social"]);
+  it("a missing pipeline (or its secret) waits and runs again later like a stopped run, sending nothing anywhere", async () => {
+    for (const kind of ["social", "competitive"] as const) {
+      const w = world([kind]);
+      const h = harness(w, "app-no-pipeline");
+      const j = job(kind);
+      const first = await h.run(j);
+      expect(first.status).toBe("queued");
+      expect(first.available_at).toBe(minutes(RETRY_FIRST_MINUTES).toISOString());
+      expect(first.reason).toContain(`No app-capable ${kind} pipeline`);
+      expect(first.reason).not.toContain("n8n");
+      expect(h.posts).toEqual([]);
+      expect(h.starts).toEqual([]);
+      const id = kind === "social" ? "social-1" : "comp-1";
+      expect(w.writes).toContain(`drop ${kind === "social" ? "reports" : "competitive_reports"} ${id}`);
+      if (kind === "competitive") expect(w.writes).toEqual(expect.arrayContaining(["release set set-1", "release social client-1"]));
+      // The next wait doubles, as after a stopped run.
+      w.tables.clock = minutes(40);
+      Object.assign(j, { status: "running", phase: null, report_id: null, result: first.result });
+      const second = await h.run(j);
+      expect(second.available_at).toBe(minutes(40 + 2 * RETRY_FIRST_MINUTES).toISOString());
+      expect(h.posts).toEqual([]);
+    }
+  });
+
+  it("a missing pipeline closes the occurrence quietly when no run fits before the schedule's next run", async () => {
+    const w = world(["social"]);
+    const h = harness(w, "app-no-pipeline");
+    // Two hours before the next monthly run: inside the last three hours, so no run fits.
+    w.tables.clock = new Date("2026-12-07T05:15:00Z");
+    const outcome = await h.run(job("social"));
+    expect(outcome.status).toBe("skipped");
+    expect(w.writes).toContain("close sched-social");
+    expect(h.posts).toEqual([]);
+  });
+
+  it("an unreadable switch reads as app: nothing goes to n8n, and with no pipeline known the occurrence runs again later", async () => {
+    const w = world(["social"]);
+    const h = harness(w, "unreadable");
+    const outcome = await h.run(job("social"));
+    expect(outcome.status).toBe("queued");
+    expect(outcome.available_at).toBe(minutes(RETRY_FIRST_MINUTES).toISOString());
+    expect(outcome.reason).toContain("report_engines does not exist");
+    expect(h.posts).toEqual([]);
+    expect(w.writes).toContain("drop reports social-1");
+  });
+
+  it("a repeated request in the posting phase with an app route starts the app run for the same report", async () => {
+    const w = world(["social"]);
+    const h = harness(w, "app", { appRun: () => ({ status: "running", heartbeat_at: w.tables.clock.toISOString(), outcome: null }) });
+    w.tables.reports.push({ id: "social-9", client_id: "client-1", status: "running", date_range_start: "2026-10-01", date_range_end: "2026-10-31", created_at: NOW.toISOString() });
+    const j = job("social", { phase: "posting", report_id: "social-9", result: { range: { start: "2026-10-01", end: "2026-10-31" }, runs: [{ report_id: "social-9", started_at: NOW.toISOString() }] } });
+    const outcome = await h.run(j);
+    expect(h.posts).toEqual([]);
+    expect(h.starts).toEqual([expect.objectContaining({ mode: "app", kind: "social", reportId: "social-9" })]);
+    expect(outcome).toMatchObject({ status: "waiting", result: { engine: "app", pipeline_run_id: "run-1" } });
+    expect(w.tables.reports.map((r) => r.id)).toEqual(["social-9"]);
+  });
+
+  it("a missing webhook URL does not stop an app route", async () => {
+    for (const kind of ["social", "competitive"] as const) {
+      const w = world([kind]);
+      w.store.webhooks = async () => ({ social: null, competitive: null });
+      const h = harness(w, "app", { appRun: () => ({ status: "running", heartbeat_at: w.tables.clock.toISOString(), outcome: null }) });
+      const outcome = await h.run(job(kind));
+      expect(outcome).toMatchObject({ status: "waiting", reason: "The report is running." });
+      expect(h.starts).toEqual([expect.objectContaining({ mode: "app", kind })]);
+      expect(h.posts).toEqual([]);
+    }
+  });
+
+  it("a missing webhook URL on an n8n route set by hand still blocks without a report, as before", async () => {
+    for (const kind of ["social", "competitive"] as const) {
+      const w = world([kind]);
+      w.store.webhooks = async () => ({ social: null, competitive: null });
+      const outcome = await harness(w, "n8n").run(job(kind));
+      expect(outcome.status).toBe("blocked");
+      expect(outcome.reason).toMatch(/not configured/);
+      expect(w.tables.reports).toHaveLength(0);
+      expect(w.tables.competitive.map((r) => r.id)).toEqual(["old-complete"]);
+    }
   });
 });
