@@ -1,7 +1,7 @@
 // @vitest-environment node
 // Node, like the Deno runtime, has AbortSignal.timeout; jsdom does not.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ISSUES_WEBHOOK_ENV, LITAL_SLACK, madeReportText, periodText, postIssue, reportsLink, stuckReportText } from "./slack";
+import { alertTest, CONNECTED_TEXT, ISSUES_WEBHOOK_ENV, LITAL_SLACK, madeReportText, periodText, postIssue, reportsLink, stuckReportText } from "./slack";
 
 const WEBHOOK = "https://hooks.slack.test/services/T000/B000/secret-part";
 const OCTOBER = { start: "2026-10-01", end: "2026-10-31" };
@@ -121,5 +121,34 @@ describe("postIssue", () => {
     expect(warn).toHaveBeenCalled();
     expect(printed).not.toContain("hooks.slack");
     expect(printed).not.toContain("secret-part");
+  });
+});
+
+describe("alertTest (run-scheduled-jobs mode alert_test)", () => {
+  it("is one fixed message that mentions Lital", () => {
+    expect(CONNECTED_TEXT).toBe("<@U03AZ88435H> Socialytics alerts are connected to this channel.");
+    expect(CONNECTED_TEXT).not.toMatch(/[\u2014\u2013]| - /);
+  });
+
+  it("answers posted: false and makes no request without the secret", async () => {
+    const fetchImpl = vi.fn();
+    expect(await alertTest(undefined, fetchImpl as unknown as typeof fetch)).toEqual({ posted: false });
+    expect(await alertTest("", fetchImpl as unknown as typeof fetch)).toEqual({ posted: false });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("posts the fixed message once and answers posted: true, never the webhook or Slack's answer", async () => {
+    const calls: Array<{ url: string; body: unknown }> = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => { calls.push({ url: String(url), body: JSON.parse(String(init!.body)) }); return new Response(`ok ${WEBHOOK}`, { status: 200 }); };
+    const answer = await alertTest(WEBHOOK, fetchImpl as typeof fetch);
+    expect(answer).toEqual({ posted: true });
+    expect(JSON.stringify(answer)).not.toContain("hooks.slack");
+    expect(calls).toEqual([{ url: WEBHOOK, body: { text: CONNECTED_TEXT } }]);
+  });
+
+  it("answers posted: false when Slack refuses it or the request fails", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(await alertTest(WEBHOOK, (async () => new Response(`no_service ${WEBHOOK}`, { status: 404 })) as unknown as typeof fetch)).toEqual({ posted: false });
+    expect(await alertTest(WEBHOOK, (async () => { throw new TypeError(`fetch failed for ${WEBHOOK}`); }) as unknown as typeof fetch)).toEqual({ posted: false });
   });
 });

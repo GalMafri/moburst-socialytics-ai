@@ -8,7 +8,9 @@
 //
 // The report messages: one when a report still isn't ready a day after its
 // first try (run-scheduled-jobs/dispatch.ts decides when), and one short
-// message when that report is ready.
+// message when that report is ready. One fixed test message shows the channel
+// is connected (run-scheduled-jobs mode alert_test), so the webhook can be
+// checked the moment the secret is added.
 
 /** The secret that holds the issues channel's incoming webhook URL. */
 export const ISSUES_WEBHOOK_ENV = "SLACK_ISSUES_WEBHOOK_URL";
@@ -94,4 +96,16 @@ export async function postIssue(webhook: string | undefined, text: string, fetch
     console.warn(`[slack] The message to the issues channel was not sent (${e instanceof Error ? e.name : "unknown error"}).`);
     return false;
   }
+}
+
+/** The fixed message alert_test posts: the channel is connected. */
+export const CONNECTED_TEXT = `${LITAL_SLACK} Socialytics alerts are connected to this channel.`;
+
+/**
+ * Posts the fixed test message (run-scheduled-jobs mode alert_test). The
+ * answer says only whether Slack took it: never the webhook or Slack's reply.
+ * Without the webhook nothing is requested.
+ */
+export async function alertTest(webhook: string | undefined, fetchImpl?: typeof fetch): Promise<{ posted: boolean }> {
+  return { posted: await postIssue(webhook, CONNECTED_TEXT, fetchImpl) };
 }

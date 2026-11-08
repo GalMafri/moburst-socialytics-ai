@@ -16,6 +16,9 @@
 // A report dispatch still not made a day after its first try posts one
 // message to #ai-products-issues through the SLACK_ISSUES_WEBHOOK_URL secret
 // (_shared/alerts/slack.ts), and one more when that report is made.
+// POST {"mode":"alert_test"}  posts one fixed message to that channel, to
+//                              check the webhook once the secret is added;
+//                              answers {"posted": true|false}, nothing else.
 //
 // In-app report pipelines (_shared/pipelines): each tick also runs due
 // report_pipeline steps in a lane of their own (worker.ts), and the daily
@@ -85,7 +88,7 @@ import { closeAbandonedRuns } from "../_shared/reports/schedule.ts";
 import { refreshCompetitorFeed } from "../_shared/competitive/refreshFeed.ts";
 import { checkClientLandscape, landscapeClient, recordTrackingCheck, RIVALIQ_UNAVAILABLE, type LandscapeCheck } from "../_shared/competitive/landscapeCheck.ts";
 import { makePoster, runDispatch, type DispatchDeps } from "./dispatch.ts";
-import { ISSUES_WEBHOOK_ENV, postIssue } from "../_shared/alerts/slack.ts";
+import { alertTest, ISSUES_WEBHOOK_ENV, postIssue } from "../_shared/alerts/slack.ts";
 import { runFeedJob } from "./feed.ts";
 import { runVoiceProfile, runWeekPlan, runWeekRevise } from "../_shared/calendar/runWeek.ts";
 import { runMomentFeedback, runMomentsList, runWeekMoments } from "../_shared/calendar/runMoments.ts";
@@ -286,6 +289,10 @@ Deno.serve(async (req) => {
         notes,
       });
     }
+
+    // POST {"mode":"alert_test"}: one fixed message to #ai-products-issues; the
+    // answer never carries the webhook or Slack's reply.
+    if (mode === "alert_test") return json(await alertTest(Deno.env.get(ISSUES_WEBHOOK_ENV)));
 
     if (mode === "replay_competitive") {
       const reportId = typeof body.report_id === "string" ? body.report_id : "";
