@@ -7,6 +7,7 @@ import { LoadRetry } from "@/components/ui/load-error";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { invokeResendable, sendQuietly } from "@/lib/quietSend";
+import { openSignIn } from "@/lib/signInTab";
 import { CheckCircle2, Loader2, LinkIcon, AlertTriangle } from "lucide-react";
 
 /** The one account the team links, so a person can check they signed in as the right one. */
@@ -28,6 +29,8 @@ export function HiggsfieldConnection() {
   const [busy, setBusy] = useState(false);
   /** A sign-in that has not opened yet; the connection below is as it was. */
   const [notStarted, setNotStarted] = useState(false);
+  /** The sign-in is open in its own tab (signInTab.ts). */
+  const [opened, setOpened] = useState(false);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["higgsfield-status"],
@@ -41,20 +44,23 @@ export function HiggsfieldConnection() {
   const connect = async () => {
     setBusy(true);
     setNotStarted(false);
-    // Each start replaces the one before, and the browser follows the last
-    // link, so asking again is harmless.
-    const { data, error } = await sendQuietly(
-      () => supabase.functions.invoke("higgsfield-auth", { body: { action: "start" } }),
-      { again: (e) => invokeResendable(e, { idempotent: true }) },
-    );
-    if (error || data?.error || !data?.authorize_url) {
-      console.warn("[higgsfield sign-in] not started yet", error ?? data?.error ?? "no authorize_url");
-      setBusy(false);
-      setNotStarted(true);
-      return;
-    }
-    // Leaves the app. Higgsfield sends the browser back to /settings.
-    window.location.href = data.authorize_url as string;
+    setOpened(false);
+    // Each start replaces the one before, so asking again is harmless.
+    const ok = await openSignIn(async () => {
+      const { data, error } = await sendQuietly(
+        () => supabase.functions.invoke("higgsfield-auth", { body: { action: "start" } }),
+        { again: (e) => invokeResendable(e, { idempotent: true }) },
+      );
+      if (error || data?.error || !data?.authorize_url) {
+        console.warn("[higgsfield sign-in] not started yet", error ?? data?.error ?? "no authorize_url");
+        return null;
+      }
+      return data.authorize_url as string;
+    });
+    setBusy(false);
+    // Higgsfield sends the new tab back to /settings; this panel checks again when the person comes back.
+    if (ok) setOpened(true);
+    else setNotStarted(true);
   };
 
   const linked = !!data?.linked;
@@ -103,6 +109,7 @@ export function HiggsfieldConnection() {
           </div>
         )}
         {notStarted && <p role="status" className="t-secondary">The sign-in has not opened yet. The connection above is unchanged.</p>}
+        {opened && !linked && <p role="status" className="t-secondary">Higgsfield's sign-in is open in a new tab. Sign in as {EXPECTED_ACCOUNT} there; this panel updates when you come back.</p>}
         <p className="t-label">
           Sign in to higgsfield.ai as {EXPECTED_ACCOUNT} first, in this browser, and leave every permission ticked. The
           sign-in link is good for 15 minutes, and signing in again keeps the current connection working until the new
