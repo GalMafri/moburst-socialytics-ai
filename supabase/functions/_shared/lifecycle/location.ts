@@ -27,7 +27,9 @@
 // then the country's main zone. The headquarters on the client's LinkedIn
 // page is an address the brand set on its own profile, ranked with the other
 // profile addresses (spec: docs/superpowers/specs/2026-11-08-onboarding-
-// profile-pages-and-no-n8n-design.md, section E). Below all of them, a client
+// profile-pages-and-no-n8n-design.md, section E), and used only where no
+// location is stored or the agency's is (socialRead.ts pageMayPlace: a
+// client whose time zone is filled sees no change). Below all of them, a client
 // no source places takes the zone most of the agency's clients have from a
 // real source (`agency`, agencyZone.ts), which any other source replaces;
 // with no such zone the time zone stays empty: nothing writes UTC. Free of

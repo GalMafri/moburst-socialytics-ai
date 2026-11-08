@@ -33,9 +33,11 @@
 // still missing (pageFill; spec: docs/superpowers/specs/2026-11-08-onboarding-
 // profile-pages-and-no-n8n-design.md, sections D and E): the LinkedIn page's
 // logo when the client has no logo at all; the page's headquarters as a
-// profile address, where the stored location ranks lower; and, when no source
-// places the client and its zone is UTC or empty with no source, the zone
-// most of the agency's clients have from a real source (agencyZone.ts).
+// profile address, only where no location is stored or the agency's is (a
+// client whose time zone is filled sees no change: the anti-goal wins over
+// section E's ranks); and, when no source places the client and its zone is
+// UTC or empty with no source, the zone most of the agency's clients have
+// from a real source (agencyZone.ts).
 
 import { engagementsOf, isPublishedPost } from "../competitive/reportMetrics.ts";
 import { ownedNetwork } from "../competitive/ownedMerge.ts";
@@ -393,6 +395,24 @@ function headquartersAddress(page: LinkedInPage | null): Address | null {
 }
 
 /**
+ * True when the page's headquarters may stand as the client's location: the
+ * page's own earlier read, or no location stored or the agency's, with a time
+ * zone nothing else filled (UTC or empty with no source, the agency's, or a
+ * person's, which the write keeps). Any other stored source is kept, however
+ * low it ranks: a client whose time zone is filled sees no change (final
+ * review ruling, 8 Nov: the plan's "fills only missing fields").
+ */
+export function pageMayPlace(client: Row): boolean {
+  const stored = storedLocation(client);
+  if (stored?.via === PAGE_SOURCE) return true;
+  if (stored?.source && stored.source !== AGENCY_SOURCE) return false;
+  const fs = client.field_sources;
+  if (!lifecycleMayWrite(fs, "timezone") || zoneFromAgency(fs)) return true;
+  const zone = str(client.timezone);
+  return (!zone || zone.toUpperCase() === "UTC") && !zoneHasSource(fs);
+}
+
+/**
  * True when the client's zone is open to the agency's: the lifecycle may
  * write it, no stored location came from a real source, and the zone is UTC
  * or empty with no source, or an earlier agency zone.
@@ -420,10 +440,10 @@ export interface PageFill {
  *  - The page logo, only when the client has no logo at all and the
  *    lifecycle may write one: never over a person's, the website's or a
  *    profile picture.
- *  - The headquarters, as a profile address (location.ts ranks), where
- *    replacesLocation allows and the stored location ranks lower or is the
- *    page's own earlier read. An address of the same rank from elsewhere (a
- *    Google Business Profile, the website) is kept.
+ *  - The headquarters, as a profile address, only where pageMayPlace holds
+ *    (no location stored, the agency's, or the page's own earlier read, which
+ *    it replaces as replacesLocation allows). Every other stored location is
+ *    kept, a weaker one too.
  *  - The agency's zone, only when the page places the client nowhere and
  *    agencyMayFill holds. It records no country: it says nothing about where
  *    the business is.
@@ -441,7 +461,7 @@ export function pageFill(client: Row, page: LinkedInPage | null, agency: string 
   const hq = address ? resolveSocialLocation({ profileAddresses: [address], postTexts: [] }) : null;
   let location: Row | null = null;
   if (hq?.source) {
-    if (replacesLocation(stored, { source: hq.source, website: null }) && (rankOf(hq.source) < rankOf(stored?.source) || stored?.via === PAGE_SOURCE)) {
+    if (pageMayPlace(client) && replacesLocation(stored, { source: hq.source, website: null })) {
       location = { ...hq, website: null, via: PAGE_SOURCE };
     }
   } else if (agency && agencyMayFill(client)) {

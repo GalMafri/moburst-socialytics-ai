@@ -446,15 +446,22 @@ describe("pageFill: what the LinkedIn page and the agency fill when it is missin
     expect(pageFill(oloClient(), null, null)).toEqual(none);
   });
 
-  it("offers the headquarters as a profile address, replacing a stored location only where replacesLocation allows", () => {
+  it("offers the headquarters as a profile address only where no location is stored, or the agency's, or the page's own", () => {
     const hq = page({ headquarters: HQ_NY });
     expect(pageFill(oloClient(), hq, null)).toEqual({
       fields: { timezone: NY, location: { timezone: NY, source: "profile_address", country: "US", region: "NY", locality: "New York", agreeing: 1, found: 1, website: null, via: "linkedin_page" } },
       from: { timezone: "profile_address" }, logoUrl: null,
     });
-    // A zone from the followers ranks lower: replaced.
+    // Any other stored source is kept, however weak (final review: a client whose time zone is filled sees no change).
     const byFollowers = oloClient({ timezone: "America/Chicago", location: { source: "followers", timezone: "America/Chicago", locality: "Austin", website: null }, field_sources: { timezone: { by: "lifecycle", from: "followers" } } });
-    expect(pageFill(byFollowers, hq, null)).toMatchObject({ fields: { timezone: NY, location: { source: "profile_address" } }, from: { timezone: "profile_address" } });
+    expect(pageFill(byFollowers, hq, null)).toEqual(none);
+    const byCountry = oloClient({ timezone: "Europe/London", location: { source: "country", timezone: "Europe/London", country: "GB", website: null }, field_sources: { timezone: { by: "lifecycle", from: "country" } } });
+    expect(pageFill(byCountry, hq, null)).toEqual(none);
+    const byPageText = oloClient({ timezone: "America/Chicago", location: { source: "page_text", timezone: "America/Chicago", website: "olo.com" }, field_sources: { timezone: { by: "lifecycle", from: "page_text" } } });
+    expect(pageFill(byPageText, hq, null)).toEqual(none);
+    // No location stored, but a zone filled from elsewhere (one written before locations were kept, or with no record): kept too.
+    expect(pageFill(oloClient({ timezone: "America/Chicago" }), hq, null)).toEqual(none);
+    expect(pageFill(oloClient({ timezone: "America/Chicago", field_sources: { timezone: { by: "lifecycle" } } }), hq, null)).toEqual(none);
     // The website's schema.org address ranks the same, and the site's own words are kept.
     const bySite = oloClient({ timezone: "America/Denver", location: { source: "schema.org", timezone: "America/Denver", website: "olo.com" }, field_sources: { timezone: { by: "lifecycle", from: "schema.org" } } });
     expect(pageFill(bySite, hq, null)).toEqual(none);
@@ -535,9 +542,9 @@ describe("runSocialRead: filling what is missing", () => {
     expect(db.rpcCalls.length).toBe(writes);
   });
 
-  it("takes the page's headquarters over a weaker stored location, and the move's own location only when it ranks higher", async () => {
-    // The stored zone came from the followers; the posts give an Austin address; the page gives New York.
-    const c = oloClient({ timezone: "America/Chicago", location: { source: "followers", timezone: "America/Chicago", locality: "Austin", website: null }, field_sources: { timezone: { by: "lifecycle", from: "followers" } } });
+  it("takes the page's headquarters where no location is stored, and the move's own location only when it ranks higher", async () => {
+    // No stored location; the posts give an Austin address; the page gives New York.
+    const c = oloClient();
     await runSocialRead(world(c), c, { rows: new Map() }, io({ linkedinPage: pageRead({ headquarters: HQ_NY }) }).fake);
     expect(c).toMatchObject({ timezone: "America/New_York", location: { source: "profile_address", via: "linkedin_page", locality: "New York", website: null } });
     expect(c.field_sources).toMatchObject({ timezone: { by: "lifecycle", from: "profile_address" } });
@@ -560,6 +567,35 @@ describe("runSocialRead: filling what is missing", () => {
     await runSocialRead(db, f, { rows: new Map([["social_read", stepRow((out as { result: Record<string, unknown> }).result)]]) }, io({ customerProfiles: gmb }).fake);
     expect(db.rpcCalls.length).toBe(writes);
     expect(f).toMatchObject({ timezone: "America/Denver", location: { via: "google_my_business" } });
+  });
+
+  it("never moves a client whose location came from the followers or a country to the page's headquarters, on a quiet look or a move (final review)", async () => {
+    const rows = [post(7, 3, "We love our customers and the team"), post(8, 4, "Our new menu is for you")];
+    for (const stored of [
+      { timezone: "America/Chicago", location: { source: "followers", timezone: "America/Chicago", locality: "Austin", region: null, country: "US", website: null }, field_sources: { timezone: { by: "lifecycle", at: "then", from: "followers" } } },
+      { timezone: "Europe/London", location: { source: "country", timezone: "Europe/London", country: "GB", region: null, locality: null, website: null }, field_sources: { timezone: { by: "lifecycle", at: "then", from: "country" } } },
+    ]) {
+      // A move (the first read), then the first look after the page is read: a quiet week.
+      const c = oloClient(JSON.parse(JSON.stringify(stored)));
+      const db = world(c);
+      const first = await runSocialRead(db, c, { rows: new Map() }, io({ ...plain(), linkedinPage: pageRead({ headquarters: HQ_NY }) }, () => rows).fake);
+      expect(first).toMatchObject({ result: { moved: "first" } });
+      expect(c, stored.location.source).toMatchObject(stored);
+      const pending = await runSocialRead(world(c), c, { rows: new Map() }, io({ ...plain(), linkedinPage: async () => ({ state: "pending", run_id: "p9" }) }, () => rows).fake);
+      const writes = db.rpcCalls.length;
+      const quiet = await runSocialRead(db, c, { rows: new Map([["social_read", stepRow((pending as { result: Record<string, unknown> }).result)]]) }, io({ ...plain(), linkedinPage: pageRead({ headquarters: HQ_NY }) }, () => rows).fake);
+      expect(quiet).toMatchObject({ result: { moved: null, filled: [] } });
+      expect(db.rpcCalls.length).toBe(writes);
+      expect(c, stored.location.source).toMatchObject(stored);
+    }
+    // An agency zone, or none at all, takes the headquarters on the quiet look.
+    for (const before of [{}, { timezone: "America/Chicago", location: { source: "agency", timezone: "America/Chicago", country: null, website: null }, field_sources: { timezone: { by: "lifecycle", from: "agency" } } }]) {
+      const c = oloClient(JSON.parse(JSON.stringify(before)));
+      const pending = await runSocialRead(world(c), c, { rows: new Map() }, io({ ...plain(), linkedinPage: async () => ({ state: "pending", run_id: "p9" }) }, () => rows).fake);
+      await runSocialRead(world(c), c, { rows: new Map([["social_read", stepRow((pending as { result: Record<string, unknown> }).result)]]) }, io({ ...plain(), linkedinPage: pageRead({ headquarters: HQ_NY }) }, () => rows).fake);
+      expect(c).toMatchObject({ timezone: "America/New_York", location: { source: "profile_address", via: "linkedin_page" } });
+      expect(c.field_sources).toMatchObject({ timezone: { by: "lifecycle", from: "profile_address" } });
+    }
   });
 
   it("never uses the agency's zone while any real source places the client", async () => {
