@@ -36,6 +36,7 @@ import { followerLocations, profileAddress, type FollowerLocations } from "../sp
 import type { CustomerProfile } from "../sprout/profiles.ts";
 import { defaultSproutCustomerId } from "../sprout/customer.ts";
 import type { BioRead, InstagramBio } from "../apify/instagramProfile.ts";
+import { pageUrlOf, type LinkedInPage, type PageRead } from "../apify/linkedinPage.ts";
 import type { SocialBrandInput, SocialBrandRead } from "../brand/research.ts";
 import { countryCode, followersZone, regionsFor, replacesLocation, resolveSocialLocation, SOURCE_RANK, zoneOf, type Address, type Headquarters, type LocationSource } from "./location.ts";
 import { lifecycleMayWrite, setBy, sourceOf, writeClientFields } from "./fields.ts";
@@ -377,6 +378,8 @@ export interface SocialIO {
   image(url: string): Promise<Uint8Array | null>;
   /** The Instagram profile's bio through Apify, or the answer of a run started earlier. Throws when no run can be made. */
   instagram(handle: string, runId: string | null): Promise<BioRead>;
+  /** The client's LinkedIn company page through Apify, or the answer of a run started earlier. Throws when no run can be made. */
+  linkedinPage(url: string, runId: string | null): Promise<PageRead>;
   openaiKey(db: Db): Promise<string | null>;
   brandRead(input: Omit<SocialBrandInput, "fetchImpl">): Promise<SocialBrandRead>;
 }
@@ -392,6 +395,26 @@ export interface InstagramState {
   run_id?: string | null;
   status?: string;
 }
+
+export interface LinkedInPageState {
+  profile_id: string;
+  url: string;
+  /** The profile as it was read: its id and page name. A change reads the page again. */
+  key: string;
+  read_at: string | null;
+  page: LinkedInPage | null;
+  /** A run still going, read on the next look. */
+  run_id?: string | null;
+  status?: string;
+}
+
+/** The LinkedIn page the last social_read kept, for the steps after it. */
+export function pageOf(result: Row | null): LinkedInPage | null {
+  const state = result?.linkedin_page as LinkedInPageState | null | undefined;
+  return state?.page ?? null;
+}
+
+const PAGE_REREAD_DAYS = 30;
 
 /** The client's active Sprout profiles with what the read needs. */
 async function profilesOf(db: Db, clientId: string): Promise<ProfileRef[]> {
@@ -427,6 +450,28 @@ async function readBio(profiles: ProfileRef[], pictures: Picture[], prev: Instag
     return { ...base, read_at: now.toISOString(), bio: got.bio };
   } catch (e) {
     console.warn("[social_read] Instagram bio not read:", e instanceof Error ? e.message : String(e));
+    return prev ? { ...prev } : null;
+  }
+}
+
+/** The LinkedIn company page: the one read before while the profile is the same and under 30 days old, else a new read (a run under way is collected first). Quiet: a read that cannot be made keeps the last one. Not part of the evidence version. */
+async function readPage(profiles: ProfileRef[], prev: LinkedInPageState | null, io: SocialIO, now: Date): Promise<LinkedInPageState | null> {
+  const li = profiles.find((p) => p.network_type === "linkedin_company" && p.native_name);
+  if (!li) return null;
+  const key = `${li.id}:${li.native_name.toLowerCase()}`;
+  const same = prev?.key === key;
+  const age = prev?.read_at ? now.getTime() - new Date(prev.read_at).getTime() : Infinity;
+  if (same && !prev.run_id && age < PAGE_REREAD_DAYS * DAY) return prev;
+  const url = pageUrlOf(li.native_name);
+  const base = { profile_id: li.id, url, key };
+  const last = same ? prev : null;
+  try {
+    const got = await io.linkedinPage(url, same ? prev.run_id ?? null : null);
+    if (got.state === "pending") return { ...base, read_at: last?.read_at ?? null, page: last?.page ?? null, run_id: got.run_id };
+    if (got.state === "failed") return { ...base, read_at: now.toISOString(), page: last?.page ?? null, status: got.status };
+    return { ...base, read_at: now.toISOString(), page: got.page };
+  } catch (e) {
+    console.warn("[social_read] LinkedIn page not read:", e instanceof Error ? e.message : String(e));
     return prev ? { ...prev } : null;
   }
 }
@@ -500,6 +545,7 @@ export async function runSocialRead(db: Db, client: Row, ctx: { rows: Map<string
     .filter((x): x is { address: Address; network: string } => !!x.address);
   const profileAddresses = local.map((x) => x.address);
   const instagram = await readBio(profiles, pictures, (prev?.instagram ?? null) as InstagramState | null, io, now);
+  const linkedin_page = await readPage(profiles, (prev?.linkedin_page ?? null) as LinkedInPageState | null, io, now);
   const langs = languageCounts(posts);
   const snapshot = snapshotOf(posts, now, {
     top: top.slice(0, TOP_POSTS).map((t) => t.post.id), languages: postLanguages(langs), topCountry: audience.countries[0]?.country ?? null,
@@ -508,7 +554,7 @@ export async function runSocialRead(db: Db, client: Row, ctx: { rows: Map<string
   const text = textPosts(posts).length;
   const base = {
     checked_at: now.toISOString(), window_days: windowDays, posts_read: rows.length, organic_posts: organic(posts).length, text_posts: text,
-    enough: text >= MIN_TEXT_POSTS, multiples, instagram,
+    enough: text >= MIN_TEXT_POSTS, multiples, instagram, linkedin_page,
   };
   const moved = versionMove(prev?.snapshot as Snapshot | undefined, snapshot, posts, now);
   // A quiet week: no model call, no write; the evidence stays as its version set it.

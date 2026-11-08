@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { fakeDb, writeClientRpc } from "./fakeDb";
 import type { StepRow } from "./policy";
 import {
-  detectLanguage, evidencePosts, imageSize, languageCounts, multipleLabel, pickLogo, pictureMayReplaceLogo, postLanguages, runSocialRead, snapshotOf,
+  detectLanguage, evidencePosts, imageSize, languageCounts, multipleLabel, pickLogo, pictureMayReplaceLogo, postLanguages, pageOf, runSocialRead, snapshotOf,
   socialVersionKey, statedInPosts, textPosts, toSocialPosts, versionMove, type SocialIO, type Snapshot, type SocialPost,
 } from "./socialRead";
 
@@ -52,8 +52,10 @@ const POSTS = () => [
   post(8, 15, "Boosted: order now", { is_boosted: true, metrics: { "lifetime.likes": 900, "lifetime.impressions": 90000 } }),
 ];
 
+const PAGE = (url: string) => ({ url, name: "Olo", website: "https://olo.com", about: "Restaurant ordering", tagline: null, specialties: [], industries: [], logo: null, headquarters: null });
+
 function io(over: Partial<SocialIO> = {}, rows: () => Record<string, unknown>[] = POSTS) {
-  const calls = { posts: [] as number[], brandRead: 0, instagram: 0, images: [] as string[] };
+  const calls = { posts: [] as number[], brandRead: 0, instagram: 0, linkedinPage: [] as Array<string | null>, urls: [] as string[], images: [] as string[] };
   const fake: SocialIO = {
     now: () => NOW,
     posts: async (_ids, since) => { calls.posts.push(Math.round((NOW.getTime() - since.getTime()) / DAY)); return rows(); },
@@ -63,6 +65,7 @@ function io(over: Partial<SocialIO> = {}, rows: () => Record<string, unknown>[] 
     customerProfiles: async () => [],
     image: async (url) => { calls.images.push(url); return url === pic(7) ? png(400) : png(320); },
     instagram: async (handle) => { calls.instagram++; return { state: "read", run_id: "r1", usd: 0.003, bio: { handle, biography: "Restaurant ordering. Austin, Texas", links: ["https://olo.com"], full_name: "Olo", category: null } }; },
+    linkedinPage: async (url, runId) => { calls.linkedinPage.push(runId); calls.urls.push(url); return { state: "read", run_id: "p1", usd: 0.004, page: PAGE(url) }; },
     openaiKey: async () => "sk",
     brandRead: async () => { calls.brandRead++; return { identity: { primary_color: "#1a1a1a", secondary_color: "#2b2b2b", accent_color: "#ff5a00", font_family: "Inter", visual_style: "v", logo_description: "l", tone_of_voice: "t", design_elements: "d", background_style: "b" }, stated: { city: "Austin", region: "TX", country: "US" }, languages: ["en"] }; },
     ...over,
@@ -299,5 +302,84 @@ describe("snapshotOf", () => {
     const posts = toSocialPosts(POSTS(), PROFILES.map((p) => ({ id: String(p.sprout_profile_id), network_type: p.network_type, native_name: p.native_name })));
     const s = snapshotOf(posts, NOW, { top: [], languages: ["en"], topCountry: "US", picture: null, look: null });
     expect(s.platforms).toEqual({ Instagram: { posts: 2, median: 11 }, LinkedIn: { posts: 3, median: 11 } });
+  });
+
+  it("reads the LinkedIn page of a client with a linkedin_company profile once, and keeps it while the profile is the same", async () => {
+    const c = oloClient();
+    const db = world(c);
+    const first = io();
+    const out = await runSocialRead(db, c, { rows: new Map() }, first.fake);
+    expect(first.calls.linkedinPage).toEqual([null]);
+    expect(first.calls.urls).toEqual(["https://www.linkedin.com/company/olo/"]);
+    const result = (out as { result: Record<string, unknown> }).result;
+    expect(result.linkedin_page).toMatchObject({ profile_id: "7", key: "7:olo", page: { name: "Olo" } });
+    expect(pageOf(result)).toMatchObject({ name: "Olo", website: "https://olo.com" });
+    const rows = new Map([["social_read", stepRow(result)]]);
+    const quiet = io();
+    const again = await runSocialRead(db, c, { rows }, quiet.fake);
+    expect(quiet.calls.linkedinPage).toEqual([]);
+    expect(pageOf((again as { result: Record<string, unknown> }).result)).toMatchObject({ name: "Olo" });
+  });
+
+  it("reads it again after 30 days or when the profile changes", async () => {
+    const c = oloClient();
+    const db = world(c);
+    const out = await runSocialRead(db, c, { rows: new Map() }, io().fake);
+    const result = (out as { result: Record<string, unknown> }).result;
+    const old = { ...result, linkedin_page: { ...(result.linkedin_page as object), read_at: ago(31) } };
+    const stale = io();
+    await runSocialRead(db, c, { rows: new Map([["social_read", stepRow(old)]]) }, stale.fake);
+    expect(stale.calls.linkedinPage).toEqual([null]);
+    const young = { ...result, linkedin_page: { ...(result.linkedin_page as object), read_at: ago(29) } };
+    const fresh = io();
+    await runSocialRead(db, c, { rows: new Map([["social_read", stepRow(young)]]) }, fresh.fake);
+    expect(fresh.calls.linkedinPage).toEqual([]);
+    const other = { ...result, linkedin_page: { ...(result.linkedin_page as object), key: "7:olo-old" } };
+    const changed = io();
+    await runSocialRead(db, c, { rows: new Map([["social_read", stepRow(other)]]) }, changed.fake);
+    expect(changed.calls.linkedinPage).toEqual([null]);
+  });
+
+  it("a pending page read keeps the run id and changes nothing else; a failed or throwing read keeps the last page", async () => {
+    const c = oloClient();
+    const db = world(c);
+    const pending = io({ linkedinPage: async () => ({ state: "pending", run_id: "p9" }) });
+    const out = await runSocialRead(db, c, { rows: new Map() }, pending.fake);
+    const first = (out as { result: Record<string, unknown> }).result;
+    expect(first.linkedin_page).toMatchObject({ run_id: "p9", page: null, read_at: null });
+    expect(first.instagram).toMatchObject({ handle: "olo.hq" });
+    let asked: string | null = "";
+    const collect = io({ linkedinPage: async (url, runId) => { asked = runId; return { state: "read", run_id: "p9", usd: null, page: PAGE(url) }; } });
+    const next = await runSocialRead(db, c, { rows: new Map([["social_read", stepRow(first)]]) }, collect.fake);
+    expect(asked).toBe("p9");
+    expect(pageOf((next as { result: Record<string, unknown> }).result)).toMatchObject({ name: "Olo" });
+    const read = (next as { result: Record<string, unknown> }).result;
+    const old = { ...read, linkedin_page: { ...(read.linkedin_page as object), read_at: ago(40) } };
+    const failed = io({ linkedinPage: async () => ({ state: "failed", run_id: "p10", status: "FAILED" }) });
+    const afterFail = await runSocialRead(db, c, { rows: new Map([["social_read", stepRow(old)]]) }, failed.fake);
+    expect(pageOf((afterFail as { result: Record<string, unknown> }).result)).toMatchObject({ name: "Olo" });
+    expect((afterFail as { result: { linkedin_page: Record<string, unknown> } }).result.linkedin_page).toMatchObject({ status: "FAILED" });
+    const thrown = io({ linkedinPage: async () => { throw new Error("APIFY_API_TOKEN is not set"); } });
+    const afterThrow = await runSocialRead(db, c, { rows: new Map([["social_read", stepRow(old)]]) }, thrown.fake);
+    expect(pageOf((afterThrow as { result: Record<string, unknown> }).result)).toMatchObject({ name: "Olo" });
+    const none = oloClient();
+    expect(await runSocialRead(world(none), none, { rows: new Map() }, thrown.fake)).toMatchObject({ status: "done", result: { linkedin_page: null } });
+    expect(pageOf(null)).toBeNull();
+  });
+
+  it("the page read alone is not a move: a quiet week with a new page returns moved null and the same version", async () => {
+    const c = oloClient();
+    const db = world(c);
+    const out = await runSocialRead(db, c, { rows: new Map() }, io().fake);
+    const result = (out as { result: Record<string, unknown> }).result;
+    const old = { ...result, linkedin_page: { ...(result.linkedin_page as object), read_at: ago(40), page: null } };
+    const writes = db.rpcCalls.length;
+    const quiet = io();
+    const again = await runSocialRead(db, c, { rows: new Map([["social_read", stepRow(old)]]) }, quiet.fake);
+    expect(quiet.calls.linkedinPage.length).toBe(1);
+    expect(again).toMatchObject({ result: { moved: null, version: 1 } });
+    expect(pageOf((again as { result: Record<string, unknown> }).result)).toMatchObject({ name: "Olo" });
+    expect(quiet.calls.brandRead).toBe(0);
+    expect(db.rpcCalls.length).toBe(writes);
   });
 });
