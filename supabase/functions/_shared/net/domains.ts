@@ -98,6 +98,17 @@ export function siteKeyOf(value: string | null | undefined): string | null {
   return SHARED_PLATFORMS[domain] ? hostOf(value).replace(/^www\./, "") : domain;
 }
 
+/** A URL's path as lowercase segments, without empty ones: [] for a homepage ("https://olo.com/"), a bare host or nothing. */
+export function pathSegments(value: string | null | undefined): string[] {
+  const s = String(value ?? "").trim();
+  if (!s) return [];
+  try {
+    return new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(s) ? s : `https://${s}`).pathname.toLowerCase().split("/").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 /**
  * How a URL stands to a client's website: "host" when it is on the
  * website's own host (www aside), "site" when it is elsewhere on the same

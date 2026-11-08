@@ -14,9 +14,13 @@
 //                               longer exists, or no longer tracks the client
 //                               as exactly one company. Something that worked
 //                               has broken, and staff need to hear about it.
+//
+// Every caller asks with landscapeClient: a client whose website is a page on
+// another client's site is matched by its name only (lifecycle/parentPage.ts).
 
 import { bestLandscapeMatch, summarizeLandscapes, type LandscapeSummary, type RivalIqLandscape } from "./rivaliqLandscape.ts";
 import { rivalIqFetch } from "./rivaliqFetch.ts";
+import { parentPageFor } from "../lifecycle/parentPage.ts";
 
 export const CLIENT_NOT_TRACKED = "RIVALIQ_CLIENT_NOT_TRACKED";
 export const LANDSCAPE_MISSING = "RIVALIQ_LANDSCAPE_MISSING";
@@ -29,6 +33,18 @@ export const APP_LANDSCAPE_PREFIX = "Socialytics - ";
 export interface LandscapeClient {
   name: string;
   website_url?: string | null;
+}
+
+/**
+ * The client as every landscape check and the import screen match it. A
+ * website that is a page on another client's site (lifecycle/parentPage.ts:
+ * Kitcaster's page on moburst.com) is left out, so the client is matched by
+ * its name only and never takes that client's RivalIQ company. Any other
+ * website is kept as it is, with no read of other clients.
+ */
+export async function landscapeClient(db: Db, client: { id?: unknown; name?: unknown; website_url?: unknown }): Promise<LandscapeClient> {
+  const website = typeof client.website_url === "string" ? client.website_url : null;
+  return { name: String(client.name ?? ""), website_url: (await parentPageFor(db, client)) ? null : website };
 }
 
 export type LandscapeResolution =

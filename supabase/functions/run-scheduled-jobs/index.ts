@@ -79,7 +79,7 @@ import { secretEquals } from "../_shared/auth/secretEquals.ts";
 import { buildCompetitivePayload, buildSocialPayload } from "../_shared/reports/payloads.ts";
 import { closeAbandonedRuns } from "../_shared/reports/schedule.ts";
 import { refreshCompetitorFeed } from "../_shared/competitive/refreshFeed.ts";
-import { checkClientLandscape, recordTrackingCheck, RIVALIQ_UNAVAILABLE, type LandscapeCheck } from "../_shared/competitive/landscapeCheck.ts";
+import { checkClientLandscape, landscapeClient, recordTrackingCheck, RIVALIQ_UNAVAILABLE, type LandscapeCheck } from "../_shared/competitive/landscapeCheck.ts";
 import { makePoster, runDispatch, type DispatchDeps } from "./dispatch.ts";
 import { runFeedJob } from "./feed.ts";
 import { runVoiceProfile, runWeekPlan, runWeekRevise } from "../_shared/calendar/runWeek.ts";
@@ -160,7 +160,7 @@ Deno.serve(async (req) => {
       // too, but only a real run records the outcome on the set.
       checkLandscape: async (client, set) => {
         if (!rivaliqKey) return { ok: false, code: RIVALIQ_UNAVAILABLE, status: null, message: "RIVALIQ_API_KEY is not configured." } satisfies LandscapeCheck;
-        const check = await checkClientLandscape(rivaliqKey, { name: client.name, website_url: (client.website_url as string | null | undefined) ?? null }, set.rivaliq_landscape_id);
+        const check = await checkClientLandscape(rivaliqKey, await landscapeClient(db, client), set.rivaliq_landscape_id);
         if (!dryRun) await recordTrackingCheck(db, set.id, set.rivaliq_landscape_id, check);
         return check;
       },

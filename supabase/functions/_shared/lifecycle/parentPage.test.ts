@@ -27,6 +27,22 @@ describe("isParentPage", () => {
     // A plain-domain client owns its subdomains as well.
     expect(isParentPage("https://careers.moburst.com/jobs", ["https://www.moburst.com"])).toBe(true);
   });
+  it("is a page only under a client that sits above it, by a strict path prefix (fix round 1)", () => {
+    // Kitcaster's page sits under Moburst's homepage.
+    expect(isParentPage(KITCASTER, ["https://www.moburst.com/"])).toBe(true);
+    // A client stored as www.moburst.com/en/ is under nobody below or beside it, and Kitcaster is not under /en/.
+    expect(isParentPage("https://www.moburst.com/en/", [KITCASTER])).toBe(false);
+    expect(isParentPage(KITCASTER, ["https://www.moburst.com/en/"])).toBe(false);
+    // Under /en/ when a page sits below it; /en/ itself under a homepage above it.
+    expect(isParentPage("https://www.moburst.com/en/podcasts/", ["https://www.moburst.com/en/"])).toBe(true);
+    expect(isParentPage("https://www.moburst.com/en/", ["https://www.moburst.com/"])).toBe(true);
+    // Two pages side by side on a domain no client owns mark neither.
+    expect(isParentPage("https://example.com/x", ["https://example.com/y"])).toBe(false);
+    expect(isParentPage("https://example.com/y", ["https://example.com/x"])).toBe(false);
+    // The same page is not under itself, and a segment counts whole ("/x" is not above "/xy/z").
+    expect(isParentPage("https://example.com/x", ["https://example.com/x/"])).toBe(false);
+    expect(isParentPage("https://example.com/xy/z", ["https://example.com/x"])).toBe(false);
+  });
   it("is false for a page on a site no other client has, and for nothing", () => {
     expect(isParentPage("https://lega.bot/en/", ["https://www.moburst.com", null, ""])).toBe(false);
     expect(isParentPage(KITCASTER, [])).toBe(false);
@@ -64,6 +80,14 @@ describe("parentPageFor", () => {
     expect(await parentPageFor(fakeDb({ clients }), { id: "k", website_url: KITCASTER })).toBe(true);
     // Moburst's own homepage is its site, whatever pages other clients have on it.
     expect(await parentPageFor(fakeDb({ clients }), { id: "m", website_url: "https://www.moburst.com" })).toBe(false);
+  });
+  it("marks neither a client stored on a page of its own site nor a client beside it", async () => {
+    const two = [
+      { id: "k", website_url: KITCASTER, archived_at: null, demo_job_id: null },
+      { id: "m", website_url: "https://www.moburst.com/en/", archived_at: null, demo_job_id: null },
+    ];
+    expect(await parentPageFor(fakeDb({ clients: two }), { id: "m", website_url: "https://www.moburst.com/en/" })).toBe(false);
+    expect(await parentPageFor(fakeDb({ clients: two }), { id: "k", website_url: KITCASTER })).toBe(false);
   });
   it("reads no client for a website with no path, so a site of its own costs nothing (Review Focus 5)", async () => {
     const db = { from: () => { throw new Error("no read expected"); } };

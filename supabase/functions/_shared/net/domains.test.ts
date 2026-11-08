@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isSharedPlatform, PLATFORM_KINDS, registrableDomain, SHARED_PLATFORMS, sharedPlatformKind, siteKeyOf, siteMatch } from "./domains";
+import { isSharedPlatform, PLATFORM_KINDS, registrableDomain, SHARED_PLATFORMS, pathSegments, sharedPlatformKind, siteKeyOf, siteMatch } from "./domains";
 import { PUBLIC_SUFFIX_SOURCE } from "./publicSuffixes";
 
 describe("registrableDomain (the Public Suffix List's ICANN section)", () => {
@@ -57,6 +57,13 @@ describe("shared platforms", () => {
     expect(siteKeyOf("www.moburst.com")).toBe("moburst.com");
     expect(siteKeyOf("https://olo.wixsite.com/site")).toBe("olo.wixsite.com");
     expect(siteKeyOf("not a site")).toBeNull();
+  });
+  it("splits a path into lowercase segments, none for a homepage", () => {
+    expect(pathSegments("https://www.moburst.com/Services/organic//podcast-booking/")).toEqual(["services", "organic", "podcast-booking"]);
+    expect(pathSegments("moburst.com/en")).toEqual(["en"]);
+    expect(pathSegments("https://olo.com/")).toEqual([]);
+    expect(pathSegments("olo.com")).toEqual([]);
+    expect(pathSegments(null)).toEqual([]);
   });
   it("says how a URL stands to a client's website: its host, the rest of its site, or neither", () => {
     expect(siteMatch("https://moburst.com/blog", "https://www.moburst.com/")).toBe("host");

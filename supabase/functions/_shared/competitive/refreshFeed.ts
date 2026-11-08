@@ -10,7 +10,7 @@
 // Moved out of refresh-competitor-feed on 2026-10-06; the behaviour is unchanged.
 
 import {collectOwnedCompetitive,mergeOwnedCompetitivePosts} from './ownedSource.ts';
-import { checkClientLandscape, isTrackingProblem, recordTrackingCheck } from "./landscapeCheck.ts";
+import { checkClientLandscape, isTrackingProblem, landscapeClient, recordTrackingCheck } from "./landscapeCheck.ts";
 import { selectedFeedSources, collectLinkedInSource } from "./linkedinSource.ts";
 import { rivalIqFetch } from "./rivaliqFetch.ts";
 import { harvestedPaths, type HarvestedRef } from "../design-prompts/designRefs.ts";
@@ -283,7 +283,7 @@ export async function refreshCompetitorFeed(admin: any, clientId: string, env: F
   // An explicit ID is a selection, not proof of client identity. Validate
   // before fetching posts, saving snapshots, generating alerts or harvesting.
   // The same check run-report and the scheduled dispatch use.
-  const check = await checkClientLandscape(key, client, set?.rivaliq_landscape_id);
+  const check = await checkClientLandscape(key, await landscapeClient(admin, client), set?.rivaliq_landscape_id);
   await recordTrackingCheck(admin, set?.id, set?.rivaliq_landscape_id, check);
   if (isTrackingProblem(check)) {
     // Not set up (RIVALIQ_CLIENT_NOT_TRACKED) and a linked landscape that

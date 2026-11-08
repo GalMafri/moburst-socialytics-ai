@@ -20,7 +20,7 @@
 
 import { profileKeyOf, type SproutProfile } from "../lifecycle/accounts.ts";
 import { normName, sameName } from "../lifecycle/names.ts";
-import { siteKeyOf, siteMatch } from "../net/domains.ts";
+import { pathSegments, siteKeyOf, siteMatch } from "../net/domains.ts";
 import type { CustomerGroup } from "./profiles.ts";
 import { networkKey } from "./publishRules.ts";
 
@@ -354,13 +354,18 @@ export function isBrandAccount(brand: Brand): boolean {
 /**
  * The client (never a demo copy) whose website is this site (net/domains.ts
  * siteMatch): a client on its host first, then one on its registrable
- * domain, so any subdomain counts. A client whose website is a subdomain of
+ * domain, so any subdomain counts; among those, the one whose website path
+ * is shortest, so a root site comes before a page on it (Moburst before
+ * Kitcaster's page on moburst.com). A client whose website is a subdomain of
  * its own (Uproar on uproar.moburst.com) is matched by that full host only.
  */
 export function clientWithSite(site: string | null | undefined, clients: KnownClient[]): KnownClient | null {
   if (!siteKeyOf(site)) return null;
-  const real = clients.filter((c) => !c.demo_job_id);
-  return real.find((c) => siteMatch(site, c.website_url) === "host") ?? real.find((c) => siteMatch(site, c.website_url) === "site") ?? null;
+  const ranked = clients.filter((c) => !c.demo_job_id)
+    .map((c, i) => ({ c, i, match: siteMatch(site, c.website_url), depth: pathSegments(c.website_url).length }))
+    .filter((x) => x.match !== null)
+    .sort((a, b) => Number(a.match === "site") - Number(b.match === "site") || a.depth - b.depth || a.i - b.i);
+  return ranked[0]?.c ?? null;
 }
 
 export type CreationBlock = { decision: "person" | "no_posts" | "client_website"; reason: string; client_id?: string };

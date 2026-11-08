@@ -522,6 +522,12 @@ describe("a page on another client's site is used for text only", () => {
     expect(await STEPS.brand_read.inputs(db, kit(), new Map())).toBe("moburst.com/services/organic/podcast-booking");
     expect(await STEPS.tracking.inputs(db, kit(), new Map())).toBe(tracked!.replace(/\|text_only$/, ""));
   });
+  it("counts only a client that sits above the page: one stored beside it on the same site marks neither (fix round 1)", async () => {
+    const db = dbWith({ clients: [{ ...moburst(), website_url: "https://www.moburst.com/en/" }, kit()], competitor_sets: [set()], competitors: [] });
+    expect(await STEPS.brand_read.inputs(db, kit(), new Map())).toBe("moburst.com/services/organic/podcast-booking");
+    expect(await STEPS.brand_read.inputs(db, client({ id: "m", website_url: "https://www.moburst.com/en/" }), new Map())).toBe("moburst.com/en");
+    expect(await STEPS.tracking.inputs(db, kit(), new Map())).not.toMatch(/text_only/);
+  });
   it("still feeds the page's text to the brief, pillars and competitors", async () => {
     const db = dbWith({ clients: [moburst(), kit()], competitor_sets: [] });
     expect(await STEPS.brief_pillars.inputs(db, kit(), rowsOf(row("brand_read", { result: { parent_page: true, site_profiles: [] } })))).toContain("|site:moburst.com/services/organic/podcast-booking|");

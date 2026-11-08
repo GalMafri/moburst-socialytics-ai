@@ -13,6 +13,7 @@
 import { createClient } from "../_shared/supabase.ts";
 import { requireStaff, AuthzError } from "../_shared/auth/requireStaff.ts";
 import { summarizeLandscapes } from "../_shared/competitive/rivaliqLandscape.ts";
+import { landscapeClient } from "../_shared/competitive/landscapeCheck.ts";
 import { rivalIqFetch } from "../_shared/competitive/rivaliqFetch.ts";
 
 const corsHeaders = {
@@ -47,7 +48,9 @@ Deno.serve(async (req) => {
       return jsonResp({ error: `RivalIQ ${resp.status}: ${text.slice(0, 200)}` }, 502);
     }
     const body = await resp.json();
-    const summaries = summarizeLandscapes(body.landscapes || [], client.name, (client as any).website_url);
+    // A website that is a page on another client's site is left out: the client is matched by its name only.
+    const matchAs = await landscapeClient(supabase, client);
+    const summaries = summarizeLandscapes(body.landscapes || [], matchAs.name, matchAs.website_url);
 
     if (mode === "list") return jsonResp({ client: client.name, landscapes: summaries });
 

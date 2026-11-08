@@ -31,6 +31,7 @@ vi.mock("./ownedSource", () => ({
 }));
 
 const { refreshCompetitorFeed } = await import("./refreshFeed");
+const { checkClientLandscape } = await import("./landscapeCheck");
 
 const MOBURST = "d00ce604-2bcc-455a-9826-f80250db75cf";
 const DEFAULTS = [
@@ -125,6 +126,19 @@ describe("refreshCompetitorFeed and the LinkedIn source switch", () => {
     await refreshCompetitorFeed(db, MOBURST, ENV);
     expect(collect).toHaveBeenCalledTimes(1);
     expect(db.tables.report_pipeline_runs ?? []).toEqual([]);
+  });
+
+  it("asks the landscape check by name only for a client whose website is a page on another client's site", async () => {
+    const check = vi.mocked(checkClientLandscape);
+    check.mockClear();
+    const db = admin(DEFAULTS);
+    db.tables.clients.push({ id: "kit", name: "Kitcaster by Moburst", website_url: "https://www.moburst.com/services/organic/podcast-booking/", archived_at: null, demo_job_id: null });
+    check.mockImplementationOnce(async () => ({ ok: false, code: "RIVALIQ_CLIENT_NOT_TRACKED", landscapeId: null, message: "No RivalIQ landscape tracks Kitcaster by Moburst." }) as never);
+    await expect(refreshCompetitorFeed(db, "kit", ENV)).rejects.toMatchObject({ status: 422 });
+    expect(check.mock.calls[0].slice(0, 2)).toEqual(["rq", { name: "Kitcaster by Moburst", website_url: null }]);
+    // A plain-domain client is asked with its website, as before.
+    await refreshCompetitorFeed(db, MOBURST, ENV);
+    expect(check.mock.calls[1].slice(0, 2)).toEqual(["rq", { name: "Moburst", website_url: "https://moburst.com" }]);
   });
 
   it("queues nothing for another client while Moburst is on shadow", async () => {

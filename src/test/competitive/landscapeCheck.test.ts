@@ -4,6 +4,7 @@ import {
   checkClientLandscape,
   CLIENT_NOT_TRACKED,
   isAppCreatedLandscape,
+  landscapeClient,
   isTrackingProblem,
   LANDSCAPE_MISSING,
   recordTrackingCheck,
@@ -12,6 +13,7 @@ import {
   RIVALIQ_BUSY,
   RIVALIQ_UNAVAILABLE,
 } from "../../../supabase/functions/_shared/competitive/landscapeCheck";
+import { fakeDb } from "../../../supabase/functions/_shared/lifecycle/fakeDb";
 
 const client = { name: "Fixture", website_url: "https://fixture.agency" };
 const own = { id: 10, name: "Socialytics - Fixture - set-1", focusCompanyId: 1, companies: [{ id: 1, name: "Fixture", url: "https://fixture.agency" }, { id: 2, name: "Rival", url: "https://rival.studio" }] };
@@ -54,6 +56,38 @@ describe("resolveClientLandscape", () => {
   it("treats a client tracked twice in the linked landscape as missing", () => {
     const doubled = { ...own, companies: [...own.companies, { id: 9, name: "Fixture LLC", url: "http://www.fixture.agency/" }] };
     expect(resolveClientLandscape([doubled], client, "10")).toMatchObject({ ok: false, code: LANDSCAPE_MISSING });
+  });
+});
+
+// Kitcaster's website is a page on moburst.com, the website of Moburst, another
+// client (lifecycle/parentPage.ts): with nothing linked, the best match on the
+// account must never be Moburst's company (spec 2026-11-08, section B).
+describe("landscapeClient: a page on another client's site is matched by name only", () => {
+  const KITCASTER = "https://www.moburst.com/services/organic/podcast-booking/";
+  const moburstLandscape = { id: 20, name: "TIER 1 Competitors", focusCompanyId: 1, companies: [{ id: 1, name: "Moburst", url: "https://www.moburst.com" }, { id: 2, name: "Phiture", url: "https://phiture.com" }] };
+  const db = () => fakeDb({ clients: [
+    { id: "m", name: "Moburst", website_url: "https://www.moburst.com", archived_at: null, demo_job_id: null },
+    { id: "k", name: "Kitcaster by Moburst", website_url: KITCASTER, archived_at: null, demo_job_id: null },
+  ] });
+
+  it("leaves the website out for a page on another client's site, so nothing linked never resolves to that client's company", async () => {
+    const asked = await landscapeClient(db(), { id: "k", name: "Kitcaster by Moburst", website_url: KITCASTER });
+    expect(asked).toEqual({ name: "Kitcaster by Moburst", website_url: null });
+    expect(resolveClientLandscape([moburstLandscape], asked, null)).toMatchObject({ ok: false, code: CLIENT_NOT_TRACKED, landscapeId: null });
+    // Without the rule the website alone matched Moburst's company: the case this guards.
+    expect(resolveClientLandscape([moburstLandscape], { name: "Kitcaster by Moburst", website_url: KITCASTER }, null)).toMatchObject({ ok: true, summary: { client_company_id: "1" } });
+    // A landscape that tracks the client under its own name still matches.
+    const own = { id: 21, name: "Socialytics - Kitcaster", focusCompanyId: 7, companies: [{ id: 7, name: "Kitcaster by Moburst", url: "https://www.moburst.com" }, { id: 2, name: "Phiture", url: "https://phiture.com" }] };
+    expect(resolveClientLandscape([moburstLandscape, own], asked, null)).toMatchObject({ ok: true, summary: { id: "21", client_company_id: "7" } });
+  });
+
+  it("keeps a plain-domain client's website and reads no client for it (Review Focus 5)", async () => {
+    const none = { from: () => { throw new Error("no read expected"); } };
+    const moburst = await landscapeClient(none, { id: "m", name: "Moburst", website_url: "https://www.moburst.com" });
+    expect(moburst).toEqual({ name: "Moburst", website_url: "https://www.moburst.com" });
+    expect(resolveClientLandscape([moburstLandscape], moburst, null)).toMatchObject({ ok: true, summary: { id: "20", client_company_id: "1" } });
+    expect(await landscapeClient(none, { id: "f", name: "Fixture", website_url: "https://fixture.agency" })).toEqual(client);
+    expect(await landscapeClient(none, { id: "x", name: "No Site", website_url: null })).toEqual({ name: "No Site", website_url: null });
   });
 });
 
