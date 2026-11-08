@@ -10,11 +10,13 @@
 // What runs is decided here. n8n runs only where a row asks for it (set by
 // hand, so the switch can be turned back until the n8n paths are removed);
 // shadow asks for n8n too, with an in-app run next to it. Everything else is
-// app, the in-app pipeline, and nothing in doubt is ever handed to n8n: an
-// unreadable table, a missing row or an unknown value is app; an app with no
-// app-capable pipeline whose secrets are set in this deployment is app with
-// no pipeline, which the callers read as "not now": the dispatch runs the
-// report again later, the feed refresh goes without LinkedIn posts.
+// app, the in-app pipeline, and nothing in doubt is ever handed to n8n. A
+// missing row or an unknown value is app, with its pipeline when one can run.
+// A switch that cannot be read, or an app with no app-capable pipeline whose
+// secrets are set in this deployment, is app with no pipeline, which the
+// callers read as "not now": the dispatch runs the report again later; the
+// feed refresh saves the feed without LinkedIn posts and the feed job
+// collects them again 10 minutes later.
 
 import { REGISTRY, type Registry } from "./registry.ts";
 import type { Engine, PipelineDefinition, ReportKind } from "./types.ts";

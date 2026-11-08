@@ -1,9 +1,10 @@
 // One competitor feed refresh, run in-process by the worker.
 
 import { CLIENT_NOT_TRACKED, LANDSCAPE_MISSING } from "../_shared/competitive/landscapeCheck.ts";
+import { FEED_RETRY_MINUTES } from "../_shared/competitive/feedRetry.ts";
 import type { JobOutcome, ScheduledJob } from "../_shared/scheduled-jobs/types.ts";
 
-export const FEED_RETRY_MINUTES = 10;
+export { FEED_RETRY_MINUTES };
 
 /** Why a feed job tries again, or ends, when the feed was saved without its LinkedIn posts. */
 export const LINKEDIN_NOT_COLLECTED = "LinkedIn posts were not collected.";
@@ -12,10 +13,10 @@ export interface FeedDeps {
   now(): Date;
   /**
    * _shared/competitive/refreshFeed.ts, bound to the project's clients and
-   * keys. linkedin_not_collected is set when the feed was saved without its
+   * keys. linkedin_not_collected is true when the feed was saved without its
    * LinkedIn posts.
    */
-  refreshFeed(clientId: string): Promise<Record<string, unknown> & { linkedin_not_collected?: string }>;
+  refreshFeed(clientId: string): Promise<Record<string, unknown> & { linkedin_not_collected?: boolean }>;
 }
 
 export async function runFeedJob(job: ScheduledJob, d: FeedDeps): Promise<JobOutcome> {

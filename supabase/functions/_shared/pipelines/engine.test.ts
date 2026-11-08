@@ -6,7 +6,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fakeDb } from "../lifecycle/fakeDb";
 import { readEngine, requestedEngine, resolveEngine, type EngineRow } from "./engine";
 import { makeRegistry, REGISTRY } from "./registry";
@@ -125,10 +125,14 @@ describe("readEngine", () => {
   });
 
   it("is app with no pipeline and the reason when the table cannot be read or the read throws, never n8n", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const failing = { from: () => ({ select: () => ({ eq: async () => ({ data: null, error: { message: "relation does not exist" } }) }) }) };
     expect(await readEngine(failing, "social", MOBURST, { registry: REGISTRY, env: socialEnv })).toEqual({ engine: "app", refused: expect.stringContaining("relation does not exist") });
     const throwing = { from: () => { throw new Error("network"); } };
     expect(await readEngine(throwing, "competitive", MOBURST, deps)).toEqual({ engine: "app", refused: expect.stringContaining("network") });
+    // Logged for the logs, each time.
+    expect(warn.mock.calls.map((c) => c.join(" "))).toEqual([expect.stringContaining("relation does not exist"), expect.stringContaining("network")]);
+    warn.mockRestore();
   });
 
   it("runs the app pipeline for a kind with no row, once its secrets are set", async () => {

@@ -40,19 +40,23 @@
 //             queued. From here the job only watches its report.
 //
 // Which engine makes the report is the engine switch (report_engines, read
-// through _shared/pipelines/engine.ts) when the request is about to go out.
-// n8n, a row set by hand: everything above is exactly as it was, webhook
-// included. shadow: the request goes to n8n as above, and once n8n has it an
+// through _shared/pipelines/engine.ts), read once per lease before anything
+// is made. n8n, a row set by hand: everything above is exactly as it was,
+// and without its webhook the dispatch is blocked before anything is made, as
+// before. shadow: the request goes to n8n as above, and once n8n has it an
 // in-app pipeline run is queued that writes only to shadow tables. Anything
 // else is app: no request goes to n8n and no webhook is needed; the in-app
 // run makes the report, and the job watches that run instead of the
 // 90-minute clock: a run the worker is still taking step by step is not
 // stuck however long it takes, and a run that stopped, or that nothing has
-// touched for 90 minutes, ends this run of the report. n8n is never the
-// backup: however many in-app runs stop, a switch that is missing or cannot
-// be read, or an app with no pipeline that can run in this deployment, the
-// occurrence runs again in the app later, with the waits and the closing
-// rule above.
+// touched for 90 minutes, ends this run of the report.
+//
+// n8n is never the backup. However many in-app runs stop, the occurrence
+// runs again in the app later, with the waits and the closing rule above. A
+// missing or unknown row is app and runs now with the app pipeline; only a
+// dispatch given no switch, a switch that cannot be read, or an app with no
+// pipeline that can run in this deployment (a secret not set) waits, and
+// runs again later the same way.
 
 import { nextRun, rangeForSchedule, type ReportRange } from "../_shared/reports/schedule.ts";
 import { STUCK_AFTER_MINUTES } from "../_shared/reports/payloads.ts";
@@ -416,24 +420,27 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
   }
 
   /**
-   * The engine switch, read once, when the request is about to go out (or
-   * when a webhook is missing, to know whether it is needed). n8n and shadow
-   * only where a row asks for them; no switch, or one that cannot be read,
-   * is app with no pipeline, so nothing goes out and the occurrence runs
-   * again later.
+   * Where this lease's request goes: the in-app run (app), or the n8n
+   * webhook (n8n and shadow, rows set by hand), which only those routes need.
    */
-  type Route = { engine: Engine; pipeline?: PipelineDefinition; refused?: string };
-  let route: Route | null = null;
-  const routeOf = async (): Promise<Route> => {
-    if (route) return route;
-    if (!d.engine) return (route = { engine: "app", refused: "No engine switch is given to this dispatch." });
+  type Target =
+    | { engine: "app"; pipeline?: PipelineDefinition; refused?: string }
+    | { engine: "n8n" | "shadow"; pipeline?: PipelineDefinition; url: string };
+
+  /**
+   * The engine switch, read once per lease. n8n and shadow only where a row
+   * asks for them; no switch, or one that cannot be read, is app with no
+   * pipeline, so nothing goes out and the occurrence runs again later.
+   */
+  const readRoute = async (): Promise<{ engine: Engine; pipeline?: PipelineDefinition; refused?: string }> => {
+    if (!d.engine) return { engine: "app", refused: "No engine switch is given to this dispatch." };
     try {
-      route = await d.engine(competitive ? "competitive" : "social", client.id);
+      return await d.engine(competitive ? "competitive" : "social", client.id);
     } catch (e) {
-      route = { engine: "app", refused: `The engine switch could not be read (${message(e)}).` };
-      console.warn(`[dispatch] ${route.refused}`);
+      const refused = `The engine switch could not be read (${message(e)}).`;
+      console.warn(`[dispatch] ${refused}`);
+      return { engine: "app", refused };
     }
-    return route;
   };
 
   /** What the in-app run is given: the report, its range and the request n8n gets. */
@@ -472,20 +479,18 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
   };
 
   /** Send the request; a confirmed answer moves the job to watching its report. */
-  const send = async (url: string | null, payload: Record<string, unknown>, result: DispatchMemory): Promise<JobOutcome> => {
-    const { engine, pipeline, refused } = await routeOf();
-    if (engine === "app") {
+  const send = async (target: Target, payload: Record<string, unknown>, result: DispatchMemory): Promise<JobOutcome> => {
+    if (target.engine === "app") {
       // A repeated request is made in the app too: the in-app run writes into the same report.
-      if (pipeline) return startApp(pipeline, payload, result);
+      if (target.pipeline) return startApp(target.pipeline, payload, result);
       // Nothing can make it in the app now: as after a run that stopped, the occurrence runs again later.
       Object.assign(memory, result);
-      return runAgain(reportId, `the report could not start in the app (${(refused ?? "no in-app pipeline can run").replace(/\.$/, "")})`);
+      return runAgain(reportId, `the report could not start in the app (${(target.refused ?? "no in-app pipeline can run").replace(/\.$/, "")})`);
     }
     await d.saveJob({ phase: "posting", result });
     let r: { ok: boolean; status: number };
     try {
-      // The webhook is checked before anything is made, for every route but app.
-      r = await d.post(url!, payload);
+      r = await d.post(target.url, payload);
     } catch (e) {
       // Unanswered: the workflow may have the request. It is sent again for
       // the same report shortly, which can never make a second report.
@@ -497,16 +502,20 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
       return runAgain(reportId, `the workflow refused the request (${r.status})`);
     }
     await d.saveJob({ phase: "sent", result });
-    if (engine === "shadow" && pipeline) await startShadow(pipeline, payload, result);
+    if (target.engine === "shadow" && target.pipeline) await startShadow(target.pipeline, payload, result);
     await note("The report is running.");
     return { status: "waiting", reason: "The report is running.", result };
   };
 
   try {
     const hooks = await d.store.webhooks();
+    const route = await readRoute();
     const url = competitive ? hooks.competitive : hooks.social;
-    // Only a request to n8n needs its webhook; the app makes the report without one.
-    if (!url && (await routeOf()).engine !== "app") throw new Error(competitive ? "competitive webhook URL not configured" : "n8n webhook URL not configured");
+    let target: Target;
+    if (route.engine === "app") target = { engine: "app", pipeline: route.pipeline, refused: route.refused };
+    else if (url) target = { engine: route.engine, pipeline: route.pipeline, url };
+    // Only a request to n8n needs its webhook. Without it: blocked, before anything is made.
+    else throw new Error(competitive ? "competitive webhook URL not configured" : "n8n webhook URL not configured");
 
     if (competitive) {
       const set = await d.store.competitorSet(client.id);
@@ -568,7 +577,7 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
       }
       const payload = await d.buildCompetitivePayload({ client, reportId, set, range, attemptStartedAt, scheduled: !manual, staggerSeconds: job.stagger_seconds });
       if (d.dryRun) return { status: "done", reason: "dry run: would post", result: { ...result, payload_keys: Object.keys(payload) } };
-      return await send(url, payload, result);
+      return await send(target, payload, result);
     }
 
     // Social.
@@ -626,7 +635,7 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
         ? { status: "waiting", reason: `dry run: ${wait}`, result: preview }
         : { status: "done", reason: "dry run: would post", result: preview };
     }
-    return await send(url, payload, result);
+    return await send(target, payload, result);
   } catch (err) {
     const msg = message(err);
     if (d.dryRun) return { status: "failed", reason: `dry run: ${msg}` };

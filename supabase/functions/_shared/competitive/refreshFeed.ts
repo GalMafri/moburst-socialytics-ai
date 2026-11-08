@@ -17,7 +17,9 @@ import { harvestedPaths, type HarvestedRef } from "../design-prompts/designRefs.
 import { pipelineEngineDeps, readEngine } from "../pipelines/engine.ts";
 import { shadowLinkedInSource } from "../pipelines/shadow.ts";
 import { feedLinkedInAnswer } from "../pipelines/feedLinkedIn.ts";
+import type { InlineDeps } from "../pipelines/inline.ts";
 import { anthropicFetch } from "../anthropic.ts";
+import { queueFeedRetry } from "./feedRetry.ts";
 
 /** A refresh that stopped with an answer for the caller: an HTTP status and, for a known case, a code. */
 export class FeedRefreshError extends Error {
@@ -38,6 +40,8 @@ export interface FeedRefreshEnv {
   secret: string | null | undefined;
   /** Window length in days (1 to 30, default 7). */
   days?: number;
+  /** Tests give their own pieces of the in-app LinkedIn run (no pause between looks); the refresh uses the database's. */
+  linkedinInline?: Partial<InlineDeps>;
 }
 
 const RIVALIQ = "https://api.rivaliq.com/v3";
@@ -317,21 +321,21 @@ export async function refreshCompetitorFeed(admin: any, clientId: string, env: F
   // after it answered. Anything else is app: the in-app pipeline, in this
   // refresh (_shared/pipelines/feedLinkedIn.ts), never n8n. When the app's
   // collection stops or cannot run, the feed is saved with the RivalIQ and
-  // owned posts and no LinkedIn posts, and the answer says why in
-  // linkedin_not_collected: the feed job then runs the refresh again
-  // (run-scheduled-jobs/feed.ts), and a person's refresh does not fail.
+  // owned posts and no LinkedIn posts, the reason goes to the log, and the
+  // answer carries linkedin_not_collected: true. The feed job then runs the
+  // refresh again (run-scheduled-jobs/feed.ts); a person's refresh does not
+  // fail and queues that job (refreshCompetitorFeedOnDemand).
   const linkedinEngine = readEngine(admin, "linkedin_source", clientId, pipelineEngineDeps());
   const collectLinkedIn = async () => {
     const engine = await linkedinEngine;
     try {
-      const answer = await feedLinkedInAnswer(admin, engine, { clientId, sources: plan.sources, period: window },
+      const answer = await feedLinkedInAnswer(admin, engine, { clientId, sources: plan.sources, period: window, inline: env.linkedinInline },
         () => collectLinkedInSource(plan.sources, window, env.secret || '', setting?.value || ''));
-      return { answer, notCollected: null };
+      return { answer, notCollected: false };
     } catch (e) {
       if (engine.engine !== "app") throw e;
-      const why = e instanceof Error ? e.message : String(e);
-      console.warn(`[refresh-competitor-feed] ${clientId}: LinkedIn was not collected (${why}); the feed is saved without LinkedIn posts.`);
-      return { answer: { socialPosts: [], additional_metrics: {} }, notCollected: why };
+      console.warn(`[refresh-competitor-feed] ${clientId}: LinkedIn was not collected (${e instanceof Error ? e.message : String(e)}); the feed is saved without LinkedIn posts.`);
+      return { answer: { socialPosts: [], additional_metrics: {} }, notCollected: true };
     }
   };
   const [{ answer: linkedin, notCollected }, owned] = await Promise.all([collectLinkedIn(),collectOwnedCompetitive(admin,client,window)]);
@@ -405,7 +409,19 @@ export async function refreshCompetitorFeed(admin: any, clientId: string, env: F
 
   return {
     client_id: clientId, landscape_id: landscapeId, window, posts: socialPosts.length, truncated: socialPosts.length >= PAGE_LIMIT, alerts: saved, design_refs: harvest,
-    // Set only when the feed was saved without LinkedIn posts: why they were not collected.
-    ...(notCollected ? { linkedin_not_collected: notCollected } : {}),
+    // Set only when the feed was saved without its LinkedIn posts. Why is in the log only.
+    ...(notCollected ? { linkedin_not_collected: true as const } : {}),
   };
+}
+
+/**
+ * A refresh a person started (the feed page's refresh-competitor-feed). Its
+ * answer is the saved feed either way; when that feed was saved without its
+ * LinkedIn posts, a feed refresh is queued to collect them, with the feed
+ * job's retry and end rules (feedRetry.ts).
+ */
+export async function refreshCompetitorFeedOnDemand(admin: any, clientId: string, env: FeedRefreshEnv) {
+  const result = await refreshCompetitorFeed(admin, clientId, env);
+  if (result.linkedin_not_collected) await queueFeedRetry(admin, clientId);
+  return result;
 }

@@ -7,7 +7,7 @@
 // Nothing else ever goes to n8n: no switch reader, an unreadable switch, a
 // missing pipeline, stopped app runs and a repeated request all run again in
 // the app.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { RETRY_FIRST_MINUTES, runDispatch, type DispatchDeps, type DispatchStore, type ScheduleRow } from "./dispatch";
 import type { JobOutcome, ScheduledJob } from "../_shared/scheduled-jobs/types";
 import type { LandscapeCheck } from "../_shared/competitive/landscapeCheck";
@@ -236,6 +236,7 @@ describe("shadow: n8n runs for real, and an in-app run is queued next to it", ()
   });
 
   it("changes nothing when the shadow cannot be queued", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const w = world(["social"]);
     const h = harness(w, "shadow", { startFails: true });
     const outcome = await h.run(job("social"));
@@ -243,6 +244,8 @@ describe("shadow: n8n runs for real, and an in-app run is queued next to it", ()
     expect(h.posts).toEqual(["https://n8n.fixture/social"]);
     const base = await observe("a social report that runs and completes", "n8n-bare");
     expect(outcome).toEqual(base.trace.outcomes[0]);
+    expect(warn.mock.calls.map((c) => c.join(" "))).toEqual([expect.stringContaining("shadow run not queued")]);
+    warn.mockRestore();
   });
 });
 
@@ -408,6 +411,7 @@ describe("no automatic hand-off to n8n", () => {
   });
 
   it("an unreadable switch reads as app: nothing goes to n8n, and with no pipeline known the occurrence runs again later", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const w = world(["social"]);
     const h = harness(w, "unreadable");
     const outcome = await h.run(job("social"));
@@ -416,6 +420,8 @@ describe("no automatic hand-off to n8n", () => {
     expect(outcome.reason).toContain("report_engines does not exist");
     expect(h.posts).toEqual([]);
     expect(w.writes).toContain("drop reports social-1");
+    expect(warn.mock.calls.map((c) => c.join(" "))).toEqual([expect.stringContaining("engine switch could not be read")]);
+    warn.mockRestore();
   });
 
   it("a repeated request in the posting phase with an app route starts the app run for the same report", async () => {
@@ -428,6 +434,21 @@ describe("no automatic hand-off to n8n", () => {
     expect(h.starts).toEqual([expect.objectContaining({ mode: "app", kind: "social", reportId: "social-9" })]);
     expect(outcome).toMatchObject({ status: "waiting", result: { engine: "app", pipeline_run_id: "run-1" } });
     expect(w.tables.reports.map((r) => r.id)).toEqual(["social-9"]);
+  });
+
+  it("a repeated request in the posting phase with an app route and no pipeline runs again later and never posts", async () => {
+    const w = world(["social"]);
+    const h = harness(w, "app-no-pipeline");
+    w.tables.reports.push({ id: "social-9", client_id: "client-1", status: "running", date_range_start: "2026-10-01", date_range_end: "2026-10-31", created_at: NOW.toISOString() });
+    const j = job("social", { phase: "posting", report_id: "social-9", result: { range: { start: "2026-10-01", end: "2026-10-31" }, runs: [{ report_id: "social-9", started_at: NOW.toISOString() }] } });
+    const outcome = await h.run(j);
+    expect(outcome.status).toBe("queued");
+    expect(outcome.available_at).toBe(minutes(RETRY_FIRST_MINUTES).toISOString());
+    expect(outcome.reason).toContain("No app-capable social pipeline");
+    expect(h.posts).toEqual([]);
+    expect(h.starts).toEqual([]);
+    expect(w.writes).toContain("drop reports social-9");
+    expect((outcome.result as { runs: Array<{ outcome?: string }> }).runs.map((r) => r.outcome)).toEqual(["stopped"]);
   });
 
   it("a missing webhook URL does not stop an app route", async () => {
