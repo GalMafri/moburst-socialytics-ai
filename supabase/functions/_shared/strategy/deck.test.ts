@@ -112,8 +112,46 @@ describe("the requests", () => {
     expect(replaces.filter((r) => r.replaceAllShapesWithImage).map((r) => r.replaceAllShapesWithImage.imageUrl)).toEqual(["https://signed/logo.png", "https://signed/start.png", "https://signed/mix.png"]);
     expect(replaces.find((r) => r.replaceAllShapesWithImage)).toMatchObject({ replaceAllShapesWithImage: { imageReplaceMethod: "CENTER_INSIDE", containsText: { text: "{{logo}}", matchCase: true } } });
     expect(required).toHaveLength(replaces.length);
-    expect(requests.at(-10)).toEqual({ updateSlidesPosition: { slideObjectIds: plan.slides.map((_, i) => `deck_${String(i + 1).padStart(2, "0")}`), insertionIndex: 0 } });
+    const moves = requests.filter((r) => r.updateSlidesPosition);
+    expect(moves).toEqual(plan.slides.map((_, i) => ({ updateSlidesPosition: { slideObjectIds: [`deck_${String(i + 1).padStart(2, "0")}`], insertionIndex: i } })));
     expect(requests.slice(-9).map((r) => r.deleteObject.objectId)).toEqual(["s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8"]);
+  });
+
+  // Google's rules for the requests that place slides (Slides API reference,
+  // DuplicateObjectRequest and UpdateSlidesPositionRequest): a copied slide
+  // goes right after the slide it copies; a move lists its slides in their
+  // current order with no duplicates, and its index counts the slides as they
+  // were before the move. On 8 Nov 2026 one move of every slide broke the
+  // second rule for Moburst, whose plan uses some template slides twice.
+  function placeSlides(start: string[], requests: Array<Record<string, any>>): string[] {
+    const order = [...start];
+    for (const r of requests) {
+      if (r.duplicateObject) {
+        const from = order.indexOf(r.duplicateObject.objectId);
+        order.splice(from + 1, 0, r.duplicateObject.objectIds[r.duplicateObject.objectId]);
+      } else if (r.updateSlidesPosition) {
+        const { slideObjectIds: moved, insertionIndex } = r.updateSlidesPosition;
+        const at = moved.map((id: string) => order.indexOf(id));
+        if (new Set(moved).size !== moved.length || at.some((x: number, k: number) => x < 0 || (k > 0 && x <= at[k - 1]))) {
+          throw new Error("The slides should be in presentation order, with no duplicates.");
+        }
+        const before = at.filter((x: number) => x < insertionIndex).length;
+        const rest = order.filter((id) => !moved.includes(id));
+        rest.splice(insertionIndex - before, 0, ...moved);
+        order.splice(0, order.length, ...rest);
+      } else if (r.deleteObject) {
+        order.splice(order.indexOf(r.deleteObject.objectId), 1);
+      }
+    }
+    return order;
+  }
+
+  it("leaves the slides in the plan's order by Google's rules, when the plan uses a template slide more than once", () => {
+    const plan = planDeck(input(3, 3), measure);
+    expect(new Set(archetypesOf(plan.slides)).size).toBeLessThan(plan.slides.length);
+    const { requests } = deckRequests(plan, findArchetypes(template), {});
+    const ids = plan.slides.map((_, i) => `deck_${String(i + 1).padStart(2, "0")}`);
+    expect(placeSlides(template.slides.map((s) => s.objectId), requests)).toEqual(ids);
   });
 
   it("finds a token a copy did not fill, so the copy goes to the trash", () => {
