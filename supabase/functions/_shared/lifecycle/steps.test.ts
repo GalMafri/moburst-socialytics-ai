@@ -92,6 +92,52 @@ describe("website", () => {
     expect(await STEPS.brand_read.inputs(db, c, new Map())).toBe("olo.com");
     expect(await STEPS.website.inputs(db, c, new Map())).toBeNull();
   });
+  describe("the website the client's LinkedIn page states", () => {
+    const withPage = (website: string | null) => rowsOf(row("social_read", { result: { checked_at: T, linkedin_page: { profile_id: "7", url: "https://www.linkedin.com/company/x", key: "7:x", read_at: T, page: { url: "https://www.linkedin.com/company/x", name: "X", website, about: "", tagline: null, specialties: [], industries: [], logo: null } } } }));
+    it("is written as stated, with its subdomain, confirmed by the profile, and no search runs", async () => {
+      const c = olo();
+      const db = dbWith({ clients: [c], sprout_profiles: profiles() });
+      deps.listBrandPosts = fail("the post read");
+      deps.searchWeb = fail("the web search");
+      deps.siteReader = fail("the site reader") as never;
+      const rows = withPage("https://uproar.moburst.com/");
+      const out = await STEPS.website.run(db, c, ctx({ rows }));
+      expect(out).toMatchObject({ status: "done", result: { website: "https://uproar.moburst.com/", confirmed_by: "profile_website", written: ["website_url"] } });
+      expect(c.website_url).toBe("https://uproar.moburst.com/");
+      expect(c.field_sources.website_url).toMatchObject({ by: "lifecycle" });
+    });
+    it("keeps the path it states", async () => {
+      const c = olo();
+      deps.listBrandPosts = fail("the post read");
+      const out = await STEPS.website.run(dbWith({ clients: [c], sprout_profiles: profiles() }), c, ctx({ rows: withPage("https://www.moburst.com/services/organic/podcast-booking/") }));
+      expect(out).toMatchObject({ status: "done", result: { website: "https://www.moburst.com/services/organic/podcast-booking/", confirmed_by: "profile_website" } });
+      expect(c.website_url).toBe("https://www.moburst.com/services/organic/podcast-booking/");
+    });
+    it("never replaces a person's website, and ignores a social profile URL", async () => {
+      const kept = olo({ website_url: "https://olo-person.example", field_sources: person("website_url") });
+      deps.listBrandPosts = fail("the post read");
+      expect(await STEPS.website.run(dbWith({ clients: [kept], sprout_profiles: profiles() }), kept, ctx({ rows: withPage("https://uproar.moburst.com/") }))).toEqual({ status: "done", result: { kept: true } });
+      expect(kept.website_url).toBe("https://olo-person.example");
+      expect(await STEPS.website.inputs(dbWith({ sprout_profiles: profiles() }), kept, withPage("https://uproar.moburst.com/"))).toBeNull();
+      // A social profile is not a website: the posts are searched as before.
+      const c = olo();
+      deps.listBrandPosts = (async () => [{ text: "See https://partner.example", created_time: T, perma_link: null, profile_id: "7" }]) as never;
+      deps.siteReader = site({}) as never;
+      deps.searchWeb = async () => [];
+      const out = await STEPS.website.run(dbWith({ clients: [c], sprout_profiles: profiles() }), c, ctx({ rows: withPage("https://www.instagram.com/olo.hq") }));
+      expect(out).toMatchObject({ status: "waiting", reason: "website" });
+      expect(c.website_url).toBeNull();
+    });
+    it("changes the inputs key when the page's stated website appears", async () => {
+      const db = dbWith({ sprout_profiles: profiles() });
+      const before = await STEPS.website.inputs(db, olo(), withPage(null));
+      const after = await STEPS.website.inputs(db, olo(), withPage("https://uproar.moburst.com/"));
+      expect(before).toBe("profiles:7,8|name:olo");
+      expect(after).not.toBe(before);
+      expect(after).toContain("uproar.moburst.com");
+      expect(await STEPS.website.inputs(db, olo(), withPage("https://www.instagram.com/olo.hq"))).toBe(before);
+    });
+  });
   it("waits 7 days when no linked site is confirmed", async () => {
     const c = olo();
     deps.listBrandPosts = (async () => [{ text: "See https://partner.example", created_time: T, perma_link: null, profile_id: "7" }]) as never;

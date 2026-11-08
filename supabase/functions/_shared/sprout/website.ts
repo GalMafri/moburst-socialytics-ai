@@ -4,14 +4,16 @@
 // 2026-11-02-sprout-auto-onboarding-design.md, section 4). Sprout's profile
 // list has no website, so the search reads the links in the brand's posts
 // of the last 90 days: each link followed through its redirects, and
-// counted under the registrable domain it lands on (app.olo.com is olo.com,
-// net/domains.ts), most-linked first, and links to a shared platform (a
+// counted under the host it lands on (www dropped: shop.olo.com stays
+// shop.olo.com), most-linked first, and links to a shared platform (a
 // social network, store, podcast host, press-release site, site builder:
 // net/domains.ts SHARED_PLATFORMS) never counted. A domain is accepted only
 // on an exact fact: its homepage links to one of the brand's profiles, its
 // registered name is one of the brand's names (nameLabels), or its
-// og:site_name is the brand name. Up to three domains are tried, each at its
-// registrable domain's homepage. The weekly onboarding job and the
+// og:site_name is the brand name. Up to three hosts are tried, each at its own
+// homepage first and then, when different, its registrable domain's
+// (net/domains.ts: olo.com for shop.olo.com); a subdomain that does not answer
+// is confirmed by nothing but its registrable domain. The weekly onboarding job and the
 // lifecycle's website step run this same search.
 //
 // When the posts confirm none, the lifecycle's website step searches the web
@@ -32,6 +34,7 @@ import { profileKeyOf, siteProfileLinks, type SproutProfile } from "../lifecycle
 import { sameName } from "../lifecycle/names.ts";
 import { registrableDomain, sharedPlatformKind, siteKeyOf } from "../net/domains.ts";
 import { isPubliclyFetchable } from "../net/safeUrl.ts";
+import type { LinkedInPage } from "../apify/linkedinPage.ts";
 import type { Brand } from "./brands.ts";
 
 export type SiteFact = "profile_link" | "domain_name" | "site_name";
@@ -49,6 +52,32 @@ export const MAX_SITES_TRIED = 3;
 export const MAX_LINKS_FOLLOWED = 30;
 
 const hostOf = (url: string) => { try { return new URL(url).hostname.toLowerCase(); } catch { return ""; } };
+/** A link's landing host as the search counts it: lowercase, without www. */
+const siteHost = (url: string) => hostOf(url).replace(/^www\./, "");
+
+/** The addresses to try for a host, in order: the host itself, then its registrable domain when that is a different one. */
+function candidatesOf(host: string): string[] {
+  const domain = registrableDomain(host);
+  return domain && domain !== host ? [host, domain] : [host];
+}
+
+/**
+ * The website a client's LinkedIn page states, exactly as stated (subdomain
+ * and path kept), or null: nothing stated, not an http(s) address, or a
+ * shared platform (a social profile, a link-in-bio page). The page's own
+ * word is the fact, so no homepage is read to confirm it.
+ */
+export function statedWebsite(page: Pick<LinkedInPage, "website"> | null): string | null {
+  const raw = String(page?.website ?? "").trim();
+  if (!raw) return null;
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+  } catch {
+    return null;
+  }
+  return !registrableDomain(raw) || sharedPlatformKind(raw) ? null : raw;
+}
 
 /** Every link in a post's text: with a scheme, or a bare www. address. */
 export function postLinks(text: string | null | undefined): string[] {
@@ -61,12 +90,14 @@ export function postLinks(text: string | null | undefined): string[] {
 }
 
 export interface LinkedDomain {
+  /** The host the links land on, without www ("shop.olo.com", "olo.com"). */
   domain: string;
   links: number;
 }
 
 /**
- * The registrable domains the posts link to, most-linked first (the first
+ * The hosts the posts link to (www dropped, any other subdomain kept: the
+ * site's registrable domain is tried after it, in searchWebsite), most-linked first (the first
  * linked on a tie), where each link lands after its redirects. A link to a
  * shared platform is dropped unread, except a link shortener (lnkd.in and
  * t.co wrap every link on LinkedIn and X), which is followed and dropped
@@ -89,7 +120,7 @@ export async function linkedDomains(posts: Array<{ text?: string | null }>, read
   for (const url of occurrences) {
     const shortened = sharedPlatformKind(url) === "shortener";
     const at = landed.get(url) ?? (shortened ? null : url);
-    const domain = at && !sharedPlatformKind(at) ? registrableDomain(at) : null;
+    const domain = at && !sharedPlatformKind(at) && registrableDomain(at) ? siteHost(at) : null;
     if (domain) counts.set(domain, (counts.get(domain) ?? 0) + 1);
   }
   return [...counts.entries()].map(([domain, links]) => ({ domain, links })).sort((a, b) => b.links - a.links);
@@ -181,17 +212,22 @@ export interface WebsiteSearch {
 export async function searchWebsite(brand: BrandLike, posts: Array<{ text?: string | null }>, reader: SiteReader): Promise<WebsiteSearch> {
   const domains = await linkedDomains(posts, reader);
   const tried: WebsiteSearch["tried"] = [];
-  for (const { domain } of domains.slice(0, MAX_SITES_TRIED)) {
-    const page = await reader.homepage(`https://${domain}`).catch(() => null);
-    const fact = confirmingFact(brand, domain, page?.html ?? null, page ? hostOf(page.url) : null);
-    tried.push({ domain, read: !!page, fact });
-    if (!fact) continue;
-    // The homepage's address after its redirects, unless they led onto a shared platform (a store, a link page): then the domain itself.
-    let website = `https://${domain}`;
-    try {
-      if (page && !sharedPlatformKind(page.url)) website = new URL(page.url).origin;
-    } catch { /* the domain itself */ }
-    return { website, confirmed_by: fact, most_linked: domains[0].domain, domains, tried, site_profiles: page ? siteProfileLinks(page.html) : [] };
+  for (const { domain: host } of domains.slice(0, MAX_SITES_TRIED)) {
+    const candidates = candidatesOf(host);
+    for (const domain of candidates) {
+      if (tried.some((t) => t.domain === domain)) continue;
+      const page = await reader.homepage(`https://${domain}`).catch(() => null);
+      // A subdomain that does not answer is not the site: its name alone (the registered name is the same for every subdomain) leaves the registrable domain to confirm.
+      const fact = !page && domain !== candidates[candidates.length - 1] ? null : confirmingFact(brand, domain, page?.html ?? null, page ? hostOf(page.url) : null);
+      tried.push({ domain, read: !!page, fact });
+      if (!fact) continue;
+      // The homepage's address after its redirects, unless they led onto a shared platform (a store, a link page): then the address itself.
+      let website = `https://${domain}`;
+      try {
+        if (page && !sharedPlatformKind(page.url)) website = new URL(page.url).origin;
+      } catch { /* the address itself */ }
+      return { website, confirmed_by: fact, most_linked: domains[0].domain, domains, tried, site_profiles: page ? siteProfileLinks(page.html) : [] };
+    }
   }
   return { website: null, confirmed_by: null, most_linked: domains[0]?.domain ?? null, domains, tried, site_profiles: [] };
 }
@@ -233,25 +269,32 @@ export async function searchWebsiteByName(brand: BrandLike, engine: SearchEngine
   const queries = nameQueries(brand.name, brand.profiles.map((p) => p.native_name));
   const tried: NameSearch["tried"] = [];
   const asked: string[] = [];
+  /** The hosts looked at: each counts once against the cap, whether its own homepage or its registrable domain's answered. */
+  const sites = new Set<string>();
   const keys = new Set(brand.profiles.map((p: SproutProfile) => profileKeyOf(p)).filter(Boolean) as string[]);
   for (const q of queries) {
     asked.push(q);
     const urls = await engine.search(q).catch(() => [] as string[]);
     for (const url of urls) {
-      if (tried.length >= MAX_SEARCHED_SITES) break;
-      const domain = registrableDomain(url);
-      if (!domain || sharedPlatformKind(url) || skip.has(domain) || tried.some((t) => t.domain === domain)) continue;
-      const page = await reader.homepage(`https://${domain}`).catch(() => null);
-      const linked = !!page && siteProfileLinks(page.html).some((k) => keys.has(k));
-      tried.push({ domain, read: !!page, linked });
-      if (!linked) continue;
-      let website = `https://${domain}`;
-      try {
-        if (page && !sharedPlatformKind(page.url)) website = new URL(page.url).origin;
-      } catch { /* the domain itself */ }
-      return { website, confirmed_by: "profile_link", queries: asked, tried, site_profiles: siteProfileLinks(page!.html) };
+      if (sites.size >= MAX_SEARCHED_SITES) break;
+      const host = siteHost(url);
+      const registrable = registrableDomain(url);
+      if (!host || !registrable || sharedPlatformKind(url) || sites.has(host) || skip.has(host) || skip.has(registrable)) continue;
+      sites.add(host);
+      for (const domain of candidatesOf(host)) {
+        if (tried.some((t) => t.domain === domain)) continue;
+        const page = await reader.homepage(`https://${domain}`).catch(() => null);
+        const linked = !!page && siteProfileLinks(page.html).some((k) => keys.has(k));
+        tried.push({ domain, read: !!page, linked });
+        if (!linked) continue;
+        let website = `https://${domain}`;
+        try {
+          if (page && !sharedPlatformKind(page.url)) website = new URL(page.url).origin;
+        } catch { /* the address itself */ }
+        return { website, confirmed_by: "profile_link", queries: asked, tried, site_profiles: siteProfileLinks(page!.html) };
+      }
     }
-    if (tried.length >= MAX_SEARCHED_SITES) break;
+    if (sites.size >= MAX_SEARCHED_SITES) break;
   }
   return { website: null, confirmed_by: null, queries: asked, tried, site_profiles: [] };
 }

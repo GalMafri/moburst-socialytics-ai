@@ -224,7 +224,7 @@ describe("the job with Sprout's groups", () => {
     const db = world();
     const report = await sproutOnboarding(db, groupedDeps(), { dryRun: false });
     const olo = report.results.find((r) => r.key === "group:11")!;
-    expect(olo).toMatchObject({ brand: "Olo", decision: "created", group: { id: "11", name: "Olo" }, website: { website: "https://www.olo.com", confirmed_by: "domain_name", most_linked: "olo.com" } });
+    expect(olo).toMatchObject({ brand: "Olo", decision: "created", group: { id: "11", name: "Olo" }, website: { website: "https://www.olo.com", confirmed_by: "domain_name", most_linked: "app.olo.com" } });
     const made = db.tables.clients.find((c) => c.id === olo.client_id)!;
     expect(made).toMatchObject({ name: "Olo", website_url: "https://www.olo.com", origin: { brand: "Olo", profile_ids: [7001, 7002, 7003] } });
     // The loose "Olo" profile matches the client this run made, so it is not made twice.

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { confirmingFact, domainLabel, linkedDomains, MAX_NAME_SEARCHES, nameLabels, nameQueries, postLinks, searchWebsite, searchWebsiteByName, siteNameOf, webReader, websiteJoins, type SiteReader } from "./website";
+import { confirmingFact, domainLabel, linkedDomains, MAX_NAME_SEARCHES, nameLabels, nameQueries, postLinks, searchWebsite, searchWebsiteByName, siteNameOf, statedWebsite, webReader, websiteJoins, type SiteReader } from "./website";
 import { groupBrands } from "./brands";
 import type { SproutProfile } from "../lifecycle/accounts";
 
@@ -47,22 +47,53 @@ describe("the links in a brand's posts", () => {
 
 describe("judging the registrable domain (the 2 Nov dry run: app.olo.com 7 times, nothing confirmed)", () => {
   const OLO_GROUP = { ...groupBrands([{ ...p("7001", "Olo - Skip the Line", "olo", "facebook"), groups: ["11"] }, { ...p("7002", "Olo App | Food Ordering", "oloapp", "fb_instagram_account"), groups: ["11"] }], [{ id: "11", name: "Olo" }])[0] };
-  it("counts every subdomain of a site as the site, and never a shared platform", async () => {
+  it("counts each landing host (without www) on its own, and never a shared platform", async () => {
     const posts = [
       ...Array.from({ length: 7 }, (_, i) => post(`Order at https://app.olo.com/r/${i}`)), post("https://www.olo.com"),
       post("https://www.einpresswire.com/article/1 https://podcasts.apple.com/podcast/olo https://anchor.fm/olo https://olo.myshopify.com https://linktr.ee/olo"),
       post("https://bit.ly/press"),
     ];
     const r = reader({ "https://bit.ly/press": "https://www.prnewswire.com/news/olo" });
-    expect(await linkedDomains(posts, r)).toEqual([{ domain: "olo.com", links: 8 }]);
+    expect(await linkedDomains(posts, r)).toEqual([{ domain: "app.olo.com", links: 7 }, { domain: "olo.com", links: 1 }]);
     // Shared platforms are never followed, only link shorteners are.
     expect(r.resolved.some((u) => /einpresswire|apple|anchor|myshopify|linktr/.test(u))).toBe(false);
   });
-  it("tries the registrable domain's homepage and confirms it by the brand's own name", async () => {
+  it("tries the full host's homepage first, then the registrable domain's, and confirms it by the brand's own name", async () => {
     const r = reader({}, { "olo.com": "<p>Olo</p>" });
     const out = await searchWebsite(OLO_GROUP, Array.from({ length: 7 }, () => post("https://app.olo.com/order")), r);
-    expect(r.read).toEqual(["https://olo.com"]);
-    expect(out).toMatchObject({ website: "https://www.olo.com", confirmed_by: "domain_name", most_linked: "olo.com" });
+    expect(r.read).toEqual(["https://app.olo.com", "https://olo.com"]);
+    expect(out).toMatchObject({ website: "https://www.olo.com", confirmed_by: "domain_name", most_linked: "app.olo.com" });
+  });
+  it("counts shop.olo.com as shop.olo.com, tries it, then olo.com, and keeps the first that confirms", async () => {
+    expect(await linkedDomains([post("https://shop.olo.com/a https://www.olo.com/b https://shop.olo.com/c")], reader())).toEqual([{ domain: "shop.olo.com", links: 2 }, { domain: "olo.com", links: 1 }]);
+    const own = reader({}, { "shop.olo.com": "<p>Olo shop</p>", "olo.com": "<p>Olo</p>" });
+    const hit = await searchWebsite(OLO_GROUP, [post("https://shop.olo.com/x")], own);
+    expect(own.read).toEqual(["https://shop.olo.com"]);
+    expect(hit).toMatchObject({ website: "https://www.shop.olo.com", confirmed_by: "domain_name" });
+    // The host does not confirm (it is not read), the registrable domain does.
+    const fallback = reader({}, { "olo.com": "<p>Olo</p>" });
+    const out = await searchWebsite(OLO_GROUP, [post("https://shop.olo.com/x")], fallback);
+    expect(fallback.read).toEqual(["https://shop.olo.com", "https://olo.com"]);
+    expect(out.tried).toEqual([{ domain: "shop.olo.com", read: false, fact: null }, { domain: "olo.com", read: true, fact: "domain_name" }]);
+    expect(out).toMatchObject({ website: "https://www.olo.com", confirmed_by: "domain_name" });
+  });
+  it("searches by name the same way: the host first, then its registrable domain", async () => {
+    const link = `<a href="https://www.instagram.com/oloapp/">ig</a>`;
+    const r = reader({}, { "olo.com": link });
+    const engine = { search: async () => ["https://shop.olo.com/menu"] };
+    const out = await searchWebsiteByName(OLO_GROUP, engine, r);
+    expect(r.read).toEqual(["https://shop.olo.com", "https://olo.com"]);
+    expect(out).toMatchObject({ website: "https://www.olo.com", confirmed_by: "profile_link" });
+  });
+  it("states a LinkedIn page's website with its subdomain and path, and ignores a social profile or a non-web address", () => {
+    expect(statedWebsite({ website: "https://uproar.moburst.com/" } as never)).toBe("https://uproar.moburst.com/");
+    expect(statedWebsite({ website: "https://www.moburst.com/services/organic/podcast-booking/" } as never)).toBe("https://www.moburst.com/services/organic/podcast-booking/");
+    expect(statedWebsite({ website: "https://www.instagram.com/olo.hq" } as never)).toBeNull();
+    expect(statedWebsite({ website: "https://linktr.ee/olo" } as never)).toBeNull();
+    expect(statedWebsite({ website: "mailto:hi@olo.com" } as never)).toBeNull();
+    expect(statedWebsite({ website: "" } as never)).toBeNull();
+    expect(statedWebsite({ website: null } as never)).toBeNull();
+    expect(statedWebsite(null)).toBeNull();
   });
   it("names a domain by its registrable label", () => {
     expect(domainLabel("app.olo.com")).toBe("olo");

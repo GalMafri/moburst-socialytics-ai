@@ -32,7 +32,7 @@ import { liveRefsIO, readChoices, refreshReferences } from "../brand-references/
 import { defaultSproutCustomerId } from "../sprout/customer.ts";
 import { listCustomerProfiles } from "../sprout/profiles.ts";
 import { listBrandPosts, MAX_POST_PAGES, POSTS_YEAR_DAYS } from "../sprout/posts.ts";
-import { searchWebsite, searchWebsiteByName, webReader } from "../sprout/website.ts";
+import { searchWebsite, searchWebsiteByName, statedWebsite, webReader } from "../sprout/website.ts";
 import { fetchSiteHtml, logoOnPage, normalizeWebsite, openaiKeyFor, ResearchError, researchBrand } from "../brand/research.ts";
 import { anthropicKey, briefFromStrategyDoc, derivePillars, isGenericPillars, PillarsError, type PillarClient, type PillarPost } from "../brand/pillars.ts";
 import { fetchSiteText, identifyCompetitors, IdentifyError } from "../competitive/identify.ts";
@@ -42,7 +42,7 @@ import { advanceSetupOnServer, resetTracking, rivalIqApi, SetupError, syncTracke
 import { LANDSCAPE_MISSING } from "../competitive/landscapeCheck.ts";
 import { scrapeMarkdown, searchWeb } from "../net/firecrawl.ts";
 import { FollowFailure } from "../competitive/rivaliqFollowFailure.ts";
-import { followerMarkets, runSocialRead, socialResult, socialVersionKey, topPostsText } from "./socialRead.ts";
+import { followerMarkets, pageOf, runSocialRead, socialResult, socialVersionKey, topPostsText } from "./socialRead.ts";
 import { liveSocialIO } from "./socialIO.ts";
 import { matchProfiles, platformsOf, profileKeyOf, profileListKey, siteProfileLinks, type SproutProfile } from "./accounts.ts";
 import { libraryPaths, MAX_REFS, pickBackground, placementFor } from "./designSettings.ts";
@@ -269,7 +269,8 @@ export const STEPS: Record<string, StepDef> = {
   // one more post; then, at creation, when the name or profiles change and
   // monthly while there is none, a web search by name that counts only a
   // site linking to one of the client's profiles. Looked at again every 7
-  // days as posts arrive. The website it confirms is brand_read's input; a
+  // days as posts arrive. A website the client's LinkedIn page states comes
+  // first, as stated (subdomain and path kept) and with no search. The website it confirms is brand_read's input; a
   // website the client has, or one a person set, is never replaced.
   website: {
     policy: { recheckDays: 7 },
@@ -277,10 +278,18 @@ export const STEPS: Record<string, StepDef> = {
       if (siteKey(client.website_url) || !lifecycleMayWrite(client.field_sources, "website_url")) return null;
       const ids = (await activeProfiles(db, client.id)).map((p) => p.id);
       const links = ((socialResult(rows)?.instagram?.bio?.links ?? []) as string[]).join(" ");
-      return ids.length ? `profiles:${ids.join(",")}|name:${normName(client.name)}${links ? `|bio:${textHash(links)}` : ""}` : null;
+      const stated = siteKey(statedWebsite(pageOf(socialResult(rows))));
+      return ids.length ? `profiles:${ids.join(",")}|name:${normName(client.name)}${links ? `|bio:${textHash(links)}` : ""}${stated ? `|page:${stated}` : ""}` : null;
     },
     async run(db, client, { previous, rows }) {
       if (siteKey(client.website_url) || !lifecycleMayWrite(client.field_sources, "website_url")) return { status: "done", result: { kept: true } };
+      // The website the client's LinkedIn page states is the first evidence: it is kept as stated, with no search.
+      const stated = statedWebsite(pageOf(socialResult(rows)));
+      if (stated) {
+        const at = deps.now();
+        const written = await writeClientFields(db, client.id, { website_url: stated });
+        return { status: "done", result: { website: stated, confirmed_by: "profile_website", linked_network: "linkedin_company", found_at: at.toISOString(), written: written.written, kept: written.skipped } };
+      }
       const profiles = await activeProfiles(db, client.id);
       if (!profiles.length) return { status: "waiting", reason: "social_accounts" };
       const now = deps.now();
