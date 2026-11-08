@@ -59,6 +59,7 @@ describe("where the product's values came from, in words", () => {
     expect(locationSourceWords("schema.org")).toBe("the business address the website publishes");
     expect(locationSourceWords("country")).toMatch(/country/);
     expect(locationSourceWords("something_else")).toBe("");
+    expect(locationSourceWords("agency")).toBe("the time zone most of the agency's clients use, until the client's own location is found");
     expect(timeZoneName("America/New_York")).toBe("Eastern Time (New York)");
     expect(timeZoneName("UTC")).toBe("UTC");
   });

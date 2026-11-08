@@ -450,6 +450,7 @@ const LOCATION_SOURCES: Record<string, string> = {
   post_text: "an address in the client's posts",
   post_read: "where the client's posts say the business is based",
   followers: "where most of the client's followers are",
+  agency: "the time zone most of the agency's clients use, until the client's own location is found",
 };
 
 /** Where the client's time zone was read from (clients.location.source), as words. */
@@ -457,12 +458,13 @@ export function locationSourceWords(source: string | null | undefined): string {
   return LOCATION_SOURCES[String(source ?? "")] ?? "";
 }
 
-const LOCAL_PROFILES: Record<string, string> = { google_my_business: "Google Business Profile", yelp: "Yelp page", tripadvisor: "Tripadvisor page" };
+/** The profiles an address can come from: a local business profile, or the headquarters on the client's LinkedIn page. */
+const ADDRESS_PROFILES: Record<string, string> = { google_my_business: "Google Business Profile", yelp: "Yelp page", tripadvisor: "Tripadvisor page", linkedin_page: "LinkedIn page" };
 
 /** Where the client's time zone was read from, with the profile or the followers' city it names. */
 export function locationOrigin(location: { source?: string | null; via?: string | null; locality?: string | null } | null | undefined): string {
   const source = String(location?.source ?? "");
-  if (source === "profile_address" && LOCAL_PROFILES[String(location?.via ?? "")]) return `the address on the client's ${LOCAL_PROFILES[String(location!.via)]}`;
+  if (source === "profile_address" && ADDRESS_PROFILES[String(location?.via ?? "")]) return `the address on the client's ${ADDRESS_PROFILES[String(location!.via)]}`;
   if (source === "followers" && location?.locality) return `${LOCATION_SOURCES.followers} (${location.locality})`;
   return locationSourceWords(source);
 }
@@ -534,10 +536,13 @@ export function onboardingFacts(client: Record<string, unknown> | null | undefin
   // The logo.
   let logo = "";
   const logoSource = sourceEntry(fs, "logo_url");
-  if (logoSource.by === "lifecycle" && logoSource.from.startsWith("profile_picture:")) {
-    const network = platformName(logoSource.from.slice("profile_picture:".length)) || "social";
+  const logoFrom = logoSource.by !== "lifecycle" ? ""
+    : logoSource.from.startsWith("profile_picture:") ? `the client's ${platformName(logoSource.from.slice("profile_picture:".length)) || "social"} profile picture`
+    : logoSource.from === "linkedin_page" ? "the logo on the client's LinkedIn page"
+    : "";
+  if (logoFrom) {
     const on = formatDate(logoSource.at);
-    logo = `From the client's ${network} profile picture${on ? `, ${on}` : ""}. ${hasSite ? "A logo you upload is kept." : "The website's logo replaces it once the website is found; a logo you upload is kept."}`;
+    logo = `From ${logoFrom}${on ? `, ${on}` : ""}. ${hasSite ? "A logo you upload is kept." : "The website's logo replaces it once the website is found; a logo you upload is kept."}`;
   }
 
   // The time zone.
