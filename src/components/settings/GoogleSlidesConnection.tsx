@@ -8,6 +8,7 @@ import { Loading } from "@/components/ui/loading";
 import { LoadRetry } from "@/components/ui/load-error";
 import { formatDate } from "@/lib/display";
 import { invokeResendable, sendQuietly } from "@/lib/quietSend";
+import { openSignIn } from "@/lib/signInTab";
 
 /** The one account strategy decks are made in and shared from. */
 const DECK_ACCOUNT = "ai@moburst.com";
@@ -26,6 +27,8 @@ export function GoogleSlidesConnection() {
   const [busy, setBusy] = useState(false);
   /** A sign-in that has not opened yet; the connection below is as it was. */
   const [notStarted, setNotStarted] = useState(false);
+  /** The sign-in is open in its own tab (signInTab.ts). */
+  const [opened, setOpened] = useState(false);
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["google-status"],
     queryFn: async (): Promise<Status> => {
@@ -38,19 +41,23 @@ export function GoogleSlidesConnection() {
   const connect = async () => {
     setBusy(true);
     setNotStarted(false);
+    setOpened(false);
     // Each start replaces the one before, so asking again is harmless.
-    const { data: started, error: startError } = await sendQuietly(
-      () => supabase.functions.invoke("google-auth", { body: { action: "start" } }),
-      { again: (e) => invokeResendable(e, { idempotent: true }) },
-    );
-    if (startError || !started?.authorize_url) {
-      console.warn("[google sign-in] not started yet", startError ?? started);
-      setBusy(false);
-      setNotStarted(true);
-      return;
-    }
-    // Leaves the app. Google sends the browser back to /settings.
-    window.location.href = started.authorize_url as string;
+    const ok = await openSignIn(async () => {
+      const { data: started, error: startError } = await sendQuietly(
+        () => supabase.functions.invoke("google-auth", { body: { action: "start" } }),
+        { again: (e) => invokeResendable(e, { idempotent: true }) },
+      );
+      if (startError || !started?.authorize_url) {
+        console.warn("[google sign-in] not started yet", startError ?? started);
+        return null;
+      }
+      return started.authorize_url as string;
+    });
+    setBusy(false);
+    // Google sends the new tab back to /settings; this panel checks again when the person comes back.
+    if (ok) setOpened(true);
+    else setNotStarted(true);
   };
 
   const connected = !!data?.connected;
@@ -90,6 +97,7 @@ export function GoogleSlidesConnection() {
         </div>
       )}
       {notStarted && <p role="status" className="t-secondary">The sign-in has not opened yet. The connection above is unchanged.</p>}
+      {opened && !connected && <p role="status" className="t-secondary">Google's sign-in is open in a new tab. Sign in as {DECK_ACCOUNT} there; this panel updates when you come back.</p>}
     </Section>
   );
 }
