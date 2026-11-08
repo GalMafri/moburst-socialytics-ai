@@ -499,6 +499,7 @@ function sourceEntry(fieldSources: unknown, field: string): { by: string; at: st
 const SITE_FOUND: Record<string, string> = {
   domain_name: "the site's domain is the brand's name",
   site_name: "the site gives the brand's name as its own",
+  profile_website: "the client's LinkedIn page lists it as its website",
 };
 
 /**

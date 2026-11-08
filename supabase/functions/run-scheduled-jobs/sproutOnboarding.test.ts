@@ -191,6 +191,18 @@ describe("the Sprout onboarding job", () => {
     expect(d.postReads.flat()).not.toContain("8001");
   });
 
+  it("totals an existing client's links across its subdomains, so a third-party site cannot take the top spot", async () => {
+    const db = world();
+    const hiring = p("9200", "Hiring Co", "hiringco", "facebook");
+    const texts = ["https://careers.moburst.com/a https://careers.moburst.com/b", "https://jobs.moburst.com/c https://jobs.moburst.com/d", "https://partner.example/x https://partner.example/y https://partner.example/z"];
+    const d = deps({
+      profiles: async () => [...LISTED, hiring],
+      posts: async (ids: string[]): Promise<SproutPost[]> => ids.includes("9200") ? texts.map((text) => ({ text, created_time: NOW.toISOString(), perma_link: null, profile_id: "9200" })) : [],
+    });
+    const report = await sproutOnboarding(db, d, { dryRun: true, only: ["9200"] });
+    expect(report.results.map((r) => [r.brand, r.decision])).toEqual([["Hiring", "client_website"]]);
+  });
+
   it("in a run's rest, still leaves a brand its website ties to a client's brand outside the rest", async () => {
     const db = world();
     db.tables.sprout_profiles.push({ id: "sp9", client_id: "olo-real", sprout_profile_id: 7001, is_active: true });

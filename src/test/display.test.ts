@@ -195,6 +195,7 @@ describe("what the product read from a client's social profiles (onboarding from
     expect(found("search_profile_link", "linkedin_company")).toBe("Found on Nov 3, 2026: the site links to the client's LinkedIn.");
     expect(found("bio_domain_name")).toBe("Found on Nov 3, 2026: the client's Instagram bio links to it.");
     expect(found("domain_name")).toBe("Found on Nov 3, 2026: the site's domain is the brand's name.");
+    expect(found("profile_website", "linkedin_company")).toBe("Found on Nov 3, 2026: the client's LinkedIn page lists it as its website.");
     expect(onboardingFacts(olo({ website_url: "https://www.olo.com", field_sources: { website_url: { by: "person" } } }), []).website).toBe("");
   });
   it("says which profile picture the logo is, and that the website's or an uploaded logo comes first", () => {

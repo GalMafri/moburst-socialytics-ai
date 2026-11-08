@@ -64,18 +64,29 @@ describe("judging the registrable domain (the 2 Nov dry run: app.olo.com 7 times
     expect(r.read).toEqual(["https://app.olo.com", "https://olo.com"]);
     expect(out).toMatchObject({ website: "https://www.olo.com", confirmed_by: "domain_name", most_linked: "app.olo.com" });
   });
-  it("counts shop.olo.com as shop.olo.com, tries it, then olo.com, and keeps the first that confirms", async () => {
+  it("counts shop.olo.com as shop.olo.com and tries it before olo.com", async () => {
     expect(await linkedDomains([post("https://shop.olo.com/a https://www.olo.com/b https://shop.olo.com/c")], reader())).toEqual([{ domain: "shop.olo.com", links: 2 }, { domain: "olo.com", links: 1 }]);
-    const own = reader({}, { "shop.olo.com": "<p>Olo shop</p>", "olo.com": "<p>Olo</p>" });
-    const hit = await searchWebsite(OLO_GROUP, [post("https://shop.olo.com/x")], own);
-    expect(own.read).toEqual(["https://shop.olo.com"]);
-    expect(hit).toMatchObject({ website: "https://www.shop.olo.com", confirmed_by: "domain_name" });
-    // The host does not confirm (it is not read), the registrable domain does.
     const fallback = reader({}, { "olo.com": "<p>Olo</p>" });
     const out = await searchWebsite(OLO_GROUP, [post("https://shop.olo.com/x")], fallback);
     expect(fallback.read).toEqual(["https://shop.olo.com", "https://olo.com"]);
     expect(out.tried).toEqual([{ domain: "shop.olo.com", read: false, fact: null }, { domain: "olo.com", read: true, fact: "domain_name" }]);
     expect(out).toMatchObject({ website: "https://www.olo.com", confirmed_by: "domain_name" });
+  });
+  it("never takes a brand's own subdomain for the site on its name alone, even when the subdomain answers", async () => {
+    // app.olo.com and shop.olo.com answer, and only the registered name (olo) matches: the registrable domain is the site.
+    const r = reader({}, { "app.olo.com": "<p>Order</p>", "shop.olo.com": "<p>Shop</p>", "olo.com": "<p>Olo</p>" });
+    const out = await searchWebsite(OLO_GROUP, [post("https://app.olo.com/a https://app.olo.com/b https://shop.olo.com/c")], r);
+    expect(r.read).toEqual(["https://app.olo.com", "https://olo.com"]);
+    expect(out.tried).toEqual([{ domain: "app.olo.com", read: true, fact: null }, { domain: "olo.com", read: true, fact: "domain_name" }]);
+    expect(out).toMatchObject({ website: "https://www.olo.com", confirmed_by: "domain_name" });
+  });
+  it("confirms a subdomain as itself by a fact from its own page: a link to a profile or its site name", async () => {
+    const uproar = groupBrands([p("21", "Uproar", "uproar", "linkedin_company")])[0];
+    const linked = reader({}, { "uproar.moburst.com": `<a href="https://www.linkedin.com/company/uproar/">in</a>`, "moburst.com": "<p>Moburst</p>" });
+    expect(await searchWebsite(uproar, [post("https://uproar.moburst.com/x")], linked)).toMatchObject({ website: "https://www.uproar.moburst.com", confirmed_by: "profile_link" });
+    expect(linked.read).toEqual(["https://uproar.moburst.com"]);
+    const named = reader({}, { "app.example.com": `<meta property="og:site_name" content="Uproar">` });
+    expect(await searchWebsite(uproar, [post("https://app.example.com/x")], named)).toMatchObject({ website: "https://www.app.example.com", confirmed_by: "site_name" });
   });
   it("searches by name the same way: the host first, then its registrable domain", async () => {
     const link = `<a href="https://www.instagram.com/oloapp/">ig</a>`;
@@ -88,6 +99,8 @@ describe("judging the registrable domain (the 2 Nov dry run: app.olo.com 7 times
   it("states a LinkedIn page's website with its subdomain and path, and ignores a social profile or a non-web address", () => {
     expect(statedWebsite({ website: "https://uproar.moburst.com/" } as never)).toBe("https://uproar.moburst.com/");
     expect(statedWebsite({ website: "https://www.moburst.com/services/organic/podcast-booking/" } as never)).toBe("https://www.moburst.com/services/organic/podcast-booking/");
+    expect(statedWebsite({ website: "https://www.moburst.com/podcast/?utm_source=linkedin&x=1#top" } as never)).toBe("https://www.moburst.com/podcast/");
+    expect(statedWebsite({ website: "https://uproar.moburst.com?utm_source=linkedin" } as never)).toBe("https://uproar.moburst.com/");
     expect(statedWebsite({ website: "https://www.instagram.com/olo.hq" } as never)).toBeNull();
     expect(statedWebsite({ website: "https://linktr.ee/olo" } as never)).toBeNull();
     expect(statedWebsite({ website: "mailto:hi@olo.com" } as never)).toBeNull();

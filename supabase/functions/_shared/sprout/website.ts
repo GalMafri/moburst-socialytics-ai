@@ -13,14 +13,17 @@
 // og:site_name is the brand name. Up to three hosts are tried, each at its own
 // homepage first and then, when different, its registrable domain's
 // (net/domains.ts: olo.com for shop.olo.com); a subdomain that does not answer
-// is confirmed by nothing but its registrable domain. The weekly onboarding job and the
+// is confirmed as itself only by a fact read from its own page (a profile
+// link or its site name), and by its registered name only as the registrable
+// domain. The weekly onboarding job and the
 // lifecycle's website step run this same search.
 //
 // When the posts confirm none, the lifecycle's website step searches the web
 // for the brand by name (spec: docs/superpowers/specs/2026-11-03-onboarding-
 // complete-design.md, section 4): up to three searches (the name and each
 // distinct handle), shared platforms and the domains the post search tried
-// dropped, three new domains read at most. A searched domain counts only
+// dropped, three new hosts at most (each read at its own homepage, then at its
+// registrable domain's when that is a different one). A searched domain counts only
 // when its homepage links to one of the brand's own profiles: a short name
 // finds other companies, so a name match alone never does.
 //
@@ -63,20 +66,23 @@ function candidatesOf(host: string): string[] {
 
 /**
  * The website a client's LinkedIn page states, exactly as stated (subdomain
- * and path kept), or null: nothing stated, not an http(s) address, or a
+ * and path kept; a query or fragment dropped), or null: nothing stated, not an http(s) address, or a
  * shared platform (a social profile, a link-in-bio page). The page's own
  * word is the fact, so no homepage is read to confirm it.
  */
 export function statedWebsite(page: Pick<LinkedInPage, "website"> | null): string | null {
   const raw = String(page?.website ?? "").trim();
   if (!raw) return null;
+  let u: URL;
   try {
-    const u = new URL(raw);
-    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    u = new URL(raw);
   } catch {
     return null;
   }
-  return !registrableDomain(raw) || sharedPlatformKind(raw) ? null : raw;
+  if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+  if (!registrableDomain(raw) || sharedPlatformKind(raw)) return null;
+  // Scheme, host and path as stated; a tracking query or a fragment is not part of the site's address.
+  return `${u.protocol}//${u.host}${u.pathname}`;
 }
 
 /** Every link in a post's text: with a scheme, or a bare www. address. */
@@ -213,12 +219,12 @@ export async function searchWebsite(brand: BrandLike, posts: Array<{ text?: stri
   const domains = await linkedDomains(posts, reader);
   const tried: WebsiteSearch["tried"] = [];
   for (const { domain: host } of domains.slice(0, MAX_SITES_TRIED)) {
-    const candidates = candidatesOf(host);
-    for (const domain of candidates) {
+    for (const domain of candidatesOf(host)) {
       if (tried.some((t) => t.domain === domain)) continue;
       const page = await reader.homepage(`https://${domain}`).catch(() => null);
-      // A subdomain that does not answer is not the site: its name alone (the registered name is the same for every subdomain) leaves the registrable domain to confirm.
-      const fact = !page && domain !== candidates[candidates.length - 1] ? null : confirmingFact(brand, domain, page?.html ?? null, page ? hostOf(page.url) : null);
+      // A subdomain is the site itself only by a fact read from its own page (a link to a profile, its site name). The brand's name as the registered name holds for every subdomain of the domain, so it confirms the registrable domain only.
+      let fact = confirmingFact(brand, domain, page?.html ?? null, page ? hostOf(page.url) : null);
+      if (fact === "domain_name" && domain !== registrableDomain(domain)) fact = null;
       tried.push({ domain, read: !!page, fact });
       if (!fact) continue;
       // The homepage's address after its redirects, unless they led onto a shared platform (a store, a link page): then the address itself.
