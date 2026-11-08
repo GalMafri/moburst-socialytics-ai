@@ -1,15 +1,17 @@
 // @vitest-environment node
+// Kept outside supabase/functions: a deploy uploads _shared with its tests, and the
+// upload has a size limit (supabase/functions/_shared/packaging.test.ts).
 // The social_read step (spec: docs/superpowers/specs/2026-11-03-onboarding-
 // complete-design.md, sections 1 to 3 and 5), on a client added from Sprout
 // with no website: Olo-shaped, a LinkedIn page and an Instagram account.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fakeDb, writeClientRpc } from "./fakeDb";
-import type { StepRow } from "./policy";
-import type { LinkedInPage } from "../apify/linkedinPage";
+import { fakeDb, writeClientRpc } from "../../../supabase/functions/_shared/lifecycle/fakeDb";
+import type { StepRow } from "../../../supabase/functions/_shared/lifecycle/policy";
+import type { LinkedInPage } from "../../../supabase/functions/_shared/apify/linkedinPage";
 import {
   detectLanguage, evidencePosts, imageSize, languageCounts, multipleLabel, pageFill, pickLogo, pictureMayReplaceLogo, postLanguages, pageOf, runSocialRead, snapshotOf,
   socialVersionKey, statedInPosts, textPosts, toSocialPosts, versionMove, type SocialIO, type Snapshot, type SocialPost,
-} from "./socialRead";
+} from "../../../supabase/functions/_shared/lifecycle/socialRead";
 
 const NOW = new Date("2026-11-03T10:00:00.000Z");
 const DAY = 86_400_000;
@@ -372,7 +374,7 @@ describe("snapshotOf", () => {
     const failed = io({ linkedinPage: async () => ({ state: "failed", run_id: "p10", status: "FAILED" }) });
     const afterFail = await runSocialRead(db, c, { rows: new Map([["social_read", stepRow(old)]]) }, failed.fake);
     expect(pageOf((afterFail as { result: Record<string, unknown> }).result)).toMatchObject({ name: "Olo" });
-    expect((afterFail as { result: { linkedin_page: Record<string, unknown> } }).result.linkedin_page).toMatchObject({ status: "FAILED" });
+    expect((afterFail as { result: Record<string, unknown> }).result.linkedin_page).toMatchObject({ status: "FAILED" });
     const warn = quietWarnings();
     const thrown = io({ linkedinPage: async () => { throw new Error("APIFY_API_TOKEN is not set"); } });
     const afterThrow = await runSocialRead(db, c, { rows: new Map([["social_read", stepRow(old)]]) }, thrown.fake);

@@ -1,8 +1,10 @@
 // @vitest-environment node
+// Kept outside supabase/functions: a deploy uploads _shared with its tests, and the
+// upload has a size limit (supabase/functions/_shared/packaging.test.ts).
 import { describe, expect, it } from "vitest";
-import { confirmingFact, domainLabel, linkedDomains, MAX_NAME_SEARCHES, nameLabels, nameQueries, postLinks, searchWebsite, searchWebsiteByName, siteNameOf, statedWebsite, webReader, websiteJoins, type SiteReader } from "./website";
-import { groupBrands } from "./brands";
-import type { SproutProfile } from "../lifecycle/accounts";
+import { confirmingFact, domainLabel, linkedDomains, MAX_NAME_SEARCHES, nameLabels, nameQueries, postLinks, searchWebsite, searchWebsiteByName, siteNameOf, statedWebsite, webReader, websiteJoins, type SiteReader } from "../../../supabase/functions/_shared/sprout/website";
+import { groupBrands } from "../../../supabase/functions/_shared/sprout/brands";
+import type { SproutProfile } from "../../../supabase/functions/_shared/lifecycle/accounts";
 
 const p = (id: string, name: string, native: string, network: string): SproutProfile => ({ id, name, native_name: native, network_type: network, native_link: "", status: "active" });
 const OLO = groupBrands([p("1", "Olo", "olo", "linkedin_company"), p("2", "Olo", "olo.hq", "fb_instagram_account")])[0];
