@@ -595,6 +595,111 @@ describe("a plain-domain client is unchanged by the parent-page rule", () => {
   });
 });
 
+// Kitcaster on 8 Nov: its posts are mostly about its podcast guests, no pillar
+// stood on them alone, the keywords were thrown away with the pillars and the
+// step's inputs never changed, so it waited for good.
+describe("brief, pillars and keywords from the LinkedIn page", () => {
+  const NOW = "2026-11-08T10:00:00.000Z";
+  const KITCASTER = "https://www.moburst.com/services/organic/podcast-booking/";
+  const ABOUT = "Kitcaster by Moburst is the podcast booking division of Moburst. We book founders, executives and experts on the podcasts their buyers already listen to.";
+  const PAGE = { url: "https://www.linkedin.com/company/kitcaster-by-moburst/", name: "Kitcaster by Moburst", website: KITCASTER, about: ABOUT, tagline: "Strategic podcast booking for B2B leaders", specialties: ["podcast booking"], industries: ["Marketing Services"], logo: null, headquarters: null };
+  const POSTS = [
+    { id: "P1", platform: "LinkedIn", format: "image", date: "2026-10-20", text: "This week's guest: a SaaS founder on hiring", label: null, top: false },
+    { id: "P2", platform: "LinkedIn", format: "image", date: "2026-10-27", text: "Our guest on the Growth Show talks pricing", label: null, top: false },
+  ];
+  const social = (page: Record<string, unknown> | null, over: Record<string, unknown> = {}) => row("social_read", { result: {
+    checked_at: NOW, version: 1, window_days: 90, text_posts: 8, enough: true, posts: POSTS,
+    linkedin_page: page ? { profile_id: "7", url: PAGE.url, key: "7:kitcaster-by-moburst", read_at: NOW, page } : null, ...over,
+  } });
+  const kit = (over: Record<string, unknown> = {}) => client({ id: "c1", name: "Kitcaster by Moburst", website_url: KITCASTER, ...over });
+  const complete = (over: Record<string, unknown> = {}) => kit({ content_pillars: [{ name: "Podcast booking", description: "d" }], social_keywords: ["podcast guesting"], field_sources: { content_pillars: { by: "lifecycle" }, social_keywords: { by: "lifecycle" } }, ...over });
+  const derived = (o: Partial<{ pillars: unknown[]; keywords: string[]; sources: string[]; source: string; brief: string | null }> = {}) =>
+    ({ pillars: [{ name: "Podcast booking", description: "d", rationale: "r" }], keywords: ["podcast guesting"], notes: "", sources: ["social_posts", "linkedin_page"], source: "social_posts", derived_at: NOW, ...o });
+
+  it("keys on the page's text while the client has no pillars and keywords, so a page read runs the step again", async () => {
+    const db = dbWith();
+    const none = await STEPS.brief_pillars.inputs(db, kit(), rowsOf(row("brand_read"), social(null)));
+    const withPage = await STEPS.brief_pillars.inputs(db, kit(), rowsOf(row("brand_read"), social(PAGE)));
+    expect(withPage).toMatch(/\|page:[0-9a-f]{8}$/);
+    expect(withPage!.startsWith(`${none}|page:`)).toBe(true);
+    expect(await STEPS.brief_pillars.inputs(db, kit(), rowsOf(row("brand_read"), social({ ...PAGE, about: `${ABOUT} Since 2017.` })))).not.toBe(withPage);
+    // Keywords alone are not complete: the page still counts.
+    expect(await STEPS.brief_pillars.inputs(db, kit({ social_keywords: ["podcast guesting"] }), rowsOf(row("brand_read"), social(PAGE)))).toMatch(/\|page:[0-9a-f]{8}$/);
+  });
+  it("leaves a complete client's key as it is when a page is read, and the run that completes a client sets off no other", async () => {
+    const db = dbWith();
+    // A client with pillars and keywords from before the page reader: its key has no page, and a page read changes nothing.
+    const before = await STEPS.brief_pillars.inputs(db, complete(), rowsOf(row("brand_read"), social(null)));
+    const ranOn = row("brief_pillars", { inputs_key: before });
+    expect(await STEPS.brief_pillars.inputs(db, complete(), rowsOf(row("brand_read"), ranOn, social(PAGE)))).toBe(before);
+    expect(await STEPS.brief_pillars.inputs(db, complete(), rowsOf(row("brand_read"), ranOn, social({ ...PAGE, about: "Something else entirely, written later on the page." })))).toBe(before);
+    // Kitcaster ran on the page and its run wrote pillars and keywords: the key it ran on stays its key, whatever the page says next.
+    const incomplete = await STEPS.brief_pillars.inputs(db, kit(), rowsOf(row("brand_read"), social(PAGE)));
+    const ran = row("brief_pillars", { status: "waiting", inputs_key: incomplete });
+    expect(await STEPS.brief_pillars.inputs(db, complete(), rowsOf(row("brand_read"), ran, social(PAGE)))).toBe(incomplete);
+    expect(await STEPS.brief_pillars.inputs(db, complete(), rowsOf(row("brand_read"), ran, social({ ...PAGE, about: "Something else entirely, written later on the page." })))).toBe(incomplete);
+  });
+  it("drafts the brief from the page's about text when there is no document and no site text, and reads the page for the pillars", async () => {
+    const c = kit();
+    const db = dbWith({ clients: [c] });
+    deps.now = () => new Date(NOW);
+    deps.anthropicKey = async () => "key";
+    deps.scrapeMarkdown = async () => null;
+    deps.fetchSiteText = async () => "";
+    let given: { evidence?: { brief_text?: string }; opts?: Record<string, unknown> } = {};
+    deps.derivePillars = (async (_db: unknown, evidence: { brief_text: string }, _k: string, opts: Record<string, unknown>) => { given = { evidence, opts }; return derived(); }) as never;
+    const out = await STEPS.brief_pillars.run(db, c, ctx({ rows: rowsOf(row("brand_read"), social(PAGE)) }));
+    expect(c.brief_text).toBe(`Drafted from the LinkedIn page on 2026-11-08:\n\n${ABOUT}`);
+    expect(c.field_sources.brief_text).toMatchObject({ by: "lifecycle", from: "linkedin_page" });
+    expect(out).toMatchObject({ status: "done", result: { brief: "from_page", pillars: "derived", keywords: 1 } });
+    // The page is given once, as the page; no brief is asked of the posts.
+    expect(given.evidence?.brief_text).toBe("");
+    expect(given.opts).toMatchObject({ page: PAGE, posts: POSTS, briefFromPosts: false });
+    // Run again on the same page: the brief it drafted is kept as it is.
+    const again = await STEPS.brief_pillars.run(db, c, ctx({ rows: rowsOf(row("brand_read"), social(PAGE)) }));
+    expect(again).toMatchObject({ status: "done", result: { brief: "from_page", written: ["content_pillars", "pillars_source", "pillars_derived_at", "social_keywords"] } });
+  });
+  it("keeps today's order: the website's text first, the page after it, the posts last", async () => {
+    deps.now = () => new Date(NOW);
+    deps.anthropicKey = async () => "key";
+    // The site has text: the brief is the site's, and the page is still read for the pillars.
+    const site = kit();
+    deps.scrapeMarkdown = async () => ({ markdown: "# Kitcaster books founders, executives and experts on the podcasts their buyers already listen to every week.", title: "Kitcaster" });
+    let opts: Record<string, unknown> = {};
+    deps.derivePillars = (async (_db: unknown, _c: unknown, _k: string, o: Record<string, unknown>) => { opts = o; return derived(); }) as never;
+    expect(await STEPS.brief_pillars.run(dbWith({ clients: [site] }), site, ctx({ rows: rowsOf(row("brand_read"), social(PAGE)) }))).toMatchObject({ result: { brief: "drafted" } });
+    expect(site.brief_text).toMatch(/^Drafted from the website on 2026-11-08:/);
+    expect(opts.page).toEqual(PAGE);
+    // A page with no about text to speak of: the brief comes from the posts.
+    const posts = kit();
+    deps.scrapeMarkdown = async () => null;
+    deps.fetchSiteText = async () => "";
+    deps.derivePillars = (async () => derived({ brief: "Kitcaster books guests on podcasts." })) as never;
+    expect(await STEPS.brief_pillars.run(dbWith({ clients: [posts] }), posts, ctx({ rows: rowsOf(row("brand_read"), social({ ...PAGE, about: "Podcast booking." })) }))).toMatchObject({ result: { brief: "from_posts" } });
+    expect(posts.brief_text).toBe("Drafted from the client's posts on 2026-11-08:\n\nKitcaster books guests on podcasts.");
+  });
+  it("never replaces a brief, pillars or keywords a person set", async () => {
+    const c = kit({ brief_text: "Our brief, written by the account team.", content_pillars: [{ name: "Ours" }], social_keywords: ["ours"], field_sources: person("brief_text", "content_pillars", "social_keywords") });
+    deps.scrapeMarkdown = fail("the scrape");
+    deps.derivePillars = fail("the derivation");
+    expect(await STEPS.brief_pillars.run(dbWith({ clients: [c] }), c, ctx({ rows: rowsOf(row("brand_read"), social(PAGE)) }))).toEqual({ status: "done", result: { brief: "kept", pillars: "kept" } });
+    expect(c).toMatchObject({ brief_text: "Our brief, written by the account team.", content_pillars: [{ name: "Ours" }], social_keywords: ["ours"] });
+  });
+  it("writes the keywords when no pillar stands, then waits for evidence", async () => {
+    const c = kit();
+    const db = dbWith({ clients: [c] });
+    deps.now = () => new Date(NOW);
+    deps.anthropicKey = async () => "key";
+    deps.scrapeMarkdown = async () => ({ markdown: "# Kitcaster books founders, executives and experts on the podcasts their buyers already listen to every week.", title: "Kitcaster" });
+    deps.derivePillars = (async () => derived({ pillars: [], keywords: ["podcast guesting", "b2b podcasts"], sources: ["social_posts", "brief"] })) as never;
+    const out = await STEPS.brief_pillars.run(db, c, ctx({ rows: rowsOf(row("brand_read"), social(null)) }));
+    expect(out).toMatchObject({ status: "waiting", reason: "evidence", recheckDays: 7, result: { brief: "drafted", pillars: "none", keywords: 2, written: ["brief_text", "social_keywords"] } });
+    expect(c).toMatchObject({ content_pillars: [], social_keywords: ["podcast guesting", "b2b podcasts"] });
+    expect(c.brief_text).toMatch(/^Drafted from the website on 2026-11-08:/);
+    expect(c.field_sources.social_keywords).toMatchObject({ by: "lifecycle" });
+  });
+});
+
 describe("design_settings", () => {
   const refs = rowsOf(row("design_refs", { result: { synthesized_at: T } }));
   const c = () => client({ logo_url: "https://moburst.com/logo.svg", brand_identity: { ...BRAND, secondary_color: "#0c1d2f" }, harvested_design_references: [{ path: "c1/social-a.jpg" }, { path: "c1/social-b.jpg" }] });

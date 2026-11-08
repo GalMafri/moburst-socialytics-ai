@@ -34,7 +34,7 @@ import { listCustomerProfiles } from "../sprout/profiles.ts";
 import { listBrandPosts, MAX_POST_PAGES, POSTS_YEAR_DAYS } from "../sprout/posts.ts";
 import { searchWebsite, searchWebsiteByName, statedWebsite, webReader } from "../sprout/website.ts";
 import { fetchSiteHtml, logoOnPage, normalizeWebsite, openaiKeyFor, ResearchError, researchBrand } from "../brand/research.ts";
-import { anthropicKey, briefFromStrategyDoc, derivePillars, isGenericPillars, PillarsError, type PillarClient, type PillarPost } from "../brand/pillars.ts";
+import { anthropicKey, briefFromStrategyDoc, derivePillars, isGenericPillars, pageEvidence, PillarsError, type PillarClient, type PillarPost } from "../brand/pillars.ts";
 import { fetchSiteText, identifyCompetitors, IdentifyError } from "../competitive/identify.ts";
 import { detectCompetitorHandles } from "../competitive/detectHandles.ts";
 import { confirmDraftSet } from "../competitive/confirmSet.ts";
@@ -177,6 +177,25 @@ export function settled(rows: Map<string, StepRow>, step: string): boolean {
   if (!r) return false;
   if (r.status === "running") return !!r.done_at || r.attempts > 0;
   return true;
+}
+
+/** The client has pillars (not the five generic ones) and keywords, whoever wrote them. */
+function hasPillarsAndKeywords(client: ClientRow): boolean {
+  return !isGenericPillars(client.content_pillars) && Array.isArray(client.social_keywords) && client.social_keywords.length > 0;
+}
+
+/**
+ * The LinkedIn page's part of brief_pillars' inputs key. While the client
+ * has no pillars and keywords, the page's text is an input, so a page read
+ * runs the step again (Kitcaster, 8 Nov: its posts alone gave none). A
+ * client with both keeps the part the step last ran on: a page read never
+ * runs a complete client again, and the run that completes one sets off no
+ * other (no step's inputs move on what it writes).
+ */
+function briefPageKey(client: ClientRow, rows: Map<string, StepRow>): string {
+  if (hasPillarsAndKeywords(client)) return str(rows.get("brief_pillars")?.inputs_key).match(/\|page:[0-9a-f]{8}(?=\||$)/)?.[0] ?? "";
+  const page = pageEvidence(pageOf(socialResult(rows)));
+  return page ? `|page:${textHash(page)}` : "";
 }
 
 /** A client whose own posts are its only evidence: no website, no strategy document, no brief a person wrote. */
@@ -450,7 +469,12 @@ export const STEPS: Record<string, StepDef> = {
   // labeled, and its 12 newest) are the posts the pillars read, and for a
   // client with no website or document the brief is drafted from them; one
   // with fewer than 5 posts with text waits and looks again weekly. A move
-  // of the posts' evidence version runs it again (socialVersionKey).
+  // of the posts' evidence version runs it again (socialVersionKey). The
+  // client's LinkedIn page (social_read) is evidence for the pillars like the
+  // website's text, and its about text is the brief when there is no
+  // document or site text, before the posts. Keywords are written even when
+  // no pillar stands; the step then waits for evidence. A page read runs it
+  // again only while the client has no pillars and keywords (briefPageKey).
   brief_pillars: {
     policy: {},
     async inputs(db, client, rows) {
@@ -464,7 +488,7 @@ export const STEPS: Record<string, StepDef> = {
       // A brief the lifecycle wrote is not an input (the step wrote it), so writing it never re-runs the step.
       const brief = !str(client.brief_text) || setBy(fs, "brief_text") === "lifecycle" ? "site" : textHash(client.brief_text);
       const own = ["brief_text", "content_pillars", "social_keywords"].map((f) => (lifecycleMayWrite(fs, f) ? "p" : "x")).join("");
-      return `brief:${brief}|doc:${str(client.strategy_doc_file_path)}|site:${site ?? ""}|own:${own}${socialVersionKey(rows, fromPosts)}`;
+      return `brief:${brief}|doc:${str(client.strategy_doc_file_path)}|site:${site ?? ""}|own:${own}${socialVersionKey(rows, fromPosts)}${briefPageKey(client, rows)}`;
     },
     async run(db, client, { rows }) {
       const fs = client.field_sources;
@@ -485,7 +509,7 @@ export const STEPS: Record<string, StepDef> = {
 
       const fields: Record<string, unknown> = {};
       const from: Record<string, string> = {};
-      let brief: "from_doc" | "drafted" | "from_posts" | "kept" | "none" = personBrief ? "kept" : "none";
+      let brief: "from_doc" | "drafted" | "from_page" | "from_posts" | "kept" | "none" = personBrief ? "kept" : "none";
       const docPath = str(client.strategy_doc_file_path) || null;
       let briefDoc: string | null = null;
       // 1. The strategy document's own words. One already copied from this document is not read again.
@@ -526,7 +550,18 @@ export const STEPS: Record<string, StepDef> = {
         }
         brief = "drafted";
       }
-      // 3. The client's posts, when there is no document or website to take the brief from: the same call as the pillars writes it.
+      // 3. The LinkedIn page's about text, when there is no document or site text to take the brief from.
+      const page = pageOf(social);
+      const about = str(page?.about);
+      if (wantBrief && brief === "none" && about.length >= 80) {
+        const body = clipText(about, 2500);
+        if (!str(client.brief_text).endsWith(body)) {
+          fields.brief_text = `Drafted from the LinkedIn page on ${day(deps.now())}:\n\n${body}`;
+          from.brief_text = "linkedin_page";
+        }
+        brief = "from_page";
+      }
+      // 4. The client's posts, when there is nothing else to take the brief from: the same call as the pillars writes it.
       const briefFromPosts = wantBrief && brief === "none" && posts.length > 0;
       let pillars: "derived" | "kept" | "none" = wantPillars ? "none" : "kept";
       let derivedNames: string[] = [];
@@ -535,12 +570,13 @@ export const STEPS: Record<string, StepDef> = {
       if (wantPillars || wantKeywords || briefFromPosts) {
         const key = await deps.anthropicKey(db);
         if (!key) return { status: "failed", error: "The AI connection is not configured." };
-        // The derivation reads the strategy document itself, so a brief copied from it is not given twice.
+        // The derivation reads the strategy document and the LinkedIn page itself, so a brief taken from either is not given twice.
         const evidence = { ...client, brief_text: brief === "drafted" ? (fields.brief_text as string | undefined) ?? str(client.brief_text) : personBrief };
         try {
           const d = await deps.derivePillars(db, evidence as PillarClient, key, {
             siteText: brief === "drafted" ? null : siteText || null, language: str(client.language) || null,
             ...(posts.length ? { posts, briefFromPosts, bio: (social?.instagram?.bio?.biography as string | undefined) ?? null } : {}),
+            ...(page ? { page } : {}),
           });
           if (briefFromPosts && d.brief) {
             fields.brief_text = `Drafted from the client's posts on ${day(deps.now())}:\n\n${d.brief}`;
@@ -569,7 +605,10 @@ export const STEPS: Record<string, StepDef> = {
         }
       }
       const written = await writeClientFields(db, client.id, fields, "lifecycle", from);
-      return { status: "done", result: { brief, brief_doc: briefDoc, pillars, pillar_names: derivedNames, keywords: derivedKeywords, source, site_chars: siteText.length, posts: posts.length, drafted_at: deps.now().toISOString(), written: written.written, kept: written.skipped } };
+      const result = { brief, brief_doc: briefDoc, pillars, pillar_names: derivedNames, keywords: derivedKeywords, source, site_chars: siteText.length, posts: posts.length, drafted_at: deps.now().toISOString(), written: written.written, kept: written.skipped };
+      // No pillar stood: the brief and keywords are written, and the step looks for evidence again in a week.
+      if (wantPillars && pillars === "none") return { status: "waiting", reason: "evidence", recheckDays: 7, result };
+      return { status: "done", result };
     },
   },
 
