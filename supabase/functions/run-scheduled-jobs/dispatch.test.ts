@@ -853,6 +853,24 @@ describe("one Slack alert for a report still not made after a day", () => {
     expect(posted).toHaveLength(1);
   });
 
+  it("sends no alert for an occurrence a person moved before the alert's lease: the lease skips it quietly (final review)", async () => {
+    const w = world({ kinds: ["social"] });
+    const slack = collect(w);
+    const h = harness(w, "accept", { alert: slack.alert });
+    const job = jobFor("social");
+    await h.run(job);
+    // Stopped at 23h45: the next run is at 24h15, so the job is first leased at the day for the alert.
+    let out = await stopAt(w, h, job, new Date(NOW.getTime() + 23 * HOUR + 45 * MIN));
+    expect(out.available_at).toBe(new Date(NOW.getTime() + 24 * HOUR).toISOString());
+    // A person moves the schedule meanwhile: this occurrence will not run again.
+    w.tables.schedules[0].next_run_at = "2026-10-21T07:00:00.000Z";
+    w.tables.clock = new Date(out.available_at!);
+    out = await h.run(job);
+    expect(out).toMatchObject({ status: "skipped" });
+    expect(out.reason).toContain("The schedule moved");
+    expect(slack.sent).toEqual([]);
+  });
+
   it("an alert that fails changes nothing about the run and keeps nothing", async () => {
     const plain = world({ kinds: ["social"] });
     const ph = harness(plain);

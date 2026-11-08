@@ -67,7 +67,8 @@
 //                 alert's time. A lease before the next run only checks the
 //                 alert and puts the job back for that run (retry_at), so the
 //                 runs keep their times; the lease is deferred, so it does
-//                 not count as an attempt.
+//                 not count as an attempt. An occurrence a person moved, or a
+//                 manual run whose window closed, is skipped first, unalerted.
 //   a run going   release_ready_dispatches lets the waiting job out at
 //                 alert_due_at (20261110200000_dispatch_alert_due.sql), and
 //                 the watch alerts that the report is still running.
@@ -512,19 +513,6 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
 
   if (job.phase === "sent" && job.report_id) return watch(job.report_id);
 
-  // Between runs, a lease before the next run's time is the alert's: it checks
-  // the alert and puts the job back for that run, starting nothing. Deferred,
-  // so the lease is not counted against the job.
-  const retryAt = Date.parse(memory.retry_at ?? "");
-  if (!job.report_id && !job.phase && Number.isFinite(retryAt) && now.getTime() < retryAt) {
-    const tried = await alertIfLate(runs.at(-1)?.end);
-    const kept: DispatchMemory = { ...memory, runs };
-    const availableAt = leaseAt(new Date(retryAt), kept);
-    // Recorded at once, so a lease that dies after the post does not post it again.
-    if (tried) await d.saveJob({ result: kept });
-    return { status: "queued", reason: `The alert was checked; the report runs again at ${new Date(retryAt).toISOString()}.`, available_at: availableAt, deferred: true, result: kept };
-  }
-
   if (!job.report_id && job.occurrence && moved) {
     return { status: "skipped", reason: `The schedule moved to ${schedule!.next_run_at} before this run started.` };
   }
@@ -533,6 +521,21 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
   // came, for one) ends quietly; nothing was made, so nothing is shown.
   if (manual && !job.report_id && now.getTime() >= Date.parse(deadline)) {
     return { status: "skipped", reason: `The manual run was asked for ${MANUAL_RUN_DAYS} days ago and could not start.` };
+  }
+
+  // Between runs, a lease before the next run's time is the alert's: it checks
+  // the alert and puts the job back for that run, starting nothing. Deferred,
+  // so the lease is not counted against the job. It comes after the two
+  // checks above, so an occurrence a person moved, or a manual run whose
+  // window closed, is skipped quietly and never alerted.
+  const retryAt = Date.parse(memory.retry_at ?? "");
+  if (!job.report_id && !job.phase && Number.isFinite(retryAt) && now.getTime() < retryAt) {
+    const tried = await alertIfLate(runs.at(-1)?.end);
+    const kept: DispatchMemory = { ...memory, runs };
+    const availableAt = leaseAt(new Date(retryAt), kept);
+    // Recorded at once, so a lease that dies after the post does not post it again.
+    if (tried) await d.saveJob({ result: kept });
+    return { status: "queued", reason: `The alert was checked; the report runs again at ${new Date(retryAt).toISOString()}.`, available_at: availableAt, deferred: true, result: kept };
   }
 
   if (job.attempts > job.max_attempts) {
