@@ -133,11 +133,14 @@ describe("the client's LinkedIn page as evidence (Kitcaster, 8 Nov)", () => {
     expect(out.source).toBe("social_posts");
     expect(out.keywords).toEqual(["podcast guesting"]);
   });
-  it("clips the page's text to 4000 characters, and counts a page as a source on its own", async () => {
+  it("clips the page's text to 4000 characters, shortening only the about text, and counts a page as a source on its own", async () => {
     asked.reply = JSON.stringify({ pillars: [{ name: "Podcast booking", description: "d", rationale: "r" }], keywords: [], notes: "" });
     const out = await derivePillars(fakeDb(), kit, "key", { page: { ...PAGE, about: "Kitcaster books guests. ".repeat(400) } });
     const page = text().find((t) => t.startsWith("The brand's LinkedIn page"))!;
-    expect(Array.from(page.slice(page.indexOf("\n") + 1)).length).toBe(4000);
+    const body = page.slice(page.indexOf("\n") + 1);
+    expect(Array.from(body).length).toBe(4000);
+    expect(body.split("\n").slice(0, 3)).toEqual(["Tagline: Strategic podcast booking for B2B leaders", "Specialties: podcast booking, thought leadership", "Industries: Marketing Services"]);
+    expect(body.split("\n")[3]).toMatch(/^About: Kitcaster books guests\./);
     expect(out).toMatchObject({ sources: ["linkedin_page"], source: "linkedin_page", pillars: [{ name: "Podcast booking" }] });
   });
   it("gives no page that says almost nothing, so the posts alone still decide", async () => {

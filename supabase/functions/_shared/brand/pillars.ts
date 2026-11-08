@@ -35,7 +35,7 @@ Rules:
 - 4 to 6 pillars. Fewer if the evidence only supports fewer.
 - Each name is 1 to 4 words, in the brand's language.
 - Each description is ONE sentence of at most 140 characters, saying what a post in this pillar actually contains.
-- Each rationale is one short clause naming the evidence: the strategy document's own wording, or what the brand's posts keep doing.
+- Each rationale is one short clause naming the evidence: the strategy document's own wording, the brand's own description on its website or LinkedIn page, or what the brand's posts keep doing.
 - Never invent a pillar the evidence does not support. If the evidence is thin, return fewer pillars and say so in the notes.
 - Do not propose a pillar that is really a format ("Reels", "Carousels") or a metric.
 
@@ -112,9 +112,10 @@ const PAGE_MAX_CHARS = 4000;
 const PAGE_MIN_CHARS = 80;
 
 /**
- * The client's LinkedIn page as evidence: its tagline, about text, specialties
- * and industries as one text, clipped to what the reading is given; "" when
- * there is no page or it says too little to rest a pillar on.
+ * The client's LinkedIn page as evidence: its tagline, specialties, industries
+ * and about text as one text, clipped to what the reading is given (the about
+ * text last, so only it is shortened); "" when there is no page or it says
+ * too little to rest a pillar on.
  */
 export function pageEvidence(page: PillarPage | null | undefined): string {
   if (!page) return "";
@@ -122,9 +123,9 @@ export function pageEvidence(page: PillarPage | null | undefined): string {
   const list = (v: unknown) => (Array.isArray(v) ? v.map(line).filter(Boolean) : []);
   const text = [
     line(page.tagline) ? `Tagline: ${line(page.tagline)}` : "",
-    String(page.about ?? "").trim() ? `About: ${String(page.about).trim()}` : "",
     list(page.specialties).length ? `Specialties: ${list(page.specialties).join(", ")}` : "",
     list(page.industries).length ? `Industries: ${list(page.industries).join(", ")}` : "",
+    String(page.about ?? "").trim() ? `About: ${String(page.about).trim()}` : "",
   ].filter(Boolean).join("\n");
   return text.length >= PAGE_MIN_CHARS ? clipText(text, PAGE_MAX_CHARS) : "";
 }

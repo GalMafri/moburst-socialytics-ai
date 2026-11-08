@@ -479,6 +479,8 @@ export const STEPS: Record<string, StepDef> = {
     policy: {},
     async inputs(db, client, rows) {
       const site = siteKey(client.website_url);
+      // Posts-only by the client's own fields, not the page: a page exists only inside a social result, so the guard
+      // below never holds for it, and the social part of the key stays as it was when a page is read.
       const fromPosts = postsOnly(client);
       if (fromPosts && !str(client.brief_text) && !socialResult(rows)) return null;
       if (site && !settled(rows, "brand_read")) return null;
@@ -502,8 +504,10 @@ export const STEPS: Record<string, StepDef> = {
       if (!wantBrief && !wantPillars && !wantKeywords) return { status: "done", result: { brief: "kept", pillars: "kept" } };
       const social = socialResult(rows);
       const posts = (Array.isArray(social?.posts) ? social!.posts : []) as PillarPost[];
+      const page = pageOf(social);
       // A client whose posts are its only evidence needs 5 organic posts with text (in 90 days, else 12 months).
-      if (postsOnly(client) && social && !social.enough) {
+      // A LinkedIn page with text to read is evidence like the website's text, so its client does not wait for posts.
+      if (postsOnly(client) && !pageEvidence(page) && social && !social.enough) {
         return { status: "waiting", reason: "posts", recheckDays: 7, result: { text_posts: Number(social.text_posts) || 0, window_days: social.window_days ?? null } };
       }
 
@@ -551,7 +555,6 @@ export const STEPS: Record<string, StepDef> = {
         brief = "drafted";
       }
       // 3. The LinkedIn page's about text, when there is no document or site text to take the brief from.
-      const page = pageOf(social);
       const about = str(page?.about);
       if (wantBrief && brief === "none" && about.length >= 80) {
         const body = clipText(about, 2500);

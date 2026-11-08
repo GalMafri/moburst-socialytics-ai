@@ -659,6 +659,37 @@ describe("brief, pillars and keywords from the LinkedIn page", () => {
     const again = await STEPS.brief_pillars.run(db, c, ctx({ rows: rowsOf(row("brand_read"), social(PAGE)) }));
     expect(again).toMatchObject({ status: "done", result: { brief: "from_page", written: ["content_pillars", "pillars_source", "pillars_derived_at", "social_keywords"] } });
   });
+  it("replaces a brief it drafted from the posts earlier with the page's", async () => {
+    const c = kit({ brief_text: "Drafted from the client's posts on 2026-11-01:\n\nKitcaster books guests.", field_sources: { brief_text: { by: "lifecycle", from: "posts" } } });
+    Object.assign(deps, { now: () => new Date(NOW), anthropicKey: async () => "key", scrapeMarkdown: async () => null, fetchSiteText: async () => "", derivePillars: async () => derived() });
+    await STEPS.brief_pillars.run(dbWith({ clients: [c] }), c, ctx({ rows: rowsOf(row("brand_read"), social(PAGE)) }));
+    expect([c.brief_text, c.field_sources.brief_text.from]).toEqual([`Drafted from the LinkedIn page on 2026-11-08:\n\n${ABOUT}`, "linkedin_page"]);
+  });
+  it("reads a client with no website and too few posts once it has a page with text, and keys it as before", async () => {
+    // Uproar-shaped: no website, no document, no brief, 2 posts with text.
+    const few = (page: Record<string, unknown> | null) => social(page, { text_posts: 2, enough: false, window_days: 365 });
+    const uproar = (over: Record<string, unknown> = {}) => kit({ name: "Uproar by Moburst", website_url: null, ...over });
+    deps.derivePillars = fail("the derivation");
+    expect(await STEPS.brief_pillars.run(dbWith({ clients: [uproar()] }), uproar(), ctx({ rows: rowsOf(few(null)) }))).toMatchObject({ status: "waiting", reason: "posts" });
+    expect(await STEPS.brief_pillars.run(dbWith({ clients: [uproar()] }), uproar(), ctx({ rows: rowsOf(few({ ...PAGE, about: "", tagline: null })) }))).toMatchObject({ status: "waiting", reason: "posts" });
+    const c = uproar();
+    Object.assign(deps, { now: () => new Date(NOW), anthropicKey: async () => "key", scrapeMarkdown: fail("the scrape") });
+    let opts: Record<string, unknown> = {};
+    deps.derivePillars = (async (_db: unknown, _c: unknown, _k: string, o: Record<string, unknown>) => { opts = o; return derived(); }) as never;
+    expect(await STEPS.brief_pillars.run(dbWith({ clients: [c] }), c, ctx({ rows: rowsOf(few(PAGE)) }))).toMatchObject({ status: "done", result: { brief: "from_page", pillars: "derived", posts: 2 } });
+    expect(opts).toMatchObject({ page: PAGE, posts: POSTS });
+    // The key: the posts' version stays in it as for any client with only its posts, and the page joins it while pillars or keywords are missing.
+    const db = dbWith();
+    const before = await STEPS.brief_pillars.inputs(db, uproar(), rowsOf(few(null)));
+    const withPage = await STEPS.brief_pillars.inputs(db, uproar(), rowsOf(few(PAGE)));
+    expect(before).toMatch(/\|social:1$/);
+    expect(withPage).toMatch(new RegExp(`^${before!.replace(/[|]/g, "\\|")}\\|page:[0-9a-f]{8}$`));
+    expect(await STEPS.brief_pillars.inputs(db, c, rowsOf(row("brief_pillars", { inputs_key: withPage }), few(PAGE)))).toBe(withPage);
+    // A client complete from its posts alone keeps its key, the posts' version included, when a page is read.
+    const done = uproar({ content_pillars: [{ name: "Launches", description: "d" }], social_keywords: ["pr"] });
+    const keyed = await STEPS.brief_pillars.inputs(db, done, rowsOf(few(null)));
+    expect(await STEPS.brief_pillars.inputs(db, done, rowsOf(row("brief_pillars", { inputs_key: keyed }), few(PAGE)))).toBe(keyed);
+  });
   it("keeps today's order: the website's text first, the page after it, the posts last", async () => {
     deps.now = () => new Date(NOW);
     deps.anthropicKey = async () => "key";
