@@ -72,7 +72,7 @@ const TRACKED: LandscapeCheck = {
 };
 
 /** none: no switch reader at all. n8n-bare: a reader that answers n8n, and no in-app hooks. */
-type Switch = "none" | "n8n-bare" | "n8n" | "unreadable" | "shadow" | "app" | "app-no-watch" | "app-no-pipeline";
+type Switch = "none" | "n8n-bare" | "n8n" | "unreadable" | "app-unreadable" | "shadow" | "app" | "app-no-watch" | "app-no-pipeline";
 const placeholder = (kind: "social" | "competitive") => REGISTRY.get(`placeholder_${kind}`)!;
 const appPipeline = (kind: "social" | "competitive"): PipelineDefinition => ({ ...placeholder(kind), name: `real_${kind}`, modes: ["shadow", "app"], appCapable: true });
 
@@ -87,6 +87,8 @@ function harness(w: ReturnType<typeof world>, sw: Switch, opts: { transport?: "a
     if (sw === "n8n-bare") return { async engine() { return { engine: "n8n" as const }; } };
     const resolve = async (kind: "social" | "competitive"): Promise<{ engine: Engine; pipeline?: PipelineDefinition; refused?: string }> => {
       if (sw === "unreadable") throw new Error("report_engines does not exist");
+      // What readEngine answers when the table cannot be read: no throw, the flag set.
+      if (sw === "app-unreadable") return { engine: "app", refused: "The engine switch could not be read (relation does not exist).", unreadable: true };
       if (sw === "n8n") return { engine: "n8n" };
       if (sw === "shadow") return { engine: "shadow", pipeline: placeholder(kind) };
       if (sw === "app-no-pipeline") return { engine: "app", refused: `No app-capable ${kind} pipeline with its secrets set is in this deployment.` };
@@ -480,44 +482,86 @@ describe("no automatic hand-off to n8n", () => {
 describe("app: one Slack alert for a report still not made after a day", () => {
   const HOUR = 60;
   const PAGE = (kind: "social" | "competitive") => `https://socialytics.moburst.com/clients/client-1/${kind === "social" ? "" : "competitive/"}reports`;
-  const collect = () => {
-    const sent: string[] = [];
-    return { sent, alert: async (text: string) => { sent.push(text); return true; } };
+  const stuck = (kind: "social" | "competitive", reason: string) => `<@U03AZ88435H> The ${kind} report for Fixture (October 2026) still isn't ready a day after the first try. Reason: ${reason}. ${PAGE(kind)}`;
+  const collect = (w: ReturnType<typeof world>) => {
+    const sent: Array<{ at: string; text: string }> = [];
+    return { sent, alert: async (text: string) => { sent.push({ at: w.tables.clock.toISOString(), text }); return true; } };
   };
 
-  it("names the in-app run that stopped, once, and the made message when the report is made", async () => {
+  it("a run still going at the day alerts then, once, that it is still running; one ready message when it is made", async () => {
     const w = world(["social"]);
-    const slack = collect();
-    let view: AppRunView = { status: "stopped", heartbeat_at: NOW.toISOString(), outcome: "Step fetch did not finish in 5 tries" };
-    const h = harness(w, "app", { appRun: () => view, alert: slack.alert });
+    const slack = collect(w);
+    const h = harness(w, "app", { appRun: () => ({ status: "running", heartbeat_at: w.tables.clock.toISOString(), outcome: null }), alert: slack.alert });
+    const j = job("social");
+    expect((await h.run(j)).result).toMatchObject({ alert_due_at: minutes(24 * HOUR).toISOString() });
+    // release_ready_dispatches lets the waiting job out at alert_due_at.
+    w.tables.clock = minutes(24 * HOUR);
+    const at24 = await h.run(j);
+    expect(at24).toMatchObject({ status: "waiting", reason: "The report is running." });
+    expect(slack.sent).toEqual([{ at: minutes(24 * HOUR).toISOString(), text: stuck("social", "it is still running") }]);
+    expect(at24.result).toMatchObject({ alerted_at: minutes(24 * HOUR).toISOString() });
+    expect((at24.result as Record<string, unknown>).alert_due_at).toBeUndefined();
+    // Recorded at once, before the lease ends.
+    expect(h.saved.at(-1)).toMatchObject({ result: { alerted_at: minutes(24 * HOUR).toISOString() } });
+    w.tables.clock = minutes(25 * HOUR);
+    expect((await h.run(j)).status).toBe("waiting");
+    expect(slack.sent).toHaveLength(1);
+    w.tables.clock = minutes(26 * HOUR);
+    w.tables.reports.at(-1)!.status = "completed";
+    expect((await h.run(j)).status).toBe("done");
+    expect(slack.sent.map((m) => m.text)).toEqual([stuck("social", "it is still running"), `<@U03AZ88435H> The social report for Fixture (October 2026) is ready now. ${PAGE("social")}`]);
+    expect(h.posts).toEqual([]);
+  });
+
+  it("a report made at 23 hours never alerts", async () => {
+    const w = world(["social"]);
+    const slack = collect(w);
+    const h = harness(w, "app", { appRun: () => ({ status: "running", heartbeat_at: w.tables.clock.toISOString(), outcome: null }), alert: slack.alert });
     const j = job("social");
     await h.run(j);
-    w.tables.clock = minutes(25 * HOUR);
-    const again = await h.run({ ...j, status: "running" });
-    expect(again.status).toBe("queued");
-    expect(slack.sent).toEqual([`<@U03AZ88435H> The social report for Fixture (October 2026) is still not made a day after its first try. Reason: the in-app run stopped. ${PAGE("social")}`]);
-    expect((again.result as Record<string, unknown>).alerted_at).toBe(minutes(25 * HOUR).toISOString());
-    // The next run is made in the app; the alert is kept through it, and no second one goes out.
-    Object.assign(j, { status: "running", phase: null, report_id: null, result: again.result });
-    w.tables.clock = new Date(again.available_at!);
-    view = { status: "running", heartbeat_at: w.tables.clock.toISOString(), outcome: null };
-    expect((await h.run(j)).result).toMatchObject({ engine: "app", alerted_at: minutes(25 * HOUR).toISOString() });
+    w.tables.clock = minutes(23 * HOUR);
+    expect((await h.run(j)).status).toBe("waiting");
     w.tables.reports.at(-1)!.status = "completed";
-    expect((await h.run({ ...j, status: "running" })).status).toBe("done");
-    expect(slack.sent).toHaveLength(2);
-    expect(slack.sent[1]).toBe(`<@U03AZ88435H> The social report for Fixture (October 2026) is made now. ${PAGE("social")}`);
-    expect(h.posts).toEqual([]);
+    expect((await h.run(j)).status).toBe("done");
+    expect(slack.sent).toEqual([]);
+  });
+
+  /** Every in-app run stops a minute after it starts; each lease at its queued time, until `until` minutes. */
+  async function quickStops(withAlert: boolean, until: number) {
+    const w = world(["social"]);
+    const slack = collect(w);
+    const h = harness(w, "app", { appRun: () => ({ status: "stopped", heartbeat_at: w.tables.clock.toISOString(), outcome: "Step fetch did not finish in 5 tries" }), ...(withAlert ? { alert: slack.alert } : {}) });
+    const j = job("social");
+    let out = await h.run(j);
+    const starts = [w.tables.clock.toISOString()];
+    while (w.tables.clock.getTime() < minutes(until).getTime()) {
+      w.tables.clock = out.status === "waiting" ? new Date(w.tables.clock.getTime() + 60_000) : new Date(out.available_at!);
+      out = await h.run(j);
+      if (out.status === "waiting") starts.push(w.tables.clock.toISOString());
+    }
+    return { slack, starts, h };
+  }
+
+  it("a quick in-app failure alerts at exactly a day, not at the 31.6-hour retry, and the runs keep their times", async () => {
+    const plain = await quickStops(false, 40 * HOUR);
+    const alerted = await quickStops(true, 40 * HOUR);
+    expect(alerted.slack.sent).toEqual([{ at: minutes(24 * HOUR).toISOString(), text: stuck("social", "the in-app run stopped") }]);
+    expect(alerted.starts).toEqual(plain.starts);
+    expect(plain.starts).toContain(minutes(1896).toISOString());
+    expect(alerted.h.starts).toHaveLength(plain.h.starts.length);
+    expect(alerted.h.posts).toEqual([]);
   });
 
   for (const [sw, reason] of [
     ["app-no-pipeline", "the in-app pipeline could not start"],
     ["unreadable", "the report engine setting could not be read"],
+    ["app-unreadable", "the report engine setting could not be read"],
   ] as const) {
     it(`words a report that could not start (${sw}) plainly, and alerts once`, async () => {
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
       for (const kind of ["social", "competitive"] as const) {
         const w = world([kind]);
-        const slack = collect();
+        const slack = collect(w);
         const h = harness(w, sw, { alert: slack.alert });
         const j = job(kind);
         for (const at of [0, 25 * HOUR, 27 * HOUR]) {
@@ -526,10 +570,47 @@ describe("app: one Slack alert for a report still not made after a day", () => {
           expect(out.status).toBe("queued");
           Object.assign(j, { status: "running", phase: null, report_id: null, result: out.result });
         }
-        expect(slack.sent).toEqual([`<@U03AZ88435H> The ${kind} report for Fixture (October 2026) is still not made a day after its first try. Reason: ${reason}. ${PAGE(kind)}`]);
+        expect(slack.sent.map((m) => m.text)).toEqual([stuck(kind, reason)]);
         expect(h.posts).toEqual([]);
       }
       warn.mockRestore();
     });
   }
+
+  describe("the code each call site on the app route passes", () => {
+    const endOf = (out: JobOutcome) => (out.result as { runs: Array<{ end?: string }> }).runs.at(-1)?.end;
+    /** The first lease starts the in-app run; the second, two hours later, finds how it ended. */
+    const ended = async (view: AppRunView | null, before?: (w: ReturnType<typeof world>) => void) => {
+      const w = world(["social"]);
+      const h = harness(w, "app", { appRun: () => view });
+      const j = job("social");
+      await h.run(j);
+      w.tables.clock = minutes(2 * HOUR);
+      before?.(w);
+      const out = await h.run({ ...j, status: "running" });
+      expect(out.status).toBe("queued");
+      return endOf(out);
+    };
+    it("an in-app run that stopped, is gone, stopped answering, or ended without the report", async () => {
+      expect(await ended({ status: "stopped", heartbeat_at: NOW.toISOString(), outcome: "x" })).toBe("app_stopped");
+      expect(await ended(null)).toBe("app_gone");
+      expect(await ended({ status: "running", heartbeat_at: NOW.toISOString(), outcome: null })).toBe("app_stopped_answering");
+      expect(await ended({ status: "done", heartbeat_at: NOW.toISOString(), outcome: null })).toBe("app_ended_without_report");
+      expect(await ended({ status: "running", heartbeat_at: minutes(2 * HOUR).toISOString(), outcome: null }, (w) => w.tables.reports.splice(0))).toBe("report_removed");
+    });
+    it("an in-app run that could not be queued, no pipeline, and a switch that could not be read", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      for (const [sw, opts, code] of [
+        ["app", { startFails: true }, "app_not_queued"],
+        ["app-no-pipeline", {}, "no_pipeline"],
+        ["unreadable", {}, "engine_unreadable"],
+        ["app-unreadable", {}, "engine_unreadable"],
+        ["none", {}, "engine_unreadable"],
+      ] as const) {
+        const w = world(["social"]);
+        expect(endOf(await harness(w, sw, opts).run(job("social"))), sw).toBe(code);
+      }
+      warn.mockRestore();
+    });
+  });
 });

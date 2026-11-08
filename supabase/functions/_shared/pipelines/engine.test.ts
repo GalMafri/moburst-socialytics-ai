@@ -127,9 +127,9 @@ describe("readEngine", () => {
   it("is app with no pipeline and the reason when the table cannot be read or the read throws, never n8n", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const failing = { from: () => ({ select: () => ({ eq: async () => ({ data: null, error: { message: "relation does not exist" } }) }) }) };
-    expect(await readEngine(failing, "social", MOBURST, { registry: REGISTRY, env: socialEnv })).toEqual({ engine: "app", refused: expect.stringContaining("relation does not exist") });
+    expect(await readEngine(failing, "social", MOBURST, { registry: REGISTRY, env: socialEnv })).toEqual({ engine: "app", refused: expect.stringContaining("relation does not exist"), unreadable: true });
     const throwing = { from: () => { throw new Error("network"); } };
-    expect(await readEngine(throwing, "competitive", MOBURST, deps)).toEqual({ engine: "app", refused: expect.stringContaining("network") });
+    expect(await readEngine(throwing, "competitive", MOBURST, deps)).toEqual({ engine: "app", refused: expect.stringContaining("network"), unreadable: true });
     // Logged for the logs, each time.
     expect(warn.mock.calls.map((c) => c.join(" "))).toEqual([expect.stringContaining("relation does not exist"), expect.stringContaining("network")]);
     warn.mockRestore();

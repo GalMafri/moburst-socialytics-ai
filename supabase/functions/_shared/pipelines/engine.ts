@@ -48,6 +48,8 @@ export interface ResolvedEngine {
   pipeline?: PipelineDefinition;
   /** Why no pipeline runs, for the logs. */
   refused?: string;
+  /** The switch itself could not be read (as opposed to a pipeline that cannot run here). */
+  unreadable?: boolean;
 }
 
 /** The engine that actually runs, given what this deployment can run. */
@@ -87,7 +89,7 @@ export async function readEngine(db: any, kind: ReportKind, clientId: string | n
   const unreadable = (why: string): ResolvedEngine => {
     const refused = `The engine switch could not be read (${why}).`;
     console.warn(`[engine] ${kind} ${clientId ?? "default"}: ${refused}`);
-    return { engine: "app", refused };
+    return { engine: "app", refused, unreadable: true };
   };
   try {
     const { data, error } = await db.from("report_engines").select("kind, client_id, engine").eq("kind", kind);

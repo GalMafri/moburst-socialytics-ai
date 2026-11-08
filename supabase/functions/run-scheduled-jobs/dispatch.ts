@@ -58,16 +58,28 @@
 // pipeline that can run in this deployment (a secret not set) waits, and
 // runs again later the same way.
 //
-// A report still not made a day after its first try: when a run of the
-// occurrence ends without the report (or a held analysis is made again)
-// ALERT_AFTER_MINUTES or more after the occurrence's first run started, one
-// Slack message goes to #ai-products-issues (_shared/alerts/slack.ts), and
-// alerted_at is kept in the job's memory so no later run of the same
-// occurrence alerts again. It is kept only when the message was posted, so
-// with no webhook set nothing is recorded and the next run that ends alerts
-// once the webhook is there. When the report is then made, one short message
-// says so. The alert never changes what the dispatch does: retries go on as
-// before.
+// A report still not made a day after its first try gets one Slack message
+// to #ai-products-issues (_shared/alerts/slack.ts), at the day itself. The
+// occurrence's first run sets alert_due_at (its start plus
+// ALERT_AFTER_MINUTES), and the job is leased then wherever it stands:
+//
+//   between runs  the job is queued for the earlier of its next run and the
+//                 alert's time. A lease before the next run only checks the
+//                 alert and puts the job back for that run (retry_at), so the
+//                 runs keep their times; the lease is deferred, so it does
+//                 not count as an attempt.
+//   a run going   release_ready_dispatches lets the waiting job out at
+//                 alert_due_at (20261110200000_dispatch_alert_due.sql), and
+//                 the watch alerts that the report is still running.
+//   a run ending  a run that ends at or after the day alerts with its reason.
+//
+// The alert is tried once at its time: alert_due_at is then removed, so the
+// job is never leased again just for it. alerted_at is kept only when the
+// message was posted, so with no webhook nothing is recorded and the next
+// run that ends (or the daily look at a running one) tries again once the
+// webhook is there. One alert per occurrence, never before the day; when the
+// report is then made, one short message says so. Nothing here changes what
+// the dispatch makes or when.
 
 import { nextRun, rangeForSchedule, type ReportRange } from "../_shared/reports/schedule.ts";
 import { madeReportText, reportsLink, stuckReportText } from "../_shared/alerts/slack.ts";
@@ -100,26 +112,35 @@ export const HELD_REDO_MINUTES = 24 * 60;
 /** A report still not made this long after its occurrence's first run started gets one Slack alert. */
 export const ALERT_AFTER_MINUTES = 24 * 60;
 
-/** Why a run ended, in the plain words the Slack alert uses; never raw error text. */
-const PLAIN_REASONS: Array<[RegExp, string]> = [
-  [/^the in-app pipeline stopped answering/, "the in-app run stopped answering"],
-  [/^the in-app pipeline (stopped|run is gone)/, "the in-app run stopped"],
-  [/^the in-app pipeline finished without completing the report/, "the in-app run ended without the report"],
-  [/^the in-app pipeline could not be queued/, "the in-app run could not start"],
-  [/^the report could not start in the app \((The engine switch could not be read|No engine switch)/, "the report engine setting could not be read"],
-  [/^the report could not start in the app/, "the in-app pipeline could not start"],
-  [/^the report was removed/, "the report was removed before it finished"],
-  [/^the worker stopped/, "the run kept stopping before it started"],
-  [/^the (workflow|request was never answered)/, "the n8n workflow did not finish it"],
-];
+/**
+ * Why a run of the report ended, as a code each call site below passes next
+ * to its words for the logs; still_running is a run going at the day.
+ */
+export type RunEnd =
+  | "app_stopped" | "app_gone" | "app_stopped_answering" | "app_ended_without_report" | "app_not_queued"
+  | "no_pipeline" | "engine_unreadable" | "report_removed" | "interrupted" | "n8n" | "held" | "still_running" | "error";
 
-/** The plain words for why a run of the report ended (the reasons runAgain is given below). */
-export function plainReason(why: string): string {
-  return PLAIN_REASONS.find(([pattern]) => pattern.test(why))?.[1] ?? "it has not finished yet";
+/** Each code in the plain words the Slack alert uses; never raw error text. */
+export const PLAIN_REASONS: Readonly<Record<RunEnd, string>> = {
+  app_stopped: "the in-app run stopped",
+  app_gone: "the in-app run stopped",
+  app_stopped_answering: "the in-app run stopped answering",
+  app_ended_without_report: "the in-app run ended without the report",
+  app_not_queued: "the in-app run could not start",
+  no_pipeline: "the in-app pipeline could not start",
+  engine_unreadable: "the report engine setting could not be read",
+  report_removed: "the report was removed before it finished",
+  interrupted: "the job was interrupted before the report could start",
+  n8n: "the n8n workflow did not finish it",
+  held: "the analysis did not pass its checks",
+  still_running: "it is still running",
+  error: "the run ended without a recorded reason",
+};
+
+/** The plain words for a code; a run with none on record (kept before codes existed) reads as an error. */
+export function plainReason(end: RunEnd | undefined): string {
+  return PLAIN_REASONS[end ?? "error"] ?? PLAIN_REASONS.error;
 }
-
-/** Why a held analysis is made again, in the alert's words. */
-const HELD_REASON = "the analysis did not pass its checks";
 
 /** A run a person asked for, with no schedule behind it (scheduled_jobs.payload). */
 export interface ManualRun {
@@ -246,7 +267,7 @@ export interface DispatchDeps {
    * switch given at all, reads as that. Only a switch that answers n8n (or
    * shadow) sends a request to n8n.
    */
-  engine?(kind: "social" | "competitive", clientId: string): Promise<{ engine: Engine; pipeline?: PipelineDefinition; refused?: string }>;
+  engine?(kind: "social" | "competitive", clientId: string): Promise<{ engine: Engine; pipeline?: PipelineDefinition; refused?: string; unreadable?: boolean }>;
   /** Queue the report's in-app pipeline run (_shared/pipelines/shadow.ts). Throws when it could not be queued; absent, nothing can be queued. */
   startPipeline?(args: ReportPipelineStart): Promise<{ run_id: string }>;
   /** The in-app run that makes a report (app engine), or null. Without it the job watches the report's own 90-minute clock. */
@@ -265,6 +286,8 @@ export interface DispatchRun {
   note?: string;
   /** Set only on a run the in-app pipeline made (the app engine). */
   engine?: "app";
+  /** Why the run ended, as a code (PLAIN_REASONS). */
+  end?: RunEnd;
 }
 
 /** What a dispatch job keeps between its leases (scheduled_jobs.result). */
@@ -281,6 +304,10 @@ export interface DispatchMemory {
   pipeline_run_id?: string;
   /** When the Slack alert for this occurrence was posted; set once, kept by every later run. */
   alerted_at?: string;
+  /** When the alert is due (the first run's start plus a day); removed once it was tried. */
+  alert_due_at?: string;
+  /** The next run's time, while the job is queued earlier for the alert; that lease only checks the alert. */
+  retry_at?: string;
   [key: string]: unknown;
 }
 
@@ -336,6 +363,7 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
   const client = await d.store.client(manual ? job.client_id : schedule!.client_id);
   if (!client || client.archived_at) return { status: "skipped", reason: "client archived or missing" };
   const competitive = (manual ? manual.kind : schedule!.report_kind) === "competitive";
+  const kind = competitive ? "competitive" : "social";
   const table = competitive ? "competitive_reports" : "reports";
   const memory: DispatchMemory = { ...((job.result ?? {}) as DispatchMemory) };
   const runs: DispatchRun[] = Array.isArray(memory.runs) ? memory.runs.map((r) => ({ ...r })) : [];
@@ -349,9 +377,12 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
   /** Where the schedule stands, for the logs; a manual run has no schedule to note. */
   const note = async (result: string | null) => { if (schedule) await d.store.note(schedule.id, result); };
 
-  const kind = competitive ? "competitive" : "social";
-  /** What the job keeps for the occurrence's next run: its period, its runs, and the alert once posted. */
-  const keep = (): DispatchMemory => ({ range: memory.range, runs, ...(memory.alerted_at ? { alerted_at: memory.alerted_at } : {}) });
+  /** What the job keeps for the occurrence's next run: its period, its runs, and where its alert stands. */
+  const keep = (): DispatchMemory => ({
+    range: memory.range, runs,
+    ...(memory.alerted_at ? { alerted_at: memory.alerted_at } : {}),
+    ...(memory.alert_due_at ? { alert_due_at: memory.alert_due_at } : {}),
+  });
   /** The report's period, as this occurrence makes it. */
   const period = (): ReportRange => memory.range ?? (manual ? manual.range : rangeForSchedule(schedule!.range_mode, now));
   /** One Slack message; true when it was posted. Nothing here ever changes what the dispatch does. */
@@ -364,22 +395,40 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
       return false;
     }
   };
+  /** A run of the report starts. The occurrence's first run sets when its alert is due. */
+  const startRun = (reportId: string, startedAt: string) => {
+    if (!runs.length && d.alert) memory.alert_due_at = new Date(Date.parse(startedAt) + ALERT_AFTER_MINUTES * MINUTE).toISOString();
+    runs.push({ report_id: reportId, started_at: startedAt });
+  };
   /**
-   * The occurrence's one alert: a run ended without the report a day or more
-   * after the first run started. Recorded on the memory only once posted.
+   * The occurrence's one alert, a day or more after its first run started.
+   * True when it was tried now. Tried once at its time: alert_due_at goes
+   * either way, and alerted_at is recorded only when it was posted.
    */
-  const alertIfLate = async (reason: string): Promise<void> => {
-    if (memory.alerted_at || !d.alert || d.dryRun) return;
+  const alertIfLate = async (end: RunEnd | undefined): Promise<boolean> => {
+    if (memory.alerted_at || !d.alert || d.dryRun) return false;
     const first = Math.min(...runs.map((r) => Date.parse(r.started_at)).filter(Number.isFinite));
-    if (!Number.isFinite(first) || now.getTime() - first < ALERT_AFTER_MINUTES * MINUTE) return;
-    const text = stuckReportText({ client: client.name, kind, range: period(), reason, link: reportsLink(kind, client.id) });
+    if (!Number.isFinite(first) || now.getTime() - first < ALERT_AFTER_MINUTES * MINUTE) return false;
+    delete memory.alert_due_at;
+    const text = stuckReportText({ client: client.name, kind, range: period(), reason: plainReason(end), link: reportsLink(kind, client.id) });
     if (await tell(text)) memory.alerted_at = now.toISOString();
+    return true;
+  };
+  /**
+   * When the job is next leased: at the next run, or at the alert's time
+   * when that comes first, with the next run's time kept as retry_at.
+   */
+  const leaseAt = (next: Date, kept: DispatchMemory): string => {
+    const due = Date.parse(kept.alert_due_at ?? "");
+    if (!Number.isFinite(due) || due >= next.getTime()) return next.toISOString();
+    kept.retry_at = next.toISOString();
+    return new Date(Math.max(due, now.getTime())).toISOString();
   };
 
-  /** The run with this report ended; the occurrence runs again later, or closes. */
-  const runAgain = async (reportId: string | null, why: string, run: ReportRun | null = null): Promise<JobOutcome> => {
+  /** The run with this report ended (why for the logs, end for the alert); the occurrence runs again later, or closes. */
+  const runAgain = async (reportId: string | null, why: string, end: RunEnd, run: ReportRun | null = null): Promise<JobOutcome> => {
     const open = reportId ? runs.find((r) => r.report_id === reportId && !r.ended_at) : undefined;
-    if (open) Object.assign(open, { ended_at: now.toISOString(), outcome: "stopped" as const, note: (run?.error ? `${why}: ${run.error}` : why).slice(0, 300) });
+    if (open) Object.assign(open, { ended_at: now.toISOString(), outcome: "stopped" as const, end, note: (run?.error ? `${why}: ${run.error}` : why).slice(0, 300) });
     if (d.dryRun) return { status: "waiting", reason: `dry run: would run again (${why})`, result: keep() };
     if (reportId) {
       await d.store.dropReport(table, reportId);
@@ -388,17 +437,26 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
       if (competitive) await d.store.releaseHeldSocial(client.id);
     }
     // Posted right before the save that keeps alerted_at, so a later run never posts it again.
-    await alertIfLate(plainReason(why));
-    const kept = keep();
-    await d.saveJob({ phase: null, report_id: null, result: kept });
+    await alertIfLate(end);
     const next = nextRunOfOccurrence(runs.length, now, deadline);
+    const kept = keep();
+    const availableAt = next ? leaseAt(next, kept) : null;
+    await d.saveJob({ phase: null, report_id: null, result: kept });
     if (!next) {
       if (schedule) await d.store.close(schedule, moved ? schedule.next_run_at : deadline);
       return { status: "skipped", reason: `No run finished before ${schedule ? "the schedule's next run" : "the manual run's window closed"} (${why}).`, result: kept };
     }
     await note(null);
     // The lease that found this does not count against the job.
-    return { status: "queued", reason: `Runs again: ${why}.`, available_at: next.toISOString(), deferred: true, result: kept };
+    return { status: "queued", reason: `Runs again: ${why}.`, available_at: availableAt!, deferred: true, result: kept };
+  };
+
+  /** The report is still running: the job waits, and at the day the one alert says so. */
+  const stillRunning = async (): Promise<JobOutcome> => {
+    const result = (): DispatchMemory => ({ ...memory, runs });
+    // Recorded at once, so a lease that dies after the post does not post it again.
+    if (await alertIfLate("still_running")) await d.saveJob({ result: result() });
+    return { status: "waiting", reason: "The report is running.", result: result() };
   };
 
   /** A sent report: done when it finished, waiting while it runs, run again when it stopped. */
@@ -408,18 +466,19 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
       const open = runs.find((r) => r.report_id === reportId && !r.ended_at);
       if (competitive && run.held) {
         // Held: kept for staff, never shown to clients, and made again tomorrow.
-        if (open) Object.assign(open, { ended_at: now.toISOString(), outcome: "held" as const });
+        if (open) Object.assign(open, { ended_at: now.toISOString(), outcome: "held" as const, end: "held" as const });
         const held = runs.filter((r) => r.outcome === "held").length;
         const at = Math.min(now.getTime() + HELD_REDO_MINUTES * MINUTE, Date.parse(deadline) - LAST_RUN_LEAD_MINUTES * MINUTE);
         if (held <= HELD_REDOS && at > now.getTime()) {
           if (d.dryRun) return { status: "waiting", reason: "dry run: would make the held analysis again", result: keep() };
           if (memory.set_id) await d.store.releaseSet(memory.set_id);
-          // Not shown to clients, so not made yet: made again a day or more after the first run, it alerts once.
-          await alertIfLate(HELD_REASON);
+          // Not shown to clients, so not made yet: held a day or more after the first run, it alerts once.
+          await alertIfLate("held");
           const kept = keep();
+          const availableAt = leaseAt(new Date(at), kept);
           await d.saveJob({ phase: null, report_id: null, result: kept });
           await note(null);
-          return { status: "queued", reason: `The analysis did not pass its checks; it is made again (${held} of ${HELD_REDOS}).`, available_at: new Date(at).toISOString(), deferred: true, result: kept };
+          return { status: "queued", reason: `The analysis did not pass its checks; it is made again (${held} of ${HELD_REDOS}).`, available_at: availableAt, deferred: true, result: kept };
         }
       } else if (open) {
         Object.assign(open, { ended_at: now.toISOString(), outcome: "ran" as const });
@@ -436,20 +495,35 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
       const app = await d.pipelineRun(reportId);
       const seen = Date.parse(app?.heartbeat_at ?? "");
       const alive = app?.status === "running" && Number.isFinite(seen) && now.getTime() - seen < STUCK_AFTER_MINUTES * MINUTE;
-      if (run && inProgress(run.status) && alive) return { status: "waiting", reason: "The report is running.", result: { ...memory, runs } };
-      return runAgain(reportId, !run ? "the report was removed"
-        : !app ? "the in-app pipeline run is gone"
-        : app.status === "stopped" ? `the in-app pipeline stopped (${app.outcome ?? "no reason recorded"})`
-        : app.status === "done" ? "the in-app pipeline finished without completing the report"
-        : "the in-app pipeline stopped answering", run);
+      if (run && inProgress(run.status) && alive) return stillRunning();
+      const [why, end]: [string, RunEnd] = !run ? ["the report was removed", "report_removed"]
+        : !app ? ["the in-app pipeline run is gone", "app_gone"]
+        : app.status === "stopped" ? [`the in-app pipeline stopped (${app.outcome ?? "no reason recorded"})`, "app_stopped"]
+        : app.status === "done" ? ["the in-app pipeline finished without completing the report", "app_ended_without_report"]
+        : ["the in-app pipeline stopped answering", "app_stopped_answering"];
+      return runAgain(reportId, why, end, run);
     }
     const started = Date.parse(run?.created_at ?? "");
     const stale = !Number.isFinite(started) || now.getTime() - started >= STUCK_AFTER_MINUTES * MINUTE;
-    if (run && inProgress(run.status) && !stale) return { status: "waiting", reason: "The report is running.", result: { ...memory, runs } };
-    return runAgain(reportId, !run ? "the report was removed" : inProgress(run.status) ? "the workflow stopped answering" : "the workflow did not finish the report", run);
+    if (run && inProgress(run.status) && !stale) return stillRunning();
+    if (!run) return runAgain(reportId, "the report was removed", "report_removed", run);
+    return runAgain(reportId, inProgress(run.status) ? "the workflow stopped answering" : "the workflow did not finish the report", "n8n", run);
   };
 
   if (job.phase === "sent" && job.report_id) return watch(job.report_id);
+
+  // Between runs, a lease before the next run's time is the alert's: it checks
+  // the alert and puts the job back for that run, starting nothing. Deferred,
+  // so the lease is not counted against the job.
+  const retryAt = Date.parse(memory.retry_at ?? "");
+  if (!job.report_id && !job.phase && Number.isFinite(retryAt) && now.getTime() < retryAt) {
+    const tried = await alertIfLate(runs.at(-1)?.end);
+    const kept: DispatchMemory = { ...memory, runs };
+    const availableAt = leaseAt(new Date(retryAt), kept);
+    // Recorded at once, so a lease that dies after the post does not post it again.
+    if (tried) await d.saveJob({ result: kept });
+    return { status: "queued", reason: `The alert was checked; the report runs again at ${new Date(retryAt).toISOString()}.`, available_at: availableAt, deferred: true, result: kept };
+  }
 
   if (!job.report_id && job.occurrence && moved) {
     return { status: "skipped", reason: `The schedule moved to ${schedule!.next_run_at} before this run started.` };
@@ -463,7 +537,7 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
 
   if (job.attempts > job.max_attempts) {
     const why = `the worker stopped ${job.attempts - 1} times before the request was answered`;
-    if (job.report_id) return runAgain(job.report_id, why);
+    if (job.report_id) return runAgain(job.report_id, why, "interrupted");
     if (!d.dryRun) await note(`error: ${why}`);
     return { status: "blocked", reason: `The worker stopped ${job.attempts - 1} times before the request was answered.` };
   }
@@ -478,7 +552,7 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
       const started = Date.parse(run?.created_at ?? "");
       // The workflow may have the request already: its report says so.
       if (!run || !inProgress(run.status)) return watch(reportId);
-      if (!Number.isFinite(started) || now.getTime() - started >= STUCK_AFTER_MINUTES * MINUTE) return runAgain(reportId, "the request was never answered", run);
+      if (!Number.isFinite(started) || now.getTime() - started >= STUCK_AFTER_MINUTES * MINUTE) return runAgain(reportId, "the request was never answered", "n8n", run);
       repeat = true;
     } else if (!run || !inProgress(run.status)) {
       // A prepared report that was closed meanwhile is not reused: this run
@@ -498,7 +572,7 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
    * webhook (n8n and shadow, rows set by hand), which only those routes need.
    */
   type Target =
-    | { engine: "app"; pipeline?: PipelineDefinition; refused?: string }
+    | { engine: "app"; pipeline?: PipelineDefinition; refused?: string; unreadable?: boolean }
     | { engine: "n8n" | "shadow"; pipeline?: PipelineDefinition; url: string };
 
   /**
@@ -506,20 +580,20 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
    * asks for them; no switch, or one that cannot be read, is app with no
    * pipeline, so nothing goes out and the occurrence runs again later.
    */
-  const readRoute = async (): Promise<{ engine: Engine; pipeline?: PipelineDefinition; refused?: string }> => {
-    if (!d.engine) return { engine: "app", refused: "No engine switch is given to this dispatch." };
+  const readRoute = async (): Promise<{ engine: Engine; pipeline?: PipelineDefinition; refused?: string; unreadable?: boolean }> => {
+    if (!d.engine) return { engine: "app", refused: "No engine switch is given to this dispatch.", unreadable: true };
     try {
-      return await d.engine(competitive ? "competitive" : "social", client.id);
+      return await d.engine(kind, client.id);
     } catch (e) {
       const refused = `The engine switch could not be read (${message(e)}).`;
       console.warn(`[dispatch] ${refused}`);
-      return { engine: "app", refused };
+      return { engine: "app", refused, unreadable: true };
     }
   };
 
   /** What the in-app run is given: the report, its range and the request n8n gets. */
   const pipelineStart = (mode: "shadow" | "app", pipeline: PipelineDefinition, payload: Record<string, unknown>, result: DispatchMemory): ReportPipelineStart => ({
-    mode, kind: competitive ? "competitive" : "social", pipeline, clientId: client.id, reportId: reportId!,
+    mode, kind, pipeline, clientId: client.id, reportId: reportId!,
     range: result.range as ReportRange, setId: competitive ? (result.set_id ?? null) : null, request: payload,
   });
 
@@ -532,7 +606,7 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
     } catch (e) {
       // Nothing started: this run ends and the occurrence runs again.
       Object.assign(memory, result);
-      return runAgain(reportId, `the in-app pipeline could not be queued (${message(e)})`);
+      return runAgain(reportId, `the in-app pipeline could not be queued (${message(e)})`, "app_not_queued");
     }
     const open = runs.find((x) => x.report_id === reportId && !x.ended_at);
     if (open) open.engine = "app";
@@ -559,7 +633,7 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
       if (target.pipeline) return startApp(target.pipeline, payload, result);
       // Nothing can make it in the app now: as after a run that stopped, the occurrence runs again later.
       Object.assign(memory, result);
-      return runAgain(reportId, `the report could not start in the app (${(target.refused ?? "no in-app pipeline can run").replace(/\.$/, "")})`);
+      return runAgain(reportId, `the report could not start in the app (${(target.refused ?? "no in-app pipeline can run").replace(/\.$/, "")})`, target.unreadable ? "engine_unreadable" : "no_pipeline");
     }
     await d.saveJob({ phase: "posting", result });
     let r: { ok: boolean; status: number };
@@ -573,7 +647,7 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
     // Refused: nothing started, so this run ends and the occurrence runs again.
     if (!r.ok) {
       Object.assign(memory, result);
-      return runAgain(reportId, `the workflow refused the request (${r.status})`);
+      return runAgain(reportId, `the workflow refused the request (${r.status})`, "n8n");
     }
     await d.saveJob({ phase: "sent", result });
     if (target.engine === "shadow" && target.pipeline) await startShadow(target.pipeline, payload, result);
@@ -586,7 +660,7 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
     const route = await readRoute();
     const url = competitive ? hooks.competitive : hooks.social;
     let target: Target;
-    if (route.engine === "app") target = { engine: "app", pipeline: route.pipeline, refused: route.refused };
+    if (route.engine === "app") target = { engine: "app", pipeline: route.pipeline, refused: route.refused, unreadable: route.unreadable };
     else if (url) target = { engine: route.engine, pipeline: route.pipeline, url };
     // Only a request to n8n needs its webhook. Without it: blocked, before anything is made.
     else throw new Error(competitive ? "competitive webhook URL not configured" : "n8n webhook URL not configured");
@@ -626,10 +700,11 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
             await note(`error: ${tracking.message}`);
             await d.store.releaseHeldSocial(client.id);
           }
-          return { status: "blocked", reason: tracking.message, result: { code: tracking.code } };
+          // Blocked jobs are put back in the queue daily with this memory: the runs and the alert stay.
+          return { status: "blocked", reason: tracking.message, result: { ...keep(), code: tracking.code } };
         }
       }
-      const range = memory.range ?? (manual ? manual.range : rangeForSchedule(schedule!.range_mode, now));
+      const range = period();
       const attemptStartedAt = (reportId && memory.attempt_started_at) || now.toISOString();
       if (!reportId) {
         if (d.dryRun) {
@@ -637,7 +712,7 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
         } else {
           reportId = await d.store.insertCompetitiveReport({ created_at: attemptStartedAt, client_id: client.id, set_id: set.id, status: "running", report_data: {}, date_range_start: range.start, date_range_end: range.end, created_by: createdBy });
           setId = set.id;
-          runs.push({ report_id: reportId, started_at: attemptStartedAt });
+          startRun(reportId, attemptStartedAt);
           await d.saveJob({ phase: "prepared", report_id: reportId, result: { ...memory, set_id: set.id, attempt_started_at: attemptStartedAt, range, runs } });
         }
       }
@@ -655,7 +730,7 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
     }
 
     // Social.
-    let range = memory.range ?? (manual ? manual.range : rangeForSchedule(schedule!.range_mode, now));
+    let range = period();
     let wait: string | null = null;
     /** The competitive report this social report is built on, when it is the pinned one. */
     let competitiveReportId: string | undefined;
@@ -693,7 +768,7 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
         reportId = "dry-run";
       } else {
         reportId = await d.store.insertSocialReport({ client_id: client.id, status: "running", report_data: {}, created_by: createdBy, date_range_start: range.start, date_range_end: range.end });
-        runs.push({ report_id: reportId, started_at: now.toISOString() });
+        startRun(reportId, now.toISOString());
         await d.saveJob({ phase: "prepared", report_id: reportId, result: { ...memory, range, runs } });
       }
     }
@@ -714,7 +789,7 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
     const msg = message(err);
     if (d.dryRun) return { status: "failed", reason: `dry run: ${msg}` };
     // A report this job opened is taken away and the occurrence runs again.
-    if (reportId) return runAgain(reportId, msg);
+    if (reportId) return runAgain(reportId, msg, "error");
     await note(`error: ${msg}`);
     return { status: "blocked", reason: msg };
   }

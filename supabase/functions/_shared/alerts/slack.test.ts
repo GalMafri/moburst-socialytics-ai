@@ -35,15 +35,16 @@ describe("periodText", () => {
     expect(periodText({ start: "2026-11-08", end: "2026-11-08" })).toBe("Nov 8, 2026");
   });
 
-  it("keeps a period it cannot read as it is", () => {
+  it("keeps a period it cannot read as it is, escaped for Slack", () => {
     expect(periodText({ start: "someday", end: "2026-11-08" })).toBe("someday to 2026-11-08");
+    expect(periodText({ start: "<a&b>", end: "2026-11-08" })).toBe("&lt;a&amp;b&gt; to 2026-11-08");
   });
 });
 
 describe("stuckReportText", () => {
   it("mentions Lital first, then names the client, the report, its period, the reason and the reports page", () => {
     const text = stuckReportText({ client: "Fixture", kind: "social", range: OCTOBER, reason: "the in-app run stopped", link: reportsLink("social", "c-123") });
-    expect(text).toBe("<@U03AZ88435H> The social report for Fixture (October 2026) is still not made a day after its first try. Reason: the in-app run stopped. https://socialytics.moburst.com/clients/c-123/reports");
+    expect(text).toBe("<@U03AZ88435H> The social report for Fixture (October 2026) still isn't ready a day after the first try. Reason: the in-app run stopped. https://socialytics.moburst.com/clients/c-123/reports");
     expect(text.startsWith(LITAL_SLACK)).toBe(true);
   });
 
@@ -55,23 +56,26 @@ describe("stuckReportText", () => {
     expect(text).toContain("https://socialytics.moburst.com/clients/c-123/competitive/reports");
   });
 
-  it("escapes the characters Slack reads as markup in the client's name and the reason", () => {
+  it("escapes the characters Slack reads as markup in the client's name, the reason and an unreadable period", () => {
     const text = stuckReportText({ client: "A&B <Co>", kind: "social", range: OCTOBER, reason: "x < y & z", link: reportsLink("social", "c-1") });
     expect(text).toContain("for A&amp;B &lt;Co&gt; (October 2026)");
     expect(text).toContain("Reason: x &lt; y &amp; z.");
     expect(text).not.toContain("<Co>");
+    const odd = madeReportText({ client: "Fixture", kind: "social", range: { start: "<!here>", end: "x" }, link: reportsLink("social", "c-1") });
+    expect(odd).toContain("(&lt;!here&gt; to x)");
+    expect(odd).not.toContain("<!here>");
   });
 });
 
 describe("madeReportText", () => {
-  it("mentions Lital and says the report is made, with the reports page", () => {
+  it("mentions Lital and says the report is ready, with the reports page", () => {
     const text = madeReportText({ client: "Fixture", kind: "competitive", range: OCTOBER, link: reportsLink("competitive", "c-123") });
-    expect(text).toBe("<@U03AZ88435H> The competitive report for Fixture (October 2026) is made now. https://socialytics.moburst.com/clients/c-123/competitive/reports");
+    expect(text).toBe("<@U03AZ88435H> The competitive report for Fixture (October 2026) is ready now. https://socialytics.moburst.com/clients/c-123/competitive/reports");
   });
 
   it("uses no dashes as punctuation in either message", () => {
     const texts = [
-      stuckReportText({ client: "Fixture", kind: "social", range: { start: "2026-11-01", end: "2026-11-08" }, reason: "it has not finished yet", link: reportsLink("social", "c") }),
+      stuckReportText({ client: "Fixture", kind: "social", range: { start: "2026-11-01", end: "2026-11-08" }, reason: "the run ended without a recorded reason", link: reportsLink("social", "c") }),
       madeReportText({ client: "Fixture", kind: "social", range: { start: "2025-12-15", end: "2026-01-14" }, link: reportsLink("social", "c") }),
     ];
     for (const t of texts) expect(t).not.toMatch(/[—–]| - /);
@@ -97,16 +101,14 @@ describe("postIssue", () => {
     expect(JSON.parse(String(calls[0].init.body))).toEqual({ text: "hello <@U03AZ88435H>" });
   });
 
-  it("answers false, without throwing or logging the webhook, when Slack refuses the message", async () => {
+  it("answers false when Slack refuses the message, logging only the status", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    const fetchImpl = async () => new Response("no_service", { status: 404 });
+    const fetchImpl = async () => new Response(`no_service ${WEBHOOK}`, { status: 404 });
     expect(await postIssue(WEBHOOK, "hello", fetchImpl as unknown as typeof fetch)).toBe(false);
     const printed = [...warn.mock.calls, ...log.mock.calls, ...error.mock.calls].map((c) => c.map(String).join(" ")).join("\n");
-    expect(printed).toContain("404");
-    expect(printed).not.toContain("hooks.slack");
-    expect(printed).not.toContain("secret-part");
+    expect(printed).toBe("[slack] The issues channel refused the message (404).");
   });
 
   it("answers false, without throwing or logging the webhook, when the request fails", async () => {
