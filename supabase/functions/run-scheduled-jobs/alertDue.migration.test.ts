@@ -2,7 +2,9 @@
 // 20261110200000_dispatch_alert_due.sql, read as text (it is not applied
 // here): release_ready_dispatches keeps both of today's releases word for
 // word, and adds one that lets a waiting, sent dispatch out once its Slack
-// alert is due, reading the time the dispatch writes and nothing else.
+// alert is due, reading the time the dispatch writes and nothing else, with
+// no cast that a value of the right shape but an impossible date could make
+// fail (final review).
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -43,15 +45,26 @@ describe(NAME, () => {
     expect(alert).toContain("set status = 'queued', available_at = now(), lease_until = null, updated_at = now()");
     expect(alert).toContain("where j.kind = 'dispatch' and j.status = 'waiting' and j.phase = 'sent'");
     expect(alert).toContain("and j.result ->> 'alerted_at' is null");
-    // The time is cast only when it has the form the dispatch writes.
-    expect(alert).toContain("case when coalesce(j.result ->> 'alert_due_at', '') ~ '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$' then (j.result ->> 'alert_due_at')::timestamptz <= now() else false end");
+    // Only the one form the dispatch writes, compared as text with now() written the same way, byte by byte.
+    expect(alert).toContain("and coalesce(j.result ->> 'alert_due_at', '') ~ '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$'");
+    expect(alert).toContain(`and (j.result ->> 'alert_due_at') collate "C" <= to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`);
     expect(body(sql)).toContain("return v_held + v_sent + v_alert;");
   });
 
-  it("reads the form the dispatch writes (toISOString)", () => {
-    const form = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
+  it("never casts the stored time, so no value (2026-02-30 in the right shape, say) can stop the three releases", () => {
+    const alert = updates(body(sql))[2];
+    expect(alert).not.toMatch(/::\s*(timestamptz|timestamp|date)\b/);
+    expect(alert).not.toMatch(/\bcast\s*\(/i);
+  });
+
+  it("reads the form the dispatch writes (toISOString), whose text order is its time order", () => {
+    const form = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
     expect(new Date("2026-11-08T07:20:00Z").toISOString()).toMatch(form);
-    expect("tomorrow").not.toMatch(form);
+    for (const other of ["tomorrow", "2026-11-08T07:20:00Z", "2026-11-08T07:20:00.1234Z", "2026-11-08 07:20:00.000Z"]) expect(other).not.toMatch(form);
+    // to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') writes the same form; between two such texts, the earlier time sorts first.
+    const times = ["2026-02-28T23:59:59.999Z", "2026-03-01T00:00:00.000Z", "2026-11-08T07:20:00.000Z", "2026-11-08T07:20:00.001Z", "2026-11-08T17:05:00.000Z", "2027-01-01T00:00:00.000Z"];
+    const byText = [...times].reverse().sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    expect(byText).toEqual([...times].sort((a, b) => Date.parse(a) - Date.parse(b)));
   });
 
   it("writes only scheduled_jobs and schedules nothing", () => {

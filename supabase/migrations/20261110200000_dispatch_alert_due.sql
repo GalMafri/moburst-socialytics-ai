@@ -4,7 +4,7 @@
 -- still running waits, and only this function lets a waiting job out. So,
 -- as in 20261020110000_inhouse_groundwork.sql, with one addition: a waiting,
 -- sent dispatch whose alert is due (result.alert_due_at, the first run's
--- start plus a day, in UTC ISO form) is let out once. The dispatch then
+-- start plus a day, as toISOString writes it) is let out once. The dispatch then
 -- removes alert_due_at, whether or not the message was posted, so the job is
 -- never let out again for it.
 --
@@ -49,18 +49,18 @@ begin
      end;
   get diagnostics v_sent = row_count;
 
-  -- The alert's time has come for a report still running. The case reads the
-  -- time only when it has the form the dispatch writes, so a value written by
-  -- hand can never stop this function.
+  -- The alert's time has come for a report still running. The time is never
+  -- cast: it is compared as text, byte by byte, in the one form the dispatch
+  -- writes (toISOString: UTC with milliseconds, 2026-11-09T07:20:00.000Z),
+  -- with now() written the same way, so the order of the texts is the order
+  -- of the times. A value of any other form is not let out; no value can make
+  -- the comparison fail.
   update public.scheduled_jobs j
      set status = 'queued', available_at = now(), lease_until = null, updated_at = now()
    where j.kind = 'dispatch' and j.status = 'waiting' and j.phase = 'sent'
      and j.result ->> 'alerted_at' is null
-     and case
-       when coalesce(j.result ->> 'alert_due_at', '') ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$'
-         then (j.result ->> 'alert_due_at')::timestamptz <= now()
-       else false
-     end;
+     and coalesce(j.result ->> 'alert_due_at', '') ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$'
+     and (j.result ->> 'alert_due_at') collate "C" <= to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"');
   get diagnostics v_alert = row_count;
   return v_held + v_sent + v_alert;
 end;
