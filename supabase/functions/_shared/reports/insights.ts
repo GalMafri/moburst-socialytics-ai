@@ -20,9 +20,13 @@
 //
 // Same data, same insights: an answer is stored in report_insights under a
 // hash of its exact input (the facts, the post sample, the prompt version
-// and the model); a stored hash is used again with no call. The team's
-// verdicts and edits are not part of it: they apply when a report is read,
-// keyed by a gap's own words (insightKey), so no vote re-words a report.
+// and the model, and for a competitive report the suggestions the team
+// rejected and its learned preferences, which shape gaps as they shape the
+// model's on main: competitive prompt.ts, aggregate.ts suppressed_insights,
+// analysis.ts team_preferences); a stored hash is used again with no call.
+// Those are read once, when the job runs: no vote queues or re-words a
+// report. A rejected suggestion is refused by the check too, and verdicts
+// apply again when a report is read, keyed by a gap's words (insightKey).
 // The row shown is a report's newest confirmed one: meeting a stored input
 // again stamps it confirmed, so a report whose input returns to an earlier
 // one (an undone change) shows that earlier answer again.
@@ -35,6 +39,8 @@
 import { numbersIn, sentences } from "./reportText.ts";
 import { competitiveChanges, competitiveFacts, socialChanges, socialFacts, type Fact } from "./facts.ts";
 import { GAP_PLATFORMS } from "../pipelines/competitive/analysis.ts";
+import { insightKey } from "./payloads.ts";
+import { type CompetitiveLearning, learningLines } from "../competitive/suggestionEdits.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -58,6 +64,8 @@ export type InsightFields =
 
 /** A post the competitive report's style fields describe. */
 export interface SamplePost { company: string; platform: string; format: string; text: string; engagement: number }
+/** A suggestion the team rejected (a thumbs-down): its key (insightKey) and its words. */
+export interface Rejected { key: string; gap: string }
 
 export interface InsightsInput {
   kind: InsightsKind;
@@ -65,6 +73,10 @@ export interface InsightsInput {
   period: string | null;
   facts: Fact[];
   sample: SamplePost[];
+  /** Competitive only: the suggestions the team rejected, by key. Never proposed again. */
+  rejected: Rejected[];
+  /** Competitive only: the team's standing preferences, learned from its edits (learningLines). */
+  preferences: string[];
 }
 
 const cited = { type: "object", additionalProperties: false, required: ["text", "facts"], properties: { text: { type: "string" }, facts: { type: "array", items: { type: "string" } } } };
@@ -118,6 +130,8 @@ export function insightsPrompt(input: InsightsInput, problems: string[] = []): s
       lines.push("", "Posts from the period that show how each company writes (for describing style only; never quote numbers from here):",
         ...input.sample.map((p) => `- ${p.company}, ${p.platform} ${p.format}: "${p.text.replace(/\s+/g, " ").slice(0, 220)}"`));
     }
+    if (input.rejected.length) lines.push("", "Suggestions the account team rejected (never propose any of these or a rephrasing of one):", ...input.rejected.map((r) => `- ${r.gap}`));
+    if (input.preferences.length) lines.push("", "The account team's standing preferences for this client's suggestions, learned from their edits to earlier reports. Follow every one when you write gaps:", ...input.preferences.map((p) => `- ${p}`));
     lines.push("", "Write:",
       "- summary: two to four short paragraphs on where the client stands against its competitors, each citing the facts it rests on;",
       "- gaps: two to four gaps the client can close, each with the gap, its platform, why it matters and a test to run, citing the facts it rests on. A test's target may only be a cited fact's number. When the facts show the client behind a competitor on any compared metric, write at least one gap.");
@@ -240,8 +254,14 @@ function textProblems(where: string, text: string, citedIds: string[], byId: Map
   return out;
 }
 
-/** Why an answer can't be shown, or nothing when it can. `client` is the report's client, whose name may hold any word. */
-export function checkInsights(fields: InsightFields | null, facts: Fact[], client = ""): string[] {
+/**
+ * Why an answer can't be shown, or nothing when it can. `client` is the
+ * report's client, whose name may hold any word; `rejected`, the keys
+ * (insightKey) of the suggestions the team rejected.
+ */
+export function checkInsights(fields: InsightFields | null, facts: Fact[], opts: { client?: string; rejected?: string[] } = {}): string[] {
+  const client = opts.client ?? "";
+  const rejected = new Set(opts.rejected ?? []);
   if (!fields) return ["The answer could not be read as the JSON asked for."];
   const byId = new Map(facts.map((f) => [f.id, f]));
   const companies = [...new Set([client, ...facts.flatMap((f) => [f.company, f.leader])].map((n) => String(n ?? "").trim()).filter(Boolean))].sort((a, b) => b.length - a.length);
@@ -259,6 +279,7 @@ export function checkInsights(fields: InsightFields | null, facts: Fact[], clien
     fields.summary.forEach((c, i) => out.push(...check(`Summary paragraph ${i + 1}`, c.text, c.facts)));
     (fields.gaps ?? []).forEach((g, i) => {
       if (!(GAP_PLATFORMS as readonly string[]).includes(g.platform)) out.push(`Gap ${i + 1} names a platform that is not one of ${GAP_PLATFORMS.join(", ")}.`);
+      if (rejected.has(insightKey(g.gap))) out.push(`Gap ${i + 1} is a suggestion the team rejected; never propose it again.`);
       for (const [part, text] of [["gap", g.gap], ["why it matters", g.why_it_matters], ["test", g.suggested_play]] as const) out.push(...check(`Gap ${i + 1}'s ${part}`, text, g.facts));
     });
     // An answer with no gaps leaves the client nothing to close, though the facts show it behind.
@@ -289,7 +310,7 @@ export function templateInsights(kind: InsightsKind, facts: Fact[]): InsightFiel
 
 /** The stored answer's key: the exact input, the prompt version and the model. */
 export async function inputHash(input: InsightsInput, model = INSIGHTS_MODEL): Promise<string> {
-  const text = JSON.stringify({ v: INSIGHTS_PROMPT_VERSION, model, kind: input.kind, client: input.client, period: input.period, facts: input.facts, sample: input.sample });
+  const text = JSON.stringify({ v: INSIGHTS_PROMPT_VERSION, model, kind: input.kind, client: input.client, period: input.period, facts: input.facts, sample: input.sample, rejected: input.rejected, preferences: input.preferences });
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -336,7 +357,7 @@ export function postSample(rd: Any): SamplePost[] {
   return out.sort((a, b) => a.company.localeCompare(b.company) || b.engagement - a.engagement || a.text.localeCompare(b.text));
 }
 
-/** The report's facts and its post sample: the exact input an answer is stored under. */
+/** The report's facts, its post sample, and for a competitive report the team's rejected suggestions and preferences: the exact input an answer is stored under. */
 export async function insightsInput(db: Db, table: string, row: Any): Promise<InsightsInput> {
   const kind = TABLES[table];
   const { data: earlier, error } = await db.from(table).select("report_data, created_at").eq("client_id", row.client_id).in("status", COMPLETE)
@@ -346,9 +367,23 @@ export async function insightsInput(db: Db, table: string, row: Any): Promise<In
   const period = { start: row.date_range_start, end: row.date_range_end };
   const rd = reportData(row);
   const facts = kind === "social" ? socialFacts(rd, { period, history }) : competitiveFacts(rd, { period, history });
+  let rejected: Rejected[] = [];
+  let preferences: string[] = [];
+  if (kind === "competitive") {
+    // As the competitive analysis gets them (payloads.ts buildCompetitivePayload): the thumbs-down suggestions and the newest twenty learnings.
+    const { data: down, error: downError } = await db.from("competitive_insight_feedback").select("insight_key, gap_text").eq("client_id", row.client_id).eq("verdict", "down");
+    if (downError) throw new Error(`Could not read the suggestions the team rejected: ${downError.message}`);
+    rejected = [...new Map(((down ?? []) as Any[])
+      .map((r) => ({ key: str(r.insight_key) || insightKey(r.gap_text), gap: str(r.gap_text) || str(r.insight_key) }))
+      .filter((r) => r.gap).map((r) => [r.key, r] as const)).values()]
+      .sort((a, b) => a.key.localeCompare(b.key));
+    const { data: learned, error: learnedError } = await db.from("competitive_learnings").select("kind, text").eq("client_id", row.client_id).order("created_at", { ascending: false }).limit(20);
+    if (learnedError) throw new Error(`Could not read the team's preferences: ${learnedError.message}`);
+    preferences = learningLines((learned ?? []) as CompetitiveLearning[]);
+  }
   return {
     kind, client: String(row.clients?.name || "the client"), period: row.date_range_start && row.date_range_end ? `${row.date_range_start} to ${row.date_range_end}` : null,
-    facts, sample: kind === "competitive" ? postSample(rd) : [],
+    facts, sample: kind === "competitive" ? postSample(rd) : [], rejected, preferences,
   };
 }
 
@@ -366,7 +401,7 @@ export async function writeInsights(input: InsightsInput, deps: InsightsDeps): P
     used.input += Number(usage?.input_tokens) || 0;
     used.output += Number(usage?.output_tokens) || 0;
     const fields = result.stopReason === "refusal" ? null : parseInsights(input.kind, result.text);
-    const found = checkInsights(fields, input.facts, input.client);
+    const found = checkInsights(fields, input.facts, { client: input.client, rejected: input.rejected.map((r) => r.key) });
     if (!found.length && fields) return { fields: orderByFacts(fields), source: "model", problems, input_tokens: used.input, output_tokens: used.output };
     problems = found;
   }

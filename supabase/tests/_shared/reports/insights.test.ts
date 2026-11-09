@@ -5,7 +5,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Fact } from "../../../functions/_shared/reports/facts";
 import {
-  checkInsights, inputHash, INSIGHTS_SYSTEM, insightsPrompt, orderByFacts, parseInsights, runReportInsights, templateInsights, writeInsights,
+  checkInsights, inputHash, INSIGHTS_SYSTEM, insightsInput, insightsPrompt, orderByFacts, parseInsights, runReportInsights, templateInsights, writeInsights,
   type InsightFields, type InsightsInput,
 } from "../../../functions/_shared/reports/insights";
 
@@ -18,7 +18,7 @@ const FACTS: Fact[] = [
   fact({ id: "F2", key: "change|all|views|", metric: "views", value: 292, previous: 575, change: -283, percent: -49.2, numbers: [292, 575, 283, 49.2], sentence: "Video views fell 49.2% to 292.", basis: "Video views 292 in October against 575 in September, -49.2%" }),
   fact({ id: "F3", key: "share|LinkedIn|engagements|", kind: "share", platform: "LinkedIn", metric: "engagements", unit: "percent", value: 96.1, numbers: [96.1, 521, 542], sentence: "LinkedIn brought 96.1% of the period's engagements.", basis: "LinkedIn 521 of 542 engagements" }),
 ];
-const INPUT: InsightsInput = { kind: "social", client: "Moburst", period: "2026-10-01 to 2026-10-31", facts: FACTS, sample: [] };
+const INPUT: InsightsInput = { kind: "social", client: "Moburst", period: "2026-10-01 to 2026-10-31", facts: FACTS, sample: [], rejected: [], preferences: [] };
 
 const social = (over: Partial<Extract<InsightFields, { kind: "social" }>> = {}): InsightFields => ({
   kind: "social",
@@ -114,6 +114,14 @@ describe("the stricter check (design point 6)", () => {
     expect(checkInsights(answer, [{ ...behind, rank: 1, leader: "Moburst" }])).toEqual([]);
   });
 
+  it("refuses a gap the team rejected, by its key (insightKey), so a hidden suggestion is never proposed again", () => {
+    const ranking = fact({ id: "F1", key: "ranking|all|followers|Moburst", kind: "ranking", metric: "followers", company: "Moburst", leader: "Rival Co", value: 14900, rank: 2, of: 2, leaderValue: 680000, median: 347450, numbers: [14900, 680000, 347450, 2, 2] });
+    const gap = { gap: "Post more memes!", platform: "instagram", why_it_matters: "Rival Co has 680,000 followers.", suggested_play: "Test memes.", facts: ["F1"] };
+    const answer: InsightFields = { kind: "competitive", summary: [{ text: "Moburst ranks 2nd of 2 on followers.", facts: ["F1"] }], gaps: [gap] };
+    expect(checkInsights(answer, [ranking], { rejected: ["post-more-memes"] })).toEqual(["Gap 1 is a suggestion the team rejected; never propose it again."]);
+    expect(checkInsights(answer, [ranking], { rejected: ["weekly-reels"] })).toEqual([]);
+  });
+
   it("states the same rules in the prompt", () => {
     for (const rule of [/currency sign/i, /rose, fell, dropped or doubled/i, /sharply or significantly/i, /ranking or share fact/i, /fact ids/i]) expect(INSIGHTS_SYSTEM).toMatch(rule);
     expect(insightsPrompt({ ...INPUT, kind: "competitive" })).toMatch(/behind a competitor on any compared metric, write at least one gap/i);
@@ -161,21 +169,24 @@ describe("the request", () => {
     expect((await writeInsights(INPUT, { now: () => new Date(), complete: fixed })).source).toBe("model");
   });
 
-  it("names the post sample in a competitive prompt, and never the team's verdicts", () => {
-    const p = insightsPrompt({ ...INPUT, kind: "competitive", sample: [{ company: "Rival Co", platform: "instagram", format: "reel", text: "Who else forgets?", engagement: 900 }] });
+  it("names the post sample, the suggestions the team rejected and its learned preferences in a competitive prompt, as main's analysis does", () => {
+    const p = insightsPrompt({ ...INPUT, kind: "competitive", sample: [{ company: "Rival Co", platform: "instagram", format: "reel", text: "Who else forgets?", engagement: 900 }], rejected: [{ key: "post-more-memes", gap: "Post more memes" }], preferences: ["Prefer: Targets are cadences"] });
     expect(p).toContain('- Rival Co, instagram reel: "Who else forgets?"');
-    expect(p).not.toMatch(/the team (rejected|chose)/i);
+    expect(p).toContain("Suggestions the account team rejected (never propose any of these or a rephrasing of one):\n- Post more memes");
+    expect(p).toContain("The account team's standing preferences for this client's suggestions, learned from their edits to earlier reports. Follow every one when you write gaps:\n- Prefer: Targets are cadences");
+    // A monthly report has no gaps: neither is named.
+    expect(insightsPrompt({ ...INPUT, rejected: [{ key: "post-more-memes", gap: "Post more memes" }] })).not.toContain("Post more memes");
   });
 });
 
 describe("inputHash", () => {
-  it("depends on the facts, the post sample, the prompt version and the model only", async () => {
+  it("depends on the facts, the post sample, the rejected suggestions, the learned preferences, the prompt version and the model", async () => {
     const a = await inputHash(INPUT);
     expect(await inputHash({ ...INPUT, facts: FACTS.map((f) => ({ ...f })) })).toBe(a);
     expect(await inputHash({ ...INPUT, sample: [{ company: "Rival Co", platform: "instagram", format: "reel", text: "Who else forgets?", engagement: 900 }] })).not.toBe(a);
+    expect(await inputHash({ ...INPUT, rejected: [{ key: "post-more-memes", gap: "Post more memes" }] })).not.toBe(a);
+    expect(await inputHash({ ...INPUT, preferences: ["Prefer: Targets are cadences"] })).not.toBe(a);
     expect(await inputHash(INPUT, "claude-opus-5-5")).not.toBe(a);
-    // The team's verdicts and edits apply when a report is read: they never re-word it.
-    expect(await inputHash({ ...INPUT, verdicts: [{ verdict: "down", gap: "Post more memes" }] } as InsightsInput)).toBe(a);
   });
 });
 
@@ -235,14 +246,22 @@ describe("runReportInsights", () => {
     expect(back.writes).toEqual([{ table: "report_insights", op: "update", value: { confirmed_at: "2026-11-09T13:00:00.000Z" }, filters: [["report_id", "r1"], ["input_hash", a]] }]);
   });
 
-  it("reads no verdict or edit of the team's for a competitive report: they apply when it is read", async () => {
-    const complete = vi.fn().mockResolvedValue({ text: "{}", stopReason: "end_turn", raw: {} });
-    const read: string[] = [];
-    const base = fakeDb({ competitive_reports: [{ ...REPORT, report_data: {} }], competitive_insight_feedback: [{ client_id: "mob", verdict: "down", gap_text: "Post more memes" }] });
-    const db = { ...base, from: (table: string) => { read.push(table); return base.from(table); } };
-    await runReportInsights(db, { ...job, payload: { table: "competitive_reports", report_id: "r1" } }, { now: () => new Date(), complete });
-    expect(read).toContain("competitive_reports");
-    expect(read).not.toContain("competitive_insight_feedback");
+  it("reads a competitive report's rejected suggestions and learned preferences once, when the job runs, as main's analysis gets them", async () => {
+    const db = fakeDb({
+      competitive_reports: [],
+      competitive_insight_feedback: [
+        { client_id: "mob", verdict: "down", insight_key: "post-more-memes", gap_text: "Post more memes" },
+        { client_id: "mob", verdict: "up", insight_key: "weekly-reels", gap_text: "Weekly Reels" },
+        { client_id: "mob", verdict: "down", insight_key: "a-daily-poll", gap_text: "A daily poll" },
+      ],
+      competitive_learnings: [{ client_id: "mob", kind: "avoid", text: "Memes" }, { client_id: "mob", kind: "prefer", text: "Targets are cadences" }],
+    });
+    const input = await insightsInput(db, "competitive_reports", { ...REPORT, report_data: {} });
+    expect(input.rejected).toEqual([{ key: "a-daily-poll", gap: "A daily poll" }, { key: "post-more-memes", gap: "Post more memes" }]);
+    expect(input.preferences).toEqual(["Avoid: Memes", "Prefer: Targets are cadences"]);
+    // A monthly report reads neither.
+    const social = await insightsInput(db, "reports", REPORT);
+    expect([social.rejected, social.preferences]).toEqual([[], []]);
   });
 
   it("leaves a report from before go-live as it is (decision 4)", async () => {

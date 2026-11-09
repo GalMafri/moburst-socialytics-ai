@@ -15,10 +15,11 @@
 --      before keep their text (decision 4)
 --   3. the report_insights job, at most one per report while queued or
 --      running, queued by report_text when it ends, done or failed
---      (report_insights_queue): its figures are settled in its first step. The team's
---      verdicts and edits are no part of a report's insights: they apply
---      when a report is read, keyed by a gap's own words, so no vote
---      queues or re-words anything.
+--      (report_insights_queue): its figures are settled in its first step.
+--      A competitive report's job reads the suggestions the team rejected
+--      and its learned preferences when it runs, as the analysis does; no
+--      vote queues or re-words anything, and verdicts apply again when a
+--      report is read, keyed by a gap's own words.
 --
 -- People read the insights of the clients they can access, as they read the
 -- reports (can_access_client, 20260720130000_company_scoped_staff.sql), and
@@ -36,7 +37,8 @@ create table if not exists public.report_insights (
   report_id uuid not null,
   client_id uuid not null references public.clients(id) on delete cascade,
   kind text not null check (kind in ('social', 'competitive')),
-  -- SHA-256 of the facts, the post sample, the prompt version and the model.
+  -- SHA-256 of the facts, the post sample, the prompt version and the model, and for a competitive
+  -- report the suggestions the team rejected and its learned preferences.
   input_hash text not null check (input_hash ~ '^[0-9a-f]{64}$'),
   -- The numbered facts, worked out in code: [{id, key, kind, ..., sentence, basis}].
   facts jsonb not null,
