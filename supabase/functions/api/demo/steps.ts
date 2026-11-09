@@ -330,7 +330,7 @@ export const DEMO_STEPS: StepDef<DemoCtx>[] = [
       const profiles = (await ctx.db.sproutProfilesOf(client.id)).filter((p) => p.is_active !== false);
       const r = await startReport(job, ctx, "social");
       // The report started, or the recent one the demo uses: neither has industry trends.
-      if (r.status === "done" || r.reason === "fresh_report_exists") r.gaps = [...(r.gaps ?? []), gap("run_social", "connected_only", CONNECTED_ONLY.trends)];
+      if (r.status === "done" || (r.status === "skipped" && r.reason === "fresh_report_exists")) r.gaps = [...(r.gaps ?? []), gap("run_social", "connected_only", CONNECTED_ONLY.trends)];
       if (!profiles.length && (r.status === "done")) r.gaps = [...(r.gaps ?? []), gap("run_social", "performance_data_unavailable", "No Sprout profile: the social report has no performance section for this brand; recommendations, the calendar and the deck are still produced.")];
       return r;
     },
