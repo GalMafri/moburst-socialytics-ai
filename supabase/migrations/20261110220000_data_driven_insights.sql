@@ -8,7 +8,9 @@
 -- the model-written fields, which stay stored untouched.
 --
 --   1. report_insights: one answer per report and exact input (its hash), so
---      the same data always shows the same words
+--      the same data always shows the same words. The row shown is the
+--      newest confirmed one: an input met again is stamped confirmed again,
+--      so a report whose input returns to an earlier one shows that answer.
 --   2. report_insights_live_from(): when insights went live; reports stored
 --      before keep their text (decision 4)
 --   3. the report_insights job, at most one waiting per report, queued by
@@ -48,12 +50,15 @@ create table if not exists public.report_insights (
   -- What was wrong with an answer that was asked again; for developers.
   problems jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now(),
+  -- When this input was last met: written with the answer, stamped again each time the job meets it.
+  confirmed_at timestamptz not null default now(),
   constraint report_insights_one_per_input unique (report_id, input_hash)
 );
-create index if not exists report_insights_report on public.report_insights (report_id, created_at desc);
+-- The row shown is the report's newest confirmed one.
+create index if not exists report_insights_shown on public.report_insights (report_id, confirmed_at desc);
 create index if not exists report_insights_client on public.report_insights (client_id);
 
-comment on table public.report_insights is 'A report''s insights: facts worked out in code, worded by one model call and checked in code. The newest row of a report is the one shown.';
+comment on table public.report_insights is 'A report''s insights: facts worked out in code, worded by one model call and checked in code. The row of a report with the newest confirmed_at is the one shown.';
 
 alter table public.report_insights enable row level security;
 
@@ -70,7 +75,7 @@ create policy "OAuth sessions cannot delete" on public.report_insights as restri
 
 revoke all on public.report_insights from public, anon, authenticated;
 -- The shown columns only: problems, model, input_tokens and output_tokens stay with the service role.
-grant select (id, report_table, report_id, client_id, kind, input_hash, facts, fields, source, prompt_version, created_at)
+grant select (id, report_table, report_id, client_id, kind, input_hash, facts, fields, source, prompt_version, created_at, confirmed_at)
   on public.report_insights to authenticated;
 grant select, insert, update, delete on public.report_insights to service_role;
 

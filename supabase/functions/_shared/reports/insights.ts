@@ -17,6 +17,9 @@
 // and the model); a stored hash is used again with no call. The team's
 // verdicts and edits are not part of it: they apply when a report is read,
 // keyed by a gap's own words (insightKey), so no vote re-words a report.
+// The row shown is a report's newest confirmed one: meeting a stored input
+// again stamps it confirmed, so a report whose input returns to an earlier
+// one (an undone change) shows that earlier answer again.
 // Only reports from go-live on get insights (decision 4,
 // report_insights_live_from); stored reports keep their text.
 //
@@ -334,15 +337,21 @@ export async function runReportInsights(db: Db, job: InsightsJob, deps: Insights
     const input = await insightsInput(db, table, row);
     if (!input.facts.length) return { status: "done", result: { facts: 0 } };
     const hash = await inputHash(input);
+    const confirmedAt = deps.now().toISOString();
     const { data: stored, error: storedError } = await db.from("report_insights").select("id").eq("report_id", reportId).eq("input_hash", hash).limit(1);
     if (storedError) throw new Error(`Could not read the stored insights: ${storedError.message}`);
-    if (stored?.length) return { status: "done", result: { facts: input.facts.length, reused: true } };
+    if (stored?.length) {
+      // The same words again, and the ones shown: stamped as the newest confirmed.
+      const { error: stampError } = await db.from("report_insights").update({ confirmed_at: confirmedAt }).eq("report_id", reportId).eq("input_hash", hash);
+      if (stampError) throw new Error(`Could not confirm the stored insights: ${stampError.message}`);
+      return { status: "done", result: { facts: input.facts.length, reused: true } };
+    }
 
     const written = await writeInsights(input, deps);
     const { error: saveError } = await db.from("report_insights").upsert({
       report_table: table, report_id: reportId, client_id: row.client_id, kind: input.kind, input_hash: hash, facts: input.facts, fields: written.fields,
       source: written.source, model: INSIGHTS_MODEL, prompt_version: INSIGHTS_PROMPT_VERSION, input_tokens: written.input_tokens, output_tokens: written.output_tokens,
-      problems: written.problems, created_at: deps.now().toISOString(),
+      problems: written.problems, created_at: confirmedAt, confirmed_at: confirmedAt,
     }, { onConflict: "report_id,input_hash", ignoreDuplicates: true });
     if (saveError) throw new Error(`Could not save the insights: ${saveError.message}`);
     return { status: "done", result: { facts: input.facts.length, source: written.source, input_tokens: written.input_tokens, output_tokens: written.output_tokens } };
@@ -362,14 +371,14 @@ export async function queueReportInsights(db: Db, table: string, reportId: strin
 }
 
 /**
- * The newest insights of a report as text the week planner reads as its
+ * The shown insights of a report (its newest confirmed row) as text the week planner reads as its
  * report findings: the insights, then the recommendations. Null when the
  * report has none (stored before go-live), so the planner reads the report's
  * own fields as before.
  */
 export async function insightFindings(db: Db, reportId: string): Promise<string[] | null> {
   try {
-    const { data, error } = await db.from("report_insights").select("fields, created_at").eq("report_id", reportId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    const { data, error } = await db.from("report_insights").select("fields, confirmed_at").eq("report_id", reportId).order("confirmed_at", { ascending: false }).limit(1).maybeSingle();
     if (error || !data?.fields || data.fields.kind !== "social") return null;
     const f = data.fields as Extract<InsightFields, { kind: "social" }>;
     return [...f.insights, ...(f.recommendations ?? [])].map((c) => c.text).filter(Boolean);

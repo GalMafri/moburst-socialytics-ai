@@ -18,7 +18,7 @@ const FACTS = [
   fact("F2", "ranking|all|compared_rate|Moburst", "Engagement rate compared on likes, comments and shares: Moburst 0.31%, Rival Co 2.1% (highest), median 0.6% across 3 companies, from Sprout and RivalIQ"),
   fact("F3", "share|LinkedIn|engagements|", "LinkedIn 521 of 542 engagements, from Sprout"),
 ];
-const row = (fields: ReportInsightsRow["fields"]): ReportInsightsRow => ({ id: "i1", report_id: "r1", kind: fields.kind, facts: FACTS, fields, source: "model", created_at: "2026-11-09T11:00:00Z" });
+const row = (fields: ReportInsightsRow["fields"]): ReportInsightsRow => ({ id: "i1", report_id: "r1", kind: fields.kind, facts: FACTS, fields, source: "model", confirmed_at: "2026-11-09T11:00:00Z" });
 
 describe("the report's insights", () => {
   it("joins the cited facts' basis lines, in the order cited, and skips an id it doesn't know", () => {

@@ -92,12 +92,20 @@ describe("20261110220000_data_driven_insights.sql", () => {
 
   it("shows people the shown columns only: problems, the model and token counts are the service role's", async () => {
     await as("authenticated", APP);
-    expect(await rows(`select id, report_table, report_id, client_id, kind, input_hash, facts, fields, source, prompt_version, created_at from public.report_insights`)).toHaveLength(1);
+    expect(await rows(`select id, report_table, report_id, client_id, kind, input_hash, facts, fields, source, prompt_version, created_at, confirmed_at from public.report_insights`)).toHaveLength(1);
     for (const column of ["problems", "model", "input_tokens", "output_tokens", "*"]) {
       await expect(db.query(`select ${column} from public.report_insights`)).rejects.toThrow(/permission denied/);
     }
     await as("service_role", { role: "service_role" });
     expect((await rows(`select problems, model, input_tokens, output_tokens from public.report_insights`)).length).toBe(2);
+  });
+
+  it("stamps each answer when it is confirmed, and readers find the newest confirmed one by its index", async () => {
+    await as(null, null);
+    const [{ n }] = await rows(`select count(*)::int as n from public.report_insights where confirmed_at is null or confirmed_at <> created_at`);
+    expect(n).toBe(0);
+    const [{ def }] = await rows(`select pg_get_indexdef('public.report_insights_shown'::regclass) as def`);
+    expect(String(def)).toMatch(/\(report_id, confirmed_at DESC\)/);
   });
 
   it("keeps go-live as the first run set it, and only the service role reads it", async () => {

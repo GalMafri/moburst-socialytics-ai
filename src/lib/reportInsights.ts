@@ -17,7 +17,7 @@ export interface ReportInsightsRow {
   facts: Fact[];
   fields: InsightFields;
   source: "model" | "template";
-  created_at: string;
+  confirmed_at: string;
 }
 
 export interface ShownInsight {

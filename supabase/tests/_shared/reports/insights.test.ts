@@ -129,7 +129,7 @@ describe("inputHash", () => {
 
 /** A report row and the tables the job reads, with every write recorded. */
 function fakeDb(tables: Record<string, unknown[]>, liveFrom: string | null = "2026-11-08T00:00:00Z") {
-  const writes: Array<{ table: string; op: string; value: unknown }> = [];
+  const writes: Array<{ table: string; op: string; value: unknown; filters?: Array<[string, unknown]> }> = [];
   return {
     writes,
     rpc: async (name: string) => (name === "report_insights_live_from" ? { data: liveFrom, error: null } : { data: null, error: null }),
@@ -138,8 +138,9 @@ function fakeDb(tables: Record<string, unknown[]>, liveFrom: string | null = "20
       // deno-lint-ignore no-explicit-any
       const q: any = {};
       for (const name of ["select", "in", "lt", "order", "limit", "not"]) q[name] = () => q;
-      q.eq = (c: string, v: unknown) => { rows = rows.filter((r) => !(c in r) || r[c] === v); return q; };
-      for (const op of ["insert", "upsert", "update"]) q[op] = (value: unknown) => { writes.push({ table, op, value }); return q; };
+      const filters: Array<[string, unknown]> = [];
+      q.eq = (c: string, v: unknown) => { filters.push([c, v]); rows = rows.filter((r) => !(c in r) || r[c] === v); return q; };
+      for (const op of ["insert", "upsert", "update"]) q[op] = (value: unknown) => { writes.push({ table, op, value, filters }); return q; };
       q.maybeSingle = async () => ({ data: rows[0] ?? null, error: null });
       q.then = (ok: (v: unknown) => unknown) => Promise.resolve({ data: rows, error: null }).then(ok);
       return q;
@@ -161,15 +162,25 @@ describe("runReportInsights", () => {
     const out = await runReportInsights(db, job, { now: () => new Date("2026-11-09T11:00:00Z"), complete });
     expect(out).toMatchObject({ status: "done", result: { source: "template" } });
     const saved = db.writes.find((w) => w.table === "report_insights")!.value as Record<string, unknown>;
-    expect(saved).toMatchObject({ report_table: "reports", report_id: "r1", client_id: "mob", kind: "social", source: "template", model: "claude-sonnet-5-5", prompt_version: 1 });
+    expect(saved).toMatchObject({ report_table: "reports", report_id: "r1", client_id: "mob", kind: "social", source: "template", model: "claude-sonnet-5-5", prompt_version: 1, confirmed_at: "2026-11-09T11:00:00.000Z" });
     expect(String(saved.input_hash)).toMatch(/^[0-9a-f]{64}$/);
 
-    // The same report again, with its answer stored: no call, nothing written.
+    // The same report again, with its answer stored: no call, the same words, stamped as the one shown.
     const again = vi.fn();
     const stored = fakeDb({ reports: [REPORT], report_insights: [{ id: "i1", report_id: "r1", input_hash: saved.input_hash }] });
-    expect(await runReportInsights(stored, job, { now: () => new Date(), complete: again })).toMatchObject({ status: "done", result: { reused: true } });
+    expect(await runReportInsights(stored, job, { now: () => new Date("2026-11-10T09:00:00Z"), complete: again })).toMatchObject({ status: "done", result: { reused: true } });
     expect(again).not.toHaveBeenCalled();
-    expect(stored.writes).toEqual([]);
+    expect(stored.writes).toEqual([{ table: "report_insights", op: "update", value: { confirmed_at: "2026-11-10T09:00:00.000Z" }, filters: [["report_id", "r1"], ["input_hash", saved.input_hash]] }]);
+  });
+
+  it("shows a report whose input returns to an earlier one with that earlier answer, confirmed again (undo, redo)", async () => {
+    // Input A was answered first, then B; the figures went back to A: A's row is stamped and is the newest confirmed.
+    const first = fakeDb({ reports: [REPORT] });
+    await runReportInsights(first, job, { now: () => new Date("2026-11-09T11:00:00Z"), complete: vi.fn().mockResolvedValue({ text: "{}", stopReason: "end_turn", raw: {} }) });
+    const a = (first.writes[0].value as { input_hash: string }).input_hash;
+    const back = fakeDb({ reports: [REPORT], report_insights: [{ id: "b", report_id: "r1", input_hash: "b".repeat(64), confirmed_at: "2026-11-09T12:00:00Z" }, { id: "a", report_id: "r1", input_hash: a, confirmed_at: "2026-11-09T11:00:00Z" }] });
+    await runReportInsights(back, job, { now: () => new Date("2026-11-09T13:00:00Z"), complete: vi.fn() });
+    expect(back.writes).toEqual([{ table: "report_insights", op: "update", value: { confirmed_at: "2026-11-09T13:00:00.000Z" }, filters: [["report_id", "r1"], ["input_hash", a]] }]);
   });
 
   it("reads no verdict or edit of the team's for a competitive report: they apply when it is read", async () => {

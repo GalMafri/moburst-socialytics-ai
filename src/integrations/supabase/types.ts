@@ -3028,6 +3028,7 @@ export type Database = {
       report_insights: {
         Row: {
           client_id: string
+          confirmed_at: string
           created_at: string
           facts: Json
           fields: Json
@@ -3045,6 +3046,7 @@ export type Database = {
         }
         Insert: {
           client_id: string
+          confirmed_at?: string
           created_at?: string
           facts: Json
           fields: Json
@@ -3062,6 +3064,7 @@ export type Database = {
         }
         Update: {
           client_id?: string
+          confirmed_at?: string
           created_at?: string
           facts?: Json
           fields?: Json
