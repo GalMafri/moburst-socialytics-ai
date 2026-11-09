@@ -2,8 +2,8 @@
 // 20261110220000_data_driven_insights.sql, applied twice to PGlite over the
 // smallest schema it touches. People read the insights of reports they can
 // see and never write them; go-live is fixed the first time the migration
-// runs; a finished report gets one waiting insights job; a changed verdict
-// queues the newest competitive report's insights and never fails the vote.
+// runs; a finished report gets one waiting insights job; the team's votes
+// queue nothing (they apply when a report is read).
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -106,19 +106,13 @@ describe("20261110220000_data_driven_insights.sql", () => {
     await expect(db.query(`select public.report_insights_queue('reports', $1)`, [MONTHLY])).rejects.toThrow();
   });
 
-  it("queues the newest competitive report's insights when a verdict changes, and the vote always goes through", async () => {
+  it("leaves the team's votes alone: no verdict or edit queues or re-words a report", async () => {
     await as(null, null);
+    expect(migration).not.toMatch(/competitive_insight_feedback|report_insights_on_feedback/);
+    expect((await rows(`select count(*)::int as n from pg_trigger where tgrelid = 'public.competitive_insight_feedback'::regclass and not tgisinternal`))[0].n).toBe(0);
+    expect((await rows(`select count(*)::int as n from pg_proc where proname = 'report_insights_on_feedback'`))[0].n).toBe(0);
     await db.query(`insert into public.competitive_insight_feedback (client_id, insight_key, gap_text, verdict) values ($1, 'post-more-memes', 'Post more memes', 'down')`, [MOBURST]);
-    const jobs = (await queued()).filter((j) => (j.payload as { table: string }).table === "competitive_reports");
-    expect(jobs).toEqual([{ kind: "report_insights", client_id: MOBURST, payload: { table: "competitive_reports", report_id: NEW }, priority: 66, status: "queued" }]);
-    // Already waiting: a second vote adds nothing.
-    await db.query(`update public.competitive_insight_feedback set verdict = 'up' where insight_key = 'post-more-memes'`);
-    expect((await queued()).filter((j) => (j.payload as { table: string }).table === "competitive_reports")).toHaveLength(1);
-    // A queue that refuses never fails the vote.
-    await db.exec(`alter table public.scheduled_jobs add constraint refuse check (kind <> 'report_insights') not valid`);
-    await db.query(`delete from public.competitive_insight_feedback where insight_key = 'post-more-memes'`);
-    expect((await rows(`select count(*)::int as n from public.competitive_insight_feedback`))[0].n).toBe(0);
-    await db.exec(`alter table public.scheduled_jobs drop constraint refuse`);
+    expect((await queued()).filter((j) => (j.payload as { table: string }).table === "competitive_reports")).toEqual([]);
   });
 
   it("adds the job kind to the ones there", async () => {

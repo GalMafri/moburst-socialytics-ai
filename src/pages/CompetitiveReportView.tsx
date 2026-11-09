@@ -32,7 +32,7 @@ import { watchExpired, watchInterval } from "@/lib/runWatch";
 import { useToast } from "@/hooks/use-toast";
 import { PostVisual, usePostPreviews, normalizePlatform, platformLabel } from "@/components/competitive/PostVisual";
 import { PlatformIcon } from "@/lib/platform-config";
-import { gapId, partitionGaps, useCompetitiveLearnings, useInsightFeedback } from "@/hooks/useInsightFeedback";
+import { partitionGaps, useCompetitiveLearnings, useInsightFeedback } from "@/hooks/useInsightFeedback";
 import { useReportInsights } from "@/hooks/useReportInsights";
 import { competitiveInsights } from "@/lib/reportInsights";
 import { toast as sonnerToast } from "sonner";
@@ -523,10 +523,10 @@ export default function CompetitiveReportView() {
 
   const castVote = async (g: any, verdict: "up" | "down") => {
     try {
-      await vote({ gapText: g.gap, keyText: gapId(g), platform: g.platform || null, verdict, reportId: report.id });
-      if (verdict === "down" && verdictFor(gapId(g)) !== "down") {
+      await vote({ gapText: g.gap, platform: g.platform || null, verdict, reportId: report.id });
+      if (verdict === "down" && verdictFor(g.gap) !== "down") {
         toast({ title: "Suggestion hidden", description: `It will not be proposed again for ${clientName}. Restore it from "hidden suggestions" if you change your mind.` });
-      } else if (verdict === "up" && verdictFor(gapId(g)) !== "up") {
+      } else if (verdict === "up" && verdictFor(g.gap) !== "up") {
         toast({ title: "Marked to implement", description: "The next monthly report and the weekly calendar plans will address this gap." });
       }
     } catch (e: any) {
@@ -1068,9 +1068,9 @@ export default function CompetitiveReportView() {
             {gaps.length === 0 && <EmptyState compact icon={Crosshair} title="No suggestions shown" description="Every suggestion for this view has been hidden by the team." />}
             <div className="grid gap-4 md:grid-cols-2">
               {gaps.map((g: any, i: number) => {
-                const v = verdictFor(gapId(g));
-                // The team's edit, if any, in place of the report's wording; votes stay keyed on the original (or on its facts).
-                const shown = editedSuggestion(g, editFor(gapId(g)));
+                const v = verdictFor(g.gap);
+                // The team's edit, if any, in place of the report's wording; votes stay keyed on the original.
+                const shown = editedSuggestion(g, editFor(g.gap));
                 return (
                   <Card key={i} className={v === "up" ? "glass-accent" : ""}>
                     <CardContent className="pt-5 space-y-3">
@@ -1106,10 +1106,10 @@ export default function CompetitiveReportView() {
                             shown={{ gap: shown.gap || "", why_it_matters: shown.why_it_matters || "", suggested_play: shown.suggested_play || "" }}
                             edited={shown.edited}
                             onSave={async (edit, fb) => {
-                              const learned = await saveEdit({ gapText: g.gap, keyText: gapId(g), platform: g.platform ?? null, reportId: report.id, edit, feedback: fb, before: { gap: shown.gap, why_it_matters: shown.why_it_matters, suggested_play: shown.suggested_play } });
+                              const learned = await saveEdit({ gapText: g.gap, platform: g.platform ?? null, reportId: report.id, edit, feedback: fb, before: { gap: shown.gap, why_it_matters: shown.why_it_matters, suggested_play: shown.suggested_play } });
                               if (learned.length) sonnerToast.success(`Learned for ${clientName}`, { description: learned.map((l) => l.text).join(" ") });
                             }}
-                            onReset={() => resetEdit(gapId(g))}
+                            onReset={() => resetEdit(g.gap)}
                           />
                         </div>
                       )}
@@ -1141,7 +1141,7 @@ export default function CompetitiveReportView() {
                   <CardContent className="space-y-2">
                     {hiddenGaps.map((g: any, i: number) => (
                       <div key={i} className="flex items-center justify-between gap-3 t-body">
-                        <span className="text-muted-foreground line-through">{editedSuggestion(g, editFor(gapId(g))).gap}</span>
+                        <span className="text-muted-foreground line-through">{editedSuggestion(g, editFor(g.gap)).gap}</span>
                         <Button size="sm" variant="ghost" onClick={() => castVote(g, "down")}><RotateCcw className="h-3.5 w-3.5 mr-1" /> Restore</Button>
                       </div>
                     ))}

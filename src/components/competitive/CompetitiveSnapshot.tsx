@@ -17,7 +17,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadRetry } from "@/components/ui/load-error";
 import { Loading } from "@/components/ui/loading";
-import { gapId, insightKey, partitionGaps, useInsightFeedback, type InsightFeedbackRow } from "@/hooks/useInsightFeedback";
+import { insightKey, partitionGaps, useInsightFeedback, type InsightFeedbackRow } from "@/hooks/useInsightFeedback";
 import { useReportInsights } from "@/hooks/useReportInsights";
 import { competitiveInsights } from "@/lib/reportInsights";
 import { firstRunSentence, formatDate, formatRange, platformName } from "@/lib/display";
@@ -167,10 +167,10 @@ export function CompetitiveSnapshot({
               <div key={i} className="glass-inner p-inner space-y-2">
                 <div className="flex gap-1.5 flex-wrap">
                   {g.platform && g.platform !== "all" && <Badge variant="outline">{platformName(g.platform)}</Badge>}
-                  {verdictFor(gapId(g)) === "up" && <Badge className="gap-1"><ThumbsUp className="h-3 w-3" /> in the calendar brief</Badge>}
+                  {verdictFor(g.gap) === "up" && <Badge className="gap-1"><ThumbsUp className="h-3 w-3" /> in the calendar brief</Badge>}
                 </div>
-                <p className="t-body font-medium">{editedSuggestion(g, editFor(gapId(g))).gap}</p>
-                {editedSuggestion(g, editFor(gapId(g))).suggested_play && <p className="t-body"><span className="text-[#b9e045] font-semibold">Play: </span>{editedSuggestion(g, editFor(gapId(g))).suggested_play}</p>}
+                <p className="t-body font-medium">{editedSuggestion(g, editFor(g.gap)).gap}</p>
+                {editedSuggestion(g, editFor(g.gap)).suggested_play && <p className="t-body"><span className="text-[#b9e045] font-semibold">Play: </span>{editedSuggestion(g, editFor(g.gap)).suggested_play}</p>}
               </div>
             ))}
           </div>

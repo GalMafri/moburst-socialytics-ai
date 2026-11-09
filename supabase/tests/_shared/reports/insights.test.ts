@@ -18,7 +18,7 @@ const FACTS: Fact[] = [
   fact({ id: "F2", key: "change|all|views|", metric: "views", value: 292, previous: 575, change: -283, percent: -49.2, numbers: [292, 575, 283, 49.2], sentence: "Video views fell 49.2% to 292.", basis: "Video views 292 in October against 575 in September, -49.2%" }),
   fact({ id: "F3", key: "share|LinkedIn|engagements|", kind: "share", platform: "LinkedIn", metric: "engagements", unit: "percent", value: 96.1, numbers: [96.1, 521, 542], sentence: "LinkedIn brought 96.1% of the period's engagements.", basis: "LinkedIn 521 of 542 engagements" }),
 ];
-const INPUT: InsightsInput = { kind: "social", client: "Moburst", period: "2026-10-01 to 2026-10-31", facts: FACTS, sample: [], verdicts: [] };
+const INPUT: InsightsInput = { kind: "social", client: "Moburst", period: "2026-10-01 to 2026-10-31", facts: FACTS, sample: [] };
 
 const social = (over: Partial<Extract<InsightFields, { kind: "social" }>> = {}): InsightFields => ({
   kind: "social",
@@ -109,21 +109,21 @@ describe("the request", () => {
     expect((await writeInsights(INPUT, { now: () => new Date(), complete: fixed })).source).toBe("model");
   });
 
-  it("names the team's verdicts and the post sample in a competitive prompt", () => {
-    const p = insightsPrompt({ ...INPUT, kind: "competitive", sample: [{ company: "Rival Co", platform: "instagram", format: "reel", text: "Who else forgets?", engagement: 900 }], verdicts: [{ verdict: "down", gap: "Post more memes" }, { verdict: "up", gap: "Weekly Reels" }] });
+  it("names the post sample in a competitive prompt, and never the team's verdicts", () => {
+    const p = insightsPrompt({ ...INPUT, kind: "competitive", sample: [{ company: "Rival Co", platform: "instagram", format: "reel", text: "Who else forgets?", engagement: 900 }] });
     expect(p).toContain('- Rival Co, instagram reel: "Who else forgets?"');
-    expect(p).toContain("Suggestions the team rejected (never suggest these or anything like them again):\n- Post more memes");
-    expect(p).toContain("Suggestions the team chose to implement (keep them in mind):\n- Weekly Reels");
+    expect(p).not.toMatch(/the team (rejected|chose)/i);
   });
 });
 
 describe("inputHash", () => {
-  it("is the same for the same input, and new for a changed verdict over the same facts", async () => {
+  it("depends on the facts, the post sample, the prompt version and the model only", async () => {
     const a = await inputHash(INPUT);
     expect(await inputHash({ ...INPUT, facts: FACTS.map((f) => ({ ...f })) })).toBe(a);
-    const verdict = await inputHash({ ...INPUT, verdicts: [{ verdict: "down", gap: "Post more memes" }] });
-    expect(verdict).not.toBe(a);
+    expect(await inputHash({ ...INPUT, sample: [{ company: "Rival Co", platform: "instagram", format: "reel", text: "Who else forgets?", engagement: 900 }] })).not.toBe(a);
     expect(await inputHash(INPUT, "claude-opus-5-5")).not.toBe(a);
+    // The team's verdicts and edits apply when a report is read: they never re-word it.
+    expect(await inputHash({ ...INPUT, verdicts: [{ verdict: "down", gap: "Post more memes" }] } as InsightsInput)).toBe(a);
   });
 });
 
@@ -170,6 +170,16 @@ describe("runReportInsights", () => {
     expect(await runReportInsights(stored, job, { now: () => new Date(), complete: again })).toMatchObject({ status: "done", result: { reused: true } });
     expect(again).not.toHaveBeenCalled();
     expect(stored.writes).toEqual([]);
+  });
+
+  it("reads no verdict or edit of the team's for a competitive report: they apply when it is read", async () => {
+    const complete = vi.fn().mockResolvedValue({ text: "{}", stopReason: "end_turn", raw: {} });
+    const read: string[] = [];
+    const base = fakeDb({ competitive_reports: [{ ...REPORT, report_data: {} }], competitive_insight_feedback: [{ client_id: "mob", verdict: "down", gap_text: "Post more memes" }] });
+    const db = { ...base, from: (table: string) => { read.push(table); return base.from(table); } };
+    await runReportInsights(db, { ...job, payload: { table: "competitive_reports", report_id: "r1" } }, { now: () => new Date(), complete });
+    expect(read).toContain("competitive_reports");
+    expect(read).not.toContain("competitive_insight_feedback");
   });
 
   it("leaves a report from before go-live as it is (decision 4)", async () => {

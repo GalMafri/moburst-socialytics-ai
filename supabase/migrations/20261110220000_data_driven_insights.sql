@@ -12,8 +12,10 @@
 --   2. report_insights_live_from(): when insights went live; reports stored
 --      before keep their text (decision 4)
 --   3. the report_insights job, at most one waiting per report, queued by
---      report_text when it finishes (report_insights_queue) and when the
---      team's verdict on a competitive suggestion changes
+--      report_text when it finishes (report_insights_queue). The team's
+--      verdicts and edits are no part of a report's insights: they apply
+--      when a report is read, keyed by a gap's own words, so no vote
+--      queues or re-words anything.
 --
 -- People read the insights of the reports they can see; only the service
 -- role writes them. The new table gets the three restrictive "OAuth sessions
@@ -28,7 +30,7 @@ create table if not exists public.report_insights (
   report_id uuid not null,
   client_id uuid not null references public.clients(id) on delete cascade,
   kind text not null check (kind in ('social', 'competitive')),
-  -- SHA-256 of the facts, the post sample, the team's verdicts, the prompt version and the model.
+  -- SHA-256 of the facts, the post sample, the prompt version and the model.
   input_hash text not null check (input_hash ~ '^[0-9a-f]{64}$'),
   -- The numbered facts, worked out in code: [{id, key, kind, ..., sentence, basis}].
   facts jsonb not null,
@@ -101,7 +103,7 @@ begin
   execute format('alter table public.scheduled_jobs add constraint scheduled_jobs_kind_check check (kind = any (%L::text[]))', v_kinds);
 end $$;
 
--- One waiting job per report: it reads the newest verdicts when it runs.
+-- One waiting job per report.
 create unique index if not exists scheduled_jobs_one_queued_report_insights
   on public.scheduled_jobs ((payload ->> 'report_id'))
   where kind = 'report_insights' and status = 'queued';
@@ -132,30 +134,3 @@ end $$;
 
 revoke all on function public.report_insights_queue(text, uuid) from public, anon, authenticated;
 grant execute on function public.report_insights_queue(text, uuid) to service_role;
-
--- A changed verdict on a competitive suggestion changes the input of the
--- client's newest competitive report's insights: they are worded again over
--- the same facts. Nothing here can fail the verdict's own write.
-create or replace function public.report_insights_on_feedback()
-returns trigger
-language plpgsql security definer set search_path = public as $$
-declare
-  v_client uuid := coalesce(new.client_id, old.client_id);
-  v_report uuid;
-begin
-  begin
-    select r.id into v_report from competitive_reports r
-     where r.client_id = v_client and r.status = 'complete' and r.created_at >= report_insights_live_from()
-     order by r.created_at desc limit 1;
-    if v_report is not null then perform report_insights_queue('competitive_reports', v_report); end if;
-  exception when others then
-    raise warning 'report_insights_on_feedback: %', sqlerrm;
-  end;
-  return coalesce(new, old);
-end $$;
-
-revoke all on function public.report_insights_on_feedback() from public, anon, authenticated;
-
-drop trigger if exists competitive_insight_feedback_insights on public.competitive_insight_feedback;
-create trigger competitive_insight_feedback_insights after insert or delete or update of verdict, edited on public.competitive_insight_feedback
-  for each row execute function public.report_insights_on_feedback();

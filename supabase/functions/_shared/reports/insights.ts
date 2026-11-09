@@ -13,14 +13,15 @@
 // anything failed.
 //
 // Same data, same insights: an answer is stored in report_insights under a
-// hash of its exact input (the facts, the post sample, the team's verdicts,
-// the prompt version and the model); a stored hash is used again with no
-// call. Only reports from go-live on get insights (decision 4,
+// hash of its exact input (the facts, the post sample, the prompt version
+// and the model); a stored hash is used again with no call. The team's
+// verdicts and edits are not part of it: they apply when a report is read,
+// keyed by a gap's own words (insightKey), so no vote re-words a report.
+// Only reports from go-live on get insights (decision 4,
 // report_insights_live_from); stored reports keep their text.
 //
 // The report_insights job (run-scheduled-jobs) is queued when a report's
-// report_text job finishes, and when the team's verdict on a competitive
-// suggestion changes (20261110220000_data_driven_insights.sql).
+// report_text job finishes (20261110220000_data_driven_insights.sql).
 
 import { numbersIn } from "./reportText.ts";
 import { competitiveChanges, competitiveFacts, socialChanges, socialFacts, type Fact } from "./facts.ts";
@@ -48,8 +49,6 @@ export type InsightFields =
 
 /** A post the competitive report's style fields describe. */
 export interface SamplePost { company: string; platform: string; format: string; text: string; engagement: number }
-/** The team's call on a suggestion. */
-export interface Verdict { verdict: "up" | "down"; gap: string }
 
 export interface InsightsInput {
   kind: InsightsKind;
@@ -57,7 +56,6 @@ export interface InsightsInput {
   period: string | null;
   facts: Fact[];
   sample: SamplePost[];
-  verdicts: Verdict[];
 }
 
 const cited = { type: "object", additionalProperties: false, required: ["text", "facts"], properties: { text: { type: "string" }, facts: { type: "array", items: { type: "string" } } } };
@@ -108,10 +106,6 @@ export function insightsPrompt(input: InsightsInput, problems: string[] = []): s
       lines.push("", "Posts from the period that show how each company writes (for describing style only; never quote numbers from here):",
         ...input.sample.map((p) => `- ${p.company}, ${p.platform} ${p.format}: "${p.text.replace(/\s+/g, " ").slice(0, 220)}"`));
     }
-    const up = input.verdicts.filter((v) => v.verdict === "up").map((v) => v.gap);
-    const down = input.verdicts.filter((v) => v.verdict === "down").map((v) => v.gap);
-    if (up.length) lines.push("", "Suggestions the team chose to implement (keep them in mind):", ...up.map((g) => `- ${g}`));
-    if (down.length) lines.push("", "Suggestions the team rejected (never suggest these or anything like them again):", ...down.map((g) => `- ${g}`));
     lines.push("", "Write:",
       "- summary: two to four short paragraphs on where the client stands against its competitors, each citing the facts it rests on;",
       "- gaps: two to four gaps the client can close, each with the gap, its platform, why it matters and a test to run, citing the facts it rests on. A test's target may only be a cited fact's number.");
@@ -235,7 +229,7 @@ export function templateInsights(kind: InsightsKind, facts: Fact[]): InsightFiel
 
 /** The stored answer's key: the exact input, the prompt version and the model. */
 export async function inputHash(input: InsightsInput, model = INSIGHTS_MODEL): Promise<string> {
-  const text = JSON.stringify({ v: INSIGHTS_PROMPT_VERSION, model, kind: input.kind, client: input.client, period: input.period, facts: input.facts, sample: input.sample, verdicts: input.verdicts });
+  const text = JSON.stringify({ v: INSIGHTS_PROMPT_VERSION, model, kind: input.kind, client: input.client, period: input.period, facts: input.facts, sample: input.sample });
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -282,7 +276,7 @@ export function postSample(rd: Any): SamplePost[] {
   return out.sort((a, b) => a.company.localeCompare(b.company) || b.engagement - a.engagement || a.text.localeCompare(b.text));
 }
 
-/** The report's facts, its post sample and the team's verdicts: the exact input an answer is stored under. */
+/** The report's facts and its post sample: the exact input an answer is stored under. */
 export async function insightsInput(db: Db, table: string, row: Any): Promise<InsightsInput> {
   const kind = TABLES[table];
   const { data: earlier, error } = await db.from(table).select("report_data, created_at").eq("client_id", row.client_id).in("status", COMPLETE)
@@ -292,17 +286,9 @@ export async function insightsInput(db: Db, table: string, row: Any): Promise<In
   const period = { start: row.date_range_start, end: row.date_range_end };
   const rd = reportData(row);
   const facts = kind === "social" ? socialFacts(rd, { period, history }) : competitiveFacts(rd, { period, history });
-  let verdicts: Verdict[] = [];
-  if (kind === "competitive") {
-    const { data: rows, error: feedbackError } = await db.from("competitive_insight_feedback").select("verdict, gap_text, edited").eq("client_id", row.client_id).not("verdict", "is", null);
-    if (feedbackError) throw new Error(`Could not read the team's verdicts: ${feedbackError.message}`);
-    verdicts = ((rows ?? []) as Any[]).filter((r) => r.verdict === "up" || r.verdict === "down")
-      .map((r) => ({ verdict: r.verdict, gap: str(r.edited?.gap) || str(r.gap_text) })).filter((v) => v.gap)
-      .sort((a, b) => a.verdict.localeCompare(b.verdict) || a.gap.localeCompare(b.gap));
-  }
   return {
     kind, client: String(row.clients?.name || "the client"), period: row.date_range_start && row.date_range_end ? `${row.date_range_start} to ${row.date_range_end}` : null,
-    facts, sample: kind === "competitive" ? postSample(rd) : [], verdicts,
+    facts, sample: kind === "competitive" ? postSample(rd) : [],
   };
 }
 

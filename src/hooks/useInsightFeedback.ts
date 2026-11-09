@@ -40,25 +40,16 @@ export function insightKey(text: string | null | undefined): string {
   return slug || "untitled";
 }
 
-/**
- * What a suggestion's verdict is keyed on. A gap from the report's insights
- * (src/lib/reportInsights.ts) carries the facts it rests on, so its verdict
- * stays with it when it is worded again; any other gap keys on its words.
- */
-export function gapId(g: { gap?: string | null; fact_keys?: string[] | null } | null | undefined): string {
-  return g?.fact_keys?.length ? `facts ${[...g.fact_keys].sort().join(" ")}` : String(g?.gap ?? "");
-}
-
 /** Split gaps by verdict; hidden gaps are the thumbs-down ones. */
-export function partitionGaps<T extends { gap?: string; fact_keys?: string[] }>(gaps: T[], rows: InsightFeedbackRow[]) {
+export function partitionGaps<T extends { gap?: string }>(gaps: T[], rows: InsightFeedbackRow[]) {
   const byKey = new Map(rows.map((r) => [r.insight_key, r.verdict]));
   const visible: T[] = [];
   const hidden: T[] = [];
   for (const g of gaps || []) {
-    const v = byKey.get(insightKey(gapId(g)));
+    const v = byKey.get(insightKey(g.gap));
     (v === "down" ? hidden : visible).push(g);
   }
-  visible.sort((a, b) => Number(byKey.get(insightKey(gapId(b))) === "up") - Number(byKey.get(insightKey(gapId(a))) === "up"));
+  visible.sort((a, b) => Number(byKey.get(insightKey(b.gap)) === "up") - Number(byKey.get(insightKey(a.gap)) === "up"));
   return { visible, hidden };
 }
 
@@ -83,9 +74,9 @@ export function useInsightFeedback(clientId: string | undefined) {
 
   /** Record a verdict. Voting the same way twice removes the verdict. */
   const vote = useCallback(
-    async (args: { gapText: string; platform?: string | null; verdict: Verdict; reportId?: string | null; keyText?: string }) => {
+    async (args: { gapText: string; platform?: string | null; verdict: Verdict; reportId?: string | null }) => {
       if (!clientId) return;
-      const key = insightKey(args.keyText ?? args.gapText);
+      const key = insightKey(args.gapText);
       const existing = byKey.get(key);
       // Every write here repeats safely, so each is sent again quietly; the page then shows what is stored.
       try {
@@ -126,13 +117,13 @@ export function useInsightFeedback(clientId: string | undefined) {
 
   /** Save an edit (by hand, or a rewrite from feedback) on the suggestion's row, keyed by its original text, and learn from it. */
   const saveEdit = useCallback(
-    async (args: { gapText: string; platform?: string | null; reportId?: string | null; edit: SuggestionEdit; feedback?: string | null; before?: SuggestionEdit; keyText?: string }): Promise<CompetitiveLearning[]> => {
+    async (args: { gapText: string; platform?: string | null; reportId?: string | null; edit: SuggestionEdit; feedback?: string | null; before?: SuggestionEdit }): Promise<CompetitiveLearning[]> => {
       if (!clientId) return [];
       const { data: auth } = await supabase.auth.getUser();
       const { error } = await supabase.from("competitive_insight_feedback").upsert(
         {
           client_id: clientId,
-          insight_key: insightKey(args.keyText ?? args.gapText),
+          insight_key: insightKey(args.gapText),
           gap_text: args.gapText,
           platform: args.platform ?? null,
           report_id: args.reportId ?? null,
@@ -150,7 +141,7 @@ export function useInsightFeedback(clientId: string | undefined) {
       let learned: CompetitiveLearning[] = [];
       if (args.reportId && args.before) {
         const { data } = await supabase.functions.invoke("revise-suggestion", {
-          body: { action: "learn", report_id: args.reportId, insight_key: insightKey(args.keyText ?? args.gapText), original: args.before, edited: args.edit, feedback: args.feedback ?? "" },
+          body: { action: "learn", report_id: args.reportId, insight_key: insightKey(args.gapText), original: args.before, edited: args.edit, feedback: args.feedback ?? "" },
         }).catch(() => ({ data: null }));
         learned = Array.isArray(data?.learned) ? data.learned : [];
         if (learned.length) await qc.invalidateQueries({ queryKey: ["competitive-learnings", clientId] });

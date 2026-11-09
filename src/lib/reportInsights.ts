@@ -26,15 +26,13 @@ export interface ShownInsight {
   basedOn: string;
 }
 
-/** A gap as the competitive screens list it, keyed for the team's verdict on its facts. */
+/** A gap as the competitive screens list it; the team's verdict keys on its words (insightKey), as every gap's does. */
 export interface ShownGap {
   gap: string;
   platform: string;
   why_it_matters: string;
   suggested_play: string;
   basedOn: string;
-  /** The keys of the facts it rests on: its verdict stays with it when it is worded again. */
-  fact_keys: string[];
 }
 
 /** "Impressions 12,400 in October against 9,800 in September, +26.5%, from Sprout; LinkedIn 521 of 542 engagements, from Sprout" */
@@ -59,13 +57,11 @@ export function socialInsights(row: ReportInsightsRow | null | undefined): { sum
 /** The competitive report's summary paragraphs and gaps; gaps are null when code had none to give. */
 export function competitiveInsights(row: ReportInsightsRow | null | undefined): { summary: ShownInsight[]; gaps: ShownGap[] | null } | null {
   if (!row || row.fields?.kind !== "competitive") return null;
-  const byId = new Map(row.facts.map((f) => [f.id, f]));
   return {
     summary: row.fields.summary.map((c) => shown(row.facts, c)),
     gaps: row.fields.gaps
       ? row.fields.gaps.map((g: Gap) => ({
         gap: g.gap, platform: g.platform, why_it_matters: g.why_it_matters, suggested_play: g.suggested_play, basedOn: basedOn(row.facts, g.facts),
-        fact_keys: g.facts.map((id) => byId.get(id)?.key).filter((k): k is string => !!k).sort(),
       }))
       : null,
   };
