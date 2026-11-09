@@ -147,6 +147,13 @@ describe("templateInsights", () => {
     expect(checkInsights(t, FACTS)).toEqual([]);
     expect(templateInsights("competitive", FACTS)).toEqual({ kind: "competitive", summary: FACTS.map((f) => ({ text: f.sentence, facts: [f.id] })), gaps: null });
   });
+
+  it("keeps a competitive template's summary short: the three highest-scoring facts, never twenty lines", () => {
+    const many = Array.from({ length: 12 }, (_, i) => fact({ id: `F${i + 1}`, key: `change|all|m${i}|`, score: 12 - i, sentence: `Fact ${i + 1}.` }));
+    expect(templateInsights("competitive", many)).toEqual({ kind: "competitive", summary: many.slice(0, 3).map((f) => ({ text: f.sentence, facts: [f.id] })), gaps: null });
+    // Out of order, still the three that score highest.
+    expect(templateInsights("competitive", [...many].reverse()).summary.map((c) => c.facts[0])).toEqual(["F1", "F2", "F3"]);
+  });
 });
 
 describe("the request", () => {

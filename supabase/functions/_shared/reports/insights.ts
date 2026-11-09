@@ -299,14 +299,22 @@ export function orderByFacts(fields: InsightFields): InsightFields {
     : { ...fields, summary: sort(fields.summary), gaps: fields.gaps ? sort(fields.gaps) : null };
 }
 
-/** The facts as sentences written in code: what shows when no answer checks out. Every fact is covered. */
+/** A competitive template's summary: its three highest-scoring facts, so it stays as short as the summary it stands in for. */
+export const TEMPLATE_SUMMARY_FACTS = 3;
+
+/**
+ * The facts as sentences written in code: what shows when no answer checks
+ * out. A monthly report's insights cover every fact; a summary is short (the
+ * two or three facts that score highest).
+ */
 export function templateInsights(kind: InsightsKind, facts: Fact[]): InsightFields {
   const each = facts.map((f) => ({ text: f.sentence, facts: [f.id] }));
   if (kind === "social") {
     const lead = facts.slice(0, 2);
     return { kind, summary: lead.length ? { text: lead.map((f) => f.sentence).join(" "), facts: lead.map((f) => f.id) } : null, insights: each, recommendations: null };
   }
-  return { kind, summary: each, gaps: null };
+  const top = [...facts].sort((a, b) => b.score - a.score || Number(a.id.slice(1)) - Number(b.id.slice(1))).slice(0, TEMPLATE_SUMMARY_FACTS);
+  return { kind, summary: top.map((f) => ({ text: f.sentence, facts: [f.id] })), gaps: null };
 }
 
 /** The stored answer's key: the exact input, the prompt version and the model. */
