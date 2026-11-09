@@ -31,9 +31,11 @@
 //                analysis.
 //   insights     The report's insights, worded with the report_insights
 //                job's code and input from the report data the run will
-//                write (social/runInsights.ts); stored for the real report in
-//                app mode only. If they can't be had, the deck uses the
-//                analysis and the report goes on.
+//                write (social/runInsights.ts), checked before any call
+//                (go-live, the report's attempt); stored for the real report
+//                in app mode only. A failed first try is tried again with
+//                the answer it kept; after that, the deck uses the analysis
+//                and the report goes on.
 //   deck         Build Presentation Content from the analysis as the report
 //                shows it (its insights in place of the model-written
 //                fields), Create Gamma Presentation, then Fetch Gamma Result
@@ -60,7 +62,7 @@ import { runInsights } from "../social/runInsights.ts";
 import { readStoredTrends, type IndustryTrends } from "../social/storedTrends.ts";
 import { FALLBACK_SPROUT_CUSTOMER_ID } from "../../sprout/customer.ts";
 import { anthropicMessages } from "../../anthropic.ts";
-import type { InsightsDeps, InsightsRow } from "../../reports/insights.ts";
+import type { InsightsDeps, InsightsHistory, InsightsRow } from "../../reports/insights.ts";
 import { shownSocial } from "../../reports/shownFields.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -74,6 +76,12 @@ export const BRIEF_TRIES = 2;
 export const ANALYSIS_ROUNDS = 1;
 /** Time the insights step keeps for itself after its model call must have ended, inside the step's own limit. */
 export const INSIGHTS_MARGIN_MS = 15_000;
+/** Tries of the insights step before the deck goes on with the analysis. */
+export const INSIGHTS_TRIES = 2;
+/** The client's earlier reports' changes, read once per run (runInsights.ts). */
+const INSIGHTS_HISTORY = "insights.history";
+/** The run's own insights answer, for a try after the one that paid for it. */
+const INSIGHTS_ANSWER = "insights.answer";
 
 export interface SocialDeps {
   sprout?: (ctx: StepContext) => SproutReader;
@@ -308,17 +316,28 @@ export function socialPipeline(deps: SocialDeps = {}): PipelineDefinition {
           if (kept) await ctx.payloads.put(KEPT.insights, kept, KEEP);
           return go(kept, { insights: kept ? "replayed" : "none kept" });
         }
+        const app = ctx.run.mode === "app";
         try {
           const got = await runInsights({
-            db: ctx.db, reportId: ctx.run.real_id, reportData: await runSummary(ctx, null), kept: await ctx.payloads.get<InsightsRow>(KEPT.insights),
+            db: ctx.db, reportId: ctx.run.real_id, reportData: await runSummary(ctx, null),
+            ...(app ? { attemptStartedAt: ((ctx.run.input ?? {}) as { attempt_started_at?: string | null }).attempt_started_at ?? null } : {}),
+            history: await ctx.payloads.get<InsightsHistory>(INSIGHTS_HISTORY),
+            onHistory: async (history) => { await ctx.payloads.put(INSIGHTS_HISTORY, history); },
+            answered: await ctx.payloads.get<InsightsRow>(INSIGHTS_ANSWER),
             complete: insightsCall(ctx), now: () => ctx.now(),
           });
           if (!got.row) return go(null, { insights: "none", reason: got.reason ?? null });
-          await ctx.payloads.put(KEPT.insights, got.row, KEEP);
+          // The answer, for a try after this one: it pays for nothing again.
+          if (got.from === "model") await ctx.payloads.put(INSIGHTS_ANSWER, got.row);
           // The real report's row, in app mode only; a shadow stores nothing. A row met again is stored already.
-          if (ctx.run.mode === "app" && got.from !== "stored") await ctx.output.write("insights", got.row as unknown as Record<string, unknown>);
+          if (app && got.from !== "stored") await ctx.output.write("insights", got.row as unknown as Record<string, unknown>);
+          // Kept with the run's provider answers once it is the report's (stored, or a shadow's own), so a replay never puts
+          // insights on a deck the run never had.
+          await ctx.payloads.put(KEPT.insights, got.row, KEEP);
           return go(got.row, { insights: got.from, source: got.row.source, facts: got.row.facts.length });
         } catch (e) {
+          // The first try's error is the step's: tried again, with the answer already kept.
+          if (ctx.attempt < INSIGHTS_TRIES) throw e;
           // As a report whose insights are not worded yet: the deck says what the analysis says, and the report goes on.
           return go(null, { insights: "not had", error: (e instanceof Error ? e.message : String(e)).slice(0, 300) });
         }

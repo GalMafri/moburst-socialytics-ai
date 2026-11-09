@@ -336,7 +336,7 @@ describe("Generate Run Summary", () => {
     const at0 = (r: Any) => summaryWithoutTrends({ ...r, started_at: null, duration_minutes: null, sprout_performance: { ...r.sprout_performance, collected_at: null } });
     expect(at0(port)).toEqual(at0(MOBURST.summary));
     // In place of n8n's trend keys: the request skipped trends, so none were read.
-    expect(port).toMatchObject({ industry_trends: null, trend_status: { industry: "skipped" }, data_counts: { tiktok_trends: 0, instagram_trends: 0, industry_trend_themes: 0, industry_trend_posts: 0 } });
+    expect(port).toMatchObject({ industry_trends: null, trend_status: "skipped", data_counts: { tiktok_trends: 0, instagram_trends: 0, industry_trend_themes: 0, industry_trend_posts: 0 } });
     expect(port.ai_analysis.industry_trends_analysis).toBeNull();
     expect(port).not.toHaveProperty("tiktok_trends");
   });

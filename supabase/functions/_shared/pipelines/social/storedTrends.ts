@@ -101,6 +101,31 @@ export async function readStoredTrends(db: Db, clientId: string, from: string, t
   return { themes: out, posts: [...posts.values()] };
 }
 
+/** Themes the report shows on its deck and asks Claude to name: the period's strongest, so a month of weekly themes stays a short list. */
+export const REPORT_TREND_THEMES = 5;
+
+/** A theme's title as two weeks' themes are matched: the same words, whatever the case or spacing. */
+export const themeKey = (title: string) => title.trim().toLowerCase().replace(/\s+/g, " ");
+
+/**
+ * The period's strongest themes, a title that recurs across weeks merged
+ * into one (the newest week's words, every platform and post it lists):
+ * the most weeks first, then the most example posts, then the newest.
+ */
+export function strongestThemes(trends: IndustryTrends, limit = REPORT_TREND_THEMES): Array<ReportTrendTheme & { weeks: number }> {
+  const merged = new Map<string, ReportTrendTheme & { weeks: number; order: number }>();
+  trends.themes.forEach((t, order) => {
+    const key = themeKey(t.title);
+    const m = merged.get(key);
+    if (!m) { merged.set(key, { ...t, platforms: [...t.platforms], post_urls: [...t.post_urls], weeks: 1, order }); return; }
+    m.weeks += 1;
+    for (const p of t.platforms) if (!m.platforms.includes(p)) m.platforms.push(p);
+    for (const u of t.post_urls) if (!m.post_urls.includes(u)) m.post_urls.push(u);
+  });
+  return [...merged.values()].sort((a, b) => b.weeks - a.weeks || b.post_urls.length - a.post_urls.length || a.order - b.order)
+    .slice(0, limit).map(({ order: _order, ...t }) => t);
+}
+
 /** Example posts Claude reads per theme. */
 export const EXAMPLES_PER_THEME = 3;
 /** Characters of an example post's text Claude reads. */

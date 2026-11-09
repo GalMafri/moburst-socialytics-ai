@@ -64,9 +64,17 @@ export class PipelineWriteRefused extends Error {
 /**
  * A database a step can read and never write: from(table).select(...), and
  * downloads from the pipeline-payloads bucket (a replay reads the answers
- * another run kept, through makePayloadStore(ctx.db, thatRun).get). Any
- * write, function call or other bucket is refused.
+ * another run kept, through makePayloadStore(ctx.db, thatRun).get), and the
+ * database functions that only read (READ_ONLY_FUNCTIONS). Any write, other
+ * function call or other bucket is refused.
  */
+/**
+ * The database functions a step may call through its read-only database:
+ * each only reads. report_insights_live_from is when report insights went
+ * live, which the social run checks before it pays for its insights.
+ */
+export const READ_ONLY_FUNCTIONS: readonly string[] = ["report_insights_live_from"];
+
 export function readOnlyDb(db: Db) {
   const refuse = (what: string) => () => { throw new PipelineWriteRefused(what); };
   return {
@@ -79,7 +87,10 @@ export function readOnlyDb(db: Db) {
         delete: refuse(`a delete from ${table}`),
       };
     },
-    rpc: refuse("a database function"),
+    rpc: (name: string, args?: Record<string, unknown>) => {
+      if (!READ_ONLY_FUNCTIONS.includes(name)) throw new PipelineWriteRefused(`the database function ${name}`);
+      return db.rpc(name, args ?? {});
+    },
     storage: {
       from(bucket: string) {
         if (bucket !== PAYLOAD_BUCKET) throw new PipelineWriteRefused(`storage outside ${PAYLOAD_BUCKET}`);

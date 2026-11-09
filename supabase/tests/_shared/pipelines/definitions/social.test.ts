@@ -177,7 +177,7 @@ const WITH_TRENDS = { ...ANALYSIS, industry_trends_analysis: INDUSTRY_ANALYSIS }
 /** A request as the app sends it today: no trend switch (Trends Task 12). */
 const todaysRequest = () => { const { skip_trends: _s, ...r } = moburstRequest(); return r; };
 
-function setup(o: { reportStatus?: string; createdAt?: string; tables?: Record<string, Any[]> } = {}) {
+function setup(o: { reportStatus?: string; createdAt?: string; tables?: Record<string, Any[]>; liveFrom?: string } = {}) {
   const clock = testClock("2026-10-16T20:59:24.047Z");
   const db = pipelineDb({
     reports: [{
@@ -188,12 +188,25 @@ function setup(o: { reportStatus?: string; createdAt?: string; tables?: Record<s
   }, () => clock.now());
   // report_insights_live_from(), which the insights writer and the report_insights job read.
   const rpc = db.rpc.bind(db);
-  db.rpc = async (name, args) => (name === "report_insights_live_from" ? { data: LIVE_FROM, error: null } : rpc(name, args));
+  db.rpc = async (name, args) => (name === "report_insights_live_from" ? { data: o.liveFrom ?? LIVE_FROM, error: null } : rpc(name, args));
   return { clock, db };
 }
 
-async function run(o: { mode: "shadow" | "app"; request?: Any; deps?: SocialDeps; reportStatus?: string; tables?: Record<string, Any[]> }) {
-  const { clock, db } = setup({ reportStatus: o.reportStatus, tables: o.tables });
+/** report_insights refusing a write: the first `times` writes, or every one. */
+function refuseInsightWrites(db: Any, times = Infinity) {
+  const from = db.from.bind(db);
+  let refused = 0;
+  db.from = (table: string) => {
+    const q = from(table);
+    if (table !== "report_insights") return q;
+    q.upsert = (row: Any, opts: Any) => (refused++ < times ? Promise.resolve({ data: null, error: { message: "canceling statement due to statement timeout" } }) : from(table).upsert(row, opts));
+    return q;
+  };
+}
+
+async function run(o: { mode: "shadow" | "app"; request?: Any; deps?: SocialDeps; reportStatus?: string; tables?: Record<string, Any[]>; liveFrom?: string; refuseInsights?: number }) {
+  const { clock, db } = setup({ reportStatus: o.reportStatus, tables: o.tables, liveFrom: o.liveFrom });
+  if (o.refuseInsights) refuseInsightWrites(db, o.refuseInsights);
   const pipeline = socialPipeline(o.deps ?? deps());
   const registry = makeRegistry([pipeline], () => true);
   const request = o.request ?? moburstRequest();
@@ -317,7 +330,7 @@ describe("social_v1 on stored trends (Trends plan, Task 16)", () => {
     expect(rd.ai_analysis.industry_trends_analysis).toEqual(INDUSTRY_ANALYSIS);
     expect(rd).not.toHaveProperty("tiktok_trends");
     expect(rd).not.toHaveProperty("instagram_trends");
-    expect(rd.trend_status).toEqual({ industry: "stored" });
+    expect(rd.trend_status).toBe("stored");
     expect(rd.data_counts).toMatchObject({ tiktok_trends: 2, instagram_trends: 2, industry_trend_themes: 4, industry_trend_posts: 5 });
 
     // Claude read the themes, not a scraper's posts.
@@ -386,7 +399,7 @@ describe("social_v1 on stored trends (Trends plan, Task 16)", () => {
     expect(db.tables.reports[0].status).toBe("completed");
     expect(rd.industry_trends).toBeNull();
     expect(rd.ai_analysis.industry_trends_analysis).toBeNull();
-    expect(rd.trend_status).toEqual({ industry: "none" });
+    expect(rd.trend_status).toBe("none");
     expect(rd.data_counts).toMatchObject({ tiktok_trends: 0, instagram_trends: 0, industry_trend_themes: 0, industry_trend_posts: 0 });
     expect(rd.warnings).toEqual([]);
     expect(requests[1].params.system).toContain("IMPORTANT: No industry trends are available for this period. Set industry_trends_analysis to null in your output.");
@@ -401,20 +414,55 @@ describe("social_v1 on stored trends (Trends plan, Task 16)", () => {
     const rd = db.tables.shadow_social_reports[0].report_data;
     expect(rd.industry_trends).toBeNull();
     expect(rd.ai_analysis.industry_trends_analysis).toBeNull();
-    expect(rd.trend_status).toEqual({ industry: "skipped" });
+    expect(rd.trend_status).toBe("skipped");
     expect(await store.get(KEPT.trends)).toEqual({ trends: null });
   });
 
-  it("when the insights can't be had, the deck uses the analysis as before and the report still finishes", async () => {
+  it("when the insights can't be had on a second try, the deck uses the analysis as before and the report still finishes", async () => {
     const insights: Any[] = [];
-    const { db, driven, deck } = await run({ mode: "app", reportStatus: "running", request: todaysRequest(), tables: TREND_TABLES(), deps: deps({ insights, failInsights: true, synthesis: WITH_TRENDS }) });
+    const { db, driven, deck, store } = await run({ mode: "app", reportStatus: "running", request: todaysRequest(), tables: TREND_TABLES(), deps: deps({ insights, failInsights: true, synthesis: WITH_TRENDS }) });
     expect(driven.outcome.status).toBe("done");
-    expect(insights).toHaveLength(1);
+    // The first try's error is not swallowed: the step is tried again, then goes on without them.
+    expect(insights).toHaveLength(2);
     expect(db.tables.reports[0].status).toBe("completed");
     expect(db.tables.report_insights ?? []).toEqual([]);
+    expect(await store.get(KEPT.insights)).toBeNull();
     expect(await deck()).toContain(`1. ${MOBURST.ai.output.sprout_performance_analysis.key_insights[0]}`);
-    const step = (db.tables.report_pipeline_steps ?? []).find((s: Any) => s.step === "insights");
-    expect(step?.detail).toMatchObject({ insights: "not had", next: "deck" });
+    const steps = (db.tables.report_pipeline_steps ?? []).filter((s: Any) => s.step === "insights");
+    expect(steps.map((s: Any) => s.outcome)).toEqual(["retry", "next"]);
+    expect(steps[1].detail).toMatchObject({ insights: "not had", next: "deck" });
+  });
+
+  it("a write refused once is tried again with the answer it kept: no second call, and the answer is kept with the run's only once stored", async () => {
+    const insights: Any[] = [];
+    const { db, driven, store, deck } = await run({ mode: "app", reportStatus: "running", request: todaysRequest(), tables: TREND_TABLES(), refuseInsights: 1, deps: deps({ insights, synthesis: WITH_TRENDS }) });
+    expect(driven.outcome.status).toBe("done");
+    expect(insights).toHaveLength(1);
+    expect(db.tables.report_insights).toHaveLength(1);
+    expect(await store.get(KEPT.insights)).toMatchObject({ input_hash: db.tables.report_insights[0].input_hash });
+    expect(await deck()).toContain(`1. ${db.tables.report_insights[0].fields.insights[0].text}`);
+  });
+
+  it("a write refused every time: the deck uses the analysis, the run keeps no insights, and its replay puts none on a deck", async () => {
+    const insights: Any[] = [];
+    const live = await run({ mode: "app", reportStatus: "running", request: todaysRequest(), tables: TREND_TABLES(), refuseInsights: Infinity, deps: deps({ insights, synthesis: WITH_TRENDS }) });
+    expect(live.driven.outcome.status).toBe("done");
+    expect(insights).toHaveLength(1);
+    expect(await live.store.get(KEPT.insights)).toBeNull();
+    expect(await live.deck()).toContain(`1. ${MOBURST.ai.output.sprout_performance_analysis.key_insights[0]}`);
+    const pipeline = socialPipeline(deps({ insights }));
+    const started = await startSocialReplay(live.db, pipeline, { reportId: REPORT.id, reuseAnalysis: true, now: () => live.clock.now() });
+    await drivePipeline(live.db, makeRegistry([pipeline], () => true), started.run_id, { clock: live.clock, env: ENV });
+    expect(await makePayloadStore(live.db, started.run_id).get("insights")).toEqual({ row: null });
+    expect(insights).toHaveLength(1);
+  });
+
+  it("a report from before insights went live gets none and costs no call: the deck uses the analysis", async () => {
+    const insights: Any[] = [];
+    const { db, deck } = await run({ mode: "app", reportStatus: "running", request: todaysRequest(), liveFrom: "2026-10-20T00:00:00.000Z", deps: deps({ insights, synthesis: WITH_TRENDS }) });
+    expect(insights).toEqual([]);
+    expect(db.tables.report_insights ?? []).toEqual([]);
+    expect(await deck()).toContain(`1. ${MOBURST.ai.output.sprout_performance_analysis.key_insights[0]}`);
   });
 });
 

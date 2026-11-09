@@ -9,6 +9,8 @@
 // templates on the same input and checks that the edits are the only
 // difference.
 
+import { REPORT_TREND_THEMES } from "./storedTrends.ts";
+
 // deno-lint-ignore no-explicit-any
 type Any = any;
 
@@ -50,13 +52,14 @@ const INDUSTRY_INPUT = "- industry_trends: the period's industry themes from the
 const INDUSTRY_PART = `### PART 2: INDUSTRY TRENDS ANALYSIS
 Using industry_trends.themes (the themes the weekly trend research found in the period, across platforms):
 - Summarize what moved in the client's industry this period
-- For each theme, say in one sentence what it means for the client, keeping its title and its platforms
+- Name at most ${REPORT_TREND_THEMES} themes: the period's strongest. A theme that recurs across weeks is one theme, under one title
+- For each theme you name, say in one sentence what it means for the client, keeping its title and its platforms
 - Use the examples only as evidence of a theme: they are other accounts' posts, never the client's
 - Extract actionable opportunities for the client`;
 const INDUSTRY_OUTPUT = `  "industry_trends_analysis": {
     "overview": "Brief summary of the period's industry trends",
     "themes": [
-      { "title": "A theme's title as industry_trends gives it", "platforms": ["The platforms it shows on, as industry_trends gives them"], "note": "What it means for the client, in one sentence" }
+      { "title": "A theme's title as industry_trends gives it (at most ${REPORT_TREND_THEMES} themes, strongest first)", "platforms": ["The platforms it shows on, as industry_trends gives them"], "note": "What it means for the client, in one sentence" }
     ],
     "opportunities_for_client": ["2-3 specific opportunities based on the themes"],
     "key_takeaways": ["3-5 actionable insights"]

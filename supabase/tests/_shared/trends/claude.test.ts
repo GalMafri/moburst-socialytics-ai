@@ -90,6 +90,16 @@ describe("the weekly themes", () => {
     expect(got.value[0]).toEqual({ title: "A", happening: "h", why_it_matters: "w", angle: "a", platforms: ["tiktok", "linkedin"], post_urls: [kept[0].url, kept[3].url] });
   });
 
+  it("asks for no dashes, and stores no em or en dash in any theme field: a comma, a sentence break, or 'to' between two numbers", () => {
+    const body = themesRequest(profile, kept) as { system: string };
+    expect(body.system).toContain("Never use an em dash or an en dash");
+    const dashed = (title: string, ids: string[]) => ({ title, happening: "Creators post daily \u2014 mostly short clips", why_it_matters: "It works\u2013 Buyers notice", angle: "Show 3\u20135 results \u2014 then the plan", post_ids: ids });
+    const got = parseThemes(JSON.stringify({ themes: [dashed("AI \u2014 in public", ["K1"]), dashed("B", ["K2"]), dashed("C", ["K3"])] }), kept);
+    if (!("value" in got)) throw new Error(got.error);
+    expect(got.value[0]).toMatchObject({ title: "AI, in public", happening: "Creators post daily, mostly short clips", why_it_matters: "It works. Buyers notice", angle: "Show 3 to 5 results, then the plan" });
+    for (const t of got.value) expect(JSON.stringify(t)).not.toMatch(/[\u2013\u2014]/);
+  });
+
   it("refuses fewer than 3 or more than 6 themes", () => {
     expect(parseThemes(JSON.stringify({ themes: [theme("A", ["K1"]), theme("B", ["K2"])] }), kept)).toHaveProperty("error");
     const seven = Array.from({ length: 7 }, (_, i) => theme(`T${i}`, ["K1"]));

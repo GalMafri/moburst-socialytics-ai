@@ -305,11 +305,14 @@ describe("competitors and tracking", () => {
 
 
 describe("reports", () => {
-  it("starts the social report for a brand without a Sprout profile and records that it carries no performance section", async () => {
+  it("starts the social report for a brand without a Sprout profile and records that it carries no performance section and no industry trends", async () => {
     const h = harness();
     await upTo(h, "run_social");
     const r = await runStep(h, "run_social");
-    expect(r).toMatchObject({ status: "done", outcome: "started", gaps: [{ code: "performance_data_unavailable" }] });
+    expect(r).toMatchObject({ status: "done", outcome: "started", gaps: [{ code: "connected_only" }, { code: "performance_data_unavailable" }] });
+    // A demo runs no trend collection (Lital, 9 Nov 2026): the report has none, and nothing says it has.
+    expect(r.gaps![0]).toEqual({ step: "run_social", code: "connected_only", message: "Industry trends are collected weekly once the brand is a client, so the demo's report has none." });
+    expect(r.gaps![1].message).not.toMatch(/trend/i);
     expect(h.calls.at(-1)!.body).toEqual({ client_id: h.job.client_id, kind: "social" });
   });
   it("starts the social report, flags it with the job, and waits until it lands", async () => {
@@ -318,6 +321,7 @@ describe("reports", () => {
     h.t.sproutProfiles.push({ ...SPROUT_PROFILE, client_id: h.job.client_id! });
     const r = await runStep(h, "run_social");
     expect(r).toMatchObject({ status: "done", outcome: "started", data: { report_id: "rep-new" }, patch: { run_ids: ["rep-new"] } });
+    expect(r.gaps).toEqual([{ step: "run_social", code: "connected_only", message: "Industry trends are collected weekly once the brand is a client, so the demo's report has none." }]);
     expect(h.calls.at(-1)!.body).toEqual({ client_id: h.job.client_id, kind: "social" });
     expect(h.t.reports.find((x) => x.id === "rep-new")!.demo_job_id).toBe("job-1");
     Object.assign(h.job, r.patch);
@@ -329,7 +333,7 @@ describe("reports", () => {
     const fresh = { ...REPORT, id: "rep-fresh", client_id: "c-bader", status: "completed", created_at: "2026-09-29T00:00:00.000Z" };
     const h = harness({ tables: { clients: [bader({ website_url: "https://brooklinen.com" })], reports: [fresh], sproutProfiles: [SPROUT_PROFILE] } });
     await runStep(h, "resolve_client");
-    expect(await runStep(h, "run_social")).toMatchObject({ status: "skipped", reason: "fresh_report_exists", patch: { run_ids: ["rep-fresh"] } });
+    expect(await runStep(h, "run_social")).toMatchObject({ status: "skipped", reason: "fresh_report_exists", patch: { run_ids: ["rep-fresh"] }, gaps: [{ code: "connected_only" }] });
     const forced = harness({ input: { force_run: true }, tables: { clients: [bader({ website_url: "https://brooklinen.com" })], reports: [fresh], sproutProfiles: [SPROUT_PROFILE] } });
     await runStep(forced, "resolve_client");
     expect((await runStep(forced, "run_social")).outcome).toBe("started");
@@ -405,7 +409,7 @@ describe("the whole job", () => {
     expect(out.post).toMatchObject({ copy: "Know your rights after a crash.", source: "calendar", media_urls: [expect.stringContaining("demo.png")] });
     expect(out.design).toEqual({ status: "none", version: null, previews: [] });
     expect(out.analytics).toBeNull();
-    expect(h.job.gaps.map((g) => g.code).sort()).toEqual(["analytics_unavailable", "competitor_unplaced", "competitor_unplaced", "connected_only", "design_system_missing", "performance_data_unavailable"]);
+    expect(h.job.gaps.map((g) => g.code).sort()).toEqual(["analytics_unavailable", "competitor_unplaced", "competitor_unplaced", "connected_only", "connected_only", "design_system_missing", "performance_data_unavailable"]);
     expect(h.callbacks).toHaveLength(1);
     expect((h.callbacks[0] as { payload: { status: string; job_id: string } }).payload).toMatchObject({ job_id: "job-1", status: "completed" });
     expect(JSON.stringify(out)).not.toMatch(/L9|123456/);

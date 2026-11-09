@@ -406,13 +406,27 @@ export function postSample(rd: Any): SamplePost[] {
   return out.sort((a, b) => a.company.localeCompare(b.company) || b.engagement - a.engagement || a.text.localeCompare(b.text));
 }
 
-/** The report's facts, its post sample, and for a competitive report the team's rejected suggestions and preferences: the exact input an answer is stored under. */
-export async function insightsInput(db: Db, table: string, row: Any): Promise<InsightsInput> {
+/** One earlier report's changes, as they decide the client's usual swing. */
+export type InsightsHistory = Array<Array<Pick<Fact, "key" | "percent">>>;
+
+/** The client's usual swing: the changes of its earlier finished reports of the same kind, newest first, at most twelve. */
+export async function readInsightsHistory(db: Db, table: string, row: Any): Promise<InsightsHistory> {
   const kind = TABLES[table];
   const { data: earlier, error } = await db.from(table).select("report_data, created_at").eq("client_id", row.client_id).in("status", COMPLETE)
     .lt("created_at", row.created_at).order("created_at", { ascending: false }).limit(HISTORY_REPORTS);
   if (error) throw new Error(`Could not read the client's earlier reports: ${error.message}`);
-  const history = ((earlier ?? []) as Any[]).map((r) => (kind === "social" ? socialChanges(reportData(r)) : competitiveChanges(reportData(r))));
+  return ((earlier ?? []) as Any[]).map((r) => (kind === "social" ? socialChanges(reportData(r)) : competitiveChanges(reportData(r))).map((c) => ({ key: c.key, percent: c.percent })));
+}
+
+/**
+ * The report's facts, its post sample, and for a competitive report the
+ * team's rejected suggestions and preferences: the exact input an answer is
+ * stored under. `history`: the earlier reports' changes when the caller read
+ * them already (readInsightsHistory), so a retry words the same input.
+ */
+export async function insightsInput(db: Db, table: string, row: Any, history?: InsightsHistory): Promise<InsightsInput> {
+  const kind = TABLES[table];
+  if (!history) history = await readInsightsHistory(db, table, row);
   const period = { start: row.date_range_start, end: row.date_range_end };
   const rd = reportData(row);
   const facts = kind === "social" ? socialFacts(rd, { period, history }) : competitiveFacts(rd, { period, history });

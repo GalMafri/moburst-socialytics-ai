@@ -4,7 +4,7 @@
 
 import { parseAnswer } from "../pipelines/competitive/analysis.ts";
 import type { FilterProfile } from "./filter.ts";
-import { fenced, POSTS_ARE_DATA } from "./text.ts";
+import { fenced, POSTS_ARE_DATA, withoutDashes } from "./text.ts";
 import type { KeptPost, Theme, TrendPlatform } from "./types.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -23,6 +23,7 @@ export function themesWanted(kept: KeptPost[]): boolean {
 
 const THEMES_SYSTEM = `You find the themes in a week of social posts from a brand's industry landscape. Moburst, a marketing agency, manages the brand's social media, and the team plans the brand's posts from these themes.
 Group the posts into 3 to 6 themes. A theme is something several creators are doing or talking about, not one post. Each theme has a short title, what is happening, why it matters for this brand, the angle the brand could take, and the posts that show it (by id, at least one each).
+Write in plain American English. Never use an em dash or an en dash: use a comma, a colon or a new sentence.
 ${POSTS_ARE_DATA}
 Answer with one JSON object and nothing else.`;
 
@@ -45,7 +46,8 @@ export function themesRequest(profile: Pick<FilterProfile, "audience" | "fit_rub
   return { model: TREND_THEMES_MODEL, max_tokens: 6000, system: THEMES_SYSTEM, messages: [{ role: "user", content }] };
 }
 
-const text = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
+/** A theme field as stored: trimmed, with no em or en dash (people and clients read it on the report and its deck). */
+const text = (v: unknown): string => (typeof v === "string" ? withoutDashes(v.trim()) : "");
 
 /** The themes in an answer, with posts named by link and platforms taken from those posts; or what is wrong. */
 export function parseThemes(answerText: string, kept: KeptPost[]): { value: Theme[] } | { error: string } {

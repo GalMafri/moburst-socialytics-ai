@@ -29,7 +29,8 @@
 //     trends where n8n's carried TikTok's and Instagram's posts
 //     (prompt.ts TREND_EDITS, DECK_TREND_EDITS, generateRunSummary).
 
-import { trendsForModel, type IndustryTrends, type ReportTrendPost } from "./storedTrends.ts";
+import { REPORT_TREND_THEMES, strongestThemes, themeKey, trendsForModel, type IndustryTrends, type ReportTrendPost, type ReportTrendTheme } from "./storedTrends.ts";
+import { periodWords } from "../../reports/facts.ts";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -763,14 +764,14 @@ const trendPlatformName = (p: unknown) => TREND_PLATFORM_NAMES[String(p).toLower
 /** Example posts on the deck. */
 export const DECK_TREND_EXAMPLES = 7;
 
-/** The deck's example posts: each theme's first, then each one's second, and so on, every post once. */
-function trendExamples(trends: IndustryTrends): Array<{ post: ReportTrendPost; theme: string }> {
-  const byUrl = new Map(trends.posts.map((p) => [p.url, p]));
+/** The deck's example posts, from the themes it shows: each theme's first, then each one's second, and so on, every post once. */
+function trendExamples(themes: ReportTrendTheme[], posts: ReportTrendPost[]): Array<{ post: ReportTrendPost; theme: string }> {
+  const byUrl = new Map(posts.map((p) => [p.url, p]));
   const out: Array<{ post: ReportTrendPost; theme: string }> = [];
   const seen = new Set<string>();
-  const depth = Math.max(0, ...trends.themes.map((t) => t.post_urls.length));
+  const depth = Math.max(0, ...themes.map((t) => t.post_urls.length));
   for (let i = 0; i < depth && out.length < DECK_TREND_EXAMPLES; i++) {
-    for (const t of trends.themes) {
+    for (const t of themes) {
       const post = byUrl.get(t.post_urls[i]);
       if (!post || seen.has(post.url)) continue;
       seen.add(post.url);
@@ -985,23 +986,32 @@ DEFINED PILLARS: ${contentPillars.join(" | ") || "Not specified"}
   // The period's industry trends: one slide of themes, one of example posts
   // from other accounts, from the stored themes and what the analysis says
   // about them (the analysis's themes and notes, else the stored themes and
-  // what is happening in each). No trends stored: no trend slides.
+  // what is happening in each). At most REPORT_TREND_THEMES themes, the
+  // strongest, a theme that recurs across weeks once, so a month of weekly
+  // themes stays one short card. No trends stored: no trend slides.
   let slideNum = 7;
   if (industry) {
-    const listed: Array<{ title: string; platforms: string[]; note: string }> = Array.isArray(industryAnalysis.themes) && industryAnalysis.themes.length
-      ? industryAnalysis.themes.map((t: Any) => ({ title: String(t?.title ?? ""), platforms: (Array.isArray(t?.platforms) ? t.platforms : []).map(trendPlatformName), note: String(t?.note ?? "") }))
-      : industry.themes.map((t) => ({ title: t.title, platforms: t.platforms.map(trendPlatformName), note: t.happening }));
-    const period = clientData.report_window?.current_month;
+    const strongest = strongestThemes(industry);
+    const named: Array<{ title: string; platforms: string[]; note: string }> = [];
+    for (const t of Array.isArray(industryAnalysis.themes) ? industryAnalysis.themes : []) {
+      const title = String(t?.title ?? "").trim();
+      if (!title) continue;
+      const platforms = (Array.isArray(t?.platforms) ? t.platforms : []).map(trendPlatformName);
+      const same = named.find((n) => themeKey(n.title) === themeKey(title));
+      if (same) { for (const p of platforms) if (!same.platforms.includes(p)) same.platforms.push(p); continue; }
+      named.push({ title, platforms, note: String(t?.note ?? "") });
+    }
+    const listed = (named.length ? named : strongest.map((t) => ({ title: t.title, platforms: t.platforms.map(trendPlatformName), note: t.happening }))).slice(0, REPORT_TREND_THEMES);
     prompt += `
 ---
 
 SLIDE ${slideNum}: INDUSTRY TRENDS THIS PERIOD
 
-${industryAnalysis.overview || `The themes that ran through your industry's social posts from ${period?.start} to ${period?.end}.`}
+${industryAnalysis.overview || `The themes that ran through your industry's social posts in ${periodWords(clientData.report_window?.current_month).now}.`}
 
 🔥 THEMES:
 `;
-    for (const t of listed.filter((x) => x.title)) prompt += `• ${t.title}${t.platforms.length ? ` (${t.platforms.join(", ")})` : ""}${t.note ? `: ${t.note}` : ""}\n`;
+    for (const t of listed) prompt += `• ${t.title}${t.platforms.length ? ` (${t.platforms.join(", ")})` : ""}${t.note ? `: ${t.note}` : ""}\n`;
     prompt += `
 ---
 
@@ -1010,12 +1020,12 @@ SLIDE ${slideNum + 1}: TRENDING CONTENT IN YOUR INDUSTRY (EXTERNAL ACCOUNTS, NOT
 These are external, third-party posts from OTHER accounts in your industry, shown for trend reference only. They are NOT ${clientName}'s posts and must never appear on the client's own top-posts slide. Study their hooks and copy:
 
 `;
-    trendExamples(industry).forEach(({ post, theme }, i) => {
+    trendExamples(strongest, industry.posts).forEach(({ post, theme }, i) => {
       const platform = trendPlatformName(post.platform).toUpperCase();
       const metrics = [post.views ? `Views: ${n(post.views)}` : "", post.likes ? `Likes: ${n(post.likes)}` : "", post.comments ? `Comments: ${n(post.comments)}` : "", post.shares ? `Shares: ${n(post.shares)}` : ""].filter(Boolean).join(" | ");
       prompt += `
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📱 ${platform} EXAMPLE #${i + 1} (EXTERNAL ACCOUNT): ${post.author || "unknown"}
+📱 ${platform} EXAMPLE #${i + 1} (EXTERNAL ACCOUNT)${post.author ? `: ${post.author}` : ""}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 THEME: ${theme}
 ${post.format ? `FORMAT: ${TREND_FORMAT_NAMES[post.format] ?? post.format}\n` : ""}${metrics ? `${metrics}\n` : ""}
@@ -1141,9 +1151,9 @@ export interface SummaryInput {
 /**
  * The report_data the writer stores. Where n8n stored its TikTok and
  * Instagram posts (tiktok_trends, instagram_trends) and why each scraper did
- * not run (trend_status), the report keeps the period's stored industry
- * trends (industry_trends, null for none) and whether it read them
- * (trend_status.industry: stored, none, or skipped by an earlier request);
+ * not run (trend_status, an object), the report keeps the period's stored
+ * industry trends (industry_trends, null for none) and whether it read them
+ * (trend_status, a string: stored, none, or skipped by an earlier request);
  * the analysis of trends is null when there are none. The counts of TikTok
  * and Instagram trend posts are the industry trends' posts on each.
  */
@@ -1229,7 +1239,7 @@ export function generateRunSummary(a: SummaryInput): Any {
     },
     industry_trends: industry,
     ai_analysis: analysis,
-    trend_status: { industry: skipped ? "skipped" : industry ? "stored" : "none" },
+    trend_status: skipped ? "skipped" : industry ? "stored" : "none",
     content_calendar: calendar,
     context: {
       timezone: clientData.context?.timezone || config.timezone || "UTC",

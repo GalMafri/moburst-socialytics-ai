@@ -32,12 +32,12 @@ describe("Generate Run Summary on stored trends", () => {
 
   it("keeps the trends it read and says whether it read any, with no warning", () => {
     const stored = summary({ industryTrends: trends, ai: { sprout_performance_analysis: {}, industry_trends_analysis: { overview: "o" } } });
-    expect(stored).toMatchObject({ industry_trends: trends, trend_status: { industry: "stored" }, data_counts: { tiktok_trends: 1, instagram_trends: 1, industry_trend_themes: 1, industry_trend_posts: 2 } });
+    expect(stored).toMatchObject({ industry_trends: trends, trend_status: "stored", data_counts: { tiktok_trends: 1, instagram_trends: 1, industry_trend_themes: 1, industry_trend_posts: 2 } });
     expect(stored.ai_analysis.industry_trends_analysis).toEqual({ overview: "o" });
     const none = summary({ ai: { sprout_performance_analysis: {}, industry_trends_analysis: { overview: "o" } } });
-    expect(none).toMatchObject({ industry_trends: null, trend_status: { industry: "none" } });
+    expect(none).toMatchObject({ industry_trends: null, trend_status: "none" });
     expect(none.ai_analysis.industry_trends_analysis).toBeNull();
-    expect(summary({ clientData: { skip_trends: true } }).trend_status).toEqual({ industry: "skipped" });
+    expect(summary({ clientData: { skip_trends: true } }).trend_status).toBe("skipped");
     for (const r of [stored, none]) {
       expect(r.warnings.filter((w: string) => /trend/i.test(w))).toEqual([]);
       expect(r).not.toHaveProperty("tiktok_trends");
@@ -56,7 +56,8 @@ describe("Build Presentation Content on stored trends", () => {
   it("makes one Industry trends slide group from the themes, with seven example posts from other accounts at most, each theme in turn", () => {
     const deck: string = buildPresentationContent(client, { sprout_performance_analysis: {} }, new Date("2026-11-01T00:00:00Z"), trends).presentation_content;
     expect(deck).toContain("SLIDE 7: INDUSTRY TRENDS THIS PERIOD");
-    expect(deck).toContain("The themes that ran through your industry's social posts from 2026-10-01 to 2026-10-31.");
+    expect(deck).toContain("The themes that ran through your industry's social posts in October.");
+    expect(deck.split("SLIDE 7: INDUSTRY TRENDS THIS PERIOD")[1].split("SLIDE 9:")[0]).not.toMatch(/\d{4}-\d{2}-\d{2}/);
     expect(deck).toContain("• Budget cuts (TikTok, LinkedIn): What happens 0.");
     expect(deck).toContain("SLIDE 8: TRENDING CONTENT IN YOUR INDUSTRY (EXTERNAL ACCOUNTS, NOT Acme'S POSTS)");
     const examples = [...deck.matchAll(/EXAMPLE #(\d+) \(EXTERNAL ACCOUNT\)/g)];
@@ -68,6 +69,27 @@ describe("Build Presentation Content on stored trends", () => {
     // The deck's own words have no dash as punctuation, and the team's own scores never leave.
     expect(deck).not.toMatch(/[\u2013\u2014]|\w - \w/);
     expect(deck).not.toMatch(/ENGAGEMENT SCORE|engagement_score|fit/i);
+  });
+
+  it("shows the strongest five themes at most, a theme that recurs across weeks once, and names no unknown author", () => {
+    const weekly = ["AI planning", "Budget cuts", "AI Planning", "Late launches", "Day in the life", "AI planning", "Client wins", "Budget cuts", "Hiring"];
+    const many = {
+      themes: weekly.map((title, i) => ({ week_start: `2026-10-${String(26 - 7 * Math.floor(i / 3)).padStart(2, "0")}`, title, happening: `What happens in ${title}.`, why_it_matters: "w", angle: "a", platforms: [i % 2 ? "instagram" : "tiktok"], post_urls: [`https://x.example/m-${i}`] })),
+      posts: weekly.map((_, i) => ({ ...post(`https://x.example/m-${i}`, i % 2 ? "instagram" : "tiktok"), author: "" })),
+    };
+    const deck: string = buildPresentationContent(client, { sprout_performance_analysis: {} }, new Date("2026-11-01T00:00:00Z"), many).presentation_content;
+    const bullets = deck.split("🔥 THEMES:\n")[1].split("\n---")[0].trim().split("\n");
+    expect(bullets).toHaveLength(5);
+    expect(bullets[0]).toBe("• AI planning (TikTok, Instagram): What happens in AI planning.");
+    expect(bullets[1]).toMatch(/^• Budget cuts \(/);
+    expect(bullets.filter((b) => /ai planning/i.test(b))).toHaveLength(1);
+    expect(deck).not.toContain("unknown");
+    expect(deck).toMatch(/EXAMPLE #1 \(EXTERNAL ACCOUNT\)\n/);
+    // The analysis's themes are capped and merged the same way.
+    const noted = { sprout_performance_analysis: {}, industry_trends_analysis: { overview: "o", themes: [...weekly, "AI planning"].map((title) => ({ title, platforms: ["TikTok"], note: `Note on ${title}.` })) } };
+    const fromAnalysis = buildPresentationContent(client, noted, new Date("2026-11-01T00:00:00Z"), many).presentation_content.split("🔥 THEMES:\n")[1].split("\n---")[0].trim().split("\n");
+    expect(fromAnalysis).toHaveLength(5);
+    expect(fromAnalysis.filter((b: string) => /ai planning/i.test(b))).toHaveLength(1);
   });
 
   it("with no stored trends, makes no trend slide and names no trend", () => {
