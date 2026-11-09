@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ALERT, CLIENT, COMPETITIVE_REPORT, COMPETITOR, COMPETITOR_SET, DESIGN_SETTINGS, DESIGN_SYSTEM, HANDLE, MEDIA_JOB, POST, REPORT, SCHEDULE, SCHEDULED_POST, SPROUT_PROFILE } from "../../../functions/_shared/socialytics-api/fixtures";
+import { ALERT, CLIENT, COMPETITIVE_REPORT, COMPETITOR, COMPETITOR_SET, DESIGN_SETTINGS, DESIGN_SYSTEM, HANDLE, MEDIA_JOB, POST, REPORT, SCHEDULE, SCHEDULED_POST, SPROUT_PROFILE, TREND_POSTS, TREND_THEMES, TREND_WEEKS } from "../../../functions/_shared/socialytics-api/fixtures";
 import { readRoutes } from "../../../functions/_shared/socialytics-api/routes-read";
 import { makeFakeStore, emptyData } from "../../../functions/_shared/socialytics-api/store.fake";
 import { handleRequest, type CoreDeps } from "../../../functions/_shared/api/core";
@@ -10,17 +10,18 @@ const ALL = "soc_all_key";
 const SCOPED = "soc_scoped_key";
 const OTHER = { ...CLIENT, id: "c-calm", name: "Calm", company_slug: "calm", website_url: "https://calm.com", created_at: "2026-09-01T00:00:00.000Z", sprout_customer_id: null };
 
-async function app(over: { analytics?: (id: string, start: string, end: string) => { ok: boolean; status: number; data: unknown } } = {}) {
+async function app(over: { analytics?: (id: string, start: string, end: string) => { ok: boolean; status: number; data: unknown }; reports?: Array<typeof REPORT>; industryTrends?: boolean } = {}) {
   const store = makeFakeStore(emptyData({
     clients: [CLIENT, OTHER], sproutProfiles: [SPROUT_PROFILE], sets: [COMPETITOR_SET], competitors: [COMPETITOR], handles: [HANDLE],
-    reports: [REPORT, { ...REPORT, id: "rep-calm", client_id: "c-calm", status: "running", created_at: "2026-09-20T00:00:00.000Z", report_data: {} }],
+    reports: [REPORT, { ...REPORT, id: "rep-calm", client_id: "c-calm", status: "running", created_at: "2026-09-20T00:00:00.000Z", report_data: {} }, ...(over.reports ?? [])],
     competitiveReports: [COMPETITIVE_REPORT], posts: [POST, { ...POST, id: "post-2", is_approved: false, source: "ad_hoc", created_at: "2026-09-03T10:00:00.000Z" }, { ...POST, id: "post-old", archived_at: "2026-09-04T10:00:00.000Z" }],
     mediaJobs: [MEDIA_JOB], schedules: [SCHEDULE], scheduledPosts: [SCHEDULED_POST], alerts: [ALERT], designSystems: [DESIGN_SYSTEM],
     designSettings: [DESIGN_SETTINGS], lifecycleSteps: [{ client_id: "c-calm", step: "design_settings", status: "waiting", result: { waiting_for: "logo_file" } }],
+    trendWeeks: TREND_WEEKS, trendThemes: TREND_THEMES, trendPosts: TREND_POSTS,
   }));
   const analyticsCalls: Array<[string, string, string]> = [];
   const routes = readRoutes({
-    store,
+    store, ...(over.industryTrends === undefined ? {} : { industryTrends: over.industryTrends }),
     analytics: async (id, start, end) => { analyticsCalls.push([id, start, end]); return over.analytics ? over.analytics(id, start, end) : { ok: true, status: 200, data: { client: { id, name: "Bader Law" }, range: { start, end, days: 30 }, profiles: [{ id: "123456", name: "Bader Law", network: "instagram" }], totals: { impressions: 10 }, by_profile: [{ profile_id: "123456", name: "Bader Law", impressions: 10 }], top_posts: [{ post_id: "sp-1", text: "t", profile_id: "123456", impressions: 5 }] } }; },
     health: async () => ({ tool: "socialytics", findings: [{ kind: "report_stuck", client_id: "c-calm", client: "Calm" }, { kind: "media_failed", client_id: "c-bader", client: "Bader Law" }, { kind: "api_schema_drift", client_id: null, client: "Socialytics API" }], demo_jobs: { running: 0, stuck: 0, failed_24h: 0 }, counts: {} }),
   });
@@ -39,6 +40,13 @@ async function app(over: { analytics?: (id: string, start: string, end: string) 
   return { get, analyticsCalls };
 }
 const ids = (r: { body: { data: Array<{ id: string }> } }) => r.body.data.map((x) => x.id);
+/** Every object key anywhere in a JSON value. */
+function keysOf(v: unknown, out = new Set<string>()): Set<string> {
+  if (Array.isArray(v)) v.forEach((x) => keysOf(x, out));
+  else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) { out.add(k); keysOf(x, out); }
+  return out;
+}
+
 
 describe("read routes", () => {
   it("lists clients newest first with pagination and summaries", async () => {
@@ -134,5 +142,60 @@ describe("read routes", () => {
     const r = await get("/v1/reports?client_id=abc");
     expect(r.status).toBe(200);
     expect(r.body.data).toEqual([]);
+  });
+});
+
+describe("industry trends on a report", () => {
+  const post = (id: string, platform: string, author: string, text: string, format: string | null) => ({ platform, url: `https://${platform}.example/${id}`, author, text, format, posted_at: "2026-08-20T14:30:00.000Z" });
+  it("carries the stored themes of the weeks that start inside the report's period, newest week first and then by position", async () => {
+    const { get } = await app();
+    const t = (await get("/v1/reports/rep-1")).body.data.industry_trends;
+    // Aug 31 is the period's last day and counts; the running week, the dismissed theme and the weeks on either side do not.
+    expect(t.themes.map((x: { title: string }) => x.title)).toEqual(["Reaction videos to new rulings", "Plain-English legal explainers", "Client stories in the first person", "Inside the courtroom"]);
+    expect(t.themes[0]).toEqual({
+      title: "Reaction videos to new rulings", happening: "Reaction videos to new rulings: what is happening.", why_it_matters: "Reaction videos to new rulings: why it matters.", angle: "Reaction videos to new rulings: the angle for the brand.", platforms: ["tiktok", "instagram"],
+      // The kept posts in the theme's own order; the post the filter dropped (tp-3) is not there.
+      posts: [post("tp-2", "instagram", "@thelegalexplainer", "What the ruling means for you.", "carousel"), post("tp-1", "tiktok", "@lawyerkate", "New ruling, in 30 seconds.", "short_video")],
+    });
+    expect(t.themes[1].posts.map((p: { url: string }) => p.url)).toEqual(["https://youtube.example/tp-5", "https://linkedin.example/tp-4"]);
+    expect(t.themes[1].posts[0].format).toBeNull();
+    // A post a theme lists twice is shown once.
+    expect(t.themes[3].posts).toHaveLength(1);
+  });
+  it("serves only the fields the contract names, never the team's own columns", async () => {
+    const { get } = await app();
+    const body = (await get("/v1/reports/rep-1")).body.data.industry_trends;
+    expect([...keysOf(body)].sort()).toEqual(["angle", "author", "format", "happening", "platform", "platforms", "posted_at", "posts", "text", "themes", "title", "url", "why_it_matters"]);
+  });
+  it("is built from the stored weeks whichever engine wrote the report, and only from the report's own client", async () => {
+    const { get } = await app();
+    // rep-calm's data is empty; its client's week is the only one in play.
+    const calm = (await get("/v1/reports/rep-calm")).body.data.industry_trends;
+    expect(calm.themes.map((x: { title: string }) => x.title)).toEqual(["Another client's theme"]);
+    expect(calm.themes[0].posts.map((p: { author: string }) => p.author)).toEqual(["@calmcreator"]);
+    expect(JSON.stringify((await get("/v1/reports/rep-1")).body.data.industry_trends)).not.toContain("Another client's theme");
+  });
+  it("is null when the period holds no week start, or the report has no period", async () => {
+    // The week of Sep 7 began the day before this period, so it is not in it.
+    const quiet = { ...REPORT, id: "rep-quiet", date_range_start: "2026-09-08", date_range_end: "2026-09-13", status: "running", created_at: "2026-09-14T00:00:00.000Z" };
+    const open = { ...REPORT, id: "rep-open", date_range_start: null, date_range_end: null, status: "running", created_at: "2026-09-15T00:00:00.000Z" };
+    const { get } = await app({ reports: [quiet, open] });
+    for (const id of ["rep-quiet", "rep-open"]) {
+      const d = (await get(`/v1/reports/${id}`)).body.data;
+      expect(d, id).toHaveProperty("industry_trends", null);
+      expect(d.trends.tiktok.posts, id).toBe(1);
+    }
+  });
+  it("leaves the trends the report itself holds as they were, and stays out of the list", async () => {
+    const { get } = await app();
+    const d = (await get("/v1/reports/rep-1")).body.data;
+    expect(d.trends).toEqual({ tiktok: { posts: 1, patterns: { top_hashtags: ["#law"] } }, instagram: { posts: 0, patterns: {} } });
+    expect("industry_trends" in (await get("/v1/reports?client_id=c-bader")).body.data[0]).toBe(false);
+  });
+  it("is not served where the route is built without it (the Claude connector's report read stays as it was)", async () => {
+    const { get } = await app({ industryTrends: false });
+    const d = (await get("/v1/reports/rep-1")).body.data;
+    expect("industry_trends" in d).toBe(false);
+    expect(d.trends.tiktok.posts).toBe(1);
   });
 });

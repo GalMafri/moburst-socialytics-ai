@@ -88,7 +88,12 @@ describe("the tools", () => {
     expect(body(await call("socialytics_competitive_report_get", { report_id: "crep-1" }))).toEqual(await api("/v1/competitive-reports/crep-1"));
     expect(body(await call("socialytics_client_analytics", { client_id: "c-bader", start: "2026-09-01", end: "2026-09-30" }))).toEqual(await api("/v1/clients/c-bader/analytics?start=2026-09-01&end=2026-09-30"));
     const report = body(await call("socialytics_report_get", { report_id: "rep-1" }));
-    expect(report).toEqual(await api("/v1/reports/rep-1"));
+    // The REST read alone carries industry_trends (Trends Task 12); the connector's report read stays as it was.
+    const rest = await api("/v1/reports/rep-1");
+    expect(rest.data).toHaveProperty("industry_trends");
+    const { industry_trends: _, ...restData } = rest.data;
+    expect(report).toEqual({ ...rest, data: restData });
+    expect("industry_trends" in report!.data).toBe(false);
   });
 
   it("find a client by part of its name and page through the rest", async () => {

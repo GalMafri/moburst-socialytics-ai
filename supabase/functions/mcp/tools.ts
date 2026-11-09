@@ -190,7 +190,8 @@ export function failure(e: unknown, tool: string, requestId: string): ToolResult
 export async function runTool(name: string, args: Record<string, unknown>, person: Person, deps: ToolDeps, requestId: string): Promise<ToolResult> {
   const tool = TOOLS.find((t) => t.name === name);
   if (!tool) return { ok: false, status: 404, code: "not_found", text: "There is no such Socialytics tool." };
-  const routes = readRoutes({ store: deps.store, analytics: deps.analytics, health: async () => { throw new Error("health is not served to the connector"); } });
+  // The connector's report read stays as it was: industry_trends is the API's (Trends Task 12).
+  const routes = readRoutes({ store: deps.store, analytics: deps.analytics, health: async () => { throw new Error("health is not served to the connector"); }, industryTrends: false });
   try {
     const body = await tool.run(args, { person, deps, routes, requestId });
     return { ok: true, status: 200, body, text: JSON.stringify(body) };

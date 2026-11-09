@@ -14,6 +14,11 @@ export interface ReadDeps {
   /** sprout-analytics through the server path; the function's own status comes back as is. */
   analytics(clientId: string, start: string, end: string): Promise<AnalyticsAnswer>;
   health(): Promise<unknown>;
+  /**
+   * Whether a report's detail carries industry_trends (the API: on by default). The Claude connector builds these routes with it off: its
+   * report read stays as it was, since Trends Task 12 (4514b7d) added the field to the API only.
+   */
+  industryTrends?: boolean;
 }
 
 const q = (ctx: RouteContext, name: string): string | undefined => ctx.query.get(name)?.trim() || undefined;
@@ -99,11 +104,14 @@ export function readRoutes(deps: ReadDeps): Route[] {
       },
     },
     {
-      method: "GET", path: "/v1/reports/:id", auth: "key", scope: "read", doc: { summary: "One social report with its analysis, calendar, performance and trends", tag: "Reports", response: "Report" },
+      method: "GET", path: "/v1/reports/:id", auth: "key", scope: "read", doc: { summary: "One social report with its analysis, calendar, performance, trends and the industry trends stored for its period", tag: "Reports", response: "Report" },
       handler: async (ctx) => {
         const r = await store.getReport(ctx.params.id, ctx.auth.clients);
         if (!r) throw notFound("Report");
-        return ok(reportOut(r, { detail: true }));
+        if (deps.industryTrends === false) return ok(reportOut(r, { detail: true }));
+        // The themes stored for the weeks of the report's period; a report with no period has none to read.
+        const trendRows = r.date_range_start && r.date_range_end ? await store.trendRows(r.client_id, r.date_range_start, r.date_range_end) : null;
+        return ok(reportOut(r, { detail: true, trendRows }));
       },
     },
     {

@@ -11,7 +11,7 @@ import { decodeCursor, type Cursor } from "../api/cursor.ts";
 import type { ClientScope } from "../api/router.ts";
 import { DESIGN_SETUP_STEPS, type DesignStepRow } from "../design/setup.ts";
 import { readShownInsights } from "../reports/shownFields.ts";
-import type { AlertRow, ClientRow, CompetitiveReportRow, CompetitorRow, CompetitorSetRow, DesignSettingsRow, DesignSystemRow, HandleRow, MediaJobRow, PostRow, ReportRow, ScheduledPostRow, ScheduleRow, SetWithCompetitors, SproutProfileRow } from "./serializers.ts";
+import { FINISHED_TREND_WEEKS, type AlertRow, type ClientRow, type CompetitiveReportRow, type CompetitorRow, type CompetitorSetRow, type DesignSettingsRow, type DesignSystemRow, type HandleRow, type MediaJobRow, type PostRow, type ReportRow, type ScheduledPostRow, type ScheduleRow, type SetWithCompetitors, type SproutProfileRow, type TrendPostRow, type TrendRows, type TrendThemeRow, type TrendWeekRow } from "./serializers.ts";
 
 export interface Page { limit: number; cursor: Cursor | null }
 export interface ClientFilters { q?: string; company_slug?: string; include_archived?: boolean }
@@ -30,6 +30,8 @@ export interface Store {
   schedulesOf(clientId: string): Promise<ScheduleRow[]>;
   listReports(scope: ClientScope, f: ReportFilters, page: Page): Promise<ReportRow[]>;
   getReport(id: string, scope: ClientScope): Promise<ReportRow | null>;
+  /** The stored trend rows a report's period may draw on: the client's finished weeks that start from `start` to `end`, their live themes, and the kept posts those themes list. */
+  trendRows(clientId: string, start: string, end: string): Promise<TrendRows>;
   listCompetitiveReports(scope: ClientScope, f: { client_id?: string; status?: string }, page: Page): Promise<CompetitiveReportRow[]>;
   getCompetitiveReport(id: string, scope: ClientScope): Promise<CompetitiveReportRow | null>;
   listSets(scope: ClientScope, f: { client_id?: string; status?: string }, page: Page): Promise<SetWithCompetitors[]>;
@@ -43,11 +45,15 @@ export interface Store {
   listDesignSystems(scope: ClientScope, f: { client_id?: string }, page: Page): Promise<DesignSystemRow[]>;
 }
 
-export const CLIENT_COLUMNS = "id, name, website_url, company_slug, primary_platforms, geo, language, timezone, content_pillars, social_keywords, trends_keywords, brand_identity, brand_notes, brief_text, logo_url, design_style_synthesis, harvested_design_references, design_references, sprout_customer_id, hub_company_name, media_backend, archived_at, created_at, updated_at, created_by, demo_job_id, pillars_source, pillars_derived_at";
+export const CLIENT_COLUMNS = "id, name, website_url, company_slug, primary_platforms, geo, language, timezone, content_pillars, social_keywords, brand_identity, brand_notes, brief_text, logo_url, design_style_synthesis, harvested_design_references, design_references, sprout_customer_id, hub_company_name, media_backend, archived_at, created_at, updated_at, created_by, demo_job_id, pillars_source, pillars_derived_at";
 export const SPROUT_PROFILE_COLUMNS = "id, client_id, sprout_profile_id, profile_name, native_name, network_type, native_link, is_active";
 export const SET_COLUMNS = "id, client_id, status, notes, source, rivaliq_landscape_id, confirmed_by, confirmed_at, created_at, updated_at, demo_job_id";
 export const COMPETITOR_COLUMNS = "id, set_id, client_id, name, website_url, rationale, similarity_score, source, is_selected, selected_rank, rivaliq_company_id, profile_detection, created_at";
 export const HANDLE_COLUMNS = "id, competitor_id, client_id, platform, handle, profile_url, is_active, followers, detection_confidence, source, detected_at";
+export const TREND_WEEK_COLUMNS = "id, client_id, week_start, status";
+export const TREND_THEME_COLUMNS = "id, week_id, client_id, position, title, happening, why_it_matters, angle, platforms, post_ids, dismissed_at";
+/** Only what the API serves: the weighted engagement, fit, the filter's reasons and the tripwire flag are not read. */
+export const TREND_POST_COLUMNS = "id, client_id, platform, url, author, text, posted_at, format, kept";
 export const REPORT_COLUMNS = "id, client_id, report_type, status, date_range_start, date_range_end, gamma_url, duration_minutes, report_data, created_at, created_by, demo_job_id";
 /** The same row without the heavy blocks: the summary's sub-fields come out of report_data by alias. */
 export const REPORT_LIST_COLUMNS = "id, client_id, report_type, status, date_range_start, date_range_end, gamma_url, duration_minutes, created_at, created_by, demo_job_id, rd_period:report_data->report_period, rd_counts:report_data->data_counts, rd_metrics:report_data->metrics_summary, rd_warnings:report_data->warnings, rd_trend:report_data->>trend_status, rd_gamma_status:report_data->>gamma_status, rd_gamma_url:report_data->>gamma_url, rd_completed:report_data->>completed_at, rd_error:report_data->>error, rd_duration:report_data->duration_minutes";
@@ -81,6 +87,13 @@ function keyset(q: any, page: Page, clientColumn = "client_id", scope?: ClientSc
   if (scope && !scope.all) x = x.in(clientColumn, [...scope.ids]);
   if (page.cursor) x = x.or(`created_at.lt.${page.cursor.c},and(created_at.eq.${page.cursor.c},id.lt.${page.cursor.i})`);
   return x.order("created_at", { ascending: false }).order("id", { ascending: false }).limit(page.limit + 1);
+}
+/** Ids per request: a uuid is 37 characters in a filter, and a group of 100 keeps the request line short and every answer under PostgREST's 1000 rows. */
+const TREND_CHUNK = 100;
+function chunked<T>(xs: T[]): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < xs.length; i += TREND_CHUNK) out.push(xs.slice(i, i + TREND_CHUNK));
+  return out;
 }
 async function rows<T>(p: PromiseLike<{ data: unknown; error: { message: string } | null }>): Promise<T[]> {
   const { data, error } = await p;
@@ -177,6 +190,16 @@ export function makeStore(db: SupabaseClient): Store {
       const r = scoped(await one<ReportRow>(db.from("reports").select(REPORT_COLUMNS).eq("id", id).maybeSingle()), scope);
       // With its shown insights, read as the person (RLS and the column grant apply).
       return r ? { ...r, insights: await readShownInsights(db, "reports", r.id) } : null;
+    },
+    // The reads of trend_themes_in_range (20261102100000_trend_access.sql), made with the service role: that function checks the signed-in user, and a key has none.
+    // Each read is narrowed the way the rule needs, and industryTrendsOut (serializers.ts) then applies the whole rule to what came back, so a row that slips through is still judged by it.
+    async trendRows(clientId, start, end) {
+      const weeks = await rows<TrendWeekRow>(db.from("trend_weeks").select(TREND_WEEK_COLUMNS).eq("client_id", clientId).in("status", FINISHED_TREND_WEEKS).gte("week_start", start).lte("week_start", end));
+      if (!weeks.length) return { weeks, themes: [], posts: [] };
+      const themes = (await Promise.all(chunked(weeks.map((w) => w.id)).map((ids) => rows<TrendThemeRow>(db.from("trend_themes").select(TREND_THEME_COLUMNS).eq("client_id", clientId).in("week_id", ids).is("dismissed_at", null))))).flat();
+      const postIds = [...new Set(themes.flatMap((t) => t.post_ids ?? []))];
+      const posts = (await Promise.all(chunked(postIds).map((ids) => rows<TrendPostRow>(db.from("trend_posts").select(TREND_POST_COLUMNS).eq("client_id", clientId).eq("kept", true).in("id", ids))))).flat();
+      return { weeks, themes, posts };
     },
     async listCompetitiveReports(scope, f, page) {
       if (f.client_id !== undefined && !isId(f.client_id)) return [];

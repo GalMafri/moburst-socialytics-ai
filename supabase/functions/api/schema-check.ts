@@ -6,11 +6,12 @@
  */
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import type { Finding } from "./health.ts";
-import { ALERT_COLUMNS, CLIENT_COLUMNS, COMPETITIVE_COLUMNS, COMPETITIVE_LIST_COLUMNS, COMPETITOR_COLUMNS, DESIGN_SYSTEM_COLUMNS, HANDLE_COLUMNS, MEDIA_JOB_COLUMNS, POST_COLUMNS, REPORT_COLUMNS, REPORT_LIST_COLUMNS, SCHEDULE_COLUMNS, SCHEDULED_POST_COLUMNS, SET_COLUMNS, SPROUT_PROFILE_COLUMNS } from "../_shared/socialytics-api/store.ts";
+import { ALERT_COLUMNS, CLIENT_COLUMNS, COMPETITIVE_COLUMNS, COMPETITIVE_LIST_COLUMNS, COMPETITOR_COLUMNS, DESIGN_SYSTEM_COLUMNS, HANDLE_COLUMNS, MEDIA_JOB_COLUMNS, POST_COLUMNS, REPORT_COLUMNS, REPORT_LIST_COLUMNS, SCHEDULE_COLUMNS, SCHEDULED_POST_COLUMNS, SET_COLUMNS, SPROUT_PROFILE_COLUMNS, TREND_POST_COLUMNS, TREND_THEME_COLUMNS, TREND_WEEK_COLUMNS } from "../_shared/socialytics-api/store.ts";
 
 export const TABLE_COLUMNS: Array<[string, string]> = [
   ["clients", CLIENT_COLUMNS], ["sprout_profiles", SPROUT_PROFILE_COLUMNS], ["competitor_sets", SET_COLUMNS], ["competitors", COMPETITOR_COLUMNS], ["competitor_handles", HANDLE_COLUMNS],
   ["reports", REPORT_COLUMNS], ["reports", REPORT_LIST_COLUMNS], ["competitive_reports", COMPETITIVE_COLUMNS], ["competitive_reports", COMPETITIVE_LIST_COLUMNS],
+  ["trend_weeks", TREND_WEEK_COLUMNS], ["trend_themes", TREND_THEME_COLUMNS], ["trend_posts", TREND_POST_COLUMNS],
   ["post_iterations", POST_COLUMNS], ["media_jobs", MEDIA_JOB_COLUMNS], ["report_schedules", SCHEDULE_COLUMNS], ["scheduled_posts", SCHEDULED_POST_COLUMNS], ["competitive_alerts", ALERT_COLUMNS], ["client_design_systems", DESIGN_SYSTEM_COLUMNS],
   ["profiles", "user_id, email"], ["user_roles", "user_id, role"],
   ["api_keys", "id, name, key_prefix, key_hash, scopes, company_slugs, client_ids, rate_limit_per_minute, created_by, created_at, expires_at, last_used_at, revoked_at, note"],
