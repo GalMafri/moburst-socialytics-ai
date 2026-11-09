@@ -17,10 +17,13 @@
 --      when a report is read, keyed by a gap's own words, so no vote
 --      queues or re-words anything.
 --
--- People read the insights of the reports they can see; only the service
--- role writes them. The new table gets the three restrictive "OAuth sessions
--- cannot ..." policies of 20261109120000_claude_connector.sql. Additive and
--- safe to apply twice.
+-- People read the insights of the clients they can access, as they read the
+-- reports (can_access_client, 20260720130000_company_scoped_staff.sql), and
+-- only the columns the screens show: what went wrong with an answer, the
+-- model and the token counts are the service role's. Only the service role
+-- writes. The new table gets the three restrictive "OAuth sessions cannot
+-- ..." policies of 20261109120000_claude_connector.sql. Additive and safe to
+-- apply twice.
 
 -- ── 1. The insights ─────────────────────────────────────────────────────────
 
@@ -56,7 +59,7 @@ alter table public.report_insights enable row level security;
 
 drop policy if exists "Read report insights" on public.report_insights;
 create policy "Read report insights" on public.report_insights
-  for select to authenticated using (public.is_moburst_staff() or public.is_client_member(client_id));
+  for select to authenticated using (public.can_access_client(client_id));
 
 drop policy if exists "OAuth sessions cannot insert" on public.report_insights;
 create policy "OAuth sessions cannot insert" on public.report_insights as restrictive for insert to authenticated with check (not (select public.is_oauth_session()));
@@ -65,8 +68,10 @@ create policy "OAuth sessions cannot update" on public.report_insights as restri
 drop policy if exists "OAuth sessions cannot delete" on public.report_insights;
 create policy "OAuth sessions cannot delete" on public.report_insights as restrictive for delete to authenticated using (not (select public.is_oauth_session()));
 
-revoke all on public.report_insights from public, anon;
-grant select on public.report_insights to authenticated;
+revoke all on public.report_insights from public, anon, authenticated;
+-- The shown columns only: problems, model, input_tokens and output_tokens stay with the service role.
+grant select (id, report_table, report_id, client_id, kind, input_hash, facts, fields, source, prompt_version, created_at)
+  on public.report_insights to authenticated;
 grant select, insert, update, delete on public.report_insights to service_role;
 
 -- ── 2. Go-live ──────────────────────────────────────────────────────────────

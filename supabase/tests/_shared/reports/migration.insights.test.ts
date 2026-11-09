@@ -34,8 +34,10 @@ grant usage on schema public to anon, authenticated, service_role;
 alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
 alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
 
-create function public.is_moburst_staff() returns boolean language sql stable as $$ select false $$;
-create function public.is_client_member(uuid) returns boolean language sql stable as $$ select $1 = '${MOBURST}'::uuid $$;
+-- A company-restricted staff member: staff, yet only one client is theirs (20260720130000_company_scoped_staff.sql).
+create function public.is_moburst_staff() returns boolean language sql stable as $$ select true $$;
+create function public.is_client_member(uuid) returns boolean language sql stable as $$ select false $$;
+create function public.can_access_client(uuid) returns boolean language sql stable as $$ select $1 = '${MOBURST}'::uuid $$;
 create function public.is_oauth_session() returns boolean language sql stable as $$ select coalesce(auth.jwt() ->> 'client_id', '') <> '' $$;
 create table public.clients (id uuid primary key, name text, archived_at timestamptz);
 create table public.reports (id uuid primary key, client_id uuid not null, status text not null, created_at timestamptz not null default now());
@@ -78,7 +80,7 @@ describe("20261110220000_data_driven_insights.sql", () => {
     expect(migration).not.toMatch(/\bdrop table\b|\bdrop column\b|\btruncate\b/i);
   });
 
-  it("lets a client's member read its insights, nobody else's, and never write them", async () => {
+  it("lets a person read the insights of the clients they can access (can_access_client), nobody else's, and never write them", async () => {
     await as("service_role", { role: "service_role" });
     for (const [client, report] of [[MOBURST, MONTHLY], [OTHER, OLD]]) {
       await db.query(`insert into public.report_insights (report_table, report_id, client_id, kind, input_hash, facts, fields, source, prompt_version) values ('reports', $1, $2, 'social', $3, '[]', '{}', 'template', 1)`, [report, client, HASH]);
@@ -86,6 +88,16 @@ describe("20261110220000_data_driven_insights.sql", () => {
     await as("authenticated", APP);
     expect((await rows(`select client_id from public.report_insights`)).map((r) => r.client_id)).toEqual([MOBURST]);
     await expect(db.query(`insert into public.report_insights (report_table, report_id, client_id, kind, input_hash, facts, fields, source, prompt_version) values ('reports', $1, $2, 'social', $3, '[]', '{}', 'model', 1)`, [NEW, MOBURST, "b".repeat(64)])).rejects.toThrow();
+  });
+
+  it("shows people the shown columns only: problems, the model and token counts are the service role's", async () => {
+    await as("authenticated", APP);
+    expect(await rows(`select id, report_table, report_id, client_id, kind, input_hash, facts, fields, source, prompt_version, created_at from public.report_insights`)).toHaveLength(1);
+    for (const column of ["problems", "model", "input_tokens", "output_tokens", "*"]) {
+      await expect(db.query(`select ${column} from public.report_insights`)).rejects.toThrow(/permission denied/);
+    }
+    await as("service_role", { role: "service_role" });
+    expect((await rows(`select problems, model, input_tokens, output_tokens from public.report_insights`)).length).toBe(2);
   });
 
   it("keeps go-live as the first run set it, and only the service role reads it", async () => {
