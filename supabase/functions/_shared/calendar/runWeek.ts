@@ -5,7 +5,9 @@
 //   week_revise    rewrite a week's posts nobody worked on, from a note
 //   voice_profile  learn how the client writes from its published posts
 // A week's plan waits for its dated moments (week_moments, runMoments.ts),
-// as it waits for the voice profile, and cites them as evidence M1, M2.
+// as it waits for the voice profile, and cites them as evidence M1, M2. It
+// also waits while the client's weekly trend collection is under way, so it
+// reads the newest trends (trendsPending).
 // Each job is one bounded model call. A plan that already has posts (a run
 // cut off after writing them) is finished rather than written twice. Every
 // active client can be planned: the posting rhythm always resolves
@@ -376,6 +378,38 @@ async function momentsPending(admin: Db, job: WeekJob, plan: { moments?: unknown
   return true;
 }
 
+/** How long a plan waits for the client's trend collection, from when the collection began. */
+const TREND_WAIT_MS = 2 * 60 * 60_000;
+
+const waitForTrends = (now: Date): WeekJobOutcome => ({ status: "queued", reason: "Waiting for the client's trends.", available_at: new Date(now.getTime() + 60_000).toISOString(), deferred: true });
+
+/**
+ * A plan reads the client's newest finished Trends week (evidence.ts
+ * latestTrendEvidence). The weekly collection is queued on the client's feed
+ * weekday just before the plans (trend-refresh-enqueue at 07:10 UTC, the
+ * plans at 07:15; 20261110230000_trends_before_plans.sql), so on that day a
+ * plan waits while its collection is queued or running, for at most two
+ * hours from when it began. After that, or once it ends either way, the plan
+ * goes on with the newest finished week. A read that fails holds nothing.
+ */
+async function trendsPending(admin: Db, clientId: string, now: Date): Promise<boolean> {
+  const since = now.getTime() - TREND_WAIT_MS;
+  const recent = (r: { created_at?: string | null }) => !!r.created_at && Date.parse(r.created_at) > since;
+  const sinceIso = new Date(since).toISOString();
+  const [jobs, weeks] = await Promise.all([
+    admin.from("scheduled_jobs").select("kind, status, created_at").eq("client_id", clientId).eq("kind", "trend_refresh").in("status", ["queued", "running"]).gte("created_at", sinceIso),
+    admin.from("trend_weeks").select("status, created_at").eq("client_id", clientId).eq("status", "running").gte("created_at", sinceIso),
+  ]);
+  if (jobs.error || weeks.error) {
+    console.warn("[calendar] the client's trend collection could not be checked:", (jobs.error ?? weeks.error)?.message);
+    return false;
+  }
+  // deno-lint-ignore no-explicit-any
+  const open = (jobs.data ?? []).some((r: any) => r.kind === "trend_refresh" && (r.status === "queued" || r.status === "running") && recent(r));
+  // deno-lint-ignore no-explicit-any
+  return open || (weeks.data ?? []).some((r: any) => r.status === "running" && recent(r));
+}
+
 /** The moments a plan kept (calendar_plans.moments), as the planner's evidence M1, M2. */
 const planMoments = (plan: { moments?: { kept?: unknown } | null }) => momentEvidence(Array.isArray(plan.moments?.kept) ? plan.moments!.kept as JudgedMoment[] : []);
 
@@ -460,6 +494,7 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
     }
     if (await voicePending(admin, job.client_id)) return waitForVoice(now);
     if (await momentsPending(admin, job, plan, week, now)) return waitForMoments(now);
+    if (await trendsPending(admin, job.client_id, now)) return waitForTrends(now);
     if (!(await claimPlan(admin, plan.id, now))) return (await planStopped(admin, plan.id)) ? STOPPED : busyElsewhere(now);
     claimed = true;
 

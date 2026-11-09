@@ -108,6 +108,31 @@ describe("runWeekPlan", () => {
     expect(m.anthropic.mock.calls[0][0].body.messages[0].content).toContain("no post is seasonal");
   });
 
+  // The weekly Trends collection runs on the client's feed weekday; on a Monday
+  // it was still collecting when the plans ran, so Monday-feed clients were
+  // planned from week-old trends (9 Nov 2026: Buzznow, European Wax Center, Yangra).
+  it("waits while the client's trend collection is under way, at most two hours from when it began", async () => {
+    m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
+    m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [{ date: "2026-10-27", platform: "Instagram", copy: "Captains.", reason_type: "performance", evidence_ids: [] }] }), raw: {} });
+    const minutesAgo = (n: number) => new Date(NOW.getTime() - n * 60_000).toISOString();
+    const waiting = { status: "queued", deferred: true, reason: "Waiting for the client's trends." };
+
+    // Queued, not started yet.
+    const queued = fakeDb({ calendar_plans: [plan], clients: [CLIENT], scheduled_jobs: [{ kind: "trend_refresh", client_id: "ptp", status: "queued", created_at: minutesAgo(5) }] });
+    expect(await runWeekPlan(queued, job(), NOW)).toMatchObject(waiting);
+    // Its week is collecting.
+    const collecting = fakeDb({ calendar_plans: [plan], clients: [CLIENT], trend_weeks: [{ client_id: "ptp", status: "running", created_at: minutesAgo(30) }] });
+    expect(await runWeekPlan(collecting, job(), NOW)).toMatchObject(waiting);
+    expect(m.anthropic).not.toHaveBeenCalled();
+
+    // Begun more than two hours ago: the plan goes on with the newest finished week.
+    const stalled = fakeDb({ calendar_plans: [plan], clients: [CLIENT], trend_weeks: [{ client_id: "ptp", status: "running", created_at: minutesAgo(121) }], scheduled_jobs: [{ kind: "trend_refresh", client_id: "ptp", status: "queued", created_at: minutesAgo(130) }] });
+    expect((await runWeekPlan(stalled, job(), NOW)).status).toBe("done");
+    // Another client's collection, or a finished week, holds nothing.
+    const others = fakeDb({ calendar_plans: [plan], clients: [CLIENT], trend_weeks: [{ client_id: "ptp", status: "done", created_at: minutesAgo(10) }, { client_id: "bader", status: "running", created_at: minutesAgo(10) }], scheduled_jobs: [{ kind: "trend_refresh", client_id: "bader", status: "running", created_at: minutesAgo(10) }] });
+    expect((await runWeekPlan(others, job(), NOW)).status).toBe("done");
+  });
+
   it("cites the moments the week kept as M items, words a seasonal post from them, and notes a seasonal post without one", async () => {
     m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
     m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [
