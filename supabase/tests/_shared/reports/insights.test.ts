@@ -5,7 +5,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Fact } from "../../../functions/_shared/reports/facts";
 import {
-  checkInsights, inputHash, insightsPrompt, orderByFacts, parseInsights, runReportInsights, templateInsights, writeInsights,
+  checkInsights, inputHash, INSIGHTS_SYSTEM, insightsPrompt, orderByFacts, parseInsights, runReportInsights, templateInsights, writeInsights,
   type InsightFields, type InsightsInput,
 } from "../../../functions/_shared/reports/insights";
 
@@ -37,7 +37,9 @@ describe("checkInsights", () => {
     expect(checkInsights(social({ insights: [{ text: "Impressions rose 31% to 12,400.", facts: ["F1"] }] }), FACTS)).toEqual(["Insight 1 writes 31%, which is not a number of the facts it cites."]);
     expect(checkInsights(social({ insights: [{ text: "LinkedIn brought 96.1% of engagements.", facts: ["F1"] }] }), FACTS)).toEqual(["Insight 1 writes 96.1%, which is not a number of the facts it cites."]);
     expect(checkInsights(social({ insights: [{ text: "Views held.", facts: ["F9"] }] }), FACTS)).toEqual(["Insight 1 cites F9, which are not in the facts."]);
-    expect(checkInsights(social({ insights: [{ text: "Video views rose 49.2% to 292.", facts: ["F2"] }] }), FACTS)).toEqual(["Insight 1 says views went up, but it fell."]);
+    expect(checkInsights(social({ insights: [{ text: "Video views rose 49.2% to 292.", facts: ["F2"] }] }), FACTS)).toEqual(["Insight 1 says rose, but no change it cites went up.", "Insight 1 says views went up, but it fell."]);
+    // Its own number beside the wrong word, even with a change that rose also cited.
+    expect(checkInsights(social({ insights: [{ text: "Video views rose 49.2% to 292.", facts: ["F1", "F2"] }] }), FACTS)).toEqual(["Insight 1 says views went up, but it fell."]);
     expect(checkInsights(social({ recommendations: [{ text: "Post more video.", facts: [] }] }), FACTS)).toEqual(["Recommendation 1 cites no fact."]);
     expect(checkInsights(social({ insights: [{ text: "Impressions rose 26.5% — a record.", facts: ["F1"] }] }), FACTS)).toEqual(["Insight 1 has a dash; use commas or periods."]);
     expect(checkInsights(null, FACTS)).toEqual(["The answer could not be read as the JSON asked for."]);
@@ -50,7 +52,7 @@ describe("checkInsights", () => {
     expect(checkInsights(social({ insights: [{ text: "Impressions rose 26.5% \u2013 a record.", facts: ["F1"] }] }), FACTS)).toEqual(["Insight 1 has a dash; use commas or periods."]);
     // A company's own name is no such word.
     const ranking = fact({ id: "F1", key: "ranking|all|followers|Acme AI", kind: "ranking", company: "Acme AI", leader: "Sprout Social Co", unit: "count", value: 14900, rank: 2, of: 3, leaderValue: 680000, median: 32000, numbers: [14900, 680000, 32000, 2, 3] });
-    const named: InsightFields = { kind: "competitive", summary: [{ text: "Acme AI ranks 2nd of 3 on followers, behind Sprout Social Co with 680,000.", facts: ["F1"] }], gaps: [] };
+    const named: InsightFields = { kind: "competitive", summary: [{ text: "Acme AI ranks 2nd of 3 on followers, behind Sprout Social Co with 680,000.", facts: ["F1"] }], gaps: [{ gap: "Acme AI trails on followers", platform: "all", why_it_matters: "Sprout Social Co has 680,000.", suggested_play: "Test a weekly series.", facts: ["F1"] }] };
     expect(checkInsights(named, [ranking])).toEqual([]);
   });
 
@@ -65,6 +67,56 @@ describe("checkInsights", () => {
     expect(checkInsights(fields, [ranking])).toEqual([]);
     expect(checkInsights({ ...fields, gaps: [{ ...fields.gaps![0], suggested_play: "Reach a 1.5% rate in six weeks." }] }, [ranking])).toEqual(["Gap 1's test writes 1.5%, which is not a number of the facts it cites."]);
     expect(checkInsights({ ...fields, gaps: [{ ...fields.gaps![0], platform: "myspace" }] }, [ranking])).toEqual([expect.stringContaining("Gap 1 names a platform")]);
+  });
+});
+
+describe("the stricter check (design point 6)", () => {
+  const one = (text: string, facts: string[]) => checkInsights(social({ insights: [{ text, facts }] }), FACTS);
+
+  it("counts a number after a currency sign as a number", () => {
+    expect(one("Impressions rose 26.5% on a $300 boost.", ["F1"])).toEqual(["Insight 1 writes $300, which is not a number of the facts it cites."]);
+    expect(one("Impressions reached \u20ac12,400 worth of reach.", ["F1"])).toEqual([]);
+  });
+
+  it("refuses a direction word away from the number when no change it cites moved that way", () => {
+    expect(one("Views rose this month, to 292.", ["F2"])).toEqual(["Insight 1 says rose, but no change it cites went up."]);
+    expect(one("LinkedIn engagements dropped, with 96.1% of the total.", ["F3"])).toEqual(["Insight 1 says dropped, but no change it cites went down."]);
+    expect(one("Video views are up from 575.", ["F2"])).toEqual(["Insight 1 says up, but no change it cites went up."]);
+    expect(one("Impressions climbed while video views slipped.", ["F1", "F2"])).toEqual([]);
+  });
+
+  it("checks doubled, tripled and halved as the multiple they claim", () => {
+    expect(one("Impressions doubled.", ["F1"])).toEqual(["Insight 1 says doubled, but no change it cites is 2x."]);
+    const doubled = fact({ id: "F4", key: "change|all|engagements|", metric: "engagements", value: 2000, previous: 1000, change: 1000, percent: 100, numbers: [2000, 1000, 1000, 100] });
+    expect(checkInsights(social({ insights: [{ text: "Engagements doubled to 2,000.", facts: ["F4"] }] }), [...FACTS, doubled])).toEqual([]);
+    expect(one("Video views halved.", ["F1"])).toEqual(["Insight 1 says halved, but no change it cites went down.", "Insight 1 says halved, but no change it cites is 0.5x."]);
+  });
+
+  it("refuses words that size a change without its number", () => {
+    expect(one("Video views dropped sharply to 292.", ["F2"])).toEqual(['Insight 1 sizes a change with "sharply"; give its number instead.']);
+    expect(one("Impressions rose significantly.", ["F1"])).toEqual(['Insight 1 sizes a change with "significantly"; give its number instead.']);
+  });
+
+  it("refuses a comparison that cites no ranking or share fact", () => {
+    expect(one("Moburst leads every rival on impressions, at 12,400.", ["F1"])).toEqual(['Insight 1 compares ("leads"), but cites no ranking or share fact.']);
+    expect(one("Impressions of 12,400 put Moburst ahead.", ["F1"])).toEqual(['Insight 1 compares ("ahead"), but cites no ranking or share fact.']);
+    expect(one("LinkedIn brought the most engagements, 96.1% of them.", ["F3"])).toEqual([]);
+  });
+
+  it("refuses a fact id in the words", () => {
+    expect(one("Impressions rose 26.5% (F1).", ["F1"])).toEqual(["Insight 1 writes a fact id (F1); never write them."]);
+  });
+
+  it("refuses a competitive answer with no gaps when the facts show the client behind on a compared metric", () => {
+    const behind = fact({ id: "F1", key: "ranking|all|followers|Moburst", kind: "ranking", metric: "followers", company: "Moburst", leader: "Rival Co", value: 14900, rank: 2, of: 2, leaderValue: 680000, median: 347450, numbers: [14900, 680000, 347450, 2, 2] });
+    const answer: InsightFields = { kind: "competitive", summary: [{ text: "Moburst ranks 2nd of 2 on followers, behind Rival Co.", facts: ["F1"] }], gaps: [] };
+    expect(checkInsights(answer, [behind])).toEqual(["There are no gaps, but F1 shows the client behind a competitor; write at least one gap."]);
+    expect(checkInsights(answer, [{ ...behind, rank: 1, leader: "Moburst" }])).toEqual([]);
+  });
+
+  it("states the same rules in the prompt", () => {
+    for (const rule of [/currency sign/i, /rose, fell, dropped or doubled/i, /sharply or significantly/i, /ranking or share fact/i, /fact ids/i]) expect(INSIGHTS_SYSTEM).toMatch(rule);
+    expect(insightsPrompt({ ...INPUT, kind: "competitive" })).toMatch(/behind a competitor on any compared metric, write at least one gap/i);
   });
 });
 
@@ -94,7 +146,7 @@ describe("the request", () => {
     const body = complete.mock.calls[0][0];
     expect(body).toMatchObject({ model: "claude-sonnet-5-5", output_config: { effort: "medium", format: { type: "json_schema" } } });
     for (const p of ["temperature", "top_p", "top_k", "thinking"]) expect(body).not.toHaveProperty(p);
-    expect(body.messages[0].content).toContain("F3: LinkedIn brought 96.1% of the period's engagements.");
+    expect(body.messages[0].content).toContain("F3 (share): LinkedIn brought 96.1% of the period's engagements.");
   });
 
   it("asks once more with the problems named, then shows the facts in code's words", async () => {

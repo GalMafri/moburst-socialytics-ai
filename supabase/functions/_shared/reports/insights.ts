@@ -6,8 +6,14 @@
 // Code decides what a report says (facts.ts); one Sonnet 5.5 call only words
 // the numbered facts (decision 3), through structured outputs at effort
 // medium, each insight citing its fact ids. Code checks the answer: the ids
-// exist, every number written is a cited fact's number at the precision it
-// was written, and "rose", "fell", "up" and "down" match the change's sign.
+// exist, every number written (one after a currency sign included) is a
+// cited fact's number at the precision it was written, a direction word
+// ("rose", "fell", "dropped", "doubled" and their kin) sits only in a
+// sentence citing a change that moved that way, a comparison ("leads",
+// "behind", "top", "most", "every rival") cites a ranking or share fact,
+// no word sizes a change in place of its number ("sharply"), no fact id is
+// written, and a competitive answer with no gaps is refused when the facts
+// show the client behind a competitor. The prompt states the same rules.
 // A failed answer is asked once more with its problems named; a second
 // failure shows the facts as sentences written here. Nothing on screen says
 // anything failed.
@@ -26,7 +32,7 @@
 // The report_insights job (run-scheduled-jobs) is queued when a report's
 // report_text job finishes (20261110220000_data_driven_insights.sql).
 
-import { numbersIn } from "./reportText.ts";
+import { numbersIn, sentences } from "./reportText.ts";
 import { competitiveChanges, competitiveFacts, socialChanges, socialFacts, type Fact } from "./facts.ts";
 import { GAP_PLATFORMS } from "../pipelines/competitive/analysis.ts";
 
@@ -85,14 +91,17 @@ export const INSIGHTS_SYSTEM = [
   "You write the insights of a client's social media report from facts that were worked out in code.",
   "Each fact has an id (F1, F2). Every piece of text you write cites the ids of the facts it rests on.",
   "Write only what the cited facts say. Every number you write must be one of the cited facts' numbers, written as the fact gives it or rounded (12,437 or 12.4K, 26.5% or 26%). Write no other number: no dates, no years, no counts of facts, no targets.",
-  "Say a number went up only when it rose, and down only when it fell.",
-  "Plain American English, short sentences, no em dashes or en dashes, no jargon, never mention fact ids, the facts list or how the facts were made.",
+  "A number after a currency sign ($, €, £) is a number too: it must be one of the cited facts' numbers.",
+  "Write rose, fell, dropped or doubled (or any other word for which way a change went: grew, climbed, slipped, halved, up 12%, down from) only in a sentence that cites a change fact that moved that way. Doubled, tripled and halved must be what the cited change was.",
+  "Never size a change with a word in place of its number, such as sharply or significantly: give the number.",
+  "Compare (leads, behind, ahead, top, most, every rival, more than) only in text that cites a ranking or share fact.",
+  "Plain American English, short sentences, no em dashes or en dashes, no jargon, never write fact ids (F1) in the text, never mention the facts list or how the facts were made.",
   "Never name where the data comes from (no tool or vendor names such as Sprout, RivalIQ, Apify or Gamma), and never write AI, model, prompt, score, pipeline or gate.",
 ].join("\n");
 
 /** The one message the model gets. `problems` are the first answer's, when it is asked again. */
 export function insightsPrompt(input: InsightsInput, problems: string[] = []): string {
-  const facts = input.facts.map((f) => `${f.id}: ${f.sentence} (${f.basis})`);
+  const facts = input.facts.map((f) => `${f.id} (${f.kind}): ${f.sentence} (${f.basis})`);
   const lines = [
     `Report: ${input.kind === "competitive" ? "competitive analysis" : "monthly social report"} for ${input.client}${input.period ? `, ${input.period}` : ""}.`,
     "",
@@ -111,7 +120,7 @@ export function insightsPrompt(input: InsightsInput, problems: string[] = []): s
     }
     lines.push("", "Write:",
       "- summary: two to four short paragraphs on where the client stands against its competitors, each citing the facts it rests on;",
-      "- gaps: two to four gaps the client can close, each with the gap, its platform, why it matters and a test to run, citing the facts it rests on. A test's target may only be a cited fact's number.");
+      "- gaps: two to four gaps the client can close, each with the gap, its platform, why it matters and a test to run, citing the facts it rests on. A test's target may only be a cited fact's number. When the facts show the client behind a competitor on any compared metric, write at least one gap.");
   }
   if (problems.length) lines.push("", "Your last answer could not be used:", ...problems.map((p) => `- ${p}`), "Answer again with these fixed.");
   return lines.join("\n");
@@ -150,6 +159,30 @@ export function parseInsights(kind: InsightsKind, text: string): InsightFields |
 const CLIENT_WORDS = /\bAI\b|\b(?:prompts?|models?|scores?|pipelines?|gates?)\b|Socialytics|Rival ?IQ|Sprout|Apify|Gamma/i;
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+/** Words for which way a change went, anywhere in a sentence: past forms, and "up" or "down" before a number or "from". */
+const RISE = /\b(?:rose|risen|rising|grew|grown|growing|increased|climbed|gained|jumped|surged|soared|rebounded)\b|\bup\b(?=\s+(?:by\s+)?[$€£¥]?\d|\s+from\b)/gi;
+const FALL = /\b(?:fell|fallen|falling|dropped|declined|declining|decreased|shrank|shrunk|slipped|slid|sank|plunged|plummeted|dipped|slumped)\b|\bdown\b(?=\s+(?:by\s+)?[$€£¥]?\d|\s+from\b)/gi;
+/** Words that claim a multiple: checked as the number they are. */
+const MULTIPLES: Record<string, number> = { doubled: 2, tripled: 3, quadrupled: 4, halved: 0.5 };
+const MULTIPLE = /\b(?:doubled|tripled|quadrupled|halved)\b/gi;
+/** Words that size a change in place of its number. */
+const SIZE = /\b(?:sharp(?:ly)?|steep(?:ly)?|significant(?:ly)?|dramatic(?:ally)?|substantial(?:ly)?|considerabl[ey]|massive(?:ly)?|huge(?:ly)?|enormous(?:ly)?|tremendous(?:ly)?|slight(?:ly)?|marginal(?:ly)?|modest(?:ly)?|greatly|rapid(?:ly)?|vastly|sizable|sizeable)\b/i;
+/** Words that compare the client with others, or a part with the whole: they need a ranking or share fact. */
+const COMPARE = /\b(?:leads?|leading|leader|behind|trails?|trailing|ahead|top|most|least|highest|lowest|best|worst|outperform(?:s|ed|ing)?|outpace[sd]?|outpacing|ranks?|ranked|every (?:rival|competitor)|all (?:rivals|competitors))\b|\b(?:more|less|fewer|higher|lower|better|worse|bigger|smaller) than\b(?!\s*[$€£¥]?\d)/i;
+const FACT_ID = /\bF\d+\b/;
+
+/**
+ * Every number in a text, one after a currency sign included: numbersIn
+ * (reportText.ts) skips those for its own callers, so the sign is blanked
+ * here (positions kept) and put back in the number's text.
+ */
+function numbersOf(text: string) {
+  return numbersIn(text.replace(/[$€£¥](?=\s?\d)/g, " ")).map((n) => {
+    const sign = /[$€£¥]\s?$/.exec(text.slice(Math.max(0, n.start - 2), n.start))?.[0] ?? "";
+    return { ...n, text: `${sign.trim()}${n.text.trim()}` };
+  });
+}
+
 const UP = /\b(rose|rise|rises|risen|rising|up|grew|grow|grows|growing|increased?|increases|increasing|climbed?|gained?)\b/gi;
 const DOWN = /\b(fell|fall|falls|fallen|falling|down|dropped|drops?|declined?|declines|declining|decreased?|decreases|decreasing|shrank|shrinks?|slipped|slid)\b/gi;
 
@@ -166,8 +199,29 @@ function textProblems(where: string, text: string, citedIds: string[], byId: Map
   if (unknown.length) out.push(`${where} cites ${unknown.join(", ")}, which are not in the facts.`);
   const facts = citedIds.map((id) => byId.get(id)).filter((f): f is Fact => !!f);
   // Every number is one of the cited facts' numbers at the precision it was written.
-  for (const n of numbersIn(text)) {
-    if (!facts.some((f) => f.numbers.some((v) => Math.abs(Math.abs(v) - n.value) <= n.tolerance))) out.push(`${where} writes ${n.text.trim()}, which is not a number of the facts it cites.`);
+  for (const n of numbersOf(text)) {
+    if (!facts.some((f) => f.numbers.some((v) => Math.abs(Math.abs(v) - n.value) <= n.tolerance))) out.push(`${where} writes ${n.text}, which is not a number of the facts it cites.`);
+  }
+  // The words, without the companies' own names ("Top Shelf Co" is no comparison).
+  const words = names ? text.replace(names, " ") : text;
+  const id = FACT_ID.exec(words);
+  if (id) out.push(`${where} writes a fact id (${id[0]}); never write them.`);
+  const size = SIZE.exec(words);
+  if (size) out.push(`${where} sizes a change with "${size[0]}"; give its number instead.`);
+  const compare = COMPARE.exec(words);
+  if (compare && !facts.some((f) => f.kind === "ranking" || f.kind === "share")) out.push(`${where} compares ("${compare[0]}"), but cites no ranking or share fact.`);
+  // A direction word, anywhere in its sentence, needs a cited change that went that way; a multiple, a change of that size.
+  const changes = facts.filter((f) => f.kind === "change");
+  const went = (up: boolean) => changes.some((f) => (up ? 1 : -1) * (f.percent ?? f.change ?? 0) > 0);
+  for (const s of sentences(words)) {
+    const multiples = [...s.text.matchAll(MULTIPLE)].map((m) => ({ word: m[0], times: MULTIPLES[m[0].toLowerCase()] }));
+    const rise = [...s.text.matchAll(RISE)].map((m) => m[0]).concat(multiples.filter((m) => m.times > 1).map((m) => m.word))[0];
+    const fall = [...s.text.matchAll(FALL)].map((m) => m[0]).concat(multiples.filter((m) => m.times < 1).map((m) => m.word))[0];
+    if (rise && !went(true)) out.push(`${where} says ${rise}, but no change it cites went up.`);
+    if (fall && !went(false)) out.push(`${where} says ${fall}, but no change it cites went down.`);
+    for (const m of multiples) {
+      if (!changes.some((f) => f.previous && Math.abs(f.value / f.previous - m.times) <= 0.05 * m.times)) out.push(`${where} says ${m.word}, but no change it cites is ${m.times}x.`);
+    }
   }
   // A direction word next to a change's number agrees with the change's sign.
   for (const f of facts.filter((x) => x.kind === "change")) {
@@ -207,6 +261,9 @@ export function checkInsights(fields: InsightFields | null, facts: Fact[], clien
       if (!(GAP_PLATFORMS as readonly string[]).includes(g.platform)) out.push(`Gap ${i + 1} names a platform that is not one of ${GAP_PLATFORMS.join(", ")}.`);
       for (const [part, text] of [["gap", g.gap], ["why it matters", g.why_it_matters], ["test", g.suggested_play]] as const) out.push(...check(`Gap ${i + 1}'s ${part}`, text, g.facts));
     });
+    // An answer with no gaps leaves the client nothing to close, though the facts show it behind.
+    const behind = facts.filter((f) => f.kind === "ranking" && (f.rank ?? 1) > 1).map((f) => f.id);
+    if (fields.gaps && !fields.gaps.length && behind.length) out.push(`There are no gaps, but ${behind.join(", ")} ${behind.length === 1 ? "shows" : "show"} the client behind a competitor; write at least one gap.`);
   }
   return [...new Set(out)];
 }
