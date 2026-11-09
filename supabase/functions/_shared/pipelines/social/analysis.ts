@@ -39,9 +39,18 @@ export const BRIEF_SCHEMA = {
   },
 };
 
-const TRENDS = { type: "object", properties: { overview: str, top_themes: strs, successful_formats: strs, top_hashtags: strs, opportunities_for_client: strs, key_takeaways: strs } };
+/** The analysis of the period's stored industry trends (Trends plan, Task 16), in place of n8n's TikTok and Instagram analyses. */
+const INDUSTRY_TRENDS = {
+  type: "object",
+  properties: {
+    overview: str,
+    themes: { type: "array", items: { type: "object", properties: { title: str, platforms: strs, note: str } } },
+    opportunities_for_client: strs,
+    key_takeaways: strs,
+  },
+};
 
-/** Structured JSON Output Parser's schema (19 Oct 2026: no weekly calendar). */
+/** Structured JSON Output Parser's schema (19 Oct 2026: no weekly calendar; 9 Nov 2026: one industry trends analysis). */
 export const SYNTHESIS_SCHEMA = {
   type: "object",
   required: ["sprout_performance_analysis"],
@@ -56,8 +65,7 @@ export const SYNTHESIS_SCHEMA = {
         platform_breakdown: { type: "array", items: { type: "object", properties: { platform: str, headline: str, insights: strs } } },
       },
     },
-    tiktok_trends_analysis: { oneOf: [TRENDS, { type: "null" }] },
-    instagram_trends_analysis: { oneOf: [TRENDS, { type: "null" }] },
+    industry_trends_analysis: { oneOf: [INDUSTRY_TRENDS, { type: "null" }] },
     competitive_takeaways: strs,
   },
 };
@@ -161,12 +169,22 @@ export function synthesisProblems(v: Any): string[] {
       });
     }
   }
-  for (const k of ["tiktok_trends_analysis", "instagram_trends_analysis"]) {
-    const t = v[k];
-    if (t === undefined || t === null) continue;
-    if (!isObj(t)) { out.push(`${k} must be an object or null`); continue; }
-    if (t.overview !== undefined && typeof t.overview !== "string") out.push(`${k}.overview must be a string`);
-    for (const f of ["top_themes", "successful_formats", "top_hashtags", "opportunities_for_client", "key_takeaways"]) if (t[f] !== undefined && !isStrs(t[f])) out.push(`${k}.${f} must be a list of strings`);
+  const t = v.industry_trends_analysis;
+  if (t !== undefined && t !== null) {
+    const k = "industry_trends_analysis";
+    if (!isObj(t)) out.push(`${k} must be an object or null`);
+    else {
+      if (t.overview !== undefined && typeof t.overview !== "string") out.push(`${k}.overview must be a string`);
+      for (const f of ["opportunities_for_client", "key_takeaways"]) if (t[f] !== undefined && !isStrs(t[f])) out.push(`${k}.${f} must be a list of strings`);
+      if (t.themes !== undefined) {
+        if (!Array.isArray(t.themes)) out.push(`${k}.themes must be an array`);
+        else t.themes.forEach((th: Any, i: number) => {
+          if (!isObj(th)) { out.push(`${k}.themes[${i}] must be an object`); return; }
+          for (const f of ["title", "note"]) if (th[f] !== undefined && typeof th[f] !== "string") out.push(`${k}.themes[${i}].${f} must be a string`);
+          if (th.platforms !== undefined && !isStrs(th.platforms)) out.push(`${k}.themes[${i}].platforms must be a list of strings`);
+        });
+      }
+    }
   }
   if (v.competitive_takeaways !== undefined && !isStrs(v.competitive_takeaways)) out.push("competitive_takeaways must be a list of strings");
   return out;

@@ -35,7 +35,10 @@
 // report_insights_live_from); stored reports keep their text.
 //
 // The report_insights job (run-scheduled-jobs) is queued when a report's
-// report_text job finishes (20261110220000_data_driven_insights.sql).
+// report_text job finishes (20261110220000_data_driven_insights.sql). The
+// in-app social report words its insights in its run, before its deck, with
+// this same code and input (pipelines/social/runInsights.ts), so the job
+// meets the stored input and makes no call.
 
 import { numbersIn, sentences } from "./reportText.ts";
 import { competitiveChanges, competitiveFacts, socialChanges, socialFacts, type Fact } from "./facts.ts";
@@ -355,6 +358,43 @@ const HISTORY_REPORTS = 12;
 
 const reportData = (row: Any) => (Array.isArray(row?.report_data) ? row.report_data[0] : row?.report_data) || {};
 
+/** The report row an answer's input is read from: by the job, and by the in-app social run before it writes the report. */
+export const INSIGHTS_REPORT_COLUMNS = "id, client_id, status, created_at, date_range_start, date_range_end, report_data, clients(name, archived_at)";
+
+/** A report_insights row: one answer for one report and one exact input. */
+export interface InsightsRow {
+  report_table: string;
+  report_id: string;
+  client_id: string;
+  kind: InsightsKind;
+  input_hash: string;
+  facts: Fact[];
+  fields: InsightFields;
+  source: "model" | "template";
+  model: string;
+  prompt_version: number;
+  input_tokens: number;
+  output_tokens: number;
+  problems: string[];
+  created_at: string;
+  confirmed_at: string;
+}
+
+/** The row an answer is stored as, written now and confirmed now. */
+export function insightsRow(table: string, reportId: string, clientId: string, input: InsightsInput, hash: string, written: Awaited<ReturnType<typeof writeInsights>>, at: string): InsightsRow {
+  return {
+    report_table: table, report_id: reportId, client_id: clientId, kind: input.kind, input_hash: hash, facts: input.facts, fields: written.fields,
+    source: written.source, model: INSIGHTS_MODEL, prompt_version: INSIGHTS_PROMPT_VERSION, input_tokens: written.input_tokens, output_tokens: written.output_tokens,
+    problems: written.problems, created_at: at, confirmed_at: at,
+  };
+}
+
+/** Stores an answer, once per report and input: a row already stored for the same input stays as it is. */
+export async function storeInsights(db: Db, row: InsightsRow): Promise<void> {
+  const { error } = await db.from("report_insights").upsert(row, { onConflict: "report_id,input_hash", ignoreDuplicates: true });
+  if (error) throw new Error(`Could not save the insights: ${error.message}`);
+}
+
 /** The posts the competitive report's style fields describe: each company's best three, by engagement. */
 export function postSample(rd: Any): SamplePost[] {
   const out: SamplePost[] = [];
@@ -425,7 +465,7 @@ export async function runReportInsights(db: Db, job: InsightsJob, deps: Insights
     : { status: "queued", reason, available_at: new Date(deps.now().getTime() + RETRY_WAITS_MINUTES[Math.min(Math.max(1, job.attempts), RETRY_WAITS_MINUTES.length) - 1] * 60_000).toISOString() };
   if (!TABLES[table] || !reportId) return { status: "skipped", reason: "The job names no report." };
   try {
-    const { data: row, error } = await db.from(table).select("id, client_id, status, created_at, date_range_start, date_range_end, report_data, clients(name, archived_at)").eq("id", reportId).maybeSingle();
+    const { data: row, error } = await db.from(table).select(INSIGHTS_REPORT_COLUMNS).eq("id", reportId).maybeSingle();
     if (error) throw new Error(`Could not read the report: ${error.message}`);
     if (!row) return { status: "skipped", reason: "The report no longer exists." };
     if (!COMPLETE.includes(String(row.status))) return { status: "skipped", reason: "The report is not finished." };
@@ -449,12 +489,7 @@ export async function runReportInsights(db: Db, job: InsightsJob, deps: Insights
     }
 
     const written = await writeInsights(input, deps);
-    const { error: saveError } = await db.from("report_insights").upsert({
-      report_table: table, report_id: reportId, client_id: row.client_id, kind: input.kind, input_hash: hash, facts: input.facts, fields: written.fields,
-      source: written.source, model: INSIGHTS_MODEL, prompt_version: INSIGHTS_PROMPT_VERSION, input_tokens: written.input_tokens, output_tokens: written.output_tokens,
-      problems: written.problems, created_at: confirmedAt, confirmed_at: confirmedAt,
-    }, { onConflict: "report_id,input_hash", ignoreDuplicates: true });
-    if (saveError) throw new Error(`Could not save the insights: ${saveError.message}`);
+    await storeInsights(db, insightsRow(table, reportId, row.client_id, input, hash, written, confirmedAt));
     return { status: "done", result: { facts: input.facts.length, source: written.source, input_tokens: written.input_tokens, output_tokens: written.output_tokens } };
   } catch (e) {
     return retry(e instanceof Error ? e.message : String(e));

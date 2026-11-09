@@ -6,15 +6,21 @@
 // $runIndex. The inputs are what n8n read in two real runs (fixtures/social.ts):
 // Moburst's September report (execution 574962) and a September trend
 // research (execution 583953).
+//
+// The trend nodes (Prepare Trend Inputs, the two scrapers, their normalizers,
+// skip and failed items) are not ported any more: the report reads the
+// weeks the trend collection stored (Trends plan, Task 16). The nodes that
+// carried their posts are compared with n8n's on a report without trends,
+// with each trend difference named (TREND_EDITS, DECK_TREND_EDITS, and the
+// trend keys of the client object and the run summary).
 import vm from "node:vm";
 import { describe, expect, it } from "vitest";
-import { apidojoSearchFor, MOBURST, mirror, moburstPages, moburstRequest, nodeCode, nodeOf, TRENDS } from "../../../../fixtures/pipelines/social";
-import { BRIEF_SYSTEM, PROMPT_EDITS, synthesisSystem, synthesisText } from "../../../../functions/_shared/pipelines/social/prompt";
+import { MOBURST, mirror, moburstPages, moburstRequest, nodeCode, nodeOf, TRENDS } from "../../../../fixtures/pipelines/social";
+import { BRIEF_SYSTEM, PROMPT_EDITS, synthesisSystem, synthesisText, TREND_EDITS } from "../../../../functions/_shared/pipelines/social/prompt";
 import { sproutRequests } from "../../../../functions/_shared/pipelines/social/providers";
 import {
   aggregateSprout, attachCompetitiveContext, attachPostThumbnails, buildNormalizedClient, buildPresentationContent, checkGammaState, combineBrief, DECK_EDITS,
-  generateRunSummary, normalizeInstagram, normalizeTikTok, prepareBriefText, prepareTrendInputs, skipSproutAnalytics, sproutSetup, trendFailed, trendSkipped,
-  workflowConfiguration,
+  DECK_TREND_EDITS, generateRunSummary, prepareBriefText, skipSproutAnalytics, sproutSetup, workflowConfiguration,
 } from "../../../../functions/_shared/pipelines/social/nodes";
 
 // deno-lint-ignore no-explicit-any
@@ -201,125 +207,66 @@ describe("Sprout", () => {
   });
 });
 
-describe("trends", () => {
-  const client = TRENDS.client;
+/** The client object without its trends: n8n's scrapers' posts and counts, or the port's stored industry trends and counts. */
+function withoutTrends(o: Any): Any {
+  const { trends: _t, industry_trends: _i, _meta, ...rest } = o;
+  const { tiktok_count: _a, instagram_count: _b, industry_themes: _c, industry_posts: _d, ...meta } = _meta ?? {};
+  return { ...rest, _meta: meta };
+}
 
-  it("Prepare Trend Inputs, with keywords, skipped, and without keywords; TikTok's search as n8n's, on apidojo", async () => {
-    // Everything as n8n's node, except the TikTok actor's input: n8n's search on apidojo (social/nodes.ts says why).
-    const cases: [Any, string | undefined][] = [
-      [client, "US"], [combined, "US"], [{ ...client, social_keywords: [], trends_keywords: "" }, "US"],
-      [{ ...client, geo: ["IL", "US"], social_keywords: ["שיווק דיגיטלי", "app growth"] }, "IL"],
-      [{ ...client, geo: "UK,Global" }, "GB"], [{ ...client, geo: "Global" }, undefined],
-    ];
-    for (const [c, location] of cases) {
-      const n8n = (await runNode(nodeCode("Prepare Trend Inputs"), {}, [c]))[0];
-      const port = plain(prepareTrendInputs(c));
-      expect({ ...port, trend_inputs: { ...port.trend_inputs, tiktok: null } }).toEqual({ ...n8n, trend_inputs: { ...n8n.trend_inputs, tiktok: null } });
-      expect(port.trend_inputs.tiktok).toEqual(apidojoSearchFor(n8n.trend_inputs.tiktok, location));
-    }
-    const port = plain(prepareTrendInputs(client));
-    expect(port.trend_status).toEqual(TRENDS.trend_inputs.trend_status);
-    expect(port.trend_inputs).toEqual({ ...TRENDS.trend_inputs.trend_inputs, tiktok: apidojoSearchFor(TRENDS.trend_inputs.trend_inputs.tiktok, "US") });
-    expect(port.trend_inputs.tiktok).toEqual({
-      keywords: ["beer league", "adult rec hockey", "captain life", "stop chasing start playing", "hockey captain", "beer league US", "adult rec hockey US", "captain life US"],
-      dateRange: "THIS_MONTH", sortType: "MOST_LIKED", location: "US", maxItems: 400, includeSearchKeywords: true,
-    });
-  });
-
-  it("Normalize TikTok Trends, on apidojo's rows: its fields read, a post two searches found counted once", () => {
-    // Rows as apidojo/tiktok-scraper returns them (28 Oct 2026), trimmed to what the normalizer reads.
-    const row = (o: Any) => ({ id: "0", title: "", views: 0, likes: 0, comments: 0, shares: 0, hashtags: [], keyword: "content strategy", ...o });
-    const machine = row({
-      id: "7563", title: "This is how to use Claude as a viral content machine #marketing #socialmedia #contentcreator #contentstrategy #video",
-      views: 26915, likes: 1746, comments: 170, shares: 473, uploadedAtFormatted: "2026-10-20T12:52:02.000Z",
-      postPage: "https://www.tiktok.com/@kallaway.marketing/video/7563", channel: { username: "kallaway.marketing" },
-      hashtags: ["marketing", "socialmedia", "contentcreator", "contentstrategy", "video"],
-    });
-    const better = row({
-      id: "7561", title: "How to Use AI to Make Better Content, and help you create videos people actually want to watch #ContentStrategy",
-      views: 1623, likes: 68, comments: 11, shares: 7, uploadedAtFormatted: "2026-10-14T04:27:03.000Z",
-      // apidojo lists a hashtag it could not read as null (28 Oct 2026, run Sah0mdLXffUz4YgEV).
-      postPage: "https://www.tiktok.com/@benkimball.ai/video/7561", channel: { username: "benkimball.ai" }, hashtags: [null, "aitools", null, "contentstrategy"],
-    });
-    const old = row({ ...better, id: "7400", uploadedAtFormatted: "2026-08-01T10:00:00.000Z", postPage: "https://www.tiktok.com/@benkimball.ai/video/7400" });
-    const unrelated = row({ id: "7562", title: "This is my morning routine with you all", likes: 90000, uploadedAtFormatted: "2026-10-15T10:00:00.000Z", postPage: "https://www.tiktok.com/@someone/video/7562", channel: { username: "someone" } });
-    const c = { ...client, social_keywords: ["content strategy"], trends_keywords: "", languages: ["en"], date_ranges: { current_month: { start: "2026-10-01", end: "2026-10-31" } } };
-    // A row with every field it reads empty is passed over, not a failed step.
-    const blank = { id: null, title: null, views: null, likes: null, comments: null, shares: null, postPage: null, uploadedAtFormatted: null, channel: null, hashtags: null, keyword: null };
-    const out = plain(normalizeTikTok([machine, blank, better, machine, old, unrelated], c));
-    expect(out.map((p: Any) => [p.rank, p.url, p.author, p.created])).toEqual([
-      [1, "https://www.tiktok.com/@kallaway.marketing/video/7563", "kallaway.marketing", "2026-10-20T12:52:02.000Z"],
-      [2, "https://www.tiktok.com/@benkimball.ai/video/7561", "benkimball.ai", "2026-10-14T04:27:03.000Z"],
-    ]);
-    expect(out[0]).toMatchObject({ caption: machine.title, views: 26915, likes: 1746, comments: 170, shares: 473, hashtags: machine.hashtags, is_ad: false });
-    expect(out[1].hashtags).toEqual(["aitools", "contentstrategy"]);
-  });
-
-  it("Normalize TikTok Trends, on the 203 posts the scraper returned", async () => {
-    const n8n = await runNode(nodeCode("Normalize TikTok Trends"), { "Combine Brief Context with Client Data": client }, TRENDS.tiktok_items);
-    const port = plain(normalizeTikTok(TRENDS.tiktok_items, client));
-    expect(port).toEqual(n8n);
-    expect(port).toEqual(TRENDS.tiktok_normalized);
-    // And with nothing relevant: n8n's placeholder.
-    const none = { ...client, social_keywords: ["nothing matches this"], trends_keywords: "" };
-    expect(plain(normalizeTikTok(TRENDS.tiktok_items, none))).toEqual(await runNode(nodeCode("Normalize TikTok Trends"), { "Combine Brief Context with Client Data": none }, TRENDS.tiktok_items));
-  });
-
-  it("Normalize Instagram Trends, on the 346 items the scraper returned (error items included)", async () => {
-    const n8n = await runNode(nodeCode("Normalize Instagram Trends"), { "Combine Brief Context with Client Data": client }, TRENDS.instagram_items);
-    const port = plain(normalizeInstagram(TRENDS.instagram_items, client));
-    expect(port).toEqual(n8n);
-    expect(port).toEqual(TRENDS.instagram_normalized);
-    const hebrew = { ...client, languages: ["he"] };
-    expect(plain(normalizeInstagram(TRENDS.instagram_items, hebrew))).toEqual(await runNode(nodeCode("Normalize Instagram Trends"), { "Combine Brief Context with Client Data": hebrew }, TRENDS.instagram_items));
-  });
-
-  it("the skip and failed items", async () => {
-    const status = { trend_status: { tiktok: "skipped", instagram: "missing_keywords" } };
-    expect(trendSkipped("tiktok", "skipped")).toEqual((await runNode(nodeCode("Skip TikTok Trends").replace(/\$json/g, "$input.first().json"), {}, [status]))[0]);
-    expect(trendSkipped("instagram", "missing_keywords")).toEqual((await runNode(nodeCode("Skip Instagram Trends").replace(/\$json/g, "$input.first().json"), {}, [status]))[0]);
-    const error = { error: { message: "Actor run failed: TIMED-OUT" } };
-    expect(trendFailed("tiktok", error.error)).toEqual((await runNode(nodeCode("TikTok Trends Failed"), {}, [error]))[0]);
-    expect(trendFailed("instagram", error.error)).toEqual((await runNode(nodeCode("Instagram Trends Failed"), {}, [error]))[0]);
-  });
-});
+/** The run summary without its trends (generateRunSummary says what the port keeps in their place). */
+function summaryWithoutTrends(r: Any): Any {
+  const { tiktok_trends: _a, instagram_trends: _b, industry_trends: _c, trend_status: _d, data_counts, ai_analysis, ...rest } = r;
+  const { tiktok_trends: _e, instagram_trends: _f, industry_trend_themes: _g, industry_trend_posts: _h, ...counts } = data_counts ?? {};
+  const { tiktok_trends_analysis: _i, instagram_trends_analysis: _j, industry_trends_analysis: _k, ...ai } = ai_analysis ?? {};
+  return { ...rest, data_counts: counts, ai_analysis: ai };
+}
 
 describe("the client object, the prompts and the deck", () => {
-  const items = [MOBURST.thumbnails, trendSkipped("tiktok", "skipped"), trendSkipped("instagram", "skipped")];
+  // n8n's items: the Sprout item, then its Skip TikTok Trends and Skip Instagram Trends items (the request skipped trends).
+  const n8nItems = [MOBURST.thumbnails, { source: "tiktok", _empty: true, _skipped: true, reason: "skipped" }, { source: "instagram", _empty: true, _skipped: true, reason: "skipped" }];
   const at = Date.parse(MOBURST.normalized._meta.generated_at);
 
-  it("Build Normalized Client Object and Attach Competitive Context", async () => {
+  it("Build Normalized Client Object and Attach Competitive Context, with the stored trends where n8n put its scrapers' posts", async () => {
     const nodes = { "Workflow Configuration": config, "Combine Brief Context with Client Data": combined };
-    const n8n = await runNode(nodeCode("Build Normalized Client Object"), nodes, items, { now: at });
-    const port = plain(buildNormalizedClient(items, config, combined, new Date(at)));
-    expect(port).toEqual(n8n[0]);
-    expect(port).toEqual(MOBURST.normalized);
+    const n8n = await runNode(nodeCode("Build Normalized Client Object"), nodes, n8nItems, { now: at });
+    const port = plain(buildNormalizedClient([MOBURST.thumbnails], config, combined, new Date(at)));
+    expect(withoutTrends(port)).toEqual(withoutTrends(n8n[0]));
+    expect(withoutTrends(port)).toEqual(withoutTrends(MOBURST.normalized));
+    expect(port.industry_trends).toBeNull();
+    expect(port._meta).toMatchObject({ industry_themes: 0, industry_posts: 0 });
     const withContext = (await runNode(nodeCode("Attach Competitive Context"), { "Workflow Configuration": config }, [port]))[0];
     expect(plain(attachCompetitiveContext(port, config))).toEqual(withContext);
     expect(withContext.competitive_context).toEqual(MOBURST.competitive_context);
   });
 
-  it("the synthesis prompts are n8n's with the writing edits only, with and without trends, Sprout and competitors", () => {
+  it("the synthesis prompts are n8n's with the writing edits and the industry trends only, with and without trends, Sprout and competitors", () => {
     const agent = nodeOf("AI Synthesis Agent").parameters;
-    const edit = (t: string) => PROMPT_EDITS.reduce((s, [from, to]) => s.split(from).join(to), t);
+    const edit = (t: string) => [...PROMPT_EDITS, ...TREND_EDITS].reduce((s, [from, to]) => s.split(from).join(to), t);
     const json = { ...MOBURST.normalized, competitive_context: MOBURST.competitive_context };
+    const industry = { themes: [{ week_start: "2026-09-07", title: "AI planning", happening: "h", why_it_matters: "w", angle: "a", platforms: ["tiktok"], examples: [{ platform: "tiktok", format: "short_video", author: "x", text: "t", likes: 1, comments: 0, shares: 0, views: 9 }] }] };
+    // Each variant holds what both read: n8n's condition reads its scrapers' posts, the port's the stored themes, and they agree.
     const variants = [
       json,
       { ...json, competitive_context: null },
-      { ...json, sprout: { ...json.sprout, profiles: [] }, skip_trends: false, trends: { tiktok: { posts: [{ url: "x" }], patterns: {} }, instagram: { posts: [], patterns: {} } } },
+      { ...json, sprout: { ...json.sprout, profiles: [] }, skip_trends: false, industry_trends: industry, trends: { tiktok: { posts: [{ url: "x" }], patterns: {} }, instagram: { posts: [], patterns: {} } } },
+      { ...json, skip_trends: false, industry_trends: null },
       { ...json, context: { ...json.context, brand_voice: "", design_style_synthesis: { mood: "calm" }, languages: "en,he", geo: "US" } },
     ];
     for (const v of variants) {
       expect(synthesisSystem(v)).toBe(edit(template(agent.options.systemMessage, v)));
       expect(synthesisText(v)).toBe(edit(template(agent.text, v)));
     }
-    // The prompts' own words have no dash as punctuation (the client's data may).
+    // The prompts' own words have no dash as punctuation (the client's data may), and every trend edit applied.
     expect(edit(agent.options.systemMessage + agent.text)).not.toMatch(/[\u2013\u2014]|\w - \w/);
+    const writingOnly = PROMPT_EDITS.reduce((t, [from, to]) => t.split(from).join(to), agent.options.systemMessage + agent.text);
+    for (const [from] of TREND_EDITS) expect(writingOnly).toContain(from);
+    for (const v of variants) expect(synthesisSystem(v) + synthesisText(v)).not.toMatch(/tiktok_trends_analysis|instagram_trends_analysis|trends\.tiktok/);
   });
 
-  /** n8n's deck text with DECK_EDITS, and the three lines the port states only when true. */
+  /** n8n's deck text with DECK_EDITS, the three lines the port states only when true, and DECK_TREND_EDITS (n8n had no trends, none are stored). */
   const asPort = (n8nText: string, normalized: Any, ai: Any) => {
-    let t = DECK_EDITS.reduce((s, [re, to]) => s.replace(re, to), n8nText);
+    let t = [...DECK_EDITS, ...DECK_TREND_EDITS].reduce((s, [re, to]) => s.replace(re, to), n8nText);
     const ch = normalized.sprout?.month_comparison?.changes ?? {};
     if (!(ch.impressions?.percent < 0)) t = t.replace("• Address performance decline with increased posting frequency\n", "");
     const under = (ai.output ?? ai).sprout_performance_analysis?.pillar_alignment?.underrepresented?.[0];
@@ -327,20 +274,12 @@ describe("the client object, the prompts and the deck", () => {
     return t;
   };
 
-  it("Build Presentation Content: n8n's deck prompt with its edits, for Moburst and with trends", async () => {
+  it("Build Presentation Content: n8n's deck prompt with its edits, for Moburst", async () => {
     const ai = { output: { ...MOBURST.ai.output } };
     delete ai.output.content_calendar;
-    const trendClient = {
-      ...MOBURST.normalized,
-      trends: {
-        tiktok: { posts: TRENDS.tiktok_normalized, patterns: buildNormalizedClient([...TRENDS.tiktok_normalized], config, combined, NOW).trends.tiktok.patterns },
-        instagram: { posts: TRENDS.instagram_normalized, patterns: buildNormalizedClient([...TRENDS.instagram_normalized], config, combined, NOW).trends.instagram.patterns },
-      },
-    };
-    const trendAi = { output: { ...ai.output, ...TRENDS.ai_trends } };
     const noUnder = { output: { ...ai.output, sprout_performance_analysis: { ...ai.output.sprout_performance_analysis, pillar_alignment: { well_represented: [], underrepresented: [], recommendations: [] } } } };
     const rising = { ...MOBURST.normalized, sprout: { ...MOBURST.normalized.sprout, month_comparison: { ...MOBURST.normalized.sprout.month_comparison, changes: { ...MOBURST.normalized.sprout.month_comparison.changes, impressions: { current: 2, previous: 1, absolute: 1, percent: 100 } } } } };
-    for (const [client, analysis] of [[MOBURST.normalized, ai], [trendClient, trendAi], [MOBURST.normalized, noUnder], [rising, ai]] as Array<[Any, Any]>) {
+    for (const [client, analysis] of [[MOBURST.normalized, ai], [MOBURST.normalized, noUnder], [rising, ai]] as Array<[Any, Any]>) {
       const n8n = (await runNode(nodeCode("Build Presentation Content"), { "Format Report Content": {}, "Build Normalized Client Object": client, "AI Synthesis Agent": analysis }, [], { now: NOW.getTime() }))[0];
       const port = plain(buildPresentationContent(client, analysis, NOW));
       expect(port.presentation_content).toBe(asPort(n8n.presentation_content, client, analysis));
@@ -387,15 +326,19 @@ describe("Generate Run Summary", () => {
     const started = new Date(at - 6 * 60_000);
     const port = plain(generateRunSummary({
       gamma, presentation: MOBURST.presentation, clientData: MOBURST.normalized, combined, config, sprout: MOBURST.aggregate, ai: MOBURST.ai,
-      prepared: MOBURST.prepared_brief, trendStatus: MOBURST.trend_inputs.trend_status, startedAt: started, now: new Date(at),
+      prepared: MOBURST.prepared_brief, industryTrends: null, startedAt: started, now: new Date(at),
     }));
     // n8n's summary node takes its own finish time as the start; the port takes the run's.
     expect(n8n).toMatchObject({ started_at: MOBURST.summary.completed_at, duration_minutes: 0 });
     expect(port).toMatchObject({ started_at: started.toISOString(), completed_at: MOBURST.summary.completed_at, duration_minutes: 6 });
-    expect({ ...port, started_at: null, duration_minutes: null }).toEqual({ ...n8n, started_at: null, duration_minutes: null });
+    expect(summaryWithoutTrends({ ...port, started_at: null, duration_minutes: null })).toEqual(summaryWithoutTrends({ ...n8n, started_at: null, duration_minutes: null }));
     // And it is what n8n stored, but for the moment n8n took for collected_at (a millisecond later inside the same node).
-    const at0 = (r: Any) => ({ ...r, started_at: null, duration_minutes: null, sprout_performance: { ...r.sprout_performance, collected_at: null } });
+    const at0 = (r: Any) => summaryWithoutTrends({ ...r, started_at: null, duration_minutes: null, sprout_performance: { ...r.sprout_performance, collected_at: null } });
     expect(at0(port)).toEqual(at0(MOBURST.summary));
+    // In place of n8n's trend keys: the request skipped trends, so none were read.
+    expect(port).toMatchObject({ industry_trends: null, trend_status: { industry: "skipped" }, data_counts: { tiktok_trends: 0, instagram_trends: 0, industry_trend_themes: 0, industry_trend_posts: 0 } });
+    expect(port.ai_analysis.industry_trends_analysis).toBeNull();
+    expect(port).not.toHaveProperty("tiktok_trends");
   });
 
   it("says when the deck did not complete or timed out, and when Sprout did not run", async () => {
@@ -408,9 +351,9 @@ describe("Generate Run Summary", () => {
       const n8n = (await runNode(nodeCode("Generate Run Summary"), nodes, [gamma], { now: at }))[0];
       const port = plain(generateRunSummary({
         gamma, presentation: MOBURST.presentation, clientData: MOBURST.normalized, combined, config, sprout: null, ai: MOBURST.ai,
-        prepared: MOBURST.prepared_brief, trendStatus: MOBURST.trend_inputs.trend_status, startedAt: new Date(at), now: new Date(at),
+        prepared: MOBURST.prepared_brief, industryTrends: null, startedAt: new Date(at), now: new Date(at),
       }));
-      expect(port).toEqual(n8n);
+      expect(summaryWithoutTrends(port)).toEqual(summaryWithoutTrends(n8n));
       expect(port.gamma_url).toBeNull();
     }
   });

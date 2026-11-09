@@ -22,6 +22,14 @@
 //     only when there is one. DECK_EDITS lists every change in the text.
 //   * The run summary's start time and duration are the run's own; n8n's
 //     summary node used its own finish time as the start.
+//   * Trends (Trends plan, Task 16): the report reads the weeks the weekly
+//     trend collection stored (storedTrends.ts), so Prepare Trend Inputs,
+//     the two scrapers and their normalizers are not ported. The client
+//     object, the prompts, the deck and the run summary carry the industry
+//     trends where n8n's carried TikTok's and Instagram's posts
+//     (prompt.ts TREND_EDITS, DECK_TREND_EDITS, generateRunSummary).
+
+import { trendsForModel, type IndustryTrends, type ReportTrendPost } from "./storedTrends.ts";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -606,106 +614,22 @@ export function attachPostThumbnails(aggregate: Any, postPages: Any[]): Any {
   return out;
 }
 
-// ── Prepare Trend Inputs ───────────────────────────────────────────────────
+// ── Industry trends (Trends plan, Task 16) ─────────────────────────────────
 
-// The TikTok search runs on apidojo/tiktok-scraper. n8n's scraper,
-// clockworks/tiktok-scraper, stopped answering date-filtered video searches
-// around 20 Oct 2026 (device registration fails, every search comes back with
-// nothing; its open issue "Video search with date filter fails"), and its
-// searches without a date filter bring back mostly old, little-seen posts.
-// The searches, the date window and the sort are n8n's; only the actor and its
-// input's shape differ. n8n's workflow still uses clockworks.
+// The report reads the trends the weekly trend collection stored for its
+// period (storedTrends.ts) in place of n8n's Prepare Trend Inputs, its two
+// scrapers (TikTok, Instagram) and their normalizers, which are no longer
+// ported: the in-app report makes no Apify call.
 
-/** TikTok's search date filters, by n8n's searchDatePosted code. */
-const TIKTOK_DATE_RANGE: Record<string, string> = { "1": "YESTERDAY", "2": "THIS_WEEK", "3": "THIS_MONTH", "4": "LAST_THREE_MONTHS", "5": "LAST_SIX_MONTHS" };
-/** Posts asked for per search, n8n's resultsPerPage. apidojo's maxItems counts across all searches. */
-export const TIKTOK_POSTS_PER_SEARCH = 50;
+/**
+ * Whether a run reads the stored trends: always, except for a request that
+ * asked for none. The app has sent no trend switch since 9 Nov 2026 (Trends
+ * Task 12); a stored request with skip_trends: true is an earlier run's,
+ * replayed as it ran.
+ */
+export const readsTrends = (client: Any): boolean => client?.skip_trends !== true;
 
-/** The first region that is a country code, for TikTok's search region; none searches everywhere. */
-function tiktokLocation(regions: string[]): string | undefined {
-  for (const region of regions) {
-    const code = region.trim().toUpperCase();
-    const iso = code === "UK" ? "GB" : code;
-    if (/^[A-Z]{2}$/.test(iso)) return iso;
-  }
-  return undefined;
-}
-
-/** The TikTok and Instagram actor inputs (null when that scraper does not run) and why. */
-export function prepareTrendInputs(client: Any): Any {
-  const list = (value: Any): string[] => (Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : [])
-    .filter((v: Any) => typeof v === "string").map((v: string) => v.trim()).filter(Boolean);
-  const keywords = [...new Set([...list(client.social_keywords), ...list(client.trends_keywords)])].filter((keyword) => /[\p{L}\p{N}]/u.test(keyword));
-  const regions = list(client.geo || ["US"]);
-  const skipped = client.skip_trends === true;
-  const queries = [...new Set([...keywords.slice(0, 5), ...keywords.slice(0, 3).flatMap((keyword) => regions.slice(0, 2).map((region) => keyword + " " + region))])].slice(0, 8);
-  // eslint-disable-next-line no-misleading-character-class -- n8n's script ranges, exactly (a range may start on a combining mark).
-  const nonLatin = /[\u0590-\u05FF\u0600-\u06FF\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF\uAC00-\uD7AF\u0E00-\u0E7F\u0900-\u097F\u0400-\u04FF]/;
-  const cleanTag = (value: string) => value.replace(/[^\p{L}\p{N}_]/gu, "").toLowerCase();
-  const baseTags = keywords.flatMap((keyword) => nonLatin.test(keyword) ? keyword.split(/\s+/).map(cleanTag).filter((tag) => tag.length > 1) : [cleanTag(keyword)]).filter(Boolean);
-  const regionalTags = keywords.filter((keyword) => !nonLatin.test(keyword)).slice(0, 2)
-    .flatMap((keyword) => regions.slice(0, 2).map((region) => cleanTag(keyword + region))).filter(Boolean);
-  const hashtags = [...new Set([...baseTags, ...regionalTags])].slice(0, 12);
-  let searchDatePosted = "2";
-  const start = client.date_ranges?.current_month?.start;
-  const end = client.date_ranges?.current_month?.end;
-  if (start && end) {
-    const days = Math.ceil((Date.parse(end) - Date.parse(start)) / 86400000);
-    if (Number.isFinite(days)) searchDatePosted = days <= 1 ? "1" : days <= 7 ? "2" : days <= 30 ? "3" : days <= 90 ? "4" : "5";
-  }
-  const location = tiktokLocation(regions);
-  return {
-    ...client,
-    trend_status: {
-      tiktok: skipped ? "skipped" : queries.length ? "requested" : "missing_keywords",
-      instagram: skipped ? "skipped" : hashtags.length ? "requested" : "missing_keywords",
-    },
-    trend_inputs: {
-      // n8n's search, most liked first (its searchSorting "1"), in its date window.
-      tiktok: !skipped && queries.length ? {
-        keywords: queries, dateRange: TIKTOK_DATE_RANGE[searchDatePosted], sortType: "MOST_LIKED", ...(location ? { location } : {}),
-        maxItems: queries.length * TIKTOK_POSTS_PER_SEARCH, includeSearchKeywords: true,
-      } : null,
-      instagram: !skipped && hashtags.length ? { hashtags, keywordSearch: false, resultsLimit: 80, resultsType: "posts" } : null,
-    },
-  };
-}
-
-// ── Normalize TikTok Trends / Normalize Instagram Trends ───────────────────
-
-const LANG_WORDS: Record<string, string[]> = {
-  en: ["the", "and", "for", "you", "this", "that", "with", "have", "are", "was", "will", "your", "from", "how", "what", "when", "get", "can", "all", "just", "not", "but", "more", "like", "new", "business", "marketing", "content", "brand", "social", "media", "digital", "tips", "follow"],
-  es: ["que", "los", "las", "del", "por", "una", "con", "para", "como", "pero", "mas", "todo", "esta", "tiene", "hay", "son", "fue", "muy", "tambien", "sobre"],
-  fr: ["les", "des", "une", "pour", "dans", "que", "est", "sur", "pas", "plus", "avec", "sont", "tout", "fait", "mais", "comme"],
-  de: ["und", "der", "die", "das", "ist", "ein", "fur", "mit", "den", "von", "nicht", "sich", "auf", "dem", "auch", "noch"],
-  pt: ["que", "para", "com", "uma", "por", "mais", "como", "mas", "dos", "das", "tem", "sao", "foi", "nao"],
-  ar: [], he: [], ja: [], ko: [], zh: [], it: [], ru: [], hi: [], th: [],
-};
-const SCRIPT_PATTERNS: Record<string, RegExp> = {
-  ar: /[\u0600-\u06FF\u0750-\u077F]/,
-  he: /[\u0590-\u05FF]/,
-  ja: /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/,
-  ko: /[\uAC00-\uD7AF\u1100-\u11FF]/,
-  zh: /[\u4E00-\u9FFF\u3400-\u4DBF]/,
-  ru: /[\u0400-\u04FF]/,
-  hi: /[\u0900-\u097F]/,
-  th: /[\u0E00-\u0E7F]/,
-};
-function matchesTargetLanguage(text: string, lang: string): boolean {
-  if (!text || text.length < 10) return false;
-  const cleanText = text.replace(/#\w+/g, "").replace(/@\w+/g, "").replace(/[\u{1F600}-\u{1F6FF}]/gu, "").replace(/[\u{2600}-\u{26FF}]/gu, "").trim();
-  if (cleanText.length < 5) return false;
-  if (SCRIPT_PATTERNS[lang]) return SCRIPT_PATTERNS[lang].test(cleanText);
-  // eslint-disable-next-line no-misleading-character-class -- n8n's script ranges, exactly (a range may start on a combining mark).
-  const nonLatinPattern = /[\u0600-\u06FF\u0750-\u077F\u0590-\u05FF\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF\uAC00-\uD7AF\u0E00-\u0E7F\u0900-\u097F\u0400-\u04FF]/;
-  if (nonLatinPattern.test(cleanText)) return false;
-  const words = LANG_WORDS[lang] || LANG_WORDS.en;
-  if (words.length === 0) return true;
-  const lowerText = cleanText.toLowerCase();
-  return words.filter((word) => lowerText.includes(word)).length >= 2;
-}
-export const matchesAnyTargetLanguage = (text: string, langs: string[]) => langs.some((lang) => matchesTargetLanguage(text, lang));
-
+/** n8n's spam signals (its trend normalizers' isSpam), kept for the weekly trend collection's rules (trends/rules.ts). */
 export const SPAM_SIGNALS = [
   /\b(crypto|bitcoin|btc|ethereum|eth|nft|airdrop|binance|coinbase|token|defi|web3|blockchain|solana|memecoin)\b/i,
   /\b(casino|poker|slots?|betting|bet365|jackpot|roulette)\b/i,
@@ -714,194 +638,20 @@ export const SPAM_SIGNALS = [
   /\b(make\s*money\s*fast|passive\s*income\s*\d|earn\s*\$?\d{4,}|work\s*from\s*home\s*\$|financial\s*freedom\s*secret)\b/i,
   /\b(link\s*in\s*bio.*free|dm\s*for\s*price|limited\s*offer|act\s*now)\b/i,
 ];
-function isSpam(caption: string, hashtags: string[]): boolean {
-  const fullText = caption + " " + (hashtags || []).join(" ");
-  let spamScore = 0;
-  for (const pattern of SPAM_SIGNALS) if (pattern.test(fullText)) spamScore++;
-  if ((hashtags || []).length > 15 && caption.length < 100) spamScore += 2;
-  const emojiCount = (caption.match(/[\u{1F600}-\u{1F6FF}\u{1F900}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu) || []).length;
-  if (emojiCount > 15) spamScore++;
-  return spamScore >= 2;
-}
-
-/** What both normalizers read from the client: the target languages, the keywords and the period's first day. */
-function trendTargets(clientData: Any) {
-  let targetLangs = ["en"];
-  const rawLangs = clientData.languages || clientData.language || ["en"];
-  targetLangs = Array.isArray(rawLangs)
-    ? rawLangs.map((l: string) => l.toLowerCase().slice(0, 2))
-    : String(rawLangs).split(",").map((l) => l.trim().toLowerCase().slice(0, 2)).filter(Boolean);
-  const socialArr = Array.isArray(clientData.social_keywords) ? clientData.social_keywords : [];
-  const trendsRaw = clientData.trends_keywords || "";
-  const trendsArr = typeof trendsRaw === "string" ? trendsRaw.split(",").map((k: string) => k.trim()) : Array.isArray(trendsRaw) ? trendsRaw : [];
-  const clientKeywords: string[] = [...new Set([...socialArr, ...trendsArr])].filter(Boolean).map((k: string) => k.toLowerCase().replace(/^#/, ""));
-  if (targetLangs.length === 0) targetLangs = ["en"];
-  return { targetLangs, clientKeywords, trendsStartDate: clientData.date_ranges?.current_month?.start || "" };
-}
-function relevanceOf(clientKeywords: string[], caption: string, hashtags: string[]): number {
-  if (clientKeywords.length === 0) return 1;
-  const fullText = (caption + " " + (hashtags || []).join(" ")).toLowerCase();
-  let matches = 0;
-  for (const kw of clientKeywords) if (fullText.includes(kw) || fullText.includes(kw.replace(/\s+/g, ""))) matches++;
-  return matches / Math.max(clientKeywords.length, 1);
-}
-/** The trend window opens 30 days before the period's first day. */
-const passesDate = (trendsStartDate: string, postDate: Date) => !(postDate.getTime() < dayMs(trendsStartDate) - 30 * DAY);
-const byRelevanceThenEngagement = (a: Any, b: Any) => {
-  const relDiff = b.relevance_score - a.relevance_score;
-  if (Math.abs(relDiff) > 0.2) return relDiff;
-  return b.engagement_score - a.engagement_score;
-};
-
-/**
- * The 15 most relevant TikTok posts in the client's languages, or one empty
- * placeholder. items: the actor's dataset, apidojo's (title, postPage,
- * uploadedAtFormatted, channel) or clockworks' as n8n reads it (a replay of an
- * earlier run keeps clockworks rows). A post found by two searches counts once.
- */
-export function normalizeTikTok(items: Any[], clientData: Any): Any[] {
-  const { targetLangs, clientKeywords, trendsStartDate } = trendTargets(clientData);
-  const seen = new Set<string>();
-  const normalized = (items ?? []).map((data: Any) => {
-    const likes = data.diggCount || data.likes || 0;
-    const comments = data.commentCount || data.comments || 0;
-    const shares = data.shareCount || data.shares || 0;
-    const views = data.playCount || data.views || 0;
-    const engagementScore = likes * 1 + comments * 2 + shares * 3 + Math.floor(views / 1000);
-    const caption = data.desc || data.text || data.caption || data.title || "";
-    let url = data.webVideoUrl || data.url || data.postPage || "";
-    if (!url && data.authorMeta?.name && data.id) url = `https://www.tiktok.com/@${data.authorMeta.name}/video/${data.id}`;
-    const author = data.authorMeta?.name || data.author || data.channel?.username || "unknown";
-    // apidojo lists a hashtag it could not read as null.
-    const hashtags = (data.hashtags || []).map((h: Any) => (typeof h === "string" ? h : h?.name || "")).filter(Boolean);
-    const textLang = (data.textLanguage || "").toLowerCase();
-    const passesLangFilter = targetLangs.includes(textLang) ? true : matchesAnyTargetLanguage(caption, targetLangs);
-    const createdIso = data.createTimeISO || data.uploadedAtFormatted || "";
-    let passesDateFilter = true;
-    if (trendsStartDate && createdIso) passesDateFilter = passesDate(trendsStartDate, new Date(createdIso));
-    return {
-      source: "tiktok", url, caption, author, hashtags,
-      engagement_score: engagementScore,
-      views, likes, comments, shares,
-      created: createdIso || data.createTime || "",
-      matches_language: passesLangFilter,
-      is_spam: isSpam(caption, hashtags),
-      relevance_score: relevanceOf(clientKeywords, caption, hashtags),
-      passes_date: passesDateFilter,
-      is_ad: data.isAd || data.isSponsored || false,
-    };
-  }).filter((item: Any) => {
-    if (!item.url || item.url.length < 10) return false;
-    if (!item.matches_language) return false;
-    if (item.is_ad) return false;
-    if (item.is_spam) return false;
-    if (!item.passes_date) return false;
-    if (clientKeywords.length > 0 && item.relevance_score === 0) return false;
-    if (seen.has(item.url)) return false;
-    seen.add(item.url);
-    return true;
-  }).sort(byRelevanceThenEngagement).slice(0, 15);
-  if (normalized.length === 0) {
-    return [{
-      source: "tiktok", url: "", caption: `No relevant ${targetLangs.join("/")} TikTok posts found for these keywords`,
-      author: "none", hashtags: [], engagement_score: 0, views: 0, likes: 0, comments: 0, shares: 0,
-      created: "", matches_language: true, is_ad: false, rank: 0, _empty: true,
-    }];
-  }
-  return normalized.map((item: Any, idx: number) => ({ ...item, rank: idx + 1 }));
-}
-
-/** The 15 most relevant Instagram posts in the client's languages, or one empty placeholder. items: the actor's dataset. */
-export function normalizeInstagram(items: Any[], clientData: Any): Any[] {
-  const { targetLangs, clientKeywords, trendsStartDate } = trendTargets(clientData);
-  const normalized = (items ?? []).map((data: Any) => {
-    if (data.type === "carousel_item") return null;
-    const likes = data.likesCount || data.likes || 0;
-    const comments = data.commentsCount || data.comments || 0;
-    const views = data.videoViewCount || data.views || 0;
-    const safeLikes = likes === -1 ? 0 : likes;
-    const engagementScore = safeLikes * 1 + comments * 2 + Math.floor(views / 1000);
-    const caption = data.caption || data.text || "";
-    let url = data.url || "";
-    if (!url && data.shortCode) url = `https://www.instagram.com/p/${data.shortCode}/`;
-    const author = data.ownerUsername || data.owner?.username || data.author || "unknown";
-    let hashtags: string[] = [];
-    if (data.hashtags && Array.isArray(data.hashtags)) hashtags = data.hashtags.map((h: Any) => (typeof h === "string" ? h : h.name || "")).filter(Boolean);
-    const postType = data.type || data.__typename || (data.videoUrl ? "Video" : "Image");
-    let passesDateFilter = true;
-    const postTimestamp = data.timestamp || data.takenAtTimestamp || 0;
-    if (trendsStartDate && postTimestamp) {
-      passesDateFilter = passesDate(trendsStartDate, typeof postTimestamp === "number" ? new Date(postTimestamp * 1000) : new Date(postTimestamp));
-    }
-    return {
-      source: "instagram", url, caption, author, hashtags,
-      engagement_score: engagementScore,
-      likes: safeLikes, comments, views,
-      type: postType,
-      created: data.timestamp || data.takenAtTimestamp || "",
-      matches_language: matchesAnyTargetLanguage(caption, targetLangs),
-      is_spam: isSpam(caption, hashtags),
-      relevance_score: relevanceOf(clientKeywords, caption, hashtags),
-      passes_date: passesDateFilter,
-    };
-  }).filter((item: Any) => {
-    if (!item) return false;
-    if (!item.url || item.url.length < 10) return false;
-    if (!item.matches_language) return false;
-    if (item.is_spam) return false;
-    if (!item.passes_date) return false;
-    if (clientKeywords.length > 0 && item.relevance_score === 0) return false;
-    return true;
-  }).sort(byRelevanceThenEngagement).slice(0, 15);
-  if (normalized.length === 0) {
-    return [{
-      source: "instagram", url: "", caption: `No relevant ${targetLangs.join("/")} Instagram posts found for these keywords`,
-      author: "none", hashtags: [], engagement_score: 0, likes: 0, comments: 0, views: 0,
-      type: "none", created: "", matches_language: true, rank: 0, _empty: true,
-    }];
-  }
-  return normalized.map((item: Any, idx: number) => ({ ...item, rank: idx + 1 }));
-}
-
-/** Skip TikTok Trends / Skip Instagram Trends: the scraper did not run, and why. */
-export const trendSkipped = (source: "tiktok" | "instagram", reason: unknown) => ({ source, _empty: true, _skipped: true, reason });
-
-/** TikTok Trends Failed / Instagram Trends Failed: the scraper ran and failed. */
-export function trendFailed(source: "tiktok" | "instagram", error: unknown): Any {
-  const e = error as Any;
-  const msg = e ? (e.message || e.error || e.description || JSON.stringify(e)) : "unknown error";
-  return { source, _empty: true, _skipped: true, reason: "scraper_failed: " + String(msg).slice(0, 300) };
-}
 
 // ── Build Normalized Client Object, Attach Competitive Context ─────────────
 
-function trendPatterns(trends: Any[]) {
-  const patterns: Any = { common_hashtags: {}, avg_engagement: 0, top_hashtags: [] };
-  if (trends.length === 0) return patterns;
-  let totalEngagement = 0;
-  for (const trend of trends) {
-    for (const tag of trend.hashtags || []) {
-      const cleanTag = String(tag).toLowerCase().replace(/^#/, "");
-      patterns.common_hashtags[cleanTag] = (patterns.common_hashtags[cleanTag] || 0) + 1;
-    }
-    totalEngagement += trend.engagement_score || 0;
-  }
-  patterns.avg_engagement = Math.round(totalEngagement / trends.length);
-  patterns.top_hashtags = Object.entries(patterns.common_hashtags).sort((a: Any, b: Any) => b[1] - a[1]).slice(0, 10).map(([tag, count]) => ({ tag, count }));
-  return patterns;
-}
-
 /**
- * Merge All Data Sources (the Sprout item, then the TikTok items, then the
- * Instagram items) and Build Normalized Client Object.
+ * Merge All Data Sources and Build Normalized Client Object: the Sprout item
+ * among the items, and the period's stored industry trends as the synthesis
+ * reads them (storedTrends.ts trendsForModel) where n8n put its TikTok and
+ * Instagram posts (trends, with their counts in _meta).
  */
-export function buildNormalizedClient(allItems: Any[], config: Any, clientData: Any, now: Date): Any {
+export function buildNormalizedClient(allItems: Any[], config: Any, clientData: Any, now: Date, industryTrends: IndustryTrends | null = null): Any {
   let sproutData: Any = { profiles: [], platform_metrics: {}, platform_breakdown: [], top_posts: [], top_posts_by_platform: {}, overall_totals: {}, reporting_period: {}, month_comparison: {} };
   for (const json of allItems) {
     if (json.profiles !== undefined || json.month_comparison !== undefined || json.overall_totals !== undefined) { sproutData = json; break; }
   }
-  const tiktokTrends = allItems.filter((j) => j.source === "tiktok" && !j._empty);
-  const instagramTrends = allItems.filter((j) => j.source === "instagram" && !j._empty);
   const clientProfileIds = (clientData.sprout_profile_ids || "").toString().split(",").map((id: string) => parseInt(id.trim(), 10)).filter((id: number) => !isNaN(id));
   let clientProfiles = sproutData.profiles || [];
   if (clientProfileIds.length > 0) clientProfiles = clientProfiles.filter((profile: Any) => clientProfileIds.includes(profile.id));
@@ -945,13 +695,10 @@ export function buildNormalizedClient(allItems: Any[], config: Any, clientData: 
       platform_breakdown: sproutData.platform_breakdown || [],
       top_posts_by_platform: sproutData.top_posts_by_platform || {},
     },
-    trends: {
-      tiktok: { posts: tiktokTrends, patterns: trendPatterns(tiktokTrends) },
-      instagram: { posts: instagramTrends, patterns: trendPatterns(instagramTrends) },
-    },
+    industry_trends: trendsForModel(industryTrends),
     _meta: {
-      tiktok_count: tiktokTrends.length,
-      instagram_count: instagramTrends.length,
+      industry_themes: industryTrends?.themes?.length ?? 0,
+      industry_posts: industryTrends?.posts?.length ?? 0,
       profiles_count: clientProfiles.length,
       generated_at: now.toISOString(),
     },
@@ -982,6 +729,25 @@ export const DECK_EDITS: ReadonlyArray<readonly [RegExp, string]> = [
   [/% - prioritize improvement$/gm, "%, prioritize improvement"],
 ];
 
+/**
+ * n8n's deck when it had no trends, against the port's when no trends are
+ * stored for the period (Trends plan, Task 16): the deck reads the stored
+ * themes, so n8n's slide about missing trends and its scraper lines go, and
+ * the lines that name trends are said only when there are some. Applied
+ * after DECK_EDITS; the parity test compares the two with these.
+ */
+export const DECK_TREND_EDITS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\n---\n\nSLIDE 7: TREND ANALYSIS\n\nTrend analysis was not included in this report\.[^]*?client onboarding screen\.\n/g, ""],
+  [/^SLIDE 8: ACTION ITEMS & NEXT STEPS$/gm, "SLIDE 7: ACTION ITEMS & NEXT STEPS"],
+  [/^SLIDE 10: DATA SOURCES & METHODOLOGY$/gm, "SLIDE 9: DATA SOURCES & METHODOLOGY"],
+  [/^• Test hooks inspired by top-performing TikTok content\n/gm, ""],
+  [/^• Test at least 3 new content formats from trend analysis\n/gm, ""],
+  [/^• (?:TikTok|Instagram) Trend Scraper: .*\n/gm, ""],
+  [/^• Engagement Scoring: .*\n/gm, ""],
+  [/^• Language Filter: .*\n/gm, ""],
+  [/^• Hashtags Searched: .*\n/gm, ""],
+];
+
 function truncate(text: unknown, maxLen = 200): string {
   if (!text) return "";
   const clean = String(text).replace(/\n/g, " ").replace(/\s+/g, " ").trim();
@@ -989,10 +755,41 @@ function truncate(text: unknown, maxLen = 200): string {
   return clean.substring(0, maxLen) + "...";
 }
 const n = (v: unknown) => Number(v || 0).toLocaleString("en-US");
+
+/** The trend platforms and formats as a deck names them (trends/types.ts). */
+const TREND_PLATFORM_NAMES: Record<string, string> = { tiktok: "TikTok", instagram: "Instagram", linkedin: "LinkedIn", youtube: "YouTube", pinterest: "Pinterest", facebook: "Facebook" };
+const TREND_FORMAT_NAMES: Record<string, string> = { short_video: "Short video", long_video: "Long video", carousel: "Carousel", image: "Image", text: "Text post", pin: "Pin" };
+const trendPlatformName = (p: unknown) => TREND_PLATFORM_NAMES[String(p).toLowerCase()] ?? String(p);
+/** Example posts on the deck. */
+export const DECK_TREND_EXAMPLES = 7;
+
+/** The deck's example posts: each theme's first, then each one's second, and so on, every post once. */
+function trendExamples(trends: IndustryTrends): Array<{ post: ReportTrendPost; theme: string }> {
+  const byUrl = new Map(trends.posts.map((p) => [p.url, p]));
+  const out: Array<{ post: ReportTrendPost; theme: string }> = [];
+  const seen = new Set<string>();
+  const depth = Math.max(0, ...trends.themes.map((t) => t.post_urls.length));
+  for (let i = 0; i < depth && out.length < DECK_TREND_EXAMPLES; i++) {
+    for (const t of trends.themes) {
+      const post = byUrl.get(t.post_urls[i]);
+      if (!post || seen.has(post.url)) continue;
+      seen.add(post.url);
+      out.push({ post, theme: t.title });
+      if (out.length === DECK_TREND_EXAMPLES) break;
+    }
+  }
+  return out;
+}
+
 const longDate = (now: Date) => now.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
 
-/** The Gamma prompt for the deck, and the counts n8n's summary reads from it. ai: the parsed analysis. */
-export function buildPresentationContent(clientData: Any, ai: Any, now: Date): Any {
+/**
+ * The Gamma prompt for the deck, and the counts n8n's summary reads from it.
+ * ai: the analysis as the report shows it (shownFields.ts shownSocial: its
+ * insights in place of the model-written fields when it has them). trends:
+ * the period's stored industry trends, or null for none.
+ */
+export function buildPresentationContent(clientData: Any, ai: Any, now: Date, trends: IndustryTrends | null = null): Any {
   const aiOutput = ai?.output || ai || {};
   const clientName = clientData.client_name || "Client";
   const date = longDate(now);
@@ -1024,18 +821,11 @@ export function buildPresentationContent(clientData: Any, ai: Any, now: Date): A
     platformBreakdownBlock = "\n\n---\n\nSLIDE 3B: PLATFORM-BY-PLATFORM PERFORMANCE\n\n" + body + "Visualize as a comparison table or grouped bar chart, one row or group per platform.";
   }
 
-  const tiktokPosts: Any[] = clientData.trends?.tiktok?.posts || [];
-  const tiktokPatterns = clientData.trends?.tiktok?.patterns || {};
-  const instagramPosts: Any[] = clientData.trends?.instagram?.posts || [];
-  const instagramPatterns = clientData.trends?.instagram?.patterns || {};
+  const industry = trends?.themes?.length ? trends : null;
+  const onPlatform = (platform: string) => (industry ? industry.posts.filter((p) => p.platform === platform).length : 0);
   const contentPillars: string[] = clientData.context?.content_pillars || [];
   const sproutAnalysis = aiOutput.sprout_performance_analysis || {};
-  const tiktokAnalysis = aiOutput.tiktok_trends_analysis || {};
-  const igAnalysis = aiOutput.instagram_trends_analysis || {};
-
-  const formatMetrics = (post: Any, platform: string) => platform === "tiktok"
-    ? `Views: ${n(post.views)} | Likes: ${n(post.likes)} | Comments: ${n(post.comments)} | Shares: ${n(post.shares)}`
-    : `Likes: ${n(post.likes)} | Comments: ${n(post.comments)}`;
+  const industryAnalysis = aiOutput.industry_trends_analysis || {};
 
   // The fall in reach is said with the post counts that sit behind it (the platform totals carry them).
   const postsNow = platformBreakdown.reduce((s, p) => s + (Number(p.post_count) || 0), 0);
@@ -1192,66 +982,65 @@ DEFINED PILLARS: ${contentPillars.join(" | ") || "Not specified"}
 `;
   (sproutAnalysis.pillar_alignment?.recommendations || []).slice(0, 3).forEach((rec: string, i: number) => { prompt += `${i + 1}. ${rec}\n`; });
 
-  const hasTikTokData = tiktokPosts.length > 0 || (tiktokAnalysis.overview && tiktokAnalysis.overview !== "No analysis available.");
-  const hasInstagramData = instagramPosts.length > 0 || (igAnalysis.overview && igAnalysis.overview !== "No analysis available.");
-  const skipTrends = clientData.skip_trends || (!hasTikTokData && !hasInstagramData);
+  // The period's industry trends: one slide of themes, one of example posts
+  // from other accounts, from the stored themes and what the analysis says
+  // about them (the analysis's themes and notes, else the stored themes and
+  // what is happening in each). No trends stored: no trend slides.
   let slideNum = 7;
-
-  const trendSlides = (o: { label: string; analysis: Any; patterns: Any; posts: Any[]; platform: "tiktok" | "instagram"; formatsIcon: string; postIcon: string }) => {
+  if (industry) {
+    const listed: Array<{ title: string; platforms: string[]; note: string }> = Array.isArray(industryAnalysis.themes) && industryAnalysis.themes.length
+      ? industryAnalysis.themes.map((t: Any) => ({ title: String(t?.title ?? ""), platforms: (Array.isArray(t?.platforms) ? t.platforms : []).map(trendPlatformName), note: String(t?.note ?? "") }))
+      : industry.themes.map((t) => ({ title: t.title, platforms: t.platforms.map(trendPlatformName), note: t.happening }));
+    const period = clientData.report_window?.current_month;
     prompt += `
 ---
 
-SLIDE ${slideNum}: ${o.label.toUpperCase()} TRENDS OVERVIEW
+SLIDE ${slideNum}: INDUSTRY TRENDS THIS PERIOD
 
-${o.analysis.overview || `Analysis of top-performing ${o.label} content in your industry keywords.`}
+${industryAnalysis.overview || `The themes that ran through your industry's social posts from ${period?.start} to ${period?.end}.`}
 
-🔥 TOP THEMES IDENTIFIED:
+🔥 THEMES:
 `;
-    for (const theme of o.analysis.top_themes || []) prompt += `• ${theme}\n`;
+    for (const t of listed.filter((x) => x.title)) prompt += `• ${t.title}${t.platforms.length ? ` (${t.platforms.join(", ")})` : ""}${t.note ? `: ${t.note}` : ""}\n`;
     prompt += `
-${o.formatsIcon} SUCCESSFUL CONTENT FORMATS:
-`;
-    for (const format of o.analysis.successful_formats || []) prompt += `• ${format}\n`;
-    prompt += `
-#️⃣ TRENDING HASHTAGS: ${(o.patterns.top_hashtags || []).slice(0, 8).map((h: Any) => `#${h.tag}`).join("  ") || "See individual posts"}
-
 ---
 
-SLIDE ${slideNum + 1}: TRENDING ${o.label.toUpperCase()} CONTENT IN YOUR INDUSTRY (EXTERNAL ACCOUNTS, NOT ${clientName}'S POSTS)
+SLIDE ${slideNum + 1}: TRENDING CONTENT IN YOUR INDUSTRY (EXTERNAL ACCOUNTS, NOT ${clientName}'S POSTS)
 
-These are external, third-party ${o.label} posts from OTHER accounts in your industry, shown for trend reference only. They are NOT ${clientName}'s posts and must never appear on the client's own top-posts slide. Study their hooks and copy:
+These are external, third-party posts from OTHER accounts in your industry, shown for trend reference only. They are NOT ${clientName}'s posts and must never appear on the client's own top-posts slide. Study their hooks and copy:
 
 `;
-    o.posts.slice(0, 7).forEach((post, i) => {
-      const caption = truncate(post.caption, 300);
+    trendExamples(industry).forEach(({ post, theme }, i) => {
+      const platform = trendPlatformName(post.platform).toUpperCase();
+      const metrics = [post.views ? `Views: ${n(post.views)}` : "", post.likes ? `Likes: ${n(post.likes)}` : "", post.comments ? `Comments: ${n(post.comments)}` : "", post.shares ? `Shares: ${n(post.shares)}` : ""].filter(Boolean).join(" | ");
       prompt += `
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-${o.postIcon} TRENDING ${o.label.toUpperCase()} #${i + 1} (EXTERNAL ACCOUNT): @${post.author}
+📱 ${platform} EXAMPLE #${i + 1} (EXTERNAL ACCOUNT): ${post.author || "unknown"}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ENGAGEMENT SCORE: ${post.engagement_score?.toLocaleString("en-US") || "N/A"}
-${formatMetrics(post, o.platform)}
-${o.platform === "instagram" ? `TYPE: ${post.type || "Post"}\n` : ""}
+THEME: ${theme}
+${post.format ? `FORMAT: ${TREND_FORMAT_NAMES[post.format] ?? post.format}\n` : ""}${metrics ? `${metrics}\n` : ""}
 CAPTION/COPY:
-"${caption}"
-
-HASHTAGS: ${(post.hashtags || []).slice(0, 5).map((h: string) => `#${h}`).join(" ") || "None"}
+"${truncate(post.text, 300)}"
 
 🔗 ${post.url}
 
 `;
     });
-    prompt += `
-💡 KEY ${o.label.toUpperCase()} TAKEAWAYS:
+    const opportunities: string[] = Array.isArray(industryAnalysis.opportunities_for_client) ? industryAnalysis.opportunities_for_client : [];
+    const takeaways: string[] = Array.isArray(industryAnalysis.key_takeaways) ? industryAnalysis.key_takeaways : [];
+    if (opportunities.length) {
+      prompt += `
+💡 OPPORTUNITIES FOR ${clientName.toUpperCase()}:
 `;
-    (o.analysis.key_takeaways || []).forEach((takeaway: string, i: number) => { prompt += `${i + 1}. ${takeaway}\n`; });
+      opportunities.forEach((o, i) => { prompt += `${i + 1}. ${o}\n`; });
+    }
+    if (takeaways.length) {
+      prompt += `
+💡 KEY INDUSTRY TAKEAWAYS:
+`;
+      takeaways.forEach((t, i) => { prompt += `${i + 1}. ${t}\n`; });
+    }
     slideNum += 2;
-  };
-  if (hasTikTokData) trendSlides({ label: "TikTok", analysis: tiktokAnalysis, patterns: tiktokPatterns, posts: tiktokPosts, platform: "tiktok", formatsIcon: "📹", postIcon: "📱" });
-  if (hasInstagramData) trendSlides({ label: "Instagram", analysis: igAnalysis, patterns: instagramPatterns, posts: instagramPosts, platform: "instagram", formatsIcon: "📸", postIcon: "📷" });
-
-  if (skipTrends) {
-    prompt += `\n---\n\nSLIDE ${slideNum}: TREND ANALYSIS\n\nTrend analysis was not included in this report. This may be because:\n- No social keywords were configured for this client\n- Trend analysis was explicitly skipped for this run\n\nTo enable trend analysis, add social keywords in the client onboarding screen.\n`;
-    slideNum++;
   }
 
   // Action items: a fall named only when impressions fell, a pillar only when the analysis found one underrepresented.
@@ -1263,8 +1052,7 @@ SLIDE ${slideNum}: ACTION ITEMS & NEXT STEPS
 
 🚨 IMMEDIATE PRIORITIES (This Week):
 • Implement top 3 content recommendations
-${changes.impressions?.percent < 0 ? "• Address performance decline with increased posting frequency\n" : ""}${underrepresented ? `• Focus on underrepresented pillar: ${underrepresented}\n` : ""}• Test hooks inspired by top-performing TikTok content
-
+${changes.impressions?.percent < 0 ? "• Address performance decline with increased posting frequency\n" : ""}${underrepresented ? `• Focus on underrepresented pillar: ${underrepresented}\n` : ""}${industry ? "• Test hooks inspired by this period's industry trends\n" : ""}
 📅 WEEKLY POSTS:
 • Each week's posts are planned in the Socialytics calendar the Monday before, from the latest results.
 
@@ -1277,22 +1065,16 @@ ${changes.impressions?.percent < 0 ? "• Address performance decline with incre
 🎯 SUCCESS CRITERIA FOR NEXT REPORT:
 • Increase posting frequency by 50%+
 • Achieve engagement rate improvement on key pillars
-• Test at least 3 new content formats from trend analysis
-
+${industry ? "• Test at least 3 new content formats from the industry trends\n" : ""}
 ---
 
 SLIDE ${slideNum + 2}: DATA SOURCES & METHODOLOGY
 
 📊 DATA SOURCES:
 ${hasSprout ? "• Sprout Social API: " + sproutTopPosts.length + " top posts analyzed, full performance metrics" : "• Sprout Social: not connected for this brand yet; no performance data in this report"}
-• TikTok Trend Scraper: ${tiktokPosts.length} top posts by engagement (filtered by target languages)
-• Instagram Trend Scraper: ${instagramPosts.length} top posts by engagement (filtered by target languages)
-
+${industry ? `• Industry trends: ${industry.themes.length} themes and ${industry.posts.length} example posts from the weekly trend research in the report dates\n` : ""}
 🔍 METHODOLOGY:
-• Engagement Scoring: (likes × 1) + (comments × 2) + (shares × 3) + (views ÷ 1000)
-• Language Filter: Target language content for relevance (multi-language supported)
 • Performance dates: ${clientData.report_window?.current_month?.start} to ${clientData.report_window?.current_month?.end}. Top-post metrics are lifetime values for posts published in those dates; they are not period totals.
-• Hashtags Searched: ${clientData.context?.brief_context?.social_keywords?.join(", ") || "Industry-relevant keywords"}
 
 📅 REPORT GENERATED: ${date}
 
@@ -1314,11 +1096,11 @@ END OF PRESENTATION
     },
     data_included: {
       sprout_top_posts: sproutTopPosts.length,
-      tiktok_posts_with_captions: tiktokPosts.length,
-      instagram_posts_with_captions: instagramPosts.length,
+      tiktok_posts_with_captions: onPlatform("tiktok"),
+      instagram_posts_with_captions: onPlatform("instagram"),
       content_pillars: contentPillars.length,
     },
-    trends_count: { tiktok: tiktokPosts.length, instagram: instagramPosts.length },
+    trends_count: { tiktok: onPlatform("tiktok"), instagram: onPlatform("instagram") },
   };
 }
 
@@ -1337,21 +1119,6 @@ export function checkGammaState(result: Any, attempt: number): Any {
 
 // ── Generate Run Summary ───────────────────────────────────────────────────
 
-function topHashtags(posts: Any[], limit = 10) {
-  const tagCounts: Record<string, number> = {};
-  for (const post of posts) {
-    for (const tag of post.hashtags || []) {
-      const clean = String(tag).toLowerCase().replace(/^#/, "");
-      if (clean) tagCounts[clean] = (tagCounts[clean] || 0) + 1;
-    }
-  }
-  return Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, limit).map(([tag, count]) => ({ tag, count }));
-}
-function avgEngagement(posts: Any[]) {
-  if (!posts.length) return 0;
-  return Math.round(posts.reduce((sum, p) => sum + (p.engagement_score || 0), 0) / posts.length);
-}
-
 export interface SummaryInput {
   /** Check Gamma State's last output, or the failed request's output. */
   gamma: Any;
@@ -1364,13 +1131,22 @@ export interface SummaryInput {
   /** The parsed analysis. */
   ai: Any;
   prepared: Any;
-  trendStatus: Any;
+  /** The period's stored industry trends (storedTrends.ts), or null when none were read. */
+  industryTrends: IndustryTrends | null;
   /** When the run started and now. */
   startedAt: Date;
   now: Date;
 }
 
-/** The report_data the writer stores. */
+/**
+ * The report_data the writer stores. Where n8n stored its TikTok and
+ * Instagram posts (tiktok_trends, instagram_trends) and why each scraper did
+ * not run (trend_status), the report keeps the period's stored industry
+ * trends (industry_trends, null for none) and whether it read them
+ * (trend_status.industry: stored, none, or skipped by an earlier request);
+ * the analysis of trends is null when there are none. The counts of TikTok
+ * and Instagram trend posts are the industry trends' posts on each.
+ */
 export function generateRunSummary(a: SummaryInput): Any {
   const gammaResult = a.gamma || {};
   const presentationData = a.presentation || {};
@@ -1412,8 +1188,8 @@ export function generateRunSummary(a: SummaryInput): Any {
   if (a.prepared?.brief_warning) warnings.push(a.prepared.brief_warning);
   if (cbc.brief_warning && !warnings.includes(cbc.brief_warning)) warnings.push(cbc.brief_warning);
 
-  const tiktokTrends: Any[] = clientData.trends?.tiktok?.posts || clientData.tiktok_trends || [];
-  const instagramTrends: Any[] = clientData.trends?.instagram?.posts || clientData.instagram_trends || [];
+  const industry = a.industryTrends?.themes?.length ? a.industryTrends : null;
+  const onPlatform = (platform: string) => (industry ? industry.posts.filter((p) => p.platform === platform).length : 0);
 
   let geoArr = clientData.context?.geo || config.geo || ["US"];
   if (typeof geoArr === "string") geoArr = geoArr.split(",").map((s: string) => s.trim()).filter(Boolean);
@@ -1422,10 +1198,10 @@ export function generateRunSummary(a: SummaryInput): Any {
   if (typeof languagesArr === "string") languagesArr = languagesArr.split(",").map((s: string) => s.trim()).filter(Boolean);
   if (!Array.isArray(languagesArr)) languagesArr = [languagesArr];
 
-  const trendStatus = a.trendStatus || {};
-  for (const [platform, state] of Object.entries(trendStatus)) {
-    if (state === "missing_keywords") warnings.push(`${platform === "tiktok" ? "TikTok" : "Instagram"} trends were not available this month.`);
-  }
+  const skipped = clientData.skip_trends === true || cbc.skip_trends === true;
+  const analysis = aiAnalysis && typeof aiAnalysis === "object" && !Array.isArray(aiAnalysis)
+    ? { ...aiAnalysis, industry_trends_analysis: industry ? aiAnalysis.industry_trends_analysis ?? null : null }
+    : aiAnalysis;
   const calendar: Any[] = aiAnalysis.content_calendar || [];
   return {
     report_id: reportId,
@@ -1451,10 +1227,9 @@ export function generateRunSummary(a: SummaryInput): Any {
       platform_metrics: sproutData.platform_metrics || {},
       top_posts_by_platform: sproutData.top_posts_by_platform || {},
     },
-    tiktok_trends: { posts: tiktokTrends, patterns: { top_hashtags: topHashtags(tiktokTrends), avg_engagement: avgEngagement(tiktokTrends) } },
-    instagram_trends: { posts: instagramTrends, patterns: { top_hashtags: topHashtags(instagramTrends), avg_engagement: avgEngagement(instagramTrends) } },
-    ai_analysis: aiAnalysis,
-    trend_status: trendStatus,
+    industry_trends: industry,
+    ai_analysis: analysis,
+    trend_status: { industry: skipped ? "skipped" : industry ? "stored" : "none" },
     content_calendar: calendar,
     context: {
       timezone: clientData.context?.timezone || config.timezone || "UTC",
@@ -1473,8 +1248,10 @@ export function generateRunSummary(a: SummaryInput): Any {
     data_counts: {
       total_recommendations: calendar.reduce((sum, day) => sum + (day.posts || []).length, 0) || presentationData.total_recommendations || 0,
       content_calendar_days: calendar.length,
-      tiktok_trends: tiktokTrends.length,
-      instagram_trends: instagramTrends.length,
+      tiktok_trends: onPlatform("tiktok"),
+      instagram_trends: onPlatform("instagram"),
+      industry_trend_themes: industry?.themes.length ?? 0,
+      industry_trend_posts: industry?.posts.length ?? 0,
       sprout_top_posts: (sproutData.top_posts || []).length,
       sprout_profiles: (sproutData.profiles || []).length,
     },

@@ -5,6 +5,7 @@
  * request ids) never appear in any output.
  */
 import { shownCompetitive, shownSocial, type ShownInsightsRow } from "../reports/shownFields.ts";
+import { FINISHED_TREND_WEEKS } from "../trends/reportWeeks.ts";
 import { designWaitingFor, designWaitingLine, type DesignStepRow, type DesignWaitingFor } from "../design/setup.ts";
 declare const Deno: { env: { get(k: string): string | undefined } } | undefined;
 /**
@@ -50,7 +51,7 @@ export interface DesignSystemRow { id: string; client_id: string; version: numbe
 
 export interface TrendWeekRow { id: string; client_id: string; week_start: string; status: string }
 export interface TrendThemeRow { id: string; week_id: string; client_id: string; position: number; title: string; happening: string; why_it_matters: string; angle: string; platforms: string[] | null; post_ids: string[] | null; dismissed_at: string | null }
-export interface TrendPostRow { id: string; client_id: string; platform: string; url: string; author: string; text: string; posted_at: string | null; format: string | null; kept: boolean }
+export interface TrendPostRow { id: string; client_id: string; platform: string; url: string; author: string; text: string; posted_at: string | null; format: string | null; kept: boolean; tripwire?: boolean }
 /** The stored trend rows a report's period may draw on (store.trendRows): the weeks, themes and posts of its client. */
 export interface TrendRows { weeks: TrendWeekRow[]; themes: TrendThemeRow[]; posts: TrendPostRow[] }
 
@@ -203,21 +204,34 @@ export function competitorSetOut(set: SetWithCompetitors): CompetitorSetOut {
 
 const trendOut = (v: unknown): TrendOut => ({ posts: Array.isArray(obj(v).posts) ? (obj(v).posts as unknown[]).length : 0, patterns: obj(v).patterns ?? null });
 
-/** A trend week counts once it has finished, whole (done) or in part (partial). */
-export const FINISHED_TREND_WEEKS = ["done", "partial"];
+/**
+ * A report's trends summary, the trend posts it holds on TikTok and on Instagram: the scrapers' posts as n8n or an in-app run before 9 Nov 2026
+ * stored them (tiktok_trends, instagram_trends), or, for a report made on the stored trends (industry_trends, Trends Task 16), its example posts on
+ * each, with no patterns. Null when the report holds neither.
+ */
+function trendsSummary(rd: Record<string, unknown>): { tiktok: TrendOut; instagram: TrendOut } | null {
+  if (rd.tiktok_trends || rd.instagram_trends) return { tiktok: trendOut(rd.tiktok_trends), instagram: trendOut(rd.instagram_trends) };
+  const posts = obj(rd.industry_trends).posts;
+  if (!Array.isArray(posts)) return null;
+  const on = (platform: string): TrendOut => ({ posts: posts.filter((p) => obj(p).platform === platform).length, patterns: null });
+  return { tiktok: on("tiktok"), instagram: on("instagram") };
+}
+
+/** A trend week counts once it has finished (trends/reportWeeks.ts). */
+export { FINISHED_TREND_WEEKS };
 
 /**
- * The industry trends of a report: the themes the weekly collection stored for its client, whichever engine wrote the report. The rule is the one the
- * app's screens read (trend_themes_in_range, supabase/migrations/20261102100000_trend_access.sql): finished weeks whose Monday falls from the period's
- * first day to its last, both included; dismissed themes left out; newest week first, then by position; each theme's posts are the kept ones it lists,
- * in the order it lists them. Only the fields below leave: the weighted engagement, the fit score, the filter's reasons and the tripwire flag stay with
- * the team. Null when no theme falls in the period, or the report has no period.
+ * The industry trends of a report: the themes the weekly collection stored for its client, whichever engine wrote the report. The rule is the one
+ * every reader of a report uses (trends/reportWeeks.ts; the in-app report, its deck and its insights read the same): finished weeks whose Monday falls
+ * from the period's first day to its last, both included; dismissed themes left out; newest week first, then by position; each theme's posts are the
+ * kept ones it lists, in the order it lists them, never one the tripwire flagged. Only the fields below leave: the weighted engagement, the fit score,
+ * the filter's reasons and the tripwire flag stay with the team. Null when no theme falls in the period, or the report has no period.
  */
 export function industryTrendsOut(rows: TrendRows | null, report: Pick<ReportRow, "client_id" | "date_range_start" | "date_range_end">): IndustryTrendsOut | null {
   const { client_id: client, date_range_start: from, date_range_end: to } = report;
   if (!rows || !from || !to) return null;
   const weekStart = new Map(rows.weeks.filter((w) => w.client_id === client && FINISHED_TREND_WEEKS.includes(w.status) && w.week_start >= from && w.week_start <= to).map((w) => [w.id, w.week_start]));
-  const kept = new Map(rows.posts.filter((p) => p.client_id === client && p.kept).map((p) => [p.id, p]));
+  const kept = new Map(rows.posts.filter((p) => p.client_id === client && p.kept && p.tripwire !== true).map((p) => [p.id, p]));
   const startOf = (t: TrendThemeRow) => weekStart.get(t.week_id)!;
   const themes = rows.themes.filter((t) => t.client_id === client && weekStart.has(t.week_id) && !t.dismissed_at)
     .sort((a, b) => (startOf(a) === startOf(b) ? a.position - b.position : startOf(a) < startOf(b) ? 1 : -1));
@@ -250,7 +264,7 @@ export function reportOut(row: ReportRow, opts: { detail?: boolean; trendRows?: 
     out.analysis = analysis && typeof analysis === "object" ? omitDeep(analysis as Record<string, unknown>, INTERNAL_KEYS) : null;
     out.calendar = Array.isArray(rd.content_calendar) ? (rd.content_calendar as ReportOut["calendar"]) : null;
     out.performance = rd.sprout_performance && typeof rd.sprout_performance === "object" ? omitDeep(rd.sprout_performance as Record<string, unknown>, INTERNAL_KEYS) : null;
-    out.trends = rd.tiktok_trends || rd.instagram_trends ? { tiktok: trendOut(rd.tiktok_trends), instagram: trendOut(rd.instagram_trends) } : null;
+    out.trends = trendsSummary(rd);
     if (opts.trendRows !== undefined) out.industry_trends = industryTrendsOut(opts.trendRows, row);
   }
   return out;

@@ -6,7 +6,11 @@
 //                                and the report as the app stored it.
 //   social-trends-2026-09.json   execution 583953 (19 Oct 2026): the client
 //                                settings the trend nodes read, the two raw
-//                                scraper datasets, what the normalizers made.
+//                                scraper datasets, what the normalizers made,
+//                                the trend analyses and Gamma's looks. The
+//                                scrapers are not ported any more (Trends
+//                                plan, Task 16); its analyses and looks are
+//                                still read.
 // Not imported by any function.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -29,19 +33,6 @@ export const nodeOf = (name: string): Any => {
 };
 export const nodeCode = (name: string): string => nodeOf(name).parameters.jsCode;
 
-/**
- * The apidojo TikTok search the app runs where n8n runs clockworks with this
- * input (social/nodes.ts, Prepare Trend Inputs): n8n's searches, date window
- * and sort, in apidojo's shape. location: the search region the client's geo gives.
- */
-export function apidojoSearchFor(n8nInput: Any, location?: string): Any {
-  if (!n8nInput) return null;
-  const range: Record<string, string> = { "1": "YESTERDAY", "2": "THIS_WEEK", "3": "THIS_MONTH", "4": "LAST_THREE_MONTHS", "5": "LAST_SIX_MONTHS" };
-  return {
-    keywords: n8nInput.searchQueries, dateRange: range[n8nInput.searchDatePosted], sortType: "MOST_LIKED", ...(location ? { location } : {}),
-    maxItems: n8nInput.searchQueries.length * n8nInput.resultsPerPage, includeSearchKeywords: true,
-  };
-}
 export const mirror = (file: string) => readFileSync(join(root, "n8n", "code", `${file}.js`), "utf8");
 
 /**
