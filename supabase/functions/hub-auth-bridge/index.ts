@@ -24,6 +24,7 @@
 import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { createClient } from "../_shared/supabase.ts";
 import { findAuthUserByEmail } from "../_shared/auth/findUser.ts";
+import { resolveToolRole, type HubUser, type ToolRole } from "./role.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -39,58 +40,7 @@ const TOOL_NAME = Deno.env.get("HUB_TOOL_NAME") || "Socialytics";
 // that header. Origin is still read below, but only to log where a request
 // came from.
 
-type HubUser = {
-  _id: string;
-  name: string;
-  email: string;
-  role: string;
-  company: string;
-  isActive: boolean;
-  tools: Array<{ tool: { _id: string; name: string; url?: string }; role: string }>;
-};
-
-type ToolRole = "admin" | "moburst_user" | "client" | null;
-type RoleResolution = {
-  role: ToolRole;
-  source: "tool_entry" | "global_admin_fallback" | "none";
-  tool_entry_name?: string;
-  tool_entry_role?: string;
-  tool_names_from_hub?: string[];
-};
-
-function resolveToolRole(hubUser: HubUser): RoleResolution {
-  const target = TOOL_NAME.toLowerCase().trim();
-  const allNames = (hubUser.tools || []).map((t) => t?.tool?.name || "");
-
-  // Permissive match: exact OR starts-with (e.g. "Socialytics AI" or "Socialytics by Moburst")
-  const toolEntry = (hubUser.tools || []).find((t) => {
-    const n = (t?.tool?.name || "").toLowerCase().trim();
-    return n === target || n.startsWith(target + " ") || n.startsWith(target + "-") || n.startsWith(target);
-  });
-
-  if (toolEntry) {
-    const rawRole = toolEntry.role || "";
-    const r = rawRole.toLowerCase().trim();
-    let role: ToolRole = null;
-    if (r === "admin") role = "admin";
-    else if (r === "moburst user" || r === "moburst" || r === "moburst_user" || r === "staff") role = "moburst_user";
-    else if (r === "client" || r === "viewer") role = "client";
-    return {
-      role,
-      source: "tool_entry",
-      tool_entry_name: toolEntry.tool?.name,
-      tool_entry_role: rawRole,
-      tool_names_from_hub: allNames,
-    };
-  }
-
-  // No tool entry — fall back to global role so Moburst admins can access tools they
-  // haven't been explicitly assigned to yet (lockout prevention).
-  if ((hubUser.role || "").toLowerCase() === "admin") {
-    return { role: "admin", source: "global_admin_fallback", tool_names_from_hub: allNames };
-  }
-  return { role: null, source: "none", tool_names_from_hub: allNames };
-}
+// The role rule lives in role.ts (resolveToolRole).
 
 function json(body: unknown) {
   return new Response(JSON.stringify(body), {
@@ -251,7 +201,7 @@ Deno.serve(async (req) => {
       return json({ error: "User is deactivated in Hub", debug: { origin, tool_name: TOOL_NAME, hub_email: hubUser.email } });
     }
 
-    const resolution = resolveToolRole(hubUser);
+    const resolution = resolveToolRole(hubUser, TOOL_NAME);
     const debug = {
       origin,
       tool_name: TOOL_NAME,

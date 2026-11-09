@@ -30,11 +30,10 @@ regardless of which portal the user came from. The legacy path was not modified.
 | gOS role | Socialytics role |
 |----------|------------------|
 | `super_admin`, `admin`, `account_manager` | `admin` |
-| `user`, `staff` with a `moburst.com` address and no outside organization | `moburst_user`: every client, with full staff features, whatever companies the Hub lists (migration `20261111110000`) |
-| `user`, `staff` with any other address, or in an outside organization | `client` |
-| `client`, `viewer` | `client` |
+| any other role, with a `moburst.com` address | `moburst_user`: every client, with full staff features, whatever companies the Hub lists (migration `20261111110000`) |
+| `user`, `staff`, `moburst_user`, `client`, `viewer`, any other address | `client` |
 
-The mapping is `supabase/functions/gos-auth-bridge/role.ts` (tested in `supabase/tests/gos-auth-bridge/role.test.ts`). Until 9 Nov 2026 a `user` with companies became a `client`, so Moburst people with assigned companies could not make designs; each gets the new role at their next sign-in through the Hub. Company scoping now applies to clients only: `allowed_company_slugs` limits a client, never a Moburst user.
+The same rule holds for tools.moburst.com (`hub-auth-bridge/role.ts`): its Socialytics tool entry decides as before, and any `moburst.com` address is raised to at least `moburst_user`; admins stay admins. Lital, 9 Nov 2026: "make any @moburst email address automatically be granted a moburst user role, not client in both hubs" (`_shared/auth/moburstPeople.ts`). The gOS mapping is `supabase/functions/gos-auth-bridge/role.ts`. Until 9 Nov 2026 a gOS `user` with companies became a `client`, so Moburst people with assigned companies could not make designs; each gets the new role at their next sign-in. Company scoping applies to clients only: `allowed_company_slugs` limits a client, never a Moburst user.
 
 ## Company scoping
 

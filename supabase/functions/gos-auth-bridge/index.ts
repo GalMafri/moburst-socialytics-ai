@@ -212,7 +212,7 @@ Deno.serve(async (req) => {
     }
 
     const slugs = Array.isArray(gosUser.allowed_company_slugs) ? gosUser.allowed_company_slugs : [];
-    const toolRole = mapGosRole(gosUser.role, gosUser.email, gosUser.organization);
+    const toolRole = mapGosRole(gosUser.role, gosUser.email);
     // Detailed context stays server-side only.
     console.log("[gos-bridge]", JSON.stringify({
       tool_id: TOOL_ID, gos_email: gosUser.email, gos_role: gosUser.role,
