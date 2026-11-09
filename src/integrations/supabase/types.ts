@@ -4694,6 +4694,11 @@ export type Database = {
         Args: { p_holder: string; p_name: string }
         Returns: undefined
       }
+      report_insights_live_from: { Args: never; Returns: string }
+      report_insights_queue: {
+        Args: { p_report: string; p_table: string }
+        Returns: undefined
+      }
       report_pipeline_retention: { Args: { p_now?: string }; Returns: Json }
       report_pipeline_start: {
         Args: {
