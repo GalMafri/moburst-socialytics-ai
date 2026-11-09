@@ -4,9 +4,9 @@
 // through the evidence limits, with the team's verdicts keyed by a gap's
 // own words.
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { competitiveBrief } from "../../../functions/_shared/competitive/brief";
-import { competitiveContext, insightKey } from "../../../functions/_shared/reports/payloads";
+import { buildSocialPayload, competitiveContext, insightKey } from "../../../functions/_shared/reports/payloads";
 import type { ShownInsightsRow } from "../../../functions/_shared/reports/shownFields";
 
 const company = (name: string, is_client: boolean, posts: number) => ({
@@ -43,7 +43,7 @@ function db(tables: Record<string, unknown[]>) {
       const rows = tables[table] ?? [];
       // deno-lint-ignore no-explicit-any
       const q: any = {};
-      for (const op of ["select", "eq", "in", "order", "limit"]) q[op] = () => q;
+      for (const op of ["select", "eq", "neq", "in", "order", "limit"]) q[op] = () => q;
       q.maybeSingle = async () => ({ data: rows[0] ?? null, error: null });
       q.then = (ok: (v: unknown) => unknown) => Promise.resolve({ data: rows, error: null }).then(ok);
       return q;
@@ -71,5 +71,17 @@ describe("the monthly report's competitive context", () => {
     expect(ctx.executive_summary).toBe("Moburst ranks 2nd of 2 on followers.");
     expect(ctx.gaps).toEqual([{ gap: "Followers trail the field", platform: "instagram", suggested_play: "Test weekly Reels.", endorsed: true }]);
     expect((competitiveContext(REPORT, [], [])!.gaps as Array<{ gap: string }>).map((g) => g.gap)).toEqual(["The model's gap"]);
+  });
+});
+
+describe("a monthly report run's payload", () => {
+  it("carries the competitive context with the report's own fields when its insights can't be read, and never fails for them", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const base = db({ competitive_reports: [REPORT], competitive_insight_feedback: [], competitive_learnings: [], sprout_profiles: [] });
+    const supabase = { from: (table: string) => (table === "report_insights" ? (() => { throw new Error("relation report_insights does not exist"); })() : base.from(table)) };
+    const payload = await buildSocialPayload({ supabase, client: { id: "mob", name: "Moburst" }, reportId: "r1", range: { start: "2026-10-01", end: "2026-10-31" } });
+    expect((payload.competitive_context as { gaps: Array<{ gap: string }> }).gaps.map((g) => g.gap)).toEqual(["The model's gap"]);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 });

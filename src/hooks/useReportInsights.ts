@@ -10,8 +10,8 @@ import { readShownInsights, type ReportTable } from "../../supabase/functions/_s
 export function useReportInsights(table: ReportTable, reportId: string | null | undefined) {
   return useQuery({
     queryKey: ["report-insights", table, reportId],
-    // A screen without its insights shows the report's own fields: nothing to say about it.
-    queryFn: () => readShownInsights(supabase, table, reportId).catch(() => null),
+    // A screen without its insights shows the report's own fields (the reader never fails).
+    queryFn: () => readShownInsights(supabase, table, reportId),
     enabled: !!reportId,
     staleTime: 60 * 1000,
   });

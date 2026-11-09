@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { competitiveFromLight, makeStore, reportFromLight } from "../../../functions/_shared/socialytics-api/store";
 import { competitiveReportOut, reportOut } from "../../../functions/_shared/socialytics-api/serializers";
 import { SHOWN_INSIGHT_COLUMNS } from "../../../functions/_shared/reports/shownFields";
@@ -76,5 +76,23 @@ describe("a single report", () => {
       expect(await store[get](id, scope)).toMatchObject({ id, insights: { report_id: id } });
       expect(calls[1]).toEqual({ table: "report_insights", select: SHOWN_INSIGHT_COLUMNS, filters: [["eq", "report_table", table], ["eq", "report_id", id], ["order", "confirmed_at", { ascending: false }], ["limit", 1]] });
     }
+  });
+
+  it("is read with its own fields when its insights can't be read: an API read never fails for them", async () => {
+    const id = "6f1c1a3e-6c1b-4c63-9a1b-0c1d2e3f4a5b";
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const db = {
+      from(table: string) {
+        const b: Record<string, unknown> = { select: () => b, eq: () => b, order: () => b, limit: () => b,
+          maybeSingle: async () => (table === "report_insights" ? { data: null, error: { message: "permission denied for table report_insights" } } : { data: { id, client_id: "c1" }, error: null }) };
+        return b;
+      },
+    };
+    // deno-lint-ignore no-explicit-any
+    const store = makeStore(db as any);
+    expect(await store.getReport(id, { allows: () => true } as never)).toEqual({ id, client_id: "c1", insights: null });
+    expect(await store.getCompetitiveReport(id, { allows: () => true } as never)).toEqual({ id, client_id: "c1", insights: null });
+    expect(warn).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
   });
 });

@@ -47,7 +47,7 @@ export function ClientOverview({ clientId, isStaff }: { clientId: string; isStaf
       ]);
       const compRow = competitive.data && competitiveReportQuality(competitive.data.report_data).ready ? competitive.data : null;
       // Read as every reader reads it: its insights where it has them, through the evidence limits (shownFields.ts).
-      const compInsights = compRow ? await readShownInsights(supabase, "competitive_reports", compRow.id).catch(() => null) : null;
+      const compInsights = compRow ? await readShownInsights(supabase, "competitive_reports", compRow.id) : null;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const fb = (feedback.data || []) as any[];
       const content = contentWeek((posts.data || []) as WeekPost[], (media.data || []) as PostMedia[], week);

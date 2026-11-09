@@ -101,7 +101,7 @@ export default function ReportView() {
       if (error) throw error;
       if (!data || !competitiveReportQuality(data.report_data).ready) return null;
       // Read as every reader reads it: its insights where it has them, through the evidence limits (shownFields.ts).
-      const insights = await readShownInsights(supabase, "competitive_reports", data.id).catch(() => null);
+      const insights = await readShownInsights(supabase, "competitive_reports", data.id);
       return { ...data, report_data: shownCompetitive(data.report_data, insights).report };
     },
     enabled: !!id,

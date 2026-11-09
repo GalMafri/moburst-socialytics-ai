@@ -64,14 +64,24 @@ export interface ShownGap {
   [key: string]: unknown;
 }
 
-/** A report's shown insights: its newest confirmed row, or null when it has none. Throws when they can't be read. */
+/**
+ * A report's shown insights: its newest confirmed row, or null when it has
+ * none. It never fails its reader: insights that can't be read are warned
+ * about and read as none, so the report's own fields show, and no report
+ * dispatch, weekly plan, brief, API read or screen fails because of them.
+ */
 export async function readShownInsights(db: Db, table: ReportTable, reportId: string | null | undefined): Promise<ShownInsightsRow | null> {
   if (!reportId) return null;
-  const { data, error } = await db.from("report_insights").select(SHOWN_INSIGHT_COLUMNS)
-    .eq("report_table", table).eq("report_id", reportId)
-    .order("confirmed_at", { ascending: false }).limit(1).maybeSingle();
-  if (error) throw new Error(`Could not read the report's insights: ${error.message}`);
-  return (data ?? null) as ShownInsightsRow | null;
+  try {
+    const { data, error } = await db.from("report_insights").select(SHOWN_INSIGHT_COLUMNS)
+      .eq("report_table", table).eq("report_id", reportId)
+      .order("confirmed_at", { ascending: false }).limit(1).maybeSingle();
+    if (error) throw new Error(error.message);
+    return (data ?? null) as ShownInsightsRow | null;
+  } catch (e) {
+    console.warn(`[report insights] could not read ${table} ${reportId}; its own fields show:`, e instanceof Error ? e.message : String(e));
+    return null;
+  }
 }
 
 const SOURCE_NAMES: Record<FactSource, string> = { sprout: "Sprout", rivaliq: "RivalIQ" };

@@ -4,7 +4,7 @@
 // evidence limits. Every reader (screens, planner, briefs, payloads, the
 // connector) reads through these.
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Fact } from "../../../functions/_shared/reports/facts";
 import type { InsightFields } from "../../../functions/_shared/reports/insights";
 import { withCompetitiveEvidenceLimits } from "../../../functions/_shared/competitive/reportEvidence";
@@ -44,10 +44,20 @@ describe("readShownInsights", () => {
     expect(SHOWN_INSIGHT_COLUMNS).not.toMatch(/\*|problems|model|tokens/);
   });
 
-  it("is null for a report with none or no id, and says so when they can't be read", async () => {
+  it("is null for a report with none or no id", async () => {
     expect(await readShownInsights(recording([]).db, "competitive_reports", "r1")).toBeNull();
     expect(await readShownInsights(recording([]).db, "reports", null)).toBeNull();
-    await expect(readShownInsights(recording([], { message: "permission denied" }).db, "reports", "r1")).rejects.toThrow(/permission denied/);
+  });
+
+  it("never fails its reader: insights that can't be read are warned about and read as none, so the report's own fields show", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(await readShownInsights(recording([], { message: "permission denied" }).db, "reports", "r1")).toBeNull();
+    const throwing = { from: () => { throw new Error("relation report_insights does not exist"); } };
+    expect(await readShownInsights(throwing, "competitive_reports", "r1")).toBeNull();
+    expect(warn.mock.calls.map((c) => c.join(" "))).toEqual([
+      expect.stringMatching(/report insights.*permission denied/), expect.stringMatching(/report insights.*does not exist/),
+    ]);
+    warn.mockRestore();
   });
 });
 

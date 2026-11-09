@@ -40,7 +40,7 @@ export async function competitiveBrief(supabase: AnyClient, clientId: string, pl
   const edits = new Map<string, unknown>((feedback || []).map((f: any) => [f.insight_key, f.edited]));
 
   // The summary and gaps every screen shows: the report's insights where it has them (a read that fails leaves its own), through the evidence limits.
-  const insights = await readShownInsights(supabase, "competitive_reports", report.id).catch(() => null);
+  const insights = await readShownInsights(supabase, "competitive_reports", report.id);
   const rd: any = shownCompetitive(report.report_data || {}, insights).report;
   const ai = rd.ai_analysis || {};
   const plat = String(platform || "").toLowerCase();

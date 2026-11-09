@@ -662,4 +662,16 @@ describe("the report findings a week is planned from (report insights, 3 Nov 202
     expect(await reportFindings({ report_insights: [{ ...insights, fields: { ...insights.fields, recommendations: null } }] })).toEqual(["Impressions rose 26.5% to 12,400.", "The model's own recommendation.", "Rival Co posts a Reel a day."]);
     expect(await reportFindings({})).toEqual(["The model's own insight.", "The model's own recommendation.", "Rival Co posts a Reel a day."]);
   });
+
+  it("plans from the report's own fields when its insights can't be read, and never fails for them", async () => {
+    m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const report = { id: "r9", created_at: "2026-11-09T00:00:00Z", report_data: [{ ai_analysis: { sprout_performance_analysis: { key_insights: ["The model's own insight."] } } }] };
+    const base = fakeDb({ clients: [CLIENT], reports: [report] });
+    const db = { ...base, from: (table: string) => (table === "report_insights" ? (() => { throw new Error("relation report_insights does not exist"); })() : base.from(table)) };
+    const gathered = await gatherEvidence(db, CLIENT, NOW);
+    expect(gathered.evidence.filter((e) => e.kind === "report").map((e) => e.text)).toEqual(["The model's own insight."]);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
 });
