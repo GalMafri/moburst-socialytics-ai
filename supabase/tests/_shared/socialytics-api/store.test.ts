@@ -135,7 +135,7 @@ describe("trendRows", () => {
   const theme = (id: string, week_id: string, post_ids: string[]) => ({ id, week_id, client_id: "c-bader", position: 0, title: id, happening: "", why_it_matters: "", angle: "", platforms: [], post_ids, dismissed_at: null });
   const post = (id: string) => ({ id, client_id: "c-bader", platform: "tiktok", url: `https://tiktok.example/${id}`, author: "", text: "", posted_at: null, format: null, kept: true });
 
-  it("reads the finished weeks that start in the period, then their live themes, then the kept posts those themes list", async () => {
+  it("reads the finished weeks that start in the period, then their live themes, then the kept, unflagged posts those themes list", async () => {
     const { db, calls } = answeringDb((c) => (c.table === "trend_weeks" ? [week("w1")] : c.table === "trend_themes" ? [theme("t1", "w1", ["p1", "p2"]), theme("t2", "w1", ["p2", "p3"])] : idsOf(c).map(post)));
     const out = await makeStore(db).trendRows("c-bader", "2026-08-01", "2026-08-31");
     expect(calls.map((c) => c.table)).toEqual(["trend_weeks", "trend_themes", "trend_posts"]);
@@ -147,6 +147,8 @@ describe("trendRows", () => {
     expect(op(themes, "in", "week_id", ["w1"])).toBeDefined();
     expect(op(themes, "is", "dismissed_at", null)).toBeDefined();
     expect(op(posts, "eq", "kept", true)).toBeDefined();
+    // A post the tripwire flagged is never served (trends/reportWeeks.ts), though the column itself is not read.
+    expect(op(posts, "eq", "tripwire", false)).toBeDefined();
     expect(op(posts, "in", "id", ["p1", "p2", "p3"])).toBeDefined();
     expect(out.weeks.map((w) => w.id)).toEqual(["w1"]);
     expect(out.themes.map((t) => t.id)).toEqual(["t1", "t2"]);

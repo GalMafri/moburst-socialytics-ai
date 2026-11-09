@@ -74,10 +74,10 @@ describe("resolveEngine", () => {
   it("takes app, and shadows with the in-app social pipeline, once its secrets are set (it has its writer)", () => {
     expect(resolveEngine("app", "social", REGISTRY, socialEnv)).toMatchObject({ engine: "app", pipeline: { name: "social_v1" } });
     expect(resolveEngine("shadow", "social", REGISTRY, socialEnv)).toMatchObject({ engine: "shadow", pipeline: { name: "social_v1" } });
-    // The scrapers' token is awaited: a shadow waits for it, a real report never does.
+    // The report reads stored trends and runs no scraper (Trends Task 16): it needs no Apify token.
     const noApify = (n: string) => (n === "APIFY_API_TOKEN" ? undefined : socialEnv(n));
     expect(resolveEngine("shadow", "social", REGISTRY, noApify).pipeline?.name).toBe("social_v1");
-    expect(resolveEngine("app", "social", REGISTRY, noApify)).toEqual({ engine: "app", refused: expect.stringContaining("app-capable") });
+    expect(resolveEngine("app", "social", REGISTRY, noApify)).toMatchObject({ engine: "app", pipeline: { name: "social_v1" } });
   });
 
   it("has no app pipeline while this deployment has no writer for the kind's real report", () => {
@@ -153,7 +153,8 @@ describe("registry", () => {
     }
     expect(REGISTRY.get("linkedin_source_v1")).toMatchObject({ kind: "linkedin_source", modes: ["shadow", "app"], appCapable: true, secrets: [], awaitedSecrets: ["APIFY_API_TOKEN"] });
     expect(REGISTRY.get("competitive_v1")).toMatchObject({ kind: "competitive", modes: ["shadow", "app"], appCapable: true, secrets: ["RIVALIQ_API_KEY", "ANTHROPIC_API_KEY"], awaitedSecrets: ["APIFY_API_TOKEN"] });
-    expect(REGISTRY.get("social_v1")).toMatchObject({ kind: "social", modes: ["shadow", "app"], appCapable: true, secrets: ["ANTHROPIC_API_KEY", "SPROUT_CLIENT_ID", "SPROUT_CLIENT_SECRET", "GAMMA_API_KEY"], awaitedSecrets: ["APIFY_API_TOKEN"] });
+    expect(REGISTRY.get("social_v1")).toMatchObject({ kind: "social", modes: ["shadow", "app"], appCapable: true, secrets: ["ANTHROPIC_API_KEY", "SPROUT_CLIENT_ID", "SPROUT_CLIENT_SECRET", "GAMMA_API_KEY"] });
+    expect(REGISTRY.get("social_v1")!.awaitedSecrets ?? []).toEqual([]);
   });
 
   it("refuses two pipelines with one name, a missing first step, and an app-capable pipeline without app mode", () => {

@@ -47,6 +47,8 @@ const CONNECTED_ONLY = {
   tracking: "A demo takes no competitor tracking slots; the connected showcase workspace shows tracking and the competitive report.",
   competitive: "The competitive report is built on tracked competitors; the connected showcase workspace shows one.",
   analytics: "Performance analytics come from the brand's own Sprout connection; the connected showcase workspace shows them.",
+  // A demo runs no trend collection (Lital, 9 Nov 2026: Trends plan Task 17 dropped); the monthly report reads only stored weeks.
+  trends: "Industry trends are collected weekly once the brand is a client, so the demo's report has none.",
 };
 
 type Input = { client_name: string; website: string; competitors?: Array<{ name: string; website?: string }>; force_run?: boolean };
@@ -321,12 +323,15 @@ export const DEMO_STEPS: StepDef<DemoCtx>[] = [
   {
     name: "run_social",
     async run(job, ctx) {
-      // The monthly workflow branches around Sprout when a brand has no profile (trends, calendar and deck still come out);
-      // the gap only says what the report will not contain.
+      // The monthly workflow branches around Sprout when a brand has no profile (recommendations, calendar and deck still
+      // come out); the gaps only say what the report will not contain. A demo's report has no industry trends: they are
+      // collected weekly for clients, and a demo runs no collection.
       const client = await clientOf(job, ctx);
       const profiles = (await ctx.db.sproutProfilesOf(client.id)).filter((p) => p.is_active !== false);
       const r = await startReport(job, ctx, "social");
-      if (!profiles.length && (r.status === "done")) r.gaps = [...(r.gaps ?? []), gap("run_social", "performance_data_unavailable", "No Sprout profile: the social report has no performance section for this brand; trends, recommendations, the calendar and the deck are still produced.")];
+      // The report started, or the recent one the demo uses: neither has industry trends.
+      if (r.status === "done" || (r.status === "skipped" && r.reason === "fresh_report_exists")) r.gaps = [...(r.gaps ?? []), gap("run_social", "connected_only", CONNECTED_ONLY.trends)];
+      if (!profiles.length && (r.status === "done")) r.gaps = [...(r.gaps ?? []), gap("run_social", "performance_data_unavailable", "No Sprout profile: the social report has no performance section for this brand; recommendations, the calendar and the deck are still produced.")];
       return r;
     },
   },

@@ -10,16 +10,18 @@
 //                when there is a brief. An analysis that cannot be had after
 //                two tries leaves the raw brief and a warning, as in n8n.
 //   combine      Combine Brief Context with Client Data, Code in JavaScript
-//                (the Sprout setup), Prepare Trend Inputs.
+//                (the Sprout setup).
 //   sprout       The four Sprout reads, one per call (Get Sprout Social
 //                Analytics Data, Post Analytics, Previous Month Analytics and
 //                Post Analytics), then Aggregate Sprout Social Data and Attach
 //                Post Thumbnails; Skip Sprout Analytics for a brand with no
 //                profile.
-//   tiktok,      Run TikTok Trends / Run Instagram Trends: the scraper
-//   instagram    (through apifyStep.ts) and its normalizer, or the skip item.
-//                A scraper that fails twice gives the failed item and the
-//                report goes on, as in n8n.
+//   stored_trends  The period's industry trends: the themes and kept posts
+//                the weekly trend collection stored for the weeks that start
+//                in the report's period (social/storedTrends.ts), in place
+//                of n8n's TikTok and Instagram scrapers (Trends plan, Task
+//                16): no Apify call. None stored, or a stored request that
+//                asked for no trends: none, and the report goes on.
 //   normalize    Merge All Data Sources, Build Normalized Client Object,
 //                Attach Competitive Context.
 //   synthesis    AI Synthesis Agent, as a Claude message batch.
@@ -27,8 +29,17 @@
 //   repair       the parser's autofix: its repair prompt, as a batch.
 //   parse_repair the repaired answer, parsed and checked; else one fresh
 //                analysis.
-//   deck         Build Presentation Content, Create Gamma Presentation, then
-//                Fetch Gamma Result and Check Gamma State every 30 s.
+//   insights     The report's insights, worded with the report_insights
+//                job's code and input from the report data the run will
+//                write (social/runInsights.ts), checked before any call
+//                (go-live, the report's attempt); stored for the real report
+//                in app mode only. A failed first try is tried again with
+//                the answer it kept; after that, the deck uses the analysis
+//                and the report goes on.
+//   deck         Build Presentation Content from the analysis as the report
+//                shows it (its insights in place of the model-written
+//                fields), Create Gamma Presentation, then Fetch Gamma Result
+//                and Check Gamma State every 30 s.
 //   summary      Generate Run Summary.
 //   write        App: the real report, through the writer update-report uses
 //                (writers.ts), fenced to the report's attempt and only while it
@@ -37,19 +48,22 @@
 // Every provider answer the run reads is kept as long as the run
 // (social/replay.ts KEPT), so the run can be replayed from what it really read.
 
-import { runActorStep, type ApifyFactory } from "../apifyStep.ts";
 import { claudeBatchStep } from "../claude.ts";
-import { ANTHROPIC_API_KEY, APIFY_API_TOKEN, GAMMA_API_KEY, SPROUT_CLIENT_ID, SPROUT_CLIENT_SECRET } from "../secrets.ts";
-import { StepRestart, type PipelineDefinition, type StepContext, type StepResult } from "../types.ts";
+import { ANTHROPIC_API_KEY, GAMMA_API_KEY, SPROUT_CLIENT_ID, SPROUT_CLIENT_SECRET } from "../secrets.ts";
+import type { PipelineDefinition, StepContext, StepResult } from "../types.ts";
 import { briefAnswer, briefRequest, parseAnswer, repairRequest, synthesisProblems, synthesisRequest } from "../social/analysis.ts";
 import {
   aggregateSprout, attachCompetitiveContext, attachPostThumbnails, buildNormalizedClient, buildPresentationContent, checkGammaState, combineBrief,
-  generateRunSummary, hasSproutProfiles, normalizeInstagram, normalizeTikTok, prepareBriefText, prepareTrendInputs, skipSproutAnalytics, sproutSetup,
-  trendFailed, trendSkipped, workflowConfiguration,
+  generateRunSummary, hasSproutProfiles, prepareBriefText, readsTrends, skipSproutAnalytics, sproutSetup, workflowConfiguration,
 } from "../social/nodes.ts";
 import { gammaClient, GAMMA_POLL_SECONDS, sproutReader, sproutRequests, SPROUT_READS, type GammaClient, type SproutReader } from "../social/providers.ts";
 import { KEEP, KEPT, keptAnswer, replayOf } from "../social/replay.ts";
+import { runInsights } from "../social/runInsights.ts";
+import { readStoredTrends, type IndustryTrends } from "../social/storedTrends.ts";
 import { FALLBACK_SPROUT_CUSTOMER_ID } from "../../sprout/customer.ts";
+import { anthropicMessages } from "../../anthropic.ts";
+import type { InsightsDeps, InsightsHistory, InsightsRow } from "../../reports/insights.ts";
+import { shownSocial } from "../../reports/shownFields.ts";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -58,28 +72,28 @@ type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 export const SOCIAL_PIPELINE = "social_v1";
 /** Tries of the brief analysis before the report goes on with the raw brief. */
 export const BRIEF_TRIES = 2;
-/** Tries of a trend scraper before the report goes on without its trends. */
-export const TREND_TRIES = 2;
 /** Fresh analyses asked for after a repaired answer still did not match its format. */
 export const ANALYSIS_ROUNDS = 1;
-
-/**
- * The two trend scrapers, as n8n's Apify nodes run them: the actors' own
- * timeout and memory. TikTok is apidojo's scraper since 28 Oct 2026, where
- * n8n's is clockworks' (social/nodes.ts, Prepare Trend Inputs, says why).
- */
-export const TREND_ACTORS = {
-  tiktok: { id: "5K30i8aFccKNF5ICs", name: "apidojo/tiktok-scraper" },
-  instagram: { id: "reGe1ST3OBgYZSsZJ", name: "apify/instagram-hashtag-scraper" },
-} as const;
+/** Time the insights step keeps for itself after its model call must have ended, inside the step's own limit. */
+export const INSIGHTS_MARGIN_MS = 15_000;
+/** Tries of the insights step before the deck goes on with the analysis. */
+export const INSIGHTS_TRIES = 2;
+/** The client's earlier reports' changes, read once per run (runInsights.ts). */
+const INSIGHTS_HISTORY = "insights.history";
+/** The run's own insights answer, for a try after the one that paid for it. */
+const INSIGHTS_ANSWER = "insights.answer";
 
 export interface SocialDeps {
   sprout?: (ctx: StepContext) => SproutReader;
-  apify?: ApifyFactory;
   gamma?: (ctx: StepContext) => GammaClient;
   /** For the Message Batches API calls. */
   claudeFetch?: Fetch;
+  /** The insights' one Messages API call (left out: anthropic.ts, ended before the step's time is up). */
+  insights?: (ctx: StepContext) => InsightsDeps["complete"];
 }
+
+/** What the stored_trends step keeps (KEPT.trends): the trends it read, null for none. */
+interface KeptTrends { trends: IndustryTrends | null }
 
 const requestOf = (ctx: StepContext): Any => ((ctx.run.input ?? {}) as { request?: Any }).request ?? {};
 
@@ -98,6 +112,36 @@ const reusing = (ctx: StepContext) => !!replayOf(ctx)?.reuse_analysis;
 export function socialPipeline(deps: SocialDeps = {}): PipelineDefinition {
   const sprout = (ctx: StepContext) => (deps.sprout ?? ((c) => sproutReader({ customerId: customerOf(c), signal: c.signal })))(ctx);
   const gamma = (ctx: StepContext) => (deps.gamma ?? ((c) => gammaClient({ apiKey: String(c.env(GAMMA_API_KEY) ?? ""), signal: c.signal })))(ctx);
+  /** The insights call, as the job makes it (anthropic.ts), ended in time for the step to go on to the deck without them. */
+  const insightsCall = (ctx: StepContext): InsightsDeps["complete"] => deps.insights?.(ctx) ?? (async (body) => {
+    const stop = new AbortController();
+    const end = () => stop.abort(new Error("The insights call ran out of time."));
+    const timer = setTimeout(end, Math.max(1_000, ctx.deadline.getTime() - ctx.now().getTime() - INSIGHTS_MARGIN_MS));
+    ctx.signal.addEventListener("abort", end, { once: true });
+    try {
+      return await anthropicMessages({ apiKey: String(ctx.env(ANTHROPIC_API_KEY) ?? ""), body, signal: stop.signal });
+    } finally {
+      clearTimeout(timer);
+      ctx.signal.removeEventListener("abort", end);
+    }
+  });
+
+  /**
+   * Generate Run Summary: the report data the run writes. Without a deck, the
+   * report data the insights are worked out from (the facts read no field of
+   * the deck).
+   */
+  const runSummary = async (ctx: StepContext, deck: { gamma: Any; presentation: Any } | null) => {
+    const [config, combined, prepared, normalized, aggregate, analysis, kept] = await Promise.all([
+      need(ctx, "config"), need(ctx, "combined"), need(ctx, "prepared"), need(ctx, "normalized"), need(ctx, "sprout.aggregate"), need(ctx, KEPT.analysis),
+      ctx.payloads.get<KeptTrends>(KEPT.trends),
+    ]);
+    return generateRunSummary({
+      gamma: deck?.gamma ?? {}, presentation: deck?.presentation ?? {}, clientData: normalized, combined, config,
+      sprout: aggregate.skipped ? null : aggregate, ai: analysis, prepared, industryTrends: kept?.trends ?? null,
+      startedAt: new Date(ctx.run.started_at), now: ctx.now(),
+    });
+  };
 
   const briefBatch = claudeBatchStep({
     async build(ctx) {
@@ -110,52 +154,10 @@ export function socialPipeline(deps: SocialDeps = {}): PipelineDefinition {
     fetchImpl: deps.claudeFetch,
   });
 
-  /** A trend scraper and its normalizer: TikTok, then Instagram. */
-  const trendStep = (source: "tiktok" | "instagram", next: string) => async (ctx: StepContext): Promise<StepResult> => {
-    const [trendInputs, combined] = await Promise.all([need(ctx, "trend_inputs"), need(ctx, "combined")]);
-    const actorInput = trendInputs.trend_inputs?.[source] ?? null;
-    const normalize = source === "tiktok" ? normalizeTikTok : normalizeInstagram;
-    let items: Any[];
-    let detail: Record<string, unknown>;
-    if (actorInput === null) {
-      items = [trendSkipped(source, trendInputs.trend_status?.[source])];
-      detail = { skipped: trendInputs.trend_status?.[source] };
-    } else if (replayOf(ctx)) {
-      const failed = await keptAnswer(ctx, KEPT.scraperFailed(source));
-      const rows = failed ? null : await keptAnswer<Any[]>(ctx, KEPT.dataset(source));
-      if (!failed && rows == null) throw new Error(`The replayed run kept no ${source} dataset.`);
-      if (failed) await ctx.payloads.put(KEPT.scraperFailed(source), failed, KEEP);
-      else await ctx.payloads.put(KEPT.dataset(source), rows, KEEP);
-      items = failed ? [trendFailed(source, failed)] : normalize(rows!, combined);
-      detail = { replayed: true, items: rows?.length ?? 0 };
-    } else {
-      try {
-        const actor = await runActorStep(ctx, { actor: TREND_ACTORS[source], input: actorInput, datasetKey: KEPT.dataset(source), keepDays: KEEP.keepDays, apify: deps.apify });
-        if (actor.type === "wait") return actor.result;
-        // A search that brought back nothing at all did not really run (20 Oct
-        // 2026: TikTok turned away all 8 of a run's searches, and the same
-        // search answered minutes later). It gets the new run a failed one gets;
-        // after the last try an empty answer stands, as n8n reads it.
-        if (!actor.rows.length && ctx.attempt < TREND_TRIES) throw new StepRestart(`The ${source} scraper brought back nothing (run ${actor.runId}).`);
-        items = normalize(actor.rows, combined);
-        detail = { apify_run_id: actor.runId, items: actor.rows.length };
-      } catch (e) {
-        // As n8n's error output: the report goes on with this scraper's trends marked failed.
-        if (ctx.attempt < TREND_TRIES) throw e;
-        const failure = { message: e instanceof Error ? e.message : String(e) };
-        await ctx.payloads.put(KEPT.scraperFailed(source), failure, KEEP);
-        items = [trendFailed(source, failure)];
-        detail = { scraper_failed: failure.message.slice(0, 300) };
-      }
-    }
-    await ctx.payloads.put(`trends.${source}`, items);
-    return { type: "next", step: next, detail: { ...detail, posts: items.filter((i) => !i._empty).length } };
-  };
-
-  /** The accepted analysis, kept, then the deck. */
+  /** The accepted analysis, kept, then the insights and the deck. */
   const accept = async (ctx: StepContext, analysis: Any, detail: Record<string, unknown>): Promise<StepResult> => {
     await ctx.payloads.put(KEPT.analysis, analysis, KEEP);
-    return { type: "next", step: "deck", detail };
+    return { type: "next", step: "insights", detail };
   };
 
   return {
@@ -164,7 +166,6 @@ export function socialPipeline(deps: SocialDeps = {}): PipelineDefinition {
     modes: ["shadow", "app"],
     appCapable: true,
     secrets: [ANTHROPIC_API_KEY, SPROUT_CLIENT_ID, SPROUT_CLIENT_SECRET, GAMMA_API_KEY],
-    awaitedSecrets: [APIFY_API_TOKEN],
     first: "start",
     steps: {
       async start(ctx) {
@@ -204,11 +205,9 @@ export function socialPipeline(deps: SocialDeps = {}): PipelineDefinition {
         const briefIn = prepared.brief_text ? briefAnswer(answer?.text) : prepared;
         const combined = combineBrief(briefIn, config, prepared);
         const setup = sproutSetup(combined, config, customerOf(ctx));
-        const trendInputs = prepareTrendInputs(combined);
         await ctx.payloads.put("combined", combined);
         await ctx.payloads.put("setup", setup);
-        await ctx.payloads.put("trend_inputs", trendInputs);
-        return { type: "next", step: "sprout", detail: { brief_analyzed: !briefIn.error && !!briefIn.output, profiles: setup.profile_ids.length, trends: trendInputs.trend_status } };
+        return { type: "next", step: "sprout", detail: { brief_analyzed: !briefIn.error && !!briefIn.output, profiles: setup.profile_ids.length, trends: readsTrends(combined) ? "stored" : "skipped" } };
       },
 
       async sprout(ctx) {
@@ -216,7 +215,7 @@ export function socialPipeline(deps: SocialDeps = {}): PipelineDefinition {
         if (!hasSproutProfiles(setup)) {
           await ctx.payloads.put("sprout.item", skipSproutAnalytics(setup));
           await ctx.payloads.put("sprout.aggregate", { skipped: true });
-          return { type: "next", step: "tiktok", detail: { sprout: "no profiles" } };
+          return { type: "next", step: "stored_trends", detail: { sprout: "no profiles" } };
         }
         const done = Number(ctx.state.sprout_reads ?? 0);
         if (done < SPROUT_READS.length) {
@@ -233,24 +232,38 @@ export function socialPipeline(deps: SocialDeps = {}): PipelineDefinition {
         const item = attachPostThumbnails(aggregate, [...posts, ...previousPosts]);
         await ctx.payloads.put("sprout.aggregate", aggregate);
         await ctx.payloads.put("sprout.item", item);
-        return { type: "next", step: "tiktok", state: { ...ctx.state, sprout_reads: 0 }, detail: { platforms: aggregate.platform_breakdown.length, top_posts: aggregate.top_posts.length } };
+        return { type: "next", step: "stored_trends", state: { ...ctx.state, sprout_reads: 0 }, detail: { platforms: aggregate.platform_breakdown.length, top_posts: aggregate.top_posts.length } };
       },
 
-      tiktok: trendStep("tiktok", "instagram"),
-      instagram: trendStep("instagram", "normalize"),
+      async stored_trends(ctx) {
+        const [config, combined] = await Promise.all([need(ctx, "config"), need(ctx, "combined")]);
+        let kept: KeptTrends;
+        let detail: Record<string, unknown>;
+        if (!readsTrends(combined)) {
+          kept = { trends: null };
+          detail = { trends: "skipped" };
+        } else if (replayOf(ctx)) {
+          // What the earlier run read, never the tables as they are now. A run from before stored trends read none.
+          kept = (await keptAnswer<KeptTrends>(ctx, KEPT.trends)) ?? { trends: null };
+          detail = { trends: "replayed" };
+        } else {
+          kept = { trends: await readStoredTrends(ctx.db, ctx.run.client_id, String(combined.date_ranges?.current_month?.start || config.current_month_start), String(combined.date_ranges?.current_month?.end || config.current_month_end)) };
+          detail = { trends: kept.trends ? "stored" : "none" };
+        }
+        await ctx.payloads.put(KEPT.trends, kept, KEEP);
+        return { type: "next", step: "normalize", detail: { ...detail, themes: kept.trends?.themes.length ?? 0, posts: kept.trends?.posts.length ?? 0 } };
+      },
 
       async normalize(ctx) {
-        const [config, combined, sproutItem, tiktok, instagram] = await Promise.all([
-          need(ctx, "config"), need(ctx, "combined"), need(ctx, "sprout.item"), need<Any[]>(ctx, "trends.tiktok"), need<Any[]>(ctx, "trends.instagram"),
-        ]);
-        const normalized = attachCompetitiveContext(buildNormalizedClient([sproutItem, ...tiktok, ...instagram], config, combined, ctx.now()), config);
+        const [config, combined, sproutItem, kept] = await Promise.all([need(ctx, "config"), need(ctx, "combined"), need(ctx, "sprout.item"), need<KeptTrends>(ctx, KEPT.trends)]);
+        const normalized = attachCompetitiveContext(buildNormalizedClient([sproutItem], config, combined, ctx.now(), kept.trends), config);
         await ctx.payloads.put("normalized", normalized);
         if (reusing(ctx)) {
           const kept = await keptAnswer(ctx, KEPT.analysis);
           if (!kept) throw new Error("The replayed run kept no analysis.");
           return accept(ctx, kept, { replayed_analysis: true });
         }
-        return { type: "next", step: "synthesis", detail: { tiktok: normalized._meta.tiktok_count, instagram: normalized._meta.instagram_count, competitive_context: !!normalized.competitive_context } };
+        return { type: "next", step: "synthesis", detail: { industry_themes: normalized._meta.industry_themes, industry_posts: normalized._meta.industry_posts, competitive_context: !!normalized.competitive_context } };
       },
 
       synthesis: claudeBatchStep({
@@ -292,11 +305,53 @@ export function socialPipeline(deps: SocialDeps = {}): PipelineDefinition {
         throw new Error(`The analysis did not match its format after a repair and a fresh analysis: ${problems.slice(0, 5).join("; ")}`);
       },
 
+      async insights(ctx) {
+        const go = async (row: InsightsRow | null, detail: Record<string, unknown>): Promise<StepResult> => {
+          await ctx.payloads.put("insights", { row });
+          return { type: "next", step: "deck", detail };
+        };
+        if (replayOf(ctx)) {
+          // A replay asks no model: the earlier run's insights stand in.
+          const kept = await keptAnswer<InsightsRow>(ctx, KEPT.insights);
+          if (kept) await ctx.payloads.put(KEPT.insights, kept, KEEP);
+          return go(kept, { insights: kept ? "replayed" : "none kept" });
+        }
+        const app = ctx.run.mode === "app";
+        try {
+          const got = await runInsights({
+            db: ctx.db, reportId: ctx.run.real_id, reportData: await runSummary(ctx, null),
+            ...(app ? { attemptStartedAt: ((ctx.run.input ?? {}) as { attempt_started_at?: string | null }).attempt_started_at ?? null } : {}),
+            history: await ctx.payloads.get<InsightsHistory>(INSIGHTS_HISTORY),
+            onHistory: async (history) => { await ctx.payloads.put(INSIGHTS_HISTORY, history); },
+            answered: await ctx.payloads.get<InsightsRow>(INSIGHTS_ANSWER),
+            complete: insightsCall(ctx), now: () => ctx.now(),
+          });
+          if (!got.row) return go(null, { insights: "none", reason: got.reason ?? null });
+          // The answer, for a try after this one: it pays for nothing again.
+          if (got.from === "model") await ctx.payloads.put(INSIGHTS_ANSWER, got.row);
+          // The real report's row, in app mode only; a shadow stores nothing. A row met again is stored already.
+          if (app && got.from !== "stored") await ctx.output.write("insights", got.row as unknown as Record<string, unknown>);
+          // Kept with the run's provider answers once it is the report's (stored, or a shadow's own), so a replay never puts
+          // insights on a deck the run never had.
+          await ctx.payloads.put(KEPT.insights, got.row, KEEP);
+          return go(got.row, { insights: got.from, source: got.row.source, facts: got.row.facts.length });
+        } catch (e) {
+          // The first try's error is the step's: tried again, with the answer already kept.
+          if (ctx.attempt < INSIGHTS_TRIES) throw e;
+          // As a report whose insights are not worded yet: the deck says what the analysis says, and the report goes on.
+          return go(null, { insights: "not had", error: (e instanceof Error ? e.message : String(e)).slice(0, 300) });
+        }
+      },
+
       async deck(ctx) {
         let presentation = await ctx.payloads.get<Any>("presentation");
         if (!presentation) {
-          const [normalized, analysis] = await Promise.all([need(ctx, "normalized"), need(ctx, KEPT.analysis)]);
-          presentation = buildPresentationContent(normalized, analysis, ctx.now());
+          const [normalized, analysis, insights, kept] = await Promise.all([
+            need(ctx, "normalized"), need(ctx, KEPT.analysis), ctx.payloads.get<{ row: InsightsRow | null }>("insights"), ctx.payloads.get<KeptTrends>(KEPT.trends),
+          ]);
+          // The analysis as the screens, the API and the planner show it: the insights' fields where the report has them.
+          const shown = shownSocial(analysis, insights?.row ?? null).analysis ?? analysis;
+          presentation = buildPresentationContent(normalized, shown, ctx.now(), kept?.trends ?? null);
           await ctx.payloads.put("presentation", presentation);
         }
         const finish = async (result: Any, detail: Record<string, unknown>): Promise<StepResult> => {
@@ -332,15 +387,8 @@ export function socialPipeline(deps: SocialDeps = {}): PipelineDefinition {
       },
 
       async summary(ctx) {
-        const [config, combined, prepared, normalized, aggregate, analysis, presentation, gammaResult, trendInputs] = await Promise.all([
-          need(ctx, "config"), need(ctx, "combined"), need(ctx, "prepared"), need(ctx, "normalized"), need(ctx, "sprout.aggregate"),
-          need(ctx, KEPT.analysis), need(ctx, "presentation"), need(ctx, KEPT.gamma), need(ctx, "trend_inputs"),
-        ]);
-        const report = generateRunSummary({
-          gamma: gammaResult, presentation, clientData: normalized, combined, config,
-          sprout: aggregate.skipped ? null : aggregate, ai: analysis, prepared, trendStatus: trendInputs.trend_status,
-          startedAt: new Date(ctx.run.started_at), now: ctx.now(),
-        });
+        const [presentation, gammaResult] = await Promise.all([need(ctx, "presentation"), need(ctx, KEPT.gamma)]);
+        const report = await runSummary(ctx, { gamma: gammaResult, presentation });
         await ctx.payloads.put("report", report);
         return { type: "next", step: "write", detail: { status: report.status, gamma_status: report.gamma_status, warnings: report.warnings.length } };
       },

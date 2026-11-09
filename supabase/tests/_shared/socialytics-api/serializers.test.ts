@@ -212,4 +212,17 @@ describe("industryTrendsOut", () => {
     // The report's own trends stay as the report holds them.
     expect(reportOut(REPORT, { detail: true, trendRows: rows }).trends).toEqual({ tiktok: { posts: 1, patterns: { top_hashtags: ["#law"] } }, instagram: { posts: 0, patterns: {} } });
   });
+  it("counts a report made on stored trends by its example posts on each platform, and keeps every field", () => {
+    const { tiktok_trends: _t, instagram_trends: _i, ...rest } = REPORT_DATA as Record<string, unknown>;
+    const industry_trends = {
+      themes: [{ week_start: "2026-08-03", title: "T", happening: "", why_it_matters: "", angle: "", platforms: ["tiktok", "linkedin"], post_urls: ["a", "b", "c"] }],
+      posts: [{ platform: "tiktok", url: "a" }, { platform: "linkedin", url: "b" }, { platform: "tiktok", url: "c" }],
+    };
+    const fresh = { ...REPORT, report_data: { ...rest, industry_trends, data_counts: { tiktok_trends: 2, instagram_trends: 0, industry_trend_themes: 1, industry_trend_posts: 3 } } };
+    const out = reportOut(fresh as never, { detail: true });
+    expect(out.trends).toEqual({ tiktok: { posts: 2, patterns: null }, instagram: { posts: 0, patterns: null } });
+    expect(out.counts).toMatchObject({ tiktok_trends: 2, instagram_trends: 0 });
+    // A report with neither keeps no summary.
+    expect(reportOut({ ...REPORT, report_data: rest } as never, { detail: true }).trends).toBeNull();
+  });
 });

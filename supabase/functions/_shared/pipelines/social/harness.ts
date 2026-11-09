@@ -22,6 +22,26 @@ type Any = any;
 // deno-lint-ignore no-explicit-any
 type Db = any;
 
+/**
+ * The trend keys of a social report, left out of a comparison with a
+ * baseline made before stored trends (Trends plan, Phase 3 point 3). Such a
+ * run read TikTok and Instagram, which a replay cannot read again, and n8n's
+ * reports carry them; a baseline made on stored trends (it has the key
+ * industry_trends, null for a period with none, as the paid Moburst run of
+ * Task 16 Step 5 will) is compared with its trends.
+ */
+export const SOCIAL_TREND_KEYS = [
+  "tiktok_trends", "instagram_trends", "industry_trends", "trend_status",
+  "ai_analysis.tiktok_trends_analysis", "ai_analysis.instagram_trends_analysis", "ai_analysis.industry_trends_analysis",
+  "data_counts.tiktok_trends", "data_counts.instagram_trends", "data_counts.industry_trend_themes", "data_counts.industry_trend_posts",
+];
+
+/** The warnings a run made before stored trends gave for a scraper with no keywords; a run on stored trends never gives them. */
+export const OLD_TREND_WARNINGS = ["TikTok trends were not available this month.", "Instagram trends were not available this month."];
+
+/** Whether a report was made on stored trends (every report the app made since 9 Nov 2026, with trends or none). */
+export const madeOnStoredTrends = (reportData: Any) => !!reportData && typeof reportData === "object" && "industry_trends" in reportData;
+
 /** How two social reports are lined up: lists matched by what they list, the run's own times left out. */
 export const SOCIAL_COMPARE_OPTIONS: CompareOptions = {
   ignore: ["started_at", "completed_at", "duration_minutes", "report_date", "sprout_performance.collected_at"],
@@ -30,10 +50,6 @@ export const SOCIAL_COMPARE_OPTIONS: CompareOptions = {
     "sprout_performance.platform_breakdown": "network",
     "sprout_performance.top_posts": "url",
     "sprout_performance.top_posts_by_platform.*": "url",
-    "tiktok_trends.posts": "url",
-    "instagram_trends.posts": "url",
-    "tiktok_trends.patterns.top_hashtags": "tag",
-    "instagram_trends.patterns.top_hashtags": "tag",
     "ai_analysis.sprout_performance_analysis.platform_breakdown": "platform",
   },
 };
@@ -74,9 +90,16 @@ export function compareSocialFigures(real: Any, shadow: Any): FiguresComparison 
   return out;
 }
 
-/** n8n's stored report and the in-app result: the figures a screen shows, then everything else side by side. */
+/**
+ * The baseline report and the in-app result: the figures a screen shows,
+ * then everything else side by side. Against a baseline made before stored
+ * trends, the trend keys and its scrapers' warnings are left out.
+ */
 export function compareSocial(real: Any, shadow: Any): { figures: FiguresComparison; comparison: Comparison } {
-  return { figures: compareSocialFigures(real, shadow), comparison: compareResults(real, shadow, SOCIAL_COMPARE_OPTIONS) };
+  if (madeOnStoredTrends(real)) return { figures: compareSocialFigures(real, shadow), comparison: compareResults(real, shadow, SOCIAL_COMPARE_OPTIONS) };
+  const base = Array.isArray(real?.warnings) ? { ...real, warnings: real.warnings.filter((w: unknown) => !OLD_TREND_WARNINGS.includes(String(w))) } : real;
+  const options = { ...SOCIAL_COMPARE_OPTIONS, ignore: [...SOCIAL_COMPARE_OPTIONS.ignore!, ...SOCIAL_TREND_KEYS] };
+  return { figures: compareSocialFigures(real, shadow), comparison: compareResults(base, shadow, options) };
 }
 
 /** The comparison as plain lines. */
@@ -102,12 +125,13 @@ export async function compareSocialRun(db: Db, runId: string): Promise<{ run_id:
 
 /**
  * Starts a live shadow social run for a past report: the run n8n made, made
- * again now with every provider called (Sprout, the trend scrapers, Claude,
- * Gamma), from the request the dispatch builds, tied to the competitive
- * report that run was sent with. Like every shadow it writes only shadow
- * tables, and it keeps the answers it read, so it can be replayed. It is
- * paid, so it starts only for a client whose social switch is on shadow or
- * app. Trends are scraped as they are now, so they differ from n8n's.
+ * again now with every provider called (Sprout, Claude, Gamma), from the
+ * request the dispatch builds, tied to the competitive report that run was
+ * sent with. Like every shadow it writes only shadow tables, and it keeps
+ * the answers it read, so it can be replayed. It is paid, so it starts only
+ * for a client whose social switch is on shadow or app. Its trends are the
+ * stored weeks of the report's period as they are now, which n8n's scrapers
+ * never read: the comparison leaves the trend keys out.
  */
 export async function startSocialShadow(db: Db, pipeline: PipelineDefinition, reportId: string, o: { now?: () => Date } = {}): Promise<{ run_id: string; started: boolean; report_id: string; competitive_report_id: string | null }> {
   if (pipeline.kind !== "social") throw new Error(`Pipeline ${pipeline.name} is not a social pipeline.`);

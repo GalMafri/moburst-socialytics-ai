@@ -54,6 +54,13 @@ describe("readOnlyDb", () => {
     expect(d.tables.reports).toEqual([{ id: "report-1", status: "running" }]);
   });
 
+  it("calls only the database functions that read, by name: when report insights went live", async () => {
+    const d = db({}, { report_insights_live_from: () => "2026-11-10T22:00:00.000Z" });
+    const ro = readOnlyDb(d);
+    expect(await ro.rpc("report_insights_live_from", {})).toEqual({ data: "2026-11-10T22:00:00.000Z", error: null });
+    expect(() => ro.rpc("report_insights_queue", { p_table: "reports", p_report: "r" })).toThrow(PipelineWriteRefused);
+  });
+
   it("reads another run's kept payloads, and writes none", async () => {
     const d = db();
     await makePayloadStore(d, "run-0").put("source.analysis", { kept: true }, { keepDays: 90 });
