@@ -97,10 +97,13 @@ describe("the stricter check (design point 6)", () => {
     expect(one("Impressions rose significantly.", ["F1"])).toEqual(['Insight 1 sizes a change with "significantly"; give its number instead.']);
   });
 
-  it("refuses a comparison that cites no ranking or share fact", () => {
-    expect(one("Moburst leads every rival on impressions, at 12,400.", ["F1"])).toEqual(['Insight 1 compares ("leads"), but cites no ranking or share fact.']);
-    expect(one("Impressions of 12,400 put Moburst ahead.", ["F1"])).toEqual(['Insight 1 compares ("ahead"), but cites no ranking or share fact.']);
+  it("refuses a comparison that cites no ranking, share or outlier fact", () => {
+    expect(one("Moburst leads every rival on impressions, at 12,400.", ["F1"])).toEqual(['Insight 1 compares ("leads"), but cites no ranking, share or outlier fact.']);
+    expect(one("Impressions of 12,400 put Moburst ahead.", ["F1"])).toEqual(['Insight 1 compares ("ahead"), but cites no ranking, share or outlier fact.']);
     expect(one("LinkedIn brought the most engagements, 96.1% of them.", ["F3"])).toEqual([]);
+    // A monthly report has no rankings: its top post is an outlier fact.
+    const outlier = fact({ id: "F4", key: "outlier|Instagram|engagements|https://instagram.com/reel/9", kind: "outlier", platform: "Instagram", metric: "engagements", value: 5200, usual: 1700, multiple: 3.1, numbers: [5200, 1700, 3.1] });
+    expect(checkInsights(social({ insights: [{ text: "Your top Instagram reel got 5,200 engagements, 3.1x your usual.", facts: ["F4"] }] }), [...FACTS, outlier])).toEqual([]);
   });
 
   it("refuses a fact id in the words", () => {
@@ -123,7 +126,7 @@ describe("the stricter check (design point 6)", () => {
   });
 
   it("states the same rules in the prompt", () => {
-    for (const rule of [/currency sign/i, /rose, fell, dropped or doubled/i, /sharply or significantly/i, /ranking or share fact/i, /fact ids/i]) expect(INSIGHTS_SYSTEM).toMatch(rule);
+    for (const rule of [/currency sign/i, /rose, fell, dropped or doubled/i, /sharply or significantly/i, /ranking, share or outlier fact/i, /fact ids/i]) expect(INSIGHTS_SYSTEM).toMatch(rule);
     expect(insightsPrompt({ ...INPUT, kind: "competitive" })).toMatch(/behind a competitor on any compared metric, write at least one gap/i);
   });
 });

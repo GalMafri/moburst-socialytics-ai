@@ -10,7 +10,8 @@
 // cited fact's number at the precision it was written, a direction word
 // ("rose", "fell", "dropped", "doubled" and their kin) sits only in a
 // sentence citing a change that moved that way, a comparison ("leads",
-// "behind", "top", "most", "every rival") cites a ranking or share fact,
+// "behind", "top", "most", "every rival") cites a ranking, share or outlier
+// fact (a monthly report has no rankings: its top post is an outlier),
 // no word sizes a change in place of its number ("sharply"), no fact id is
 // written, and a competitive answer with no gaps is refused when the facts
 // show the client behind a competitor. The prompt states the same rules.
@@ -106,7 +107,7 @@ export const INSIGHTS_SYSTEM = [
   "A number after a currency sign ($, €, £) is a number too: it must be one of the cited facts' numbers.",
   "Write rose, fell, dropped or doubled (or any other word for which way a change went: grew, climbed, slipped, halved, up 12%, down from) only in a sentence that cites a change fact that moved that way. Doubled, tripled and halved must be what the cited change was.",
   "Never size a change with a word in place of its number, such as sharply or significantly: give the number.",
-  "Compare (leads, behind, ahead, top, most, every rival, more than) only in text that cites a ranking or share fact.",
+  "Compare (leads, behind, ahead, top, most, best, every rival, more than) only in text that cites a ranking, share or outlier fact.",
   "Plain American English, short sentences, no em dashes or en dashes, no jargon, never write fact ids (F1) in the text, never mention the facts list or how the facts were made.",
   "Never name where the data comes from (no tool or vendor names such as Sprout, RivalIQ, Apify or Gamma), and never write AI, model, prompt, score, pipeline or gate.",
 ].join("\n");
@@ -181,7 +182,7 @@ const MULTIPLES: Record<string, number> = { doubled: 2, tripled: 3, quadrupled: 
 const MULTIPLE = /\b(?:doubled|tripled|quadrupled|halved)\b/gi;
 /** Words that size a change in place of its number. */
 const SIZE = /\b(?:sharp(?:ly)?|steep(?:ly)?|significant(?:ly)?|dramatic(?:ally)?|substantial(?:ly)?|considerabl[ey]|massive(?:ly)?|huge(?:ly)?|enormous(?:ly)?|tremendous(?:ly)?|slight(?:ly)?|marginal(?:ly)?|modest(?:ly)?|greatly|rapid(?:ly)?|vastly|sizable|sizeable)\b/i;
-/** Words that compare the client with others, or a part with the whole: they need a ranking or share fact. */
+/** Words that compare the client with others, a part with the whole, or a post with the rest: they need a ranking, share or outlier fact. */
 const COMPARE = /\b(?:leads?|leading|leader|behind|trails?|trailing|ahead|top|most|least|highest|lowest|best|worst|outperform(?:s|ed|ing)?|outpace[sd]?|outpacing|ranks?|ranked|every (?:rival|competitor)|all (?:rivals|competitors))\b|\b(?:more|less|fewer|higher|lower|better|worse|bigger|smaller) than\b(?!\s*[$€£¥]?\d)/i;
 const FACT_ID = /\bF\d+\b/;
 
@@ -223,7 +224,7 @@ function textProblems(where: string, text: string, citedIds: string[], byId: Map
   const size = SIZE.exec(words);
   if (size) out.push(`${where} sizes a change with "${size[0]}"; give its number instead.`);
   const compare = COMPARE.exec(words);
-  if (compare && !facts.some((f) => f.kind === "ranking" || f.kind === "share")) out.push(`${where} compares ("${compare[0]}"), but cites no ranking or share fact.`);
+  if (compare && !facts.some((f) => f.kind === "ranking" || f.kind === "share" || f.kind === "outlier")) out.push(`${where} compares ("${compare[0]}"), but cites no ranking, share or outlier fact.`);
   // A direction word, anywhere in its sentence, needs a cited change that went that way; a multiple, a change of that size.
   const changes = facts.filter((f) => f.kind === "change");
   const went = (up: boolean) => changes.some((f) => (up ? 1 : -1) * (f.percent ?? f.change ?? 0) > 0);
