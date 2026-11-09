@@ -27,6 +27,7 @@ import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { createClient } from "../_shared/supabase.ts";
 import { findAuthUserByEmail } from "../_shared/auth/findUser.ts";
 import { linkPortalCompanies } from "../_shared/lifecycle/portal.ts";
+import { mapGosRole, type ToolRole } from "./role.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -65,24 +66,7 @@ type GosUser = {
   allowed_company_slugs?: string[];
 };
 
-type ToolRole = "admin" | "moburst_user" | "client" | null;
-
-// Map gOS roles onto the tool's 3 internal roles. A plain "user" is distinguished
-// by whether the portal assigned them any company:
-//   super_admin, admin, account_manager        → admin
-//   user / staff WITHOUT a company assignment   → moburst_user (internal, sees all)
-//   user / staff WITH a company assignment      → client (scoped to that company)
-//   client                                      → client (scoped)
-// Anything unrecognized → null (access denied with a clear message).
-function mapGosRole(role: string, slugs: string[]): ToolRole {
-  const r = (role || "").toLowerCase().trim();
-  if (r === "super_admin" || r === "admin" || r === "account_manager") return "admin";
-  if (r === "client" || r === "viewer") return "client";
-  if (r === "user" || r === "moburst_user" || r === "staff") {
-    return slugs.length > 0 ? "client" : "moburst_user";
-  }
-  return null;
-}
+// The role mapping lives in role.ts (mapGosRole).
 
 function json(body: unknown) {
   return new Response(JSON.stringify(body), {
@@ -228,21 +212,12 @@ Deno.serve(async (req) => {
     }
 
     const slugs = Array.isArray(gosUser.allowed_company_slugs) ? gosUser.allowed_company_slugs : [];
-    const toolRole = mapGosRole(gosUser.role, slugs);
-    const roleLc = (gosUser.role || "").toLowerCase().trim();
-    // Policy: a company-assigned USER should have exactly ONE company. Flag more
-    // than one as a config error (still scoped to all assigned, as a Client).
-    const multiCompanyConfigError =
-      (roleLc === "user" || roleLc === "moburst_user" || roleLc === "staff") && slugs.length > 1;
+    const toolRole = mapGosRole(gosUser.role, gosUser.organization);
     // Detailed context stays server-side only.
     console.log("[gos-bridge]", JSON.stringify({
       tool_id: TOOL_ID, gos_email: gosUser.email, gos_role: gosUser.role,
       gos_org: gosUser.organization, slugs, resolved_role: toolRole,
-      multi_company_config_error: multiCompanyConfigError,
     }));
-    if (multiCompanyConfigError) {
-      console.warn(`[gos-bridge] CONFIG ERROR: gOS user ${gosUser.email} has ${slugs.length} companies assigned; a company-assigned USER should have exactly one. Scoped to all assigned as a Client — please fix in the portal.`);
-    }
 
     if (!toolRole) {
       return json({
@@ -265,7 +240,7 @@ Deno.serve(async (req) => {
       refresh_token: result.refresh_token,
       tool_role: toolRole,
       user_id: result.user_id,
-      debug: { tool_id: TOOL_ID, resolved_role: toolRole, multi_company_config_error: multiCompanyConfigError },
+      debug: { tool_id: TOOL_ID, resolved_role: toolRole },
     });
   } catch (err) {
     console.error("gos-auth-bridge error:", err);
