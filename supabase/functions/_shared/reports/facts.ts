@@ -27,7 +27,7 @@ import { competitiveFigures, socialFigures, type Figure } from "./reportText.ts"
 import { normalizedCompetitiveMetrics } from "../competitive/reportMetrics.ts";
 import { sproutEngagements } from "./socialFigures.ts";
 import { median } from "../calendar/evidence.ts";
-import { mediaKind, mediaLabel } from "./mediaKind.ts";
+import { mediaKind, mediaLabel, postType } from "./mediaKind.ts";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -119,12 +119,8 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const article = (word: string) => (/^(?:[aeiou]|x\b)/i.test(word) ? "an" : "a");
 /** A post as the screens label its type: "Instagram video post", "LinkedIn document post". */
 const postWords = (platform: string, format: string) => `${platformName(platform)} ${format} post`;
-/**
- * A post's type through the screens' label (mediaKind.ts), never a raw type
- * such as INSTAGRAM_MEDIA. A raw type starts with its platform's name, which
- * is no type: "LINKEDIN_COMPANY_UPDATE" holds "link" and would read as a link post.
- */
-const formatOf = (raw: unknown, link: string) => mediaLabel(mediaKind(String(raw || "").replace(/linkedin/gi, ""), link)).toLowerCase();
+/** A post's type through the screens' label (mediaKind.ts: postType, mediaKind, mediaLabel), never a raw type such as INSTAGRAM_MEDIA. */
+const formatOf = (post: Any, link: string) => mediaLabel(mediaKind(postType(post), link)).toLowerCase();
 
 export interface Period { start?: string | null; end?: string | null }
 
@@ -274,7 +270,7 @@ export function socialFacts(reportData: Any, opts: FactOptions = {}): Fact[] {
     const usual = round1(total / count);
     const multiple = round1(ratio(value, usual));
     if (multiple < OUTLIER_MULTIPLE) continue;
-    const format = formatOf(p?.content_category || p?.post_type || p?.media_type, link);
+    const format = formatOf(p, link);
     const post = postWords(net, format);
     outliers.push({
       key: `outlier|${net}|engagements|${link}`, kind: "outlier", platform: net, metric: "engagements", unit: "count", value, usual, multiple, link, format,
@@ -361,7 +357,7 @@ export function competitiveFacts(reportData: Any, opts: FactOptions = {}): Fact[
         if (!valid(value) || !link) continue;
         const multiple = round1(ratio(value, round1(usual)));
         if (multiple < OUTLIER_MULTIPLE) continue;
-        const format = formatOf(p?.media_type, link);
+        const format = formatOf(p, link);
         const net = channel === "x" ? "twitter" : channel;
         const post = postWords(net, format);
         outliers.push({

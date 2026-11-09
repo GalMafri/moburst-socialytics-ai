@@ -56,7 +56,7 @@ import { ReportCalendarLink } from "@/components/calendar/ReportCalendarLink";
 import { NewPostDialog } from "@/components/calendar/NewPostDialog";
 import { ContentIdeasTab } from "@/components/reports/calendar/ContentIdeasTab";
 import { CompetitiveSnapshot } from "@/components/competitive/CompetitiveSnapshot";
-import { PostVisual, usePostPreviews, type PostPreview } from "@/components/competitive/PostVisual";
+import { PostVisual, postType, usePostPreviews, type PostPreview } from "@/components/competitive/PostVisual";
 import { useInsightFeedback } from "@/hooks/useInsightFeedback";
 import { measuredEngagements } from "@/lib/trendEngagement";
 import { competitiveReportQuality } from "../../supabase/functions/_shared/competitive/reportEvidence";
@@ -743,7 +743,7 @@ function PostCard({ post, preview }: { post: any; preview?: PostPreview | null }
             url={link}
             preview={preview}
             image={post.image_url || post.media_url || post.thumbnail_url || null}
-            mediaType={post.post_type || post.media_type || post.content_type}
+            mediaType={postType(post)}
             platform={post.network_type || post.platform}
             className="w-28 shrink-0 self-start"
             compact

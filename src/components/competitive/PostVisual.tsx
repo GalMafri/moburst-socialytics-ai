@@ -16,13 +16,13 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Play, Layers, Image as ImageIcon, ExternalLink, ImageOff, FileText, Link as LinkIcon } from "lucide-react";
 import { normalizePlatform, platformLabel } from "@/lib/platform";
-import { mediaKind, mediaLabel, platformFromUrl, type MediaKind } from "../../../supabase/functions/_shared/reports/mediaKind";
+import { mediaKind, mediaLabel, platformFromUrl, postType, type MediaKind } from "../../../supabase/functions/_shared/reports/mediaKind";
 
 // Re-exported so existing imports keep working; the helpers live in src/lib/platform.ts.
 export { normalizePlatform, platformLabel };
 
 // What kind of post a post is and its label, shared with a report's facts (supabase/functions/_shared/reports/mediaKind.ts).
-export { mediaKind, mediaLabel, platformFromUrl, type MediaKind };
+export { mediaKind, mediaLabel, platformFromUrl, postType, type MediaKind };
 
 export type PostPreview = {
   url: string;

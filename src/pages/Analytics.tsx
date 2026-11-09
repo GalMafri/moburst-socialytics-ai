@@ -5,7 +5,7 @@ import { useNextRun } from "@/lib/nextRun";
 import { sproutEngagementRate, sproutEngagements } from "@/lib/reportFigures";
 import { StatCard } from "@/components/ui/stat-card";
 import { Section, SectionNav } from "@/components/ui/section";
-import { PostVisual, usePostPreviews } from "@/components/competitive/PostVisual";
+import { PostVisual, postType, usePostPreviews } from "@/components/competitive/PostVisual";
 import { PlatformBadge } from "@/lib/platform-config";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -1025,7 +1025,7 @@ function LiveSproutSection({
             <div className="grid gap-inner md:grid-cols-2">
               {posts.slice(0, 6).map((p: any, i: number) => (
                 <div key={i} className="flex gap-4 glass-inner p-inner">
-                  <PostVisual url={p.permalink} preview={p.permalink ? previews[p.permalink] : null} mediaType={p.post_type} platform={p.network_type} className="w-28 shrink-0 self-start" compact />
+                  <PostVisual url={p.permalink} preview={p.permalink ? previews[p.permalink] : null} mediaType={postType(p)} platform={p.network_type} className="w-28 shrink-0 self-start" compact />
                   <div className="flex-1 min-w-0 space-y-2">
                     <div className="flex items-center justify-between gap-2">
                       {p.network_type ? <PlatformBadge platform={p.network_type} size="sm" /> : <span />}
