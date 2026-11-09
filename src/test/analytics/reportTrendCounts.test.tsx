@@ -7,7 +7,7 @@
 // falls inside its own. Until the read answers, nothing it changes shows.
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AIDeepInsights } from "@/components/analytics/AIDeepInsights";
 
@@ -58,9 +58,9 @@ describe("Analytics: report trend counts", () => {
   });
 
   it("counts each report's trend recommendations as its page lists them", async () => {
-    mount(); await settle();
+    mount();
     // September: its own 2 opportunities. October: its 2 themes' angles, not its own 3 opportunities.
-    expect(tile("Recommendations")).toHaveTextContent("4");
+    await waitFor(() => expect(tile("Recommendations")).toHaveTextContent("4"));
     expect(screen.getByText("Industry trends · 1 report")).toBeInTheDocument();
     expect(screen.getByText("TikTok · 1 report")).toBeInTheDocument();
     expect(screen.getByText("Instagram · 1 report")).toBeInTheDocument();
