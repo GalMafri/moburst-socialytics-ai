@@ -1050,7 +1050,6 @@ export type Database = {
           sprout_customer_id: string | null
           strategy_doc_file_path: string | null
           timezone: string | null
-          trends_keywords: string | null
           updated_at: string | null
           video_references: Json
           video_style: Json | null
@@ -1095,7 +1094,6 @@ export type Database = {
           sprout_customer_id?: string | null
           strategy_doc_file_path?: string | null
           timezone?: string | null
-          trends_keywords?: string | null
           updated_at?: string | null
           video_references?: Json
           video_style?: Json | null
@@ -1140,7 +1138,6 @@ export type Database = {
           sprout_customer_id?: string | null
           strategy_doc_file_path?: string | null
           timezone?: string | null
-          trends_keywords?: string | null
           updated_at?: string | null
           video_references?: Json
           video_style?: Json | null
