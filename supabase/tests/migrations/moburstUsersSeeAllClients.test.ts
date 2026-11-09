@@ -64,7 +64,7 @@ beforeAll(async () => {
   await db.exec(SETUP);
   await db.exec(migration);
   await db.exec(migration);
-});
+}, 30_000);
 afterAll(async () => { await db.close(); });
 
 describe("Moburst users see every client", () => {

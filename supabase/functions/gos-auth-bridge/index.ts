@@ -212,7 +212,7 @@ Deno.serve(async (req) => {
     }
 
     const slugs = Array.isArray(gosUser.allowed_company_slugs) ? gosUser.allowed_company_slugs : [];
-    const toolRole = mapGosRole(gosUser.role, gosUser.organization);
+    const toolRole = mapGosRole(gosUser.role, gosUser.email, gosUser.organization);
     // Detailed context stays server-side only.
     console.log("[gos-bridge]", JSON.stringify({
       tool_id: TOOL_ID, gos_email: gosUser.email, gos_role: gosUser.role,
@@ -233,7 +233,9 @@ Deno.serve(async (req) => {
     // exact name, and the client takes the portal's organization name as its
     // hub company name when it has none (_shared/lifecycle/portal.ts). This
     // never stops a sign-in.
-    await linkPortalCompanies(supabase, slugs, gosUser.organization ?? null);
+    // Every sign-in links its companies by slug; only a client's organization
+    // matches or names a client, so a staff sign-in never stamps "Moburst" on one.
+    await linkPortalCompanies(supabase, slugs, toolRole === "client" ? gosUser.organization ?? null : null);
 
     return json({
       access_token: result.access_token,

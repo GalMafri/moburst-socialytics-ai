@@ -30,8 +30,8 @@ regardless of which portal the user came from. The legacy path was not modified.
 | gOS role | Socialytics role |
 |----------|------------------|
 | `super_admin`, `admin`, `account_manager` | `admin` |
-| `user`, `staff` at Moburst (no organization, or one naming Moburst) | `moburst_user`: every client, with full staff features, whatever companies the Hub lists (migration `20261111110000`) |
-| `user`, `staff` in an outside organization | `client` |
+| `user`, `staff` with a `moburst.com` address and no outside organization | `moburst_user`: every client, with full staff features, whatever companies the Hub lists (migration `20261111110000`) |
+| `user`, `staff` with any other address, or in an outside organization | `client` |
 | `client`, `viewer` | `client` |
 
 The mapping is `supabase/functions/gos-auth-bridge/role.ts` (tested in `supabase/tests/gos-auth-bridge/role.test.ts`). Until 9 Nov 2026 a `user` with companies became a `client`, so Moburst people with assigned companies could not make designs; each gets the new role at their next sign-in through the Hub. Company scoping now applies to clients only: `allowed_company_slugs` limits a client, never a Moburst user.
@@ -42,7 +42,7 @@ gOS sends `allowed_company_slugs` (canonical slugs, e.g. `bader-law`). The bridg
 stores them on `profiles.allowed_company_slugs`; `is_client_member()` matches them
 against `clients.company_slug`. `company_slug` is backfilled by slugifying the
 company name — verify/adjust per client if a name doesn't slugify to the catalog
-slug. Staff/admin bypass company scoping (`is_moburst_staff()`), as before.
+slug. Admins and Moburst users are never limited by company (`can_access_client`, 20261111110000); `allowed_company_slugs` limits clients only.
 
 ## Deploy checklist
 
