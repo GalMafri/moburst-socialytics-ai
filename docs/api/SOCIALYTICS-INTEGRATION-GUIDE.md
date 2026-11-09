@@ -284,7 +284,7 @@ End-to-end checklist:
 | `404 not_found` on a client you know exists | Outside the key's reach | Ask for a wider `company_slugs` or an unscoped key. |
 | `429 demo_capacity` | Three demos already running | Queue and retry in a few minutes. |
 | `429 rate_limited` | Over the per-minute limit | Honour `Retry-After`; ask for a higher limit on the key if needed. |
-| `partial` with `connected_only` gaps | Expected for a prospect | Show tracking, the competitive report and analytics from Moburst's workspace. |
+| `partial` with `connected_only` gaps | Expected for a prospect | Show tracking, the competitive report, analytics and industry trends from Moburst's workspace. |
 | `competitors_unconfirmed` or `no_competitors` | Fewer than three proposed competitors had a website and a verified social profile | Pass `competitors[]` with the names you want; the demo detects their handles. |
 | `post_image_missing` | The image provider refused or ran out of credits; the reason is in the gap | Show the copy; the admin checks the provider. |
 | Job stays `running` past 35 minutes | The social report is slow or has stalled and is being tried again; the API records `report_timeout` at 100 minutes and folds the report in when it lands | Keep polling or wait for the callback. |
