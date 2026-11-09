@@ -86,7 +86,7 @@ The job runs these steps, each recorded with its outcome and a plain reason:
 5. `design`: only for a brand this job created (approving a design system is a team decision, never taken on a client that existed before); when it has at least three design references, a design system is built and approved; otherwise a gap says designs use the brand colours and fonts only.
 6. `competitors`: the competitors named in the request, or 8 to 12 proposed from the brand; social handles are detected; the three closest with a website and a verified profile are selected and the set confirmed. Fewer than three: the set stays a draft.
 7. `tracking`: skipped with a `connected_only` gap. Tracking takes a RivalIQ seat and a demo never consumes one; the set stays confirmed for the day the brand connects.
-8. `run_social`: the social report starts (`run-report`) unless one completed in the last 7 days and `force_run` is false. It runs for every brand; without a Sprout profile it carries trends, recommendations, the calendar and the deck but no performance section, and the job says so in `gaps`. 9. `run_competitive`: skipped (`connected_only`); the competitive report is shown on the connected showcase workspace.
+8. `run_social`: the social report starts (`run-report`) unless one completed in the last 7 days and `force_run` is false. It runs for every brand; without a Sprout profile it carries recommendations, the calendar and the deck but no performance section, and the job says so in `gaps`. 9. `run_competitive`: skipped (`connected_only`); the competitive report is shown on the connected showcase workspace.
 10. `wait_reports`: both rows are polled every two minutes; 100 minutes after start a report is recorded as timed out and folded in later when it lands.
 11. `post`: the first calendar post of the social report (or an ad-hoc post from the pillars) is written, rendered with Gemini and stored; a post without an image is still returned, with the reason.
 12. `analytics`: skipped for a prospect (no Sprout profile), with the gap saying where it is shown.
@@ -103,6 +103,7 @@ The callback body is the job's `status`, `client_id`, `outputs`, `gaps`, `finish
 ## Known limits
 
 - A brand not managed in Moburst's Sprout account gets a social report without a performance section, no performance analytics, no scheduled posting and no design references from its own posts; the demo says so in `gaps`. Its post comes from the report's calendar.
+- A demo runs no trend collection, so its social report has no industry trends; `run_social` records a `connected_only` gap that says so. Signed clients' trends are collected weekly and read by their monthly report (`industry_trends`, `analysis.industry_trends_analysis`; on reports made from 9 November 2026 `trend_status` is `stored`, `none` or `skipped`).
 - Demos never start RivalIQ tracking or the competitive report (`connected_only`). RivalIQ's plan tracks a fixed number of distinct companies (40 on 2026-10-01, all in use); the seats stay with signed clients. `setup-rivaliq-landscape` has a `cleanup` mode that deletes a landscape a failed setup created and left empty.
 - Socialytics makes social and competitive reports itself (since 8 November 2026): a social report takes about 10 minutes and a competitive one about 20 in recent runs.
 
