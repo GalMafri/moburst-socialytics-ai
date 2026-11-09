@@ -19,6 +19,7 @@ import { fetchOpenTopics } from "@/lib/openTopics";
 import { fetchNextRun } from "@/lib/nextRun";
 import { buildCompetitiveContext } from "@/components/competitive/CompetitiveSnapshot";
 import { competitiveReportQuality } from "../../../supabase/functions/_shared/competitive/reportEvidence";
+import { readShownInsights } from "../../../supabase/functions/_shared/reports/shownFields";
 import { actionItems, competitiveStanding, contentWeek, reportHeadline, type PostMedia, type WeekPost } from "@/lib/clientOverview";
 
 const andList = (xs: string[]) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
@@ -45,6 +46,8 @@ export function ClientOverview({ clientId, isStaff }: { clientId: string; isStaf
         fetchNextRun(clientId, "competitive").catch(() => null),
       ]);
       const compRow = competitive.data && competitiveReportQuality(competitive.data.report_data).ready ? competitive.data : null;
+      // Read as every reader reads it: its insights where it has them, through the evidence limits (shownFields.ts).
+      const compInsights = compRow ? await readShownInsights(supabase, "competitive_reports", compRow.id).catch(() => null) : null;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const fb = (feedback.data || []) as any[];
       const content = contentWeek((posts.data || []) as WeekPost[], (media.data || []) as PostMedia[], week);
@@ -53,7 +56,7 @@ export function ClientOverview({ clientId, isStaff }: { clientId: string; isStaf
         report: report.data,
         headline: report.data ? reportHeadline(report.data.report_data) : null,
         competitive: compRow,
-        standing: compRow ? competitiveStanding(buildCompetitiveContext(compRow, fb)) : null,
+        standing: compRow ? competitiveStanding(buildCompetitiveContext(compRow, fb, compInsights)) : null,
         content,
         firstMonthly: firstRunSentence("monthly", nextMonthly, timeZone),
         // A run that was held back is not shown; the next one is a fact worth stating.

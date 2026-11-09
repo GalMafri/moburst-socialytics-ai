@@ -56,7 +56,7 @@ export function InsightCard({
   accent?: boolean;
   className?: string;
   footer?: ReactNode;
-  /** The numbers the insight rests on, in words (report insights, src/lib/reportInsights.ts). */
+  /** The numbers the insight rests on, in words (report insights, supabase/functions/_shared/reports/shownFields.ts). */
   basedOn?: string;
 }) {
   const { headline, body } = splitHeadline(text);

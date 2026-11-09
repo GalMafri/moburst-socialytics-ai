@@ -2,9 +2,11 @@
 // writes content for a client (ad-hoc posts, copy rewrites). Uses the latest
 // complete competitive report and the team's verdicts on its gaps: endorsed
 // gaps must be addressed, hidden gaps must not be proposed, everything else is
-// context. Returns "" when the client has no competitive analysis yet.
-import { competitiveReportQuality, withCompetitiveEvidenceLimits } from './reportEvidence.ts';
-import { normalizedCompetitiveMetrics } from './reportMetrics.ts';
+// context. Returns "" when the client has no competitive analysis yet. The
+// report is read as every reader reads it (reports/shownFields.ts): its
+// insights where it has them, through the evidence limits.
+import { competitiveReportQuality } from './reportEvidence.ts';
+import { readShownInsights, shownCompetitive } from '../reports/shownFields.ts';
 import { type CompetitiveLearning, editedSuggestion, learningLines } from './suggestionEdits.ts';
 
 // deno-lint-ignore no-explicit-any
@@ -16,7 +18,7 @@ const insightKey = (text: string) =>
 export async function competitiveBrief(supabase: AnyClient, clientId: string, platform?: string | null): Promise<string> {
   const { data: report } = await supabase
     .from("competitive_reports")
-    .select("created_at, report_data")
+    .select("id, created_at, report_data")
     .eq("client_id", clientId)
     .eq("status", "complete")
     .order("created_at", { ascending: false })
@@ -37,8 +39,9 @@ export async function competitiveBrief(supabase: AnyClient, clientId: string, pl
   // The team's edits replace the report's wording; verdicts stay keyed on the original.
   const edits = new Map<string, unknown>((feedback || []).map((f: any) => [f.insight_key, f.edited]));
 
-  // The summary is written from the figures every screen shows, never the stored ones.
-  const rd: any = withCompetitiveEvidenceLimits(normalizedCompetitiveMetrics(report.report_data || {}));
+  // The summary and gaps every screen shows: the report's insights where it has them (a read that fails leaves its own), through the evidence limits.
+  const insights = await readShownInsights(supabase, "competitive_reports", report.id).catch(() => null);
+  const rd: any = shownCompetitive(report.report_data || {}, insights).report;
   const ai = rd.ai_analysis || {};
   const plat = String(platform || "").toLowerCase();
   const gaps: any[] = Array.isArray(ai.gaps_for_client) ? ai.gaps_for_client : [];

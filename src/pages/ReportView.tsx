@@ -6,7 +6,7 @@ import { reportCounts, sproutEngagementRate, sproutEngagements } from "@/lib/rep
 import { StatCard } from "@/components/ui/stat-card";
 import { useQuery } from "@tanstack/react-query";
 import { useReportInsights } from "@/hooks/useReportInsights";
-import { socialInsights } from "@/lib/reportInsights";
+import { readShownInsights, shownCompetitive, shownSocial } from "../../supabase/functions/_shared/reports/shownFields";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { StatGrid } from "@/components/ui/stat-card";
@@ -59,8 +59,7 @@ import { CompetitiveSnapshot } from "@/components/competitive/CompetitiveSnapsho
 import { PostVisual, usePostPreviews, type PostPreview } from "@/components/competitive/PostVisual";
 import { useInsightFeedback } from "@/hooks/useInsightFeedback";
 import { measuredEngagements } from "@/lib/trendEngagement";
-import { normalizedCompetitiveMetrics } from "@/lib/competitiveMetrics";
-import { competitiveReportQuality, withCompetitiveEvidenceLimits } from "../../supabase/functions/_shared/competitive/reportEvidence";
+import { competitiveReportQuality } from "../../supabase/functions/_shared/competitive/reportEvidence";
 import { Prose } from "@/components/ui/prose";
 import { Section, SectionNav } from "@/components/ui/section";
 import { ReportDecks } from "@/components/reports/ReportDecks";
@@ -101,7 +100,9 @@ export default function ReportView() {
         .maybeSingle();
       if (error) throw error;
       if (!data || !competitiveReportQuality(data.report_data).ready) return null;
-      return { ...data, report_data: withCompetitiveEvidenceLimits(normalizedCompetitiveMetrics(data.report_data)) };
+      // Read as every reader reads it: its insights where it has them, through the evidence limits (shownFields.ts).
+      const insights = await readShownInsights(supabase, "competitive_reports", data.id).catch(() => null);
+      return { ...data, report_data: shownCompetitive(data.report_data, insights).report };
     },
     enabled: !!id,
   });
@@ -132,7 +133,6 @@ export default function ReportView() {
 
   // The report's insights, worked out from its figures (report_insights), in place of the model-written ones.
   const { data: insightsRow } = useReportInsights("reports", reportId);
-  const fromInsights = socialInsights(insightsRow);
 
   const overviewPostUrls = useMemo(() => {
     const rawRd = (report as any)?.report_data;
@@ -280,9 +280,11 @@ export default function ReportView() {
   const endorsedGaps = latestCompetitive
     ? ((latestCompetitive.report_data as any)?.ai_analysis?.gaps_for_client || []).filter((g: any) => verdictFor(g.gap) === "up")
     : [];
-  const competitiveTakeaways: string[] = Array.isArray(aiAnalysis?.competitive_takeaways) ? aiAnalysis.competitive_takeaways : [];
-  const pillarRecs: string[] = fromInsights?.recommendations ? fromInsights.recommendations.map((r) => r.text) : aiAnalysis?.sprout_performance_analysis?.pillar_alignment?.recommendations || [];
-  const pillarRecsBasis = fromInsights?.recommendations?.map((r) => r.basedOn);
+  // The report's insights where it has them, its own fields otherwise, field by field (shownFields.ts).
+  const shown = shownSocial(aiAnalysis, insightsRow, { staff: isMoburstStaff });
+  const competitiveTakeaways: string[] = shown.takeaways;
+  const pillarRecs: string[] = shown.recommendations.map((r) => r.text);
+  const pillarRecsBasis = shown.recommendations.map((r) => r.basedOn);
   const trendOpportunities: string[] = [
     ...(aiAnalysis?.tiktok_trends_analysis?.opportunities_for_client || []),
     ...(aiAnalysis?.instagram_trends_analysis?.opportunities_for_client || []),
@@ -349,10 +351,10 @@ export default function ReportView() {
     if (a.tab) return setTab(a.tab);
     if (a.anchor) document.getElementById(`report-${a.anchor}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
-  const insights: string[] = fromInsights ? fromInsights.insights.map((i) => i.text) : aiAnalysis?.sprout_performance_analysis?.key_insights || [];
-  const insightsBasis = fromInsights?.insights.map((i) => i.basedOn);
-  const summary: string | null = fromInsights ? fromInsights.summary?.text ?? null : aiAnalysis?.sprout_performance_analysis?.month_over_month_summary || null;
-  const summaryBasis = fromInsights?.summary?.basedOn;
+  const insights: string[] = shown.insights.map((i) => i.text);
+  const insightsBasis = shown.insights.map((i) => i.basedOn);
+  const summary: string | null = shown.summary?.text ?? null;
+  const summaryBasis = shown.summary?.basedOn;
   const pillars = aiAnalysis?.sprout_performance_analysis?.pillar_alignment;
   const pillarsLine = pillars
     ? `${(pillars.well_represented || []).length} pillars well represented, ${(pillars.underrepresented || []).length} need attention, ${pillarRecs.length} recommendations.`

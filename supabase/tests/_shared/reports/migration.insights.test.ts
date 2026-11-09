@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { SHOWN_INSIGHT_COLUMNS } from "../../../functions/_shared/reports/shownFields";
 
 const migrations = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "migrations");
 const migration = readFileSync(join(migrations, "20261110220000_data_driven_insights.sql"), "utf8");
@@ -93,6 +94,8 @@ describe("20261110220000_data_driven_insights.sql", () => {
   it("shows people the shown columns only: problems, the model and token counts are the service role's", async () => {
     await as("authenticated", APP);
     expect(await rows(`select id, report_table, report_id, client_id, kind, input_hash, facts, fields, source, prompt_version, created_at, confirmed_at from public.report_insights`)).toHaveLength(1);
+    // What every reader asks for (shownFields.ts) is within the grant.
+    expect(await rows(`select ${SHOWN_INSIGHT_COLUMNS} from public.report_insights`)).toHaveLength(1);
     for (const column of ["problems", "model", "input_tokens", "output_tokens", "*"]) {
       await expect(db.query(`select ${column} from public.report_insights`)).rejects.toThrow(/permission denied/);
     }

@@ -369,20 +369,3 @@ export async function queueReportInsights(db: Db, table: string, reportId: strin
     console.warn("[report insights] could not queue:", e instanceof Error ? e.message : String(e));
   }
 }
-
-/**
- * The shown insights of a report (its newest confirmed row) as text the week planner reads as its
- * report findings: the insights, then the recommendations. Null when the
- * report has none (stored before go-live), so the planner reads the report's
- * own fields as before.
- */
-export async function insightFindings(db: Db, reportId: string): Promise<string[] | null> {
-  try {
-    const { data, error } = await db.from("report_insights").select("fields, confirmed_at").eq("report_id", reportId).order("confirmed_at", { ascending: false }).limit(1).maybeSingle();
-    if (error || !data?.fields || data.fields.kind !== "social") return null;
-    const f = data.fields as Extract<InsightFields, { kind: "social" }>;
-    return [...f.insights, ...(f.recommendations ?? [])].map((c) => c.text).filter(Boolean);
-  } catch {
-    return null;
-  }
-}

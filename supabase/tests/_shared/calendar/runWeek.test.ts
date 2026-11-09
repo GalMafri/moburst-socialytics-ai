@@ -650,13 +650,16 @@ describe("runVoiceProfile", () => {
 });
 
 describe("the report findings a week is planned from (report insights, 3 Nov 2026)", () => {
-  it("reads a report's checked insights and recommendations when it has them, and its own fields otherwise", async () => {
+  it("reads a report's checked insights and recommendations when it has them, and its own fields otherwise, field by field", async () => {
     m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
-    const report = { id: "r9", created_at: "2026-11-09T00:00:00Z", report_data: [{ ai_analysis: { sprout_performance_analysis: { key_insights: ["The model's own insight."] } } }] };
-    const insights = { report_id: "r9", created_at: "2026-11-09T01:00:00Z", fields: { kind: "social", summary: null, insights: [{ text: "Impressions rose 26.5% to 12,400.", facts: ["F1"] }], recommendations: [{ text: "Post the next video on LinkedIn.", facts: ["F3"] }] } };
-    const withInsights = await gatherEvidence(fakeDb({ clients: [CLIENT], reports: [report], report_insights: [insights] }), CLIENT, NOW);
-    expect(withInsights.evidence.filter((e) => e.kind === "report").map((e) => e.text)).toEqual(["Impressions rose 26.5% to 12,400.", "Post the next video on LinkedIn."]);
-    const without = await gatherEvidence(fakeDb({ clients: [CLIENT], reports: [report] }), CLIENT, NOW);
-    expect(without.evidence.filter((e) => e.kind === "report").map((e) => e.text)).toEqual(["The model's own insight."]);
+    const ai = { sprout_performance_analysis: { key_insights: ["The model's own insight."], pillar_alignment: { recommendations: ["The model's own recommendation."] } }, competitive_takeaways: ["Rival Co posts a Reel a day."] };
+    const report = { id: "r9", created_at: "2026-11-09T00:00:00Z", report_data: [{ ai_analysis: ai }] };
+    const insights = { report_table: "reports", report_id: "r9", confirmed_at: "2026-11-09T01:00:00Z", facts: [], fields: { kind: "social", summary: null, insights: [{ text: "Impressions rose 26.5% to 12,400.", facts: ["F1"] }], recommendations: [{ text: "Post the next video on LinkedIn.", facts: ["F3"] }] } };
+    const reportFindings = async (tables: Record<string, unknown[]>) => (await gatherEvidence(fakeDb({ clients: [CLIENT], reports: [report], ...tables }), CLIENT, NOW)).evidence.filter((e) => e.kind === "report").map((e) => e.text);
+    // The insights carry no takeaways: the report's own stay.
+    expect(await reportFindings({ report_insights: [insights] })).toEqual(["Impressions rose 26.5% to 12,400.", "Post the next video on LinkedIn.", "Rival Co posts a Reel a day."]);
+    // Code wrote no recommendations (the facts in its own words): the report's own stay.
+    expect(await reportFindings({ report_insights: [{ ...insights, fields: { ...insights.fields, recommendations: null } }] })).toEqual(["Impressions rose 26.5% to 12,400.", "The model's own recommendation.", "Rival Co posts a Reel a day."]);
+    expect(await reportFindings({})).toEqual(["The model's own insight.", "The model's own recommendation.", "Rival Co posts a Reel a day."]);
   });
 });

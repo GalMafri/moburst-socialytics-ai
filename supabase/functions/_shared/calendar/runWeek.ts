@@ -35,7 +35,7 @@ import { voicePromptBlock, voiceReady } from "../voice/voice.ts";
 import { activeTerms } from "../trends/profile.ts";
 import { HASHTAG_PLATFORMS, type HashtagPlatform } from "../trends/types.ts";
 import { strategyPromptBlock } from "../strategy/prompt.ts";
-import { insightFindings } from "../reports/insights.ts";
+import { readShownInsights, shownSocial } from "../reports/shownFields.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -82,7 +82,6 @@ function todayIn(timeZone: string, now: Date): string {
 
 const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * DAY).toISOString().slice(0, 10);
 const list = (s: unknown) => String(s ?? "").split(",").map((x) => x.trim()).filter(Boolean);
-const strings = (x: unknown): string[] => (Array.isArray(x) ? x.map((v) => (typeof v === "string" ? v : v && typeof v === "object" ? Object.values(v as Record<string, unknown>).filter((t) => typeof t === "string").join(": ") : "")).filter(Boolean) : []);
 const usage = (raw: unknown) => {
   const u = (raw as { usage?: { input_tokens?: number; output_tokens?: number } } | null)?.usage;
   return { input: Number(u?.input_tokens) || 0, output: Number(u?.output_tokens) || 0 };
@@ -270,11 +269,10 @@ export async function gatherEvidence(admin: Db, client: Record<string, any>, now
     .order("created_at", { ascending: false }).limit(1).maybeSingle();
   if (reportError) throw new Error(`Could not read the latest report: ${reportError.message}`);
   const rd = Array.isArray(report?.report_data) ? report.report_data[0] : report?.report_data;
-  const ai = rd?.ai_analysis ?? {};
-  const perf = ai.sprout_performance_analysis ?? {};
-  // A report from go-live on is read through its insights (report_insights), worked out from its figures; an older one through its own fields.
-  const findings = (report?.id ? await insightFindings(admin, report.id) : null)
-    ?? [...strings(perf.key_insights), ...strings(perf.pillar_alignment?.recommendations), ...strings(ai.competitive_takeaways)];
+  // Read as every reader reads it (shownFields.ts): the report's insights where it has them, its own
+  // fields otherwise, field by field, so the competitive takeaways the insights don't carry stay.
+  const shown = shownSocial(rd?.ai_analysis, await readShownInsights(admin, "reports", report?.id));
+  const findings = [...shown.insights.map((i) => i.text), ...shown.recommendations.map((r) => r.text), ...shown.takeaways];
 
   // Industry trends come from the newest finished weekly Trends run (its themes staff did not dismiss), not from the report.
   const trends = scoreTrendItems(await latestTrendEvidence(admin, client.id, now));

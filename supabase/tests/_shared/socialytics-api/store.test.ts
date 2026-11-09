@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { competitiveFromLight, makeStore, reportFromLight } from "../../../functions/_shared/socialytics-api/store";
 import { competitiveReportOut, reportOut } from "../../../functions/_shared/socialytics-api/serializers";
+import { SHOWN_INSIGHT_COLUMNS } from "../../../functions/_shared/reports/shownFields";
 
 describe("light list rows", () => {
   it("rebuild the report_data the summary serializer reads", () => {
@@ -51,5 +52,29 @@ describe("clientExtras", () => {
     expect(extras.c3.designSettings).toBeNull();
     expect(extras.c3.designSteps.map((r) => r.step)).toEqual(["design_refs", "design_settings"]);
     expect(extras.c1.designSteps).toEqual([]);
+  });
+});
+
+describe("a single report", () => {
+  it("comes with its shown insights (the newest confirmed row), read by the shown columns", async () => {
+    const id = "6f1c1a3e-6c1b-4c63-9a1b-0c1d2e3f4a5b";
+    const calls: Array<{ table: string; select: string; filters: unknown[][] }> = [];
+    const db = {
+      from(table: string) {
+        const c = { table, select: "", filters: [] as unknown[][] };
+        calls.push(c);
+        const b: Record<string, unknown> = { select: (cols: string) => { c.select = cols; return b; }, maybeSingle: async () => ({ data: table === "report_insights" ? { report_id: id, facts: [], fields: { kind: "competitive" } } : { id, client_id: "c1" }, error: null }) };
+        for (const op of ["eq", "order", "limit"]) b[op] = (...a: unknown[]) => { c.filters.push([op, ...a]); return b; };
+        return b;
+      },
+    };
+    // deno-lint-ignore no-explicit-any
+    const store = makeStore(db as any);
+    const scope = { allows: () => true } as never;
+    for (const [get, table] of [["getReport", "reports"], ["getCompetitiveReport", "competitive_reports"]] as const) {
+      calls.length = 0;
+      expect(await store[get](id, scope)).toMatchObject({ id, insights: { report_id: id } });
+      expect(calls[1]).toEqual({ table: "report_insights", select: SHOWN_INSIGHT_COLUMNS, filters: [["eq", "report_table", table], ["eq", "report_id", id], ["order", "confirmed_at", { ascending: false }], ["limit", 1]] });
+    }
   });
 });

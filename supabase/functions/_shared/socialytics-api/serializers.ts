@@ -4,8 +4,7 @@
  * and customer ids, RivalIQ landscape and company ids, media provider
  * request ids) never appear in any output.
  */
-import { normalizedCompetitiveMetrics } from "../competitive/reportMetrics.ts";
-import { withCompetitiveEvidenceLimits } from "../competitive/reportEvidence.ts";
+import { shownCompetitive, shownSocial, type ShownInsightsRow } from "../reports/shownFields.ts";
 import { designWaitingFor, designWaitingLine, type DesignStepRow, type DesignWaitingFor } from "../design/setup.ts";
 declare const Deno: { env: { get(k: string): string | undefined } } | undefined;
 /**
@@ -33,8 +32,9 @@ export interface SproutProfileRow { id: string; client_id: string; sprout_profil
 export interface CompetitorSetRow { id: string; client_id: string; status: string; notes: string | null; source: string | null; rivaliq_landscape_id: string | null; confirmed_by?: string | null; confirmed_at: string | null; created_at: string; updated_at?: string | null; demo_job_id: string | null }
 export interface CompetitorRow { id: string; set_id: string; client_id: string; name: string; website_url: string | null; rationale: string | null; similarity_score: number | null; source: string | null; is_selected: boolean | null; selected_rank: number | null; rivaliq_company_id?: string | null; profile_detection: unknown; created_at: string }
 export interface HandleRow { id: string; competitor_id: string; client_id: string; platform: string; handle: string; profile_url: string | null; is_active: boolean | null; followers: number | null; detection_confidence: number | null; source: string | null; detected_at: string | null }
-export interface ReportRow { id: string; client_id: string; report_type: string | null; status: string; date_range_start: string | null; date_range_end: string | null; gamma_url: string | null; duration_minutes: number | null; report_data: unknown; created_at: string; created_by?: string | null; demo_job_id: string | null }
-export interface CompetitiveReportRow { id: string; client_id: string; set_id: string | null; report_data: unknown; status: string; gamma_url: string | null; duration_minutes: number | null; date_range_start: string | null; date_range_end: string | null; created_by?: string | null; created_at: string; demo_job_id: string | null }
+/** `insights`: the report's shown insights (reports/shownFields.ts), read with a single report. */
+export interface ReportRow { id: string; client_id: string; report_type: string | null; status: string; date_range_start: string | null; date_range_end: string | null; gamma_url: string | null; duration_minutes: number | null; report_data: unknown; created_at: string; created_by?: string | null; demo_job_id: string | null; insights?: ShownInsightsRow | null }
+export interface CompetitiveReportRow { id: string; client_id: string; set_id: string | null; report_data: unknown; status: string; gamma_url: string | null; duration_minutes: number | null; date_range_start: string | null; date_range_end: string | null; created_by?: string | null; created_at: string; demo_job_id: string | null; insights?: ShownInsightsRow | null }
 export interface PostRow {
   id: string; client_id: string; report_id: string | null; recommendation_index: number | null; version: number | null; platform: string; post_copy: string | null; hashtags: unknown; cta: string | null; concept: string | null; visual_direction: string | null;
   format: string | null; source: string | null; created_at: string; created_by?: string | null; media_urls: string[] | null; video_edits?: unknown; variant_group_id: string | null; is_selected: boolean | null; variant_angle: string | null;
@@ -206,7 +206,9 @@ export function reportOut(row: ReportRow, opts: { detail?: boolean } = {}): Repo
     links: { app: `${APP_URL}/clients/${row.client_id}/reports/${row.id}`, api: `/v1/reports/${row.id}` },
   };
   if (opts.detail) {
-    out.analysis = rd.ai_analysis && typeof rd.ai_analysis === "object" ? omitDeep(rd.ai_analysis as Record<string, unknown>, INTERNAL_KEYS) : null;
+    // Read as every reader reads it: the report's insights where it has them, its own fields otherwise (shownFields.ts).
+    const analysis = shownSocial(rd.ai_analysis, row.insights).analysis;
+    out.analysis = analysis && typeof analysis === "object" ? omitDeep(analysis as Record<string, unknown>, INTERNAL_KEYS) : null;
     out.calendar = Array.isArray(rd.content_calendar) ? (rd.content_calendar as ReportOut["calendar"]) : null;
     out.performance = rd.sprout_performance && typeof rd.sprout_performance === "object" ? omitDeep(rd.sprout_performance as Record<string, unknown>, INTERNAL_KEYS) : null;
     out.trends = rd.tiktok_trends || rd.instagram_trends ? { tiktok: trendOut(rd.tiktok_trends), instagram: trendOut(rd.instagram_trends) } : null;
@@ -215,11 +217,12 @@ export function reportOut(row: ReportRow, opts: { detail?: boolean } = {}): Repo
 }
 
 export function competitiveReportOut(row: CompetitiveReportRow, opts: { detail?: boolean } = {}): CompetitiveReportOut {
-  // The same normalized view every screen reads: one engagement rate
+  // The same view every screen reads (shownFields.ts): one engagement rate
   // (engagements divided by impressions) for every company, never the rate
-  // stored by the workflow that wrote the report.
+  // stored by the workflow that wrote the report, through the evidence
+  // limits, with the report's insights where it has them.
   const raw = obj(row.report_data);
-  const rd = raw.aggregates ? obj(withCompetitiveEvidenceLimits(normalizedCompetitiveMetrics(raw))) : raw;
+  const rd = raw.aggregates ? obj(shownCompetitive(raw, row.insights).report) : raw;
   const period = obj(rd.period);
   const out: CompetitiveReportOut = {
     id: row.id, client_id: row.client_id, set_id: row.set_id, status: row.status,

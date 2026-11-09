@@ -87,6 +87,19 @@ describe("reportOut", () => {
   });
 });
 
+describe("a report's insights through the connector (shownFields.ts)", () => {
+  const facts = [{ id: "F1", key: "ranking|all|followers|Bader Law", kind: "ranking", platform: "all", metric: "followers", unit: "count", value: 1, score: 1, numbers: [1], sentence: "", basis: "Followers: Bader Law 1, Morgan & Morgan 9 (highest), median 5 across 2 companies", sources: ["sprout", "rivaliq"] }];
+  it("gives the insights' fields in place of the report's own, field by field, naming no vendor", () => {
+    const social = reportOut({ ...REPORT, insights: { report_id: "rep-1", confirmed_at: "x", facts, fields: { kind: "social", summary: { text: "Reach fell.", facts: ["F1"] }, insights: [{ text: "Bader Law trails on followers.", facts: ["F1"] }], recommendations: null } } } as never, { detail: true });
+    expect(social.analysis?.sprout_performance_analysis).toMatchObject({ month_over_month_summary: "Reach fell.", key_insights: ["Bader Law trails on followers."] });
+    expect(social.analysis?.competitive_takeaways).toEqual(["Post more Reels."]);
+    const comp = competitiveReportOut({ ...COMPETITIVE_REPORT, insights: { report_id: "crep-1", confirmed_at: "x", facts, fields: { kind: "competitive", summary: [{ text: "Bader Law trails on followers.", facts: ["F1"] }], gaps: [{ gap: "Followers trail", platform: "instagram", why_it_matters: "w", suggested_play: "s", facts: ["F1"] }] } } } as never, { detail: true });
+    expect(comp.analysis?.executive_summary).toBe("Bader Law trails on followers.");
+    expect(comp.analysis?.gaps_for_client).toEqual([{ gap: "Followers trail", platform: "instagram", why_it_matters: "w", suggested_play: "s", based_on: facts[0].basis }]);
+    expect(JSON.stringify(comp.analysis)).not.toMatch(/Sprout|Rival ?IQ|"F1"/);
+  });
+});
+
 describe("competitiveReportOut", () => {
   it("summarises and details without RivalIQ identifiers", () => {
     const s = competitiveReportOut(COMPETITIVE_REPORT);
