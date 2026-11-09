@@ -51,7 +51,8 @@ describe("socialFacts", () => {
     const views = socialChanges(social(), { start: "2026-09-01", end: "2026-09-30" }).find((f) => f.key === "change|all|views|")!;
     expect(views).toMatchObject({ kind: "change", value: 292, previous: 575, change: -283, percent: -49.2 });
     expect(views.sentence).toBe("Video views fell 49.2% to 292.");
-    expect(views.basis).toBe("Video views 292 in September against 575 in August, -49.2%, from Sprout");
+    expect(views.basis).toBe("Video views 292 in September against 575 in August, -49.2%");
+    expect(views.sources).toEqual(["sprout"]);
     expect(views.numbers).toEqual(expect.arrayContaining([292, 575, 283, 49.2]));
   });
 
@@ -78,7 +79,33 @@ describe("socialFacts", () => {
     expect(facts.find((f) => f.key === "share|LinkedIn|engagements|")).toMatchObject({ value: 96.1, total: 542 });
     const outlier = facts.find((f) => f.kind === "outlier")!;
     expect(outlier).toMatchObject({ platform: "LinkedIn", value: 210, usual: 47.4, multiple: 4.4, link: "https://linkedin.com/p/1", format: "document" });
+    expect(outlier.sentence).toBe("A LinkedIn document post got 210 engagements, 4.4x the platform's usual per post.");
     expect(facts.filter((f) => f.kind === "outlier")).toHaveLength(1);
+  });
+
+  it("names a post's type as the screens label it, with the right article, when its category is empty", () => {
+    const posts = [
+      { permalink: "https://www.instagram.com/reel/9", network_type: "FB_INSTAGRAM_ACCOUNT", post_type: "INSTAGRAM_MEDIA", content_category: "", engagements: 90, impressions: 900 },
+      { permalink: "https://linkedin.com/p/8", network_type: "LINKEDIN", post_type: "LINKEDIN_COMPANY_UPDATE", engagements: 400, impressions: 900 },
+    ];
+    const rd = social();
+    rd[0].sprout_performance.top_posts = posts as never;
+    const outliers = socialFacts(rd).filter((f) => f.kind === "outlier");
+    expect(outliers.map((f) => f.sentence).sort()).toEqual([
+      "A LinkedIn image post got 400 engagements, 8.3x the platform's usual per post.",
+      "An Instagram video post got 90 engagements, 8.3x the platform's usual per post.",
+    ]);
+    for (const f of outliers) expect(f.sentence + f.basis).not.toMatch(/instagram media|company update|_/i);
+  });
+
+  it("keeps data vendors out of every fact's words and carries them as data", () => {
+    const facts = [...socialChanges(social(), { start: "2026-09-01", end: "2026-09-30" }), ...socialFacts(social())];
+    expect(facts.some((f) => f.metric === "engagement_rate")).toBe(true);
+    for (const f of facts) {
+      expect(`${f.sentence} ${f.basis}`).not.toMatch(/Sprout|Rival ?IQ|Apify|Gamma/i);
+      expect(f.sources).toEqual(["sprout"]);
+    }
+    expect(facts.find((f) => f.metric === "engagement_rate")!.sentence).toMatch(/^Engagement rate (rose|fell) /);
   });
 
   it("numbers facts by score, then by a fixed key, and never past twenty", () => {
@@ -120,13 +147,17 @@ describe("competitiveFacts", () => {
     const rate = facts.find((f) => f.key === "ranking|all|compared_rate|Moburst")!;
     expect(rate).toMatchObject({ rank: 3, of: 3, leader: "Rival Co", value: rateOf("Moburst"), leaderValue: rateOf("Rival Co"), median: rateOf("Other App") });
     expect(rate.sentence).toMatch(/^Moburst ranks 3rd of 3 on engagement rate compared on likes, comments and shares with [\d.]+%, against Rival Co's [\d.]+%\.$/);
-    expect(rate.basis).toContain("from Sprout and RivalIQ");
+    expect(rate.basis).not.toMatch(/Sprout|Rival ?IQ/);
+    expect(rate.sources).toEqual(["sprout", "rivaliq"]);
     expect(facts.find((f) => f.key === "ranking|all|followers|Moburst")).toMatchObject({ rank: 3, leader: "Rival Co", value: 14900, leaderValue: 680000, median: 32000 });
   });
 
   it("finds a competitor's post far above its usual per post", () => {
-    const outlier = competitiveFacts(competitive()).find((f) => f.kind === "outlier" && f.company === "Rival Co");
-    expect(outlier).toMatchObject({ platform: "instagram", value: 7000, usual: 700, multiple: 10, format: "reel" });
+    const facts = competitiveFacts(competitive());
+    const outlier = facts.find((f) => f.kind === "outlier" && f.company === "Rival Co")!;
+    expect(outlier).toMatchObject({ platform: "instagram", value: 7000, usual: 700, multiple: 10, format: "video", sources: ["rivaliq"] });
+    expect(outlier.sentence).toBe("An Instagram video post by Rival Co got 7,000 engagements, 10x its usual per post.");
+    for (const f of facts) expect(`${f.sentence} ${f.basis}`).not.toMatch(/Sprout|Rival ?IQ|Apify|Gamma/i);
   });
 
   it("gives the client's changes, filtered like the monthly report's", () => {

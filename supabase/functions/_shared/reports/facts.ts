@@ -19,12 +19,15 @@
 // earlier reports); with fewer than three earlier reports, the five largest
 // changes are kept. Facts are sorted by score, then by their key, and
 // numbered F1, F2: no clock, no object order and no model touches the list.
+// A fact's words name no data vendor: clients read them. Where its figures
+// come from is data (sources), which staff see appended (shownFields.ts).
 // Free of Deno and network imports so it can be tested.
 
 import { competitiveFigures, socialFigures, type Figure } from "./reportText.ts";
 import { normalizedCompetitiveMetrics } from "../competitive/reportMetrics.ts";
 import { sproutEngagements } from "./socialFigures.ts";
 import { median } from "../calendar/evidence.ts";
+import { mediaKind, mediaLabel } from "./mediaKind.ts";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -32,6 +35,8 @@ type Any = any;
 export type FactKind = "change" | "ranking" | "outlier" | "share";
 /** How a fact's numbers are written: a count, a percentage (a rate or a share), or posts a week. */
 export type FactUnit = "count" | "percent" | "per_week";
+/** Where a fact's figures come from: the client's own connected profiles, the competitor tracking, or both. Never in its words. */
+export type FactSource = "sprout" | "rivaliq";
 
 export interface Fact {
   /** F1, F2 by score; given by numberFacts. */
@@ -65,8 +70,10 @@ export interface Fact {
   numbers: number[];
   /** The fact in a sentence, written here: what the report shows when no model answer checks out. */
   sentence: string;
-  /** The "Based on" line under an insight that cites it. */
+  /** The "Based on" line under an insight that cites it, naming no data vendor. */
   basis: string;
+  /** Where its figures come from (staff see it named after the basis). */
+  sources: FactSource[];
 }
 
 export const MAX_FACTS = 20;
@@ -79,7 +86,7 @@ export const OUTLIER_MULTIPLE = 2;
 const OUTLIERS = 3;
 
 const METRIC_WORDS: Record<string, string> = {
-  engagements: "engagements", impressions: "impressions", views: "video views", engagement_rate: "Sprout engagement rate", posts: "posts",
+  engagements: "engagements", impressions: "impressions", views: "video views", engagement_rate: "engagement rate", posts: "posts",
   cadence: "posts a week", compared_rate: "engagement rate compared on likes, comments and shares", engagements_per_post: "engagements per post",
   impressions_per_post: "impressions per post", share_of_voice: "share of voice", followers: "followers",
 };
@@ -108,6 +115,16 @@ const fmtPct = (n: number) => `${round1(Math.abs(n))}%`;
 const fmtX = (n: number) => `${Number.isInteger(n) ? n : n.toFixed(1)}x`;
 const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+/** "a" or "an" as the word after it is said: an Instagram post, an X post, a LinkedIn post. */
+const article = (word: string) => (/^(?:[aeiou]|x\b)/i.test(word) ? "an" : "a");
+/** A post as the screens label its type: "Instagram video post", "LinkedIn document post". */
+const postWords = (platform: string, format: string) => `${platformName(platform)} ${format} post`;
+/**
+ * A post's type through the screens' label (mediaKind.ts), never a raw type
+ * such as INSTAGRAM_MEDIA. A raw type starts with its platform's name, which
+ * is no type: "LINKEDIN_COMPANY_UPDATE" holds "link" and would read as a link post.
+ */
+const formatOf = (raw: unknown, link: string) => mediaLabel(mediaKind(String(raw || "").replace(/linkedin/gi, ""), link)).toLowerCase();
 
 export interface Period { start?: string | null; end?: string | null }
 
@@ -130,7 +147,7 @@ type Draft = Omit<Fact, "id">;
 const subject = (platform: string, metric: string) => (platform === "all" ? cap(METRIC_WORDS[metric] ?? metric) : `${platformName(platform)} ${METRIC_WORDS[metric] ?? metric}`);
 
 /** A change in words: "Impressions rose 26.5% to 12,400." A rate's change is in points. */
-function changeFact(platform: string, metric: string, unit: FactUnit, value: number, previous: number, period: Period | undefined, source: string, company?: string): Draft | null {
+function changeFact(platform: string, metric: string, unit: FactUnit, value: number, previous: number, period: Period | undefined, sources: FactSource[], company?: string): Draft | null {
   const words = periodWords(period);
   const who = company ? `${company}'s ${platform === "all" ? "" : `${platformName(platform)} `}${METRIC_WORDS[metric] ?? metric}` : subject(platform, metric);
   if (unit === "percent") {
@@ -138,9 +155,9 @@ function changeFact(platform: string, metric: string, unit: FactUnit, value: num
     if (change === 0) return null;
     return {
       key: `change|${platform}|${metric}|${company ?? ""}`, kind: "change", platform, metric, ...(company ? { company } : {}), unit, value, previous, change, percent: change,
-      score: 0, numbers: [value, previous, Math.abs(change)],
+      score: 0, numbers: [value, previous, Math.abs(change)], sources,
       sentence: `${cap(who)} ${change > 0 ? "rose" : "fell"} ${round2(Math.abs(change))} points to ${fmt(value, unit)}.`,
-      basis: `${cap(who)} ${fmt(value, unit)} in ${words.now} against ${fmt(previous, unit)} in ${words.before}, ${change > 0 ? "+" : "-"}${round2(Math.abs(change))} points, from ${source}`,
+      basis: `${cap(who)} ${fmt(value, unit)} in ${words.now} against ${fmt(previous, unit)} in ${words.before}, ${change > 0 ? "+" : "-"}${round2(Math.abs(change))} points`,
     };
   }
   const percent = percentChange(value, previous);
@@ -148,9 +165,9 @@ function changeFact(platform: string, metric: string, unit: FactUnit, value: num
   const change = value - previous;
   return {
     key: `change|${platform}|${metric}|${company ?? ""}`, kind: "change", platform, metric, ...(company ? { company } : {}), unit, value, previous, change, percent,
-    score: 0, numbers: [value, previous, Math.abs(change), Math.abs(percent)],
+    score: 0, numbers: [value, previous, Math.abs(change), Math.abs(percent)], sources,
     sentence: `${cap(who)} ${percent > 0 ? "rose" : "fell"} ${fmtPct(percent)} to ${fmt(value, unit)}.`,
-    basis: `${cap(who)} ${fmt(value, unit)} in ${words.now} against ${fmt(previous, unit)} in ${words.before}, ${percent > 0 ? "+" : "-"}${fmtPct(percent)}, from ${source}`,
+    basis: `${cap(who)} ${fmt(value, unit)} in ${words.now} against ${fmt(previous, unit)} in ${words.before}, ${percent > 0 ? "+" : "-"}${fmtPct(percent)}`,
   };
 }
 
@@ -201,12 +218,12 @@ export function socialChanges(reportData: Any, period?: Period): Draft[] {
   for (const net of ["all", ...platforms]) {
     for (const metric of ["engagements", "impressions", "views"]) {
       const cur = fig.get(`${net}|current|${metric}`), prev = fig.get(`${net}|previous|${metric}`);
-      if (valid(cur) && valid(prev)) { const d = changeFact(net, metric, "count", cur, prev, period, "Sprout"); if (d) out.push(d); }
+      if (valid(cur) && valid(prev)) { const d = changeFact(net, metric, "count", cur, prev, period, ["sprout"]); if (d) out.push(d); }
     }
     const rate = fig.get(`${net}|current|engagement_rate`), ratePrev = fig.get(`${net}|previous|engagement_rate`);
-    if (valid(rate) && valid(ratePrev)) { const d = changeFact(net, "engagement_rate", "percent", rate, ratePrev, period, "Sprout"); if (d) out.push(d); }
+    if (valid(rate) && valid(ratePrev)) { const d = changeFact(net, "engagement_rate", "percent", rate, ratePrev, period, ["sprout"]); if (d) out.push(d); }
     const posts = fig.get(`${net}|posts`), postsPrev = fig.get(`${net}|posts_previous`);
-    if (net !== "all" && valid(posts) && valid(postsPrev)) { const d = changeFact(net, "posts", "count", posts, postsPrev, period, "Sprout"); if (d) out.push(d); }
+    if (net !== "all" && valid(posts) && valid(postsPrev)) { const d = changeFact(net, "posts", "count", posts, postsPrev, period, ["sprout"]); if (d) out.push(d); }
   }
   return out;
 }
@@ -233,9 +250,9 @@ export function socialFacts(reportData: Any, opts: FactOptions = {}): Fact[] {
       const share = round1((part / total) * 100);
       drafts.push({
         key: `share|${net}|${metric}|`, kind: "share", platform: net, metric, unit: "percent", value: share, total, score: share / (100 / platforms.length) / 2,
-        numbers: [share, part, total],
+        numbers: [share, part, total], sources: ["sprout"],
         sentence: `${platformName(net)} brought ${fmt(share, "percent")} of the period's ${METRIC_WORDS[metric]}.`,
-        basis: `${platformName(net)} ${fmt(part, "count")} of ${fmt(total, "count")} ${METRIC_WORDS[metric]}, from Sprout`,
+        basis: `${platformName(net)} ${fmt(part, "count")} of ${fmt(total, "count")} ${METRIC_WORDS[metric]}`,
       });
     }
   }
@@ -257,12 +274,13 @@ export function socialFacts(reportData: Any, opts: FactOptions = {}): Fact[] {
     const usual = round1(total / count);
     const multiple = round1(ratio(value, usual));
     if (multiple < OUTLIER_MULTIPLE) continue;
-    const format = String(p?.content_category || p?.post_type || p?.media_type || "post").toLowerCase().replace(/_/g, " ");
+    const format = formatOf(p?.content_category || p?.post_type || p?.media_type, link);
+    const post = postWords(net, format);
     outliers.push({
       key: `outlier|${net}|engagements|${link}`, kind: "outlier", platform: net, metric: "engagements", unit: "count", value, usual, multiple, link, format,
-      score: multiple / 2, numbers: [value, usual, multiple],
-      sentence: `A ${platformName(net)} ${format} got ${fmt(value, "count")} engagements, ${fmtX(multiple)} the platform's usual per post.`,
-      basis: `A ${platformName(net)} ${format}: ${fmt(value, "count")} engagements against ${fmt(usual, "count")} per post on ${platformName(net)} this period, from Sprout`,
+      score: multiple / 2, numbers: [value, usual, multiple], sources: ["sprout"],
+      sentence: `${cap(article(post))} ${post} got ${fmt(value, "count")} engagements, ${fmtX(multiple)} the platform's usual per post.`,
+      basis: `${cap(article(post))} ${post}: ${fmt(value, "count")} engagements against ${fmt(usual, "count")} per post on ${platformName(net)} this period`,
     });
   }
   drafts.push(...outliers.sort((a, b) => (b.multiple ?? 0) - (a.multiple ?? 0) || a.key.localeCompare(b.key)).slice(0, OUTLIERS));
@@ -292,7 +310,7 @@ export function competitiveChanges(reportData: Any, period?: Period): Draft[] {
   const out: Draft[] = [];
   for (const metric of ["followers", "engagements", "impressions", "posts"]) {
     const cur = fig.get(`${client}|all|${metric}|current`), prev = fig.get(`${client}|all|${metric}|previous`);
-    if (valid(cur) && valid(prev)) { const d = changeFact("all", metric, "count", cur, prev, period, "Sprout", client); if (d) out.push(d); }
+    if (valid(cur) && valid(prev)) { const d = changeFact("all", metric, "count", cur, prev, period, ["sprout"], client); if (d) out.push(d); }
   }
   return out;
 }
@@ -321,11 +339,11 @@ export function competitiveFacts(reportData: Any, opts: FactOptions = {}): Fact[
       drafts.push({
         key: `ranking|${ch}|${r.metric}|${client}`, kind: "ranking", platform: ch, metric: r.metric, company: client, unit: r.unit, value: mine.v, rank, of: values.length,
         leader: leader.name, leaderValue: leader.v, median: mid, score: 1 + Math.min(Math.abs(mine.v - mid) / Math.max(Math.abs(mid), 1e-9), 4),
-        numbers: [mine.v, leader.v, mid, rank, values.length],
+        numbers: [mine.v, leader.v, mid, rank, values.length], sources: ["sprout", "rivaliq"],
         sentence: rank === 1
           ? `${client} leads on ${words}${where} with ${fmt(mine.v, r.unit)}; the median is ${fmt(mid, r.unit)}.`
           : `${client} ranks ${ordinal(rank)} of ${values.length} on ${words}${where} with ${fmt(mine.v, r.unit)}, against ${leader.name}'s ${fmt(leader.v, r.unit)}.`,
-        basis: `${cap(words)}${where}: ${client} ${fmt(mine.v, r.unit)}, ${leader.name} ${fmt(leader.v, r.unit)} (highest), median ${fmt(mid, r.unit)} across ${values.length} companies, from Sprout and RivalIQ`,
+        basis: `${cap(words)}${where}: ${client} ${fmt(mine.v, r.unit)}, ${leader.name} ${fmt(leader.v, r.unit)} (highest), median ${fmt(mid, r.unit)} across ${values.length} companies`,
       });
     }
   }
@@ -343,13 +361,14 @@ export function competitiveFacts(reportData: Any, opts: FactOptions = {}): Fact[
         if (!valid(value) || !link) continue;
         const multiple = round1(ratio(value, round1(usual)));
         if (multiple < OUTLIER_MULTIPLE) continue;
-        const format = String(p?.media_type || "post").toLowerCase().replace(/_/g, " ");
+        const format = formatOf(p?.media_type, link);
         const net = channel === "x" ? "twitter" : channel;
+        const post = postWords(net, format);
         outliers.push({
           key: `outlier|${net}|engagements|${link}`, kind: "outlier", platform: net, metric: "engagements", company, unit: "count", value, usual: round1(usual), multiple, link, format,
-          score: multiple / 2, numbers: [value, round1(usual), multiple],
-          sentence: `A ${platformName(net)} ${format} by ${company} got ${fmt(value, "count")} engagements, ${fmtX(multiple)} its usual per post.`,
-          basis: `${company}'s ${platformName(net)} ${format}: ${fmt(value, "count")} engagements against ${fmt(usual, "count")} per post on ${platformName(net)}, from ${company === client ? "Sprout" : "RivalIQ"}`,
+          score: multiple / 2, numbers: [value, round1(usual), multiple], sources: [company === client ? "sprout" : "rivaliq"],
+          sentence: `${cap(article(post))} ${post} by ${company} got ${fmt(value, "count")} engagements, ${fmtX(multiple)} its usual per post.`,
+          basis: `${company}'s ${post}: ${fmt(value, "count")} engagements against ${fmt(usual, "count")} per post on ${platformName(net)}`,
         });
       }
     }

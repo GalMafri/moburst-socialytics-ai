@@ -11,12 +11,12 @@ import {
 
 const fact = (over: Partial<Fact>): Fact => ({
   id: "F1", key: "change|all|impressions|", kind: "change", platform: "all", metric: "impressions", unit: "count", value: 12400, previous: 9800, change: 2600, percent: 26.5,
-  score: 2.6, numbers: [12400, 9800, 2600, 26.5], sentence: "Impressions rose 26.5% to 12,400.", basis: "Impressions 12,400 in October against 9,800 in September, +26.5%, from Sprout", ...over,
+  score: 2.6, numbers: [12400, 9800, 2600, 26.5], sentence: "Impressions rose 26.5% to 12,400.", basis: "Impressions 12,400 in October against 9,800 in September, +26.5%", sources: ["sprout"], ...over,
 });
 const FACTS: Fact[] = [
   fact({}),
-  fact({ id: "F2", key: "change|all|views|", metric: "views", value: 292, previous: 575, change: -283, percent: -49.2, numbers: [292, 575, 283, 49.2], sentence: "Video views fell 49.2% to 292.", basis: "Video views 292 in October against 575 in September, -49.2%, from Sprout" }),
-  fact({ id: "F3", key: "share|LinkedIn|engagements|", kind: "share", platform: "LinkedIn", metric: "engagements", unit: "percent", value: 96.1, numbers: [96.1, 521, 542], sentence: "LinkedIn brought 96.1% of the period's engagements.", basis: "LinkedIn 521 of 542 engagements, from Sprout" }),
+  fact({ id: "F2", key: "change|all|views|", metric: "views", value: 292, previous: 575, change: -283, percent: -49.2, numbers: [292, 575, 283, 49.2], sentence: "Video views fell 49.2% to 292.", basis: "Video views 292 in October against 575 in September, -49.2%" }),
+  fact({ id: "F3", key: "share|LinkedIn|engagements|", kind: "share", platform: "LinkedIn", metric: "engagements", unit: "percent", value: 96.1, numbers: [96.1, 521, 542], sentence: "LinkedIn brought 96.1% of the period's engagements.", basis: "LinkedIn 521 of 542 engagements" }),
 ];
 const INPUT: InsightsInput = { kind: "social", client: "Moburst", period: "2026-10-01 to 2026-10-31", facts: FACTS, sample: [], verdicts: [] };
 
@@ -41,6 +41,17 @@ describe("checkInsights", () => {
     expect(checkInsights(social({ recommendations: [{ text: "Post more video.", facts: [] }] }), FACTS)).toEqual(["Recommendation 1 cites no fact."]);
     expect(checkInsights(social({ insights: [{ text: "Impressions rose 26.5% — a record.", facts: ["F1"] }] }), FACTS)).toEqual(["Insight 1 has a dash; use commas or periods."]);
     expect(checkInsights(null, FACTS)).toEqual(["The answer could not be read as the JSON asked for."]);
+  });
+
+  it("refuses a data vendor's name and every word a client must not read, dashes included", () => {
+    for (const word of ["Sprout", "RivalIQ", "Rival IQ", "Apify", "Gamma", "AI", "the model", "a score", "the prompt", "the pipeline", "a gate", "Socialytics"]) {
+      expect(checkInsights(social({ insights: [{ text: `Impressions rose 26.5% in ${word} data.`, facts: ["F1"] }] }), FACTS)).toEqual([expect.stringMatching(/^Insight 1 uses "[^"]+", a word the client must not read\.$/)]);
+    }
+    expect(checkInsights(social({ insights: [{ text: "Impressions rose 26.5% \u2013 a record.", facts: ["F1"] }] }), FACTS)).toEqual(["Insight 1 has a dash; use commas or periods."]);
+    // A company's own name is no such word.
+    const ranking = fact({ id: "F1", key: "ranking|all|followers|Acme AI", kind: "ranking", company: "Acme AI", leader: "Sprout Social Co", unit: "count", value: 14900, rank: 2, of: 3, leaderValue: 680000, median: 32000, numbers: [14900, 680000, 32000, 2, 3] });
+    const named: InsightFields = { kind: "competitive", summary: [{ text: "Acme AI ranks 2nd of 3 on followers, behind Sprout Social Co with 680,000.", facts: ["F1"] }], gaps: [] };
+    expect(checkInsights(named, [ranking])).toEqual([]);
   });
 
   it("keeps the direction check to the sentence that quotes the change", () => {

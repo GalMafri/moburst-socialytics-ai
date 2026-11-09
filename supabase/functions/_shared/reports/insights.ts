@@ -86,6 +86,7 @@ export const INSIGHTS_SYSTEM = [
   "Write only what the cited facts say. Every number you write must be one of the cited facts' numbers, written as the fact gives it or rounded (12,437 or 12.4K, 26.5% or 26%). Write no other number: no dates, no years, no counts of facts, no targets.",
   "Say a number went up only when it rose, and down only when it fell.",
   "Plain American English, short sentences, no em dashes or en dashes, no jargon, never mention fact ids, the facts list or how the facts were made.",
+  "Never name where the data comes from (no tool or vendor names such as Sprout, RivalIQ, Apify or Gamma), and never write AI, model, prompt, score, pipeline or gate.",
 ].join("\n");
 
 /** The one message the model gets. `problems` are the first answer's, when it is asked again. */
@@ -144,14 +145,25 @@ export function parseInsights(kind: InsightsKind, text: string): InsightFields |
   };
 }
 
+/**
+ * Words a client must not read (src/test/competitive/clientFacing.test.tsx):
+ * a data vendor's name and the words of how the product is built. Dashes are
+ * refused on their own.
+ */
+const CLIENT_WORDS = /\bAI\b|\b(?:prompts?|models?|scores?|pipelines?|gates?)\b|Socialytics|Rival ?IQ|Sprout|Apify|Gamma/i;
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 const UP = /\b(rose|rise|rises|risen|rising|up|grew|grow|grows|growing|increased?|increases|increasing|climbed?|gained?)\b/gi;
 const DOWN = /\b(fell|fall|falls|fallen|falling|down|dropped|drops?|declined?|declines|declining|decreased?|decreases|decreasing|shrank|shrinks?|slipped|slid)\b/gi;
 
 /** The problems with one piece of text against the facts it cites. */
-function textProblems(where: string, text: string, citedIds: string[], byId: Map<string, Fact>): string[] {
+function textProblems(where: string, text: string, citedIds: string[], byId: Map<string, Fact>, names: RegExp | null): string[] {
   const out: string[] = [];
   if (!text) return [`${where} is empty.`];
   if (/[–—]/.test(text)) out.push(`${where} has a dash; use commas or periods.`);
+  // A company's own name ("Acme AI") is no such word.
+  const banned = (names ? text.replace(names, " ") : text).match(CLIENT_WORDS);
+  if (banned) out.push(`${where} uses "${banned[0]}", a word the client must not read.`);
   if (!citedIds.length) out.push(`${where} cites no fact.`);
   const unknown = citedIds.filter((id) => !byId.has(id));
   if (unknown.length) out.push(`${where} cites ${unknown.join(", ")}, which are not in the facts.`);
@@ -177,23 +189,26 @@ function textProblems(where: string, text: string, citedIds: string[], byId: Map
   return out;
 }
 
-/** Why an answer can't be shown, or nothing when it can. */
-export function checkInsights(fields: InsightFields | null, facts: Fact[]): string[] {
+/** Why an answer can't be shown, or nothing when it can. `client` is the report's client, whose name may hold any word. */
+export function checkInsights(fields: InsightFields | null, facts: Fact[], client = ""): string[] {
   if (!fields) return ["The answer could not be read as the JSON asked for."];
   const byId = new Map(facts.map((f) => [f.id, f]));
+  const companies = [...new Set([client, ...facts.flatMap((f) => [f.company, f.leader])].map((n) => String(n ?? "").trim()).filter(Boolean))].sort((a, b) => b.length - a.length);
+  const names = companies.length ? new RegExp(companies.map(escapeRe).join("|"), "gi") : null;
+  const check = (where: string, text: string, cited: string[]) => textProblems(where, text, cited, byId, names);
   const out: string[] = [];
   if (fields.kind === "social") {
     if (!fields.summary) out.push("The summary is missing.");
-    else out.push(...textProblems("The summary", fields.summary.text, fields.summary.facts, byId));
+    else out.push(...check("The summary", fields.summary.text, fields.summary.facts));
     if (!fields.insights.length) out.push("There are no insights.");
-    fields.insights.forEach((c, i) => out.push(...textProblems(`Insight ${i + 1}`, c.text, c.facts, byId)));
-    (fields.recommendations ?? []).forEach((c, i) => out.push(...textProblems(`Recommendation ${i + 1}`, c.text, c.facts, byId)));
+    fields.insights.forEach((c, i) => out.push(...check(`Insight ${i + 1}`, c.text, c.facts)));
+    (fields.recommendations ?? []).forEach((c, i) => out.push(...check(`Recommendation ${i + 1}`, c.text, c.facts)));
   } else {
     if (!fields.summary.length) out.push("The summary is missing.");
-    fields.summary.forEach((c, i) => out.push(...textProblems(`Summary paragraph ${i + 1}`, c.text, c.facts, byId)));
+    fields.summary.forEach((c, i) => out.push(...check(`Summary paragraph ${i + 1}`, c.text, c.facts)));
     (fields.gaps ?? []).forEach((g, i) => {
       if (!(GAP_PLATFORMS as readonly string[]).includes(g.platform)) out.push(`Gap ${i + 1} names a platform that is not one of ${GAP_PLATFORMS.join(", ")}.`);
-      for (const [part, text] of [["gap", g.gap], ["why it matters", g.why_it_matters], ["test", g.suggested_play]] as const) out.push(...textProblems(`Gap ${i + 1}'s ${part}`, text, g.facts, byId));
+      for (const [part, text] of [["gap", g.gap], ["why it matters", g.why_it_matters], ["test", g.suggested_play]] as const) out.push(...check(`Gap ${i + 1}'s ${part}`, text, g.facts));
     });
   }
   return [...new Set(out)];
@@ -305,7 +320,7 @@ export async function writeInsights(input: InsightsInput, deps: InsightsDeps): P
     used.input += Number(usage?.input_tokens) || 0;
     used.output += Number(usage?.output_tokens) || 0;
     const fields = result.stopReason === "refusal" ? null : parseInsights(input.kind, result.text);
-    const found = checkInsights(fields, input.facts);
+    const found = checkInsights(fields, input.facts, input.client);
     if (!found.length && fields) return { fields: orderByFacts(fields), source: "model", problems, input_tokens: used.input, output_tokens: used.output };
     problems = found;
   }
