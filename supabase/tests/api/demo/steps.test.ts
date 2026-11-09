@@ -437,3 +437,20 @@ describe("refreshOutputs", () => {
     expect(await refreshOutputs(h.job, h.ctx)).toBe(false);
   });
 });
+
+describe("collect reads each report as every reader does (shownFields.ts)", () => {
+  it("hands back a report's insights in place of its own fields", async () => {
+    const insights = [
+      { report_id: REPORT.id, confirmed_at: "2026-09-02T00:00:00Z", facts: [], fields: { kind: "social" as const, summary: null, insights: [{ text: "Reach fell 20.1%.", facts: [] }], recommendations: null } },
+      { report_id: COMPETITIVE_REPORT.id, confirmed_at: "2026-09-26T00:00:00Z", facts: [], fields: { kind: "competitive" as const, summary: [{ text: "Morgan & Morgan posts 27 times a week.", facts: [] }], gaps: null } },
+    ];
+    const h = harness({ tables: { clients: [CLIENT], reports: [REPORT], competitiveReports: [COMPETITIVE_REPORT], insights } });
+    Object.assign(h.job, { client_id: CLIENT.id, run_ids: [REPORT.id, COMPETITIVE_REPORT.id] });
+    const r = await runStep(h, "collect");
+    const out = r.patch!.outputs as { social_report: { highlights: string[] }; competitive_report: { executive_summary: string; gaps: Array<{ gap: string }> } };
+    expect(out.social_report.highlights).toEqual(["Reach fell 20.1%."]);
+    expect(out.competitive_report.executive_summary).toBe("Morgan & Morgan posts 27 times a week.");
+    // The insights carry no gaps here: the report's own stay.
+    expect(out.competitive_report.gaps.map((g) => g.gap)).toEqual(["Cadence"]);
+  });
+});

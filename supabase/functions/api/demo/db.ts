@@ -8,6 +8,7 @@ import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { clientHost } from "../../_shared/net/clientHost.ts";
 import { confirmDraftSet } from "../../_shared/competitive/confirmSet.ts";
 import type { ClientRow, CompetitiveReportRow, CompetitorRow, CompetitorSetRow, DesignSystemRow, PostRow, ReportRow, SetWithCompetitors, SproutProfileRow } from "../../_shared/socialytics-api/serializers.ts";
+import { readShownInsights, type ReportTable, type ShownInsightsRow } from "../../_shared/reports/shownFields.ts";
 import { CLIENT_COLUMNS, COMPETITIVE_COLUMNS, COMPETITOR_COLUMNS, DESIGN_SYSTEM_COLUMNS, POST_COLUMNS, REPORT_COLUMNS, SET_COLUMNS, SPROUT_PROFILE_COLUMNS, setsWithCompetitors } from "../../_shared/socialytics-api/store.ts";
 
 /** Neutralise the characters a PostgREST pattern match would interpret. */
@@ -38,6 +39,8 @@ export interface DemoDb {
   competitiveReportsOf(clientId: string): Promise<CompetitiveReportRow[]>;
   getReports(ids: string[]): Promise<ReportRow[]>;
   getCompetitiveReports(ids: string[]): Promise<CompetitiveReportRow[]>;
+  /** A report's shown insights (reports/shownFields.ts), or null: never fails. */
+  insightsOf(table: ReportTable, reportId: string): Promise<ShownInsightsRow | null>;
   flagReport(table: "reports" | "competitive_reports", id: string, jobId: string): Promise<void>;
   postsForJob(jobId: string): Promise<PostRow[]>;
   insertPost(row: Record<string, unknown>): Promise<PostRow>;
@@ -108,6 +111,7 @@ export function makeDemoDb(db: SupabaseClient): DemoDb {
     competitiveReportsOf: (clientId) => rows<CompetitiveReportRow>(db.from("competitive_reports").select(COMPETITIVE_COLUMNS).eq("client_id", clientId).order("created_at", { ascending: false }).limit(20)),
     getReports: (ids) => (ids.length ? rows<ReportRow>(db.from("reports").select(REPORT_COLUMNS).in("id", ids)) : Promise.resolve([])),
     getCompetitiveReports: (ids) => (ids.length ? rows<CompetitiveReportRow>(db.from("competitive_reports").select(COMPETITIVE_COLUMNS).in("id", ids)) : Promise.resolve([])),
+    insightsOf: (table, reportId) => readShownInsights(db, table, reportId),
     flagReport: (table, id, jobId) => run(db.from(table).update({ demo_job_id: jobId }).eq("id", id)),
     postsForJob: (jobId) => rows<PostRow>(db.from("post_iterations").select(POST_COLUMNS).eq("demo_job_id", jobId).order("created_at", { ascending: true })),
     insertPost: (row) => must<PostRow>(db.from("post_iterations").insert(row).select(POST_COLUMNS).single(), "post insert"),
