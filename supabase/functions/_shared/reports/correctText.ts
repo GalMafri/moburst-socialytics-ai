@@ -16,11 +16,16 @@
 //   4. The corrected sentences are written in place. The report's text and
 //      client figures as they were before the first change are kept in the
 //      row's correction_audit, with a record of every change.
+//   5. When the job ends, done or failed, the report's insights are queued
+//      (insights.ts, report_insights): its figures are settled in step 1,
+//      so a text that could not be corrected still gets insights from the
+//      figures it shows. A job that will be tried again queues nothing yet.
 //
 // Nothing here is shown to anyone: a job that does not finish is tried again
 // with growing waits, and the report keeps showing its figures meanwhile.
 
 import { anthropicMessages } from "../anthropic.ts";
+import { queueReportInsights } from "./insights.ts";
 import { clientFiguresFromStoredPosts } from "../competitive/storedFigures.ts";
 import {
   applyCorrections, checkCorrection, competitiveFigures, correctionPrompt, CORRECTION_SYSTEM, parseCorrection, socialFigures, staleReportText,
@@ -116,6 +121,13 @@ export async function reportTextCheck(db: Db, table: string, reportId: string): 
 }
 
 export async function runReportText(db: Db, job: ReportTextJob, deps: ReportTextDeps): Promise<ReportTextOutcome> {
+  const outcome = await reportTextOutcome(db, job, deps);
+  // Either final state: the figures were settled in the first step.
+  if (outcome.status === "done" || outcome.status === "failed") await queueReportInsights(db, String(job.payload?.table || ""), String(job.payload?.report_id || ""));
+  return outcome;
+}
+
+async function reportTextOutcome(db: Db, job: ReportTextJob, deps: ReportTextDeps): Promise<ReportTextOutcome> {
   const table = String(job.payload?.table || "");
   const reportId = String(job.payload?.report_id || "");
   const retry = (reason: string): ReportTextOutcome => job.attempts >= job.max_attempts

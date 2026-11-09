@@ -20,6 +20,10 @@
 //                              check the webhook once the secret is added;
 //                              answers {"posted": true|false}, nothing else.
 //
+// Report insights (_shared/reports/insights.ts): a report_insights job words
+// one finished report's facts, queued when its report_text job ends, done
+// or failed.
+//
 // In-app report pipelines (_shared/pipelines): each tick also runs due
 // report_pipeline steps in a lane of their own (worker.ts), and the daily
 // sweep removes expired pipeline payloads and old pipeline runs.
@@ -111,6 +115,8 @@ import { liveOnboardingDeps, runSproutOnboardingJob, sproutOnboarding } from "./
 import { onboardingFieldsCheck } from "./fieldsCheck.ts";
 import type { ScheduledJob } from "../_shared/scheduled-jobs/types.ts";
 import { runReportText, sonnetCompletion } from "../_shared/reports/correctText.ts";
+import { runReportInsights } from "../_shared/reports/insights.ts";
+import { anthropicMessages } from "../_shared/anthropic.ts";
 import { runNotesRead } from "../_shared/notes/run.ts";
 import { runStrategyDeck } from "../_shared/strategy/deckJob.ts";
 import { googleConfig, keepAlive } from "../_shared/google/oauth.ts";
@@ -122,6 +128,7 @@ const corsHeaders = {
 
 const JOB_LABELS: Partial<Record<ScheduledJob["kind"], string>> = {
   report_text: "report figures and text",
+  report_insights: "report insights",
   feed_refresh: "feed refresh",
   week_plan: "week plan",
   week_revise: "week revision",
@@ -208,6 +215,15 @@ Deno.serve(async (req) => {
               const key = Deno.env.get("ANTHROPIC_API_KEY");
               if (!key) throw new Error("ANTHROPIC_API_KEY is not configured.");
               return sonnetCompletion(key)(system, message);
+            },
+          });
+          // One finished report's insights from its figures (_shared/reports/insights.ts).
+          case "report_insights": return runReportInsights(db, job, {
+            now: () => new Date(),
+            complete: (body) => {
+              const key = Deno.env.get("ANTHROPIC_API_KEY");
+              if (!key) throw new Error("ANTHROPIC_API_KEY is not configured.");
+              return anthropicMessages({ apiKey: key, body });
             },
           });
           case "dispatch": return runDispatch(job, dispatchDeps(job, false));

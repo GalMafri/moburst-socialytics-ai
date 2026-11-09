@@ -47,6 +47,7 @@ export function InsightCard({
   accent = false,
   className,
   footer,
+  basedOn,
 }: {
   text: string;
   index?: number;
@@ -55,6 +56,8 @@ export function InsightCard({
   accent?: boolean;
   className?: string;
   footer?: ReactNode;
+  /** The numbers the insight rests on, in words (report insights, supabase/functions/_shared/reports/shownFields.ts). */
+  basedOn?: string;
 }) {
   const { headline, body } = splitHeadline(text);
   // The figures the insight turns on, as chips under the headline. The card
@@ -81,6 +84,7 @@ export function InsightCard({
             </div>
           )}
           {body && <p className="t-body">{body}</p>}
+          {basedOn && <p className="t-secondary">Based on {basedOn}.</p>}
         </div>
       </div>
       {footer && <div className="flex items-center justify-end gap-3 mt-auto">{footer}</div>}
@@ -89,7 +93,7 @@ export function InsightCard({
 }
 
 /** A responsive grid of InsightCards. */
-export function InsightGrid({ items, numbered = true, label, icon, className }: { items: string[]; numbered?: boolean; label?: string; icon?: ReactNode; className?: string }) {
+export function InsightGrid({ items, numbered = true, label, icon, className, basedOn }: { items: string[]; numbered?: boolean; label?: string; icon?: ReactNode; className?: string; basedOn?: Array<string | undefined> }) {
   if (!items?.length) return null;
   // Three columns is right for one-line insights and wrong for paragraphs: a
   // 330-character insight in a 369px column is seven lines. Long ones get two.
@@ -97,7 +101,7 @@ export function InsightGrid({ items, numbered = true, label, icon, className }: 
   return (
     <div className={cn("grid gap-3 md:grid-cols-2", longest <= 240 && "xl:grid-cols-3", className)}>
       {items.map((t, i) => (
-        <InsightCard key={i} text={t} index={numbered ? i + 1 : undefined} icon={icon} label={label} />
+        <InsightCard key={i} text={t} index={numbered ? i + 1 : undefined} icon={icon} label={label} basedOn={basedOn?.[i]} />
       ))}
     </div>
   );

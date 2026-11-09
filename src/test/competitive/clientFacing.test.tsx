@@ -12,7 +12,7 @@ import { WATCH_LIMIT_MINUTES } from '@/lib/runWatch';
 // What a client sees on the competitive screens: no vendor or landscape
 // names, no raw statuses or errors, no internal wording, and a page that
 // stops polling a run that outlived the sweep.
-const fixture = vi.hoisted(() => ({ staff: false, status: 'complete', createdAt: '', data: null as any, fail: false, reads: 0 }));
+const fixture = vi.hoisted(() => ({ staff: false, status: 'complete', createdAt: '', data: null as any, fail: false, reads: 0, insights: null as any }));
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ isMoburstStaff: fixture.staff, canRunAnalysis: fixture.staff, canDelete: false }) }));
 vi.mock('@/hooks/useInsightFeedback', () => ({ useInsightFeedback: () => ({ rows: [], verdictFor: () => null, vote: vi.fn(), editFor: () => null, saveEdit: vi.fn(), resetEdit: vi.fn() }), useCompetitiveLearnings: () => ({ learnings: [], remove: vi.fn() }), partitionGaps: (gaps: any[]) => ({ visible: gaps, hidden: [] }) }));
 vi.mock('@/components/competitive/PostVisual', () => ({ usePostPreviews: () => ({ previews: {} }), PostVisual: () => null, normalizePlatform: (x: string) => x, platformLabel: (x: string) => x }));
@@ -26,6 +26,7 @@ vi.mock('@/integrations/supabase/client', () => ({ supabase: { from: (table: str
     maybeSingle() { single = true; return query; },
     then(resolve: any) {
       if (table === 'clients') return Promise.resolve({ data: { id: 'client', name: 'QA client' }, error: null }).then(resolve);
+      if (table === 'report_insights') return Promise.resolve({ data: fixture.insights, error: null }).then(resolve);
       fixture.reads++;
       if (fixture.fail) return Promise.resolve({ data: null, error: Object.assign(new Error('permission denied for table competitive_reports (42501)'), { code: '42501' }) }).then(resolve);
       return Promise.resolve({ data: single ? row() : [row()], error: null }).then(resolve);
@@ -49,7 +50,7 @@ const complete = () => ({
 let client: QueryClient;
 beforeEach(() => {
   vi.useFakeTimers();
-  Object.assign(fixture, { staff: false, status: 'complete', createdAt: new Date().toISOString(), data: complete(), fail: false, reads: 0 });
+  Object.assign(fixture, { staff: false, status: 'complete', createdAt: new Date().toISOString(), data: complete(), fail: false, reads: 0, insights: null });
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
 });
 afterEach(() => { cleanup(); client.clear(); vi.useRealTimers(); });
@@ -59,6 +60,44 @@ function mount(element: React.ReactElement, path = '/clients/client/reports/repo
 }
 // Whole words, any case (so "aggregate" is not "gate"), plus the landscape name, data vendors and em dashes.
 const banned = /\bAI\b|\b(prompts?|models?|scores?|pipelines?|gates?)\b|Socialytics -|Rival ?IQ|Sprout|Apify|—/i;
+
+/** A report_insights row (shown columns only): facts from both the client's profiles and the competitor tracking. */
+const INSIGHTS = {
+  report_id: 'report', confirmed_at: '2026-10-01T00:00:00Z',
+  facts: [
+    { id: 'F1', key: 'ranking|all|followers|QA client', kind: 'ranking', platform: 'all', metric: 'followers', company: 'QA client', unit: 'count', value: 1200, score: 2, numbers: [1200, 1200, 1200, 1, 2], sentence: '', basis: 'Followers: QA client 1,200, Competitor 1,200 (highest), median 1,200 across 2 companies', sources: ['sprout', 'rivaliq'] },
+    { id: 'F2', key: 'change|all|engagements|QA client', kind: 'change', platform: 'all', metric: 'engagements', company: 'QA client', unit: 'count', value: 240, score: 1, numbers: [240, 200, 40, 20], sentence: '', basis: "QA client's engagements 240 in September against 200 in August, +20%", sources: ['sprout'] },
+  ],
+  fields: {
+    kind: 'competitive',
+    summary: [{ text: 'QA client ties Competitor on followers at 1,200.', facts: ['F1'] }, { text: "QA client's engagements rose 20% to 240.", facts: ['F2'] }],
+    gaps: [{ gap: 'Followers are level with the field', platform: 'all', why_it_matters: 'Competitor has 1,200 too.', suggested_play: 'Test a weekly series.', facts: ['F1'] }],
+  },
+};
+
+it('shows a client a report with insights: what each rests on, and no vendor, id or internal wording', async () => {
+  fixture.insights = INSIGHTS;
+  // The insights are read once the report is: a second tick for them to land.
+  mount(<CompetitiveReportView />); await tick(20); await tick(20);
+  // Prose sets each figure apart: the paragraph is read as text.
+  expect(document.body.textContent).toContain('QA client ties Competitor on followers at 1,200.');
+  expect(screen.getAllByText(`Based on ${INSIGHTS.facts[0].basis}.`).length).toBe(2);
+  expect(screen.getByText('Followers are level with the field')).toBeInTheDocument();
+  expect(document.body.textContent).not.toMatch(banned);
+  expect(document.body.textContent).not.toMatch(/\bF\d\b|–/);
+  cleanup(); fixture.staff = true;
+  mount(<CompetitiveReportView />); await tick(20); await tick(20);
+  expect(screen.getAllByText(`Based on ${INSIGHTS.facts[0].basis}, from Sprout and RivalIQ.`).length).toBe(2);
+  expect(screen.getByText(`Based on ${INSIGHTS.facts[1].basis}, from Sprout.`)).toBeInTheDocument();
+});
+
+it('a snapshot with insights shows a client their summary and gaps, with no vendor or internal wording', async () => {
+  fixture.insights = INSIGHTS;
+  mount(<CompetitiveSnapshot clientId="client" />, '/x', '/x'); await tick(20); await tick(20);
+  expect(document.body.textContent).toContain("QA client's engagements rose 20% to 240.");
+  expect(screen.getByText('Followers are level with the field')).toBeInTheDocument();
+  expect(document.body.textContent).not.toMatch(banned);
+});
 
 it('shows a client a plain status and no landscape, vendor or internal wording', async () => {
   mount(<CompetitiveReportView />); await tick(20);

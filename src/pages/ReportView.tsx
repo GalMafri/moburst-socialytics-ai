@@ -5,6 +5,8 @@ import { reportsMeasure } from "@/lib/platformMeasures";
 import { reportCounts, sproutEngagementRate, sproutEngagements } from "@/lib/reportFigures";
 import { StatCard } from "@/components/ui/stat-card";
 import { useQuery } from "@tanstack/react-query";
+import { useReportInsights } from "@/hooks/useReportInsights";
+import { readShownInsights, shownCompetitive, shownSocial } from "../../supabase/functions/_shared/reports/shownFields";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { StatGrid } from "@/components/ui/stat-card";
@@ -54,11 +56,10 @@ import { ReportCalendarLink } from "@/components/calendar/ReportCalendarLink";
 import { NewPostDialog } from "@/components/calendar/NewPostDialog";
 import { ContentIdeasTab } from "@/components/reports/calendar/ContentIdeasTab";
 import { CompetitiveSnapshot } from "@/components/competitive/CompetitiveSnapshot";
-import { PostVisual, usePostPreviews, type PostPreview } from "@/components/competitive/PostVisual";
+import { PostVisual, postType, usePostPreviews, type PostPreview } from "@/components/competitive/PostVisual";
 import { useInsightFeedback } from "@/hooks/useInsightFeedback";
 import { measuredEngagements } from "@/lib/trendEngagement";
-import { normalizedCompetitiveMetrics } from "@/lib/competitiveMetrics";
-import { competitiveReportQuality, withCompetitiveEvidenceLimits } from "../../supabase/functions/_shared/competitive/reportEvidence";
+import { competitiveReportQuality } from "../../supabase/functions/_shared/competitive/reportEvidence";
 import { Prose } from "@/components/ui/prose";
 import { Section, SectionNav } from "@/components/ui/section";
 import { ReportDecks } from "@/components/reports/ReportDecks";
@@ -99,7 +100,9 @@ export default function ReportView() {
         .maybeSingle();
       if (error) throw error;
       if (!data || !competitiveReportQuality(data.report_data).ready) return null;
-      return { ...data, report_data: withCompetitiveEvidenceLimits(normalizedCompetitiveMetrics(data.report_data)) };
+      // Read as every reader reads it: its insights where it has them, through the evidence limits (shownFields.ts).
+      const insights = await readShownInsights(supabase, "competitive_reports", data.id);
+      return { ...data, report_data: shownCompetitive(data.report_data, insights).report };
     },
     enabled: !!id,
   });
@@ -127,6 +130,9 @@ export default function ReportView() {
     refetchInterval: (query) => query.state.data?.status === "running" ? 5000 : false,
     refetchIntervalInBackground: true,
   });
+
+  // The report's insights, worked out from its figures (report_insights), in place of the model-written ones.
+  const { data: insightsRow } = useReportInsights("reports", reportId);
 
   const overviewPostUrls = useMemo(() => {
     const rawRd = (report as any)?.report_data;
@@ -274,8 +280,11 @@ export default function ReportView() {
   const endorsedGaps = latestCompetitive
     ? ((latestCompetitive.report_data as any)?.ai_analysis?.gaps_for_client || []).filter((g: any) => verdictFor(g.gap) === "up")
     : [];
-  const competitiveTakeaways: string[] = Array.isArray(aiAnalysis?.competitive_takeaways) ? aiAnalysis.competitive_takeaways : [];
-  const pillarRecs: string[] = aiAnalysis?.sprout_performance_analysis?.pillar_alignment?.recommendations || [];
+  // The report's insights where it has them, its own fields otherwise, field by field (shownFields.ts).
+  const shown = shownSocial(aiAnalysis, insightsRow, { staff: isMoburstStaff });
+  const competitiveTakeaways: string[] = shown.takeaways;
+  const pillarRecs: string[] = shown.recommendations.map((r) => r.text);
+  const pillarRecsBasis = shown.recommendations.map((r) => r.basedOn);
   const trendOpportunities: string[] = [
     ...(aiAnalysis?.tiktok_trends_analysis?.opportunities_for_client || []),
     ...(aiAnalysis?.instagram_trends_analysis?.opportunities_for_client || []),
@@ -324,7 +333,8 @@ export default function ReportView() {
     const plat = platformLabelOf(best.network_type || best.platform || "");
     return `The best post reached ${compactNumber(Number(best.impressions ?? 0))} impressions${plat ? ` on ${plat}` : ""}${best.engagements != null ? ` with ${compactNumber(Number(best.engagements))} engagements` : ""}. Lifetime metrics for posts published in the report period; ranked by impressions and engagement.`;
   })();
-  const counts = reportCounts(rd);
+  // Counted as the page lists them: the report's insights where it has them (shownFields.ts).
+  const counts = reportCounts(rd, insightsRow);
   // Every recommendation the page can show: the report's own, and competitor gaps the team endorsed.
   const totalRecommendations = counts.recommendations + endorsedGaps.length;
   type Action = { source: "Competitors" | "Performance" | "Trends"; title: string; detail?: string; tab?: string; anchor?: string; href?: string };
@@ -342,8 +352,10 @@ export default function ReportView() {
     if (a.tab) return setTab(a.tab);
     if (a.anchor) document.getElementById(`report-${a.anchor}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
-  const insights: string[] = aiAnalysis?.sprout_performance_analysis?.key_insights || [];
-  const summary: string | null = aiAnalysis?.sprout_performance_analysis?.month_over_month_summary || null;
+  const insights: string[] = shown.insights.map((i) => i.text);
+  const insightsBasis = shown.insights.map((i) => i.basedOn);
+  const summary: string | null = shown.summary?.text ?? null;
+  const summaryBasis = shown.summary?.basedOn;
   const pillars = aiAnalysis?.sprout_performance_analysis?.pillar_alignment;
   const pillarsLine = pillars
     ? `${(pillars.well_represented || []).length} pillars well represented, ${(pillars.underrepresented || []).length} need attention, ${pillarRecs.length} recommendations.`
@@ -460,11 +472,16 @@ export default function ReportView() {
                             <p className="t-body">{hero.label} vs the previous period</p>
                           </div>
                         )}
-                        {summary && <Prose text={formatNumbersInText(summary)} className="t-secondary" />}
+                        {summary && (
+                          <div className="space-y-1">
+                            <Prose text={formatNumbersInText(summary)} className="t-secondary" />
+                            {summaryBasis && <p className="t-secondary">Based on {summaryBasis}.</p>}
+                          </div>
+                        )}
                       </div>
                     )}
                     {insights.length > 0 && (
-                    <InsightGrid items={insights.map((t) => formatNumbersInText(t))} />
+                    <InsightGrid items={insights.map((t) => formatNumbersInText(t))} basedOn={insightsBasis} />
                     )}
                     {aiAnalysis?.sprout_performance_analysis?.top_performing_content?.length > 0 && (
                       <div className="pt-4 border-t border-white/[0.06] space-y-2">
@@ -581,7 +598,12 @@ export default function ReportView() {
                         <div className="pt-4 border-t border-white/[0.06] space-y-2">
                           <p className="t-subhead">Recommendations</p>
                           <ul className="space-y-2">
-                            {pillarRecs.map((r, i) => <li key={i} className="t-body flex gap-2"><span className="text-primary">•</span><span>{r}</span></li>)}
+                            {pillarRecs.map((r, i) => (
+                              <li key={i} className="t-body flex gap-2">
+                                <span className="text-primary">•</span>
+                                <span>{r}{pillarRecsBasis?.[i] && <span className="block t-secondary">Based on {pillarRecsBasis[i]}.</span>}</span>
+                              </li>
+                            ))}
                           </ul>
                         </div>
                       )}
@@ -721,7 +743,7 @@ function PostCard({ post, preview }: { post: any; preview?: PostPreview | null }
             url={link}
             preview={preview}
             image={post.image_url || post.media_url || post.thumbnail_url || null}
-            mediaType={post.post_type || post.media_type || post.content_type}
+            mediaType={postType(post)}
             platform={post.network_type || post.platform}
             className="w-28 shrink-0 self-start"
             compact

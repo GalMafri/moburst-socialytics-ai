@@ -171,6 +171,38 @@ describe("the report_text job", () => {
     expect(complete).toHaveBeenCalledTimes(1);
   });
 
+  it("queues the report's insights once its text is settled (report insights, 3 Nov 2026)", async () => {
+    const { db } = fakeDb("competitive_reports", row(), { socialPosts: BADER_POSTS });
+    const rpc = vi.fn(async () => ({ data: null, error: null }));
+    const complete = vi.fn(async (_system: string, message: string) => {
+      const ids = [...message.matchAll(/^(s\d+) \(.*?\): (.*)$/gm)].map((m) => ({ id: m[1], text: m[2] }));
+      return JSON.stringify({ sentences: ids.map((s) => ({ id: s.id, text: s.text.replace("28.6%", "0.12%").replace("94 posts", "65 posts").replace("42 posts", "13 posts").replace("0.07%", "1.28%").replace("0.23%", "2.89%").replace("0.14%", "1.62%") })) });
+    });
+    expect((await runReportText({ ...db, rpc }, job(), { now, complete })).status).toBe("done");
+    expect(rpc).toHaveBeenCalledWith("report_insights_queue", { p_table: "competitive_reports", p_report: "1c4f4805" });
+    // Nothing stale the second time: still queued, and a queue that fails never fails the job.
+    const failing = vi.fn(async () => { throw new Error("no such function"); });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect((await runReportText({ ...db, rpc: failing }, job(), { now, complete })).status).toBe("done");
+    expect(failing).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
+  it("queues the report's insights when its text job ends either way, and not while it will be tried again", async () => {
+    // Its figures are settled in the first step, so a text that could not be corrected still gets insights from them.
+    const { db } = fakeDb("competitive_reports", row(), { socialPosts: BADER_POSTS });
+    const rpc = vi.fn(async () => ({ data: null, error: null }));
+    const bad = async () => JSON.stringify({ sentences: [{ id: "s1", text: "Rate at 7.5%." }] });
+    expect((await runReportText({ ...db, rpc }, job(2), { now, complete: bad })).status).toBe("queued");
+    expect(rpc).not.toHaveBeenCalled();
+    expect((await runReportText({ ...db, rpc }, job(7), { now, complete: bad })).status).toBe("failed");
+    expect(rpc).toHaveBeenCalledWith("report_insights_queue", { p_table: "competitive_reports", p_report: "1c4f4805" });
+    // A job that names no report queues nothing.
+    rpc.mockClear();
+    expect((await runReportText({ ...db, rpc }, { ...job(1), payload: {} }, { now, complete: bad })).status).toBe("skipped");
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
   it("tries again later, quietly, when the answer adds a number the report does not show", async () => {
     const { db, row: stored } = fakeDb("competitive_reports", row(), { socialPosts: BADER_POSTS });
     const outcome = await runReportText(db, job(2), { now, complete: async () => JSON.stringify({ sentences: [{ id: "s1", text: "Rate at 7.5%." }] }) });

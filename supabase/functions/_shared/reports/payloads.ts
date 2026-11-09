@@ -10,8 +10,8 @@
 // run. Every run now goes through here: manual, scheduled, and retried.
 
 import { defaultSproutCustomerId } from "../sprout/customer.ts";
-import { competitiveReportQuality, withCompetitiveEvidenceLimits } from "../competitive/reportEvidence.ts";
-import { normalizedCompetitiveMetrics } from "../competitive/reportMetrics.ts";
+import { competitiveReportQuality } from "../competitive/reportEvidence.ts";
+import { readShownInsights, shownCompetitive, type ShownInsightsRow } from "./shownFields.ts";
 import { type CompetitiveLearning, editedSuggestion, learningLines, type SuggestionEdit } from "../competitive/suggestionEdits.ts";
 /**
  * How long a run may sit on "running" before it is treated as dead.
@@ -61,15 +61,18 @@ export interface InsightFeedbackRow {
 /**
  * The client's latest competitive analysis, distilled for the content
  * calendar: how they stand, what the field does, which gaps the team has
- * endorsed and which they have rejected.
+ * endorsed and which they have rejected. Read as every reader reads it
+ * (shownFields.ts): its insights where it has them, through the evidence
+ * limits.
  */
 export function competitiveContext(
   reportRow: { created_at: string; report_data: unknown } | null | undefined,
   feedback: InsightFeedbackRow[] = [],
   learnings: CompetitiveLearning[] = [],
+  insights: ShownInsightsRow | null = null,
 ): Record<string, unknown> | null {
   if (!reportRow?.report_data || !competitiveReportQuality(reportRow.report_data).ready) return null;
-  const rd: any = withCompetitiveEvidenceLimits(normalizedCompetitiveMetrics(reportRow.report_data));
+  const rd: any = shownCompetitive(reportRow.report_data, insights).report;
   const ai = rd.ai_analysis || {};
   const companies: any[] = rd.aggregates?.companies || [];
   const me = companies.find((c) => c.is_client);
@@ -186,6 +189,7 @@ export async function buildSocialPayload(args: {
     .order("created_at", { ascending: false })
     .limit(20);
 
+  const competitiveInsights = await readShownInsights(supabase, "competitive_reports", latestCompetitive?.id);
   const { voice, notes } = splitBrandVoice(client.brand_notes);
   return {
     report_id: reportId,
@@ -220,7 +224,7 @@ export async function buildSocialPayload(args: {
     skip_trends: args.skipTrends === true,
     timezone: client.timezone || "UTC",
     competitive_report_id: latestCompetitive?.id || null,
-    competitive_context: competitiveContext(latestCompetitive, (feedback || []) as InsightFeedbackRow[], (learnings || []) as CompetitiveLearning[]),
+    competitive_context: competitiveContext(latestCompetitive, (feedback || []) as InsightFeedbackRow[], (learnings || []) as CompetitiveLearning[], competitiveInsights),
     ...(args.scheduled ? { scheduled: true } : {}),
     ...(args.staggerSeconds ? { stagger_seconds: args.staggerSeconds } : {}),
   };

@@ -1,13 +1,16 @@
 /** In-memory DemoDb for the step tests: the same operations the steps make on production, over plain arrays. */
 import type { ClientRow, CompetitiveReportRow, CompetitorRow, CompetitorSetRow, DesignSystemRow, HandleRow, PostRow, ReportRow, SproutProfileRow } from "../../_shared/socialytics-api/serializers.ts";
 import type { DemoDb } from "./db.ts";
+import type { ShownInsightsRow } from "../../_shared/reports/shownFields.ts";
 
 export interface FakeTables {
   clients: ClientRow[]; sproutProfiles: SproutProfileRow[]; sets: CompetitorSetRow[]; competitors: CompetitorRow[]; handles: HandleRow[]; reports: ReportRow[]; competitiveReports: CompetitiveReportRow[];
   posts: PostRow[]; designSystems: DesignSystemRow[]; profiles: Array<{ user_id: string; email: string }>; owners: string[]; keys: Array<{ id: string; company_slugs: string[] | null; client_ids: string[] | null }>;
+  /** Reports' shown insights (report_insights). */
+  insights: ShownInsightsRow[];
 }
 export function emptyTables(over: Partial<FakeTables> = {}): FakeTables {
-  return { clients: [], sproutProfiles: [], sets: [], competitors: [], handles: [], reports: [], competitiveReports: [], posts: [], designSystems: [], profiles: [], owners: ["u-owner"], keys: [{ id: "k-1", company_slugs: null, client_ids: null }], ...over };
+  return { clients: [], sproutProfiles: [], sets: [], competitors: [], handles: [], reports: [], competitiveReports: [], posts: [], designSystems: [], profiles: [], owners: ["u-owner"], keys: [{ id: "k-1", company_slugs: null, client_ids: null }], insights: [], ...over };
 }
 
 const host = (u: string | null | undefined) => (u ?? "").replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/.*$/, "").toLowerCase();
@@ -45,6 +48,7 @@ export function makeFakeDemoDb(t: FakeTables): DemoDb {
     async competitiveReportsOf(cid) { return newest(t.competitiveReports.filter((r) => r.client_id === cid)); },
     async getReports(ids) { return t.reports.filter((r) => ids.includes(r.id)); },
     async getCompetitiveReports(ids) { return t.competitiveReports.filter((r) => ids.includes(r.id)); },
+    async insightsOf(_table, reportId) { return t.insights.find((i) => i.report_id === reportId) ?? null; },
     async flagReport(table, rid, jobId) { const list = table === "reports" ? t.reports : t.competitiveReports; const r = list.find((x) => x.id === rid); if (r) r.demo_job_id = jobId; },
     async postsForJob(jobId) { return t.posts.filter((p) => p.demo_job_id === jobId); },
     async insertPost(row) { const p = { report_id: null, recommendation_index: null, version: 1, post_copy: null, hashtags: [], cta: null, concept: null, visual_direction: null, format: null, source: null, media_urls: [], variant_group_id: null, is_selected: false, variant_angle: null, is_approved: false, approved_at: null, rejected_at: null, rejection_reason: null, archived_at: null, finishing: null, demo_job_id: null, ...row, id: id("post"), created_at: now() } as PostRow; t.posts.push(p); return p; },

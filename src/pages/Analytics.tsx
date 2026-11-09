@@ -5,7 +5,7 @@ import { useNextRun } from "@/lib/nextRun";
 import { sproutEngagementRate, sproutEngagements } from "@/lib/reportFigures";
 import { StatCard } from "@/components/ui/stat-card";
 import { Section, SectionNav } from "@/components/ui/section";
-import { PostVisual, usePostPreviews } from "@/components/competitive/PostVisual";
+import { PostVisual, postType, usePostPreviews } from "@/components/competitive/PostVisual";
 import { PlatformBadge } from "@/lib/platform-config";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -46,6 +46,8 @@ import { Loading } from "@/components/ui/loading";
 import { LoadRetry } from "@/components/ui/load-error";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { reportsMeasure } from "@/lib/platformMeasures";
+import { useReportInsights } from "@/hooks/useReportInsights";
+import { shownSocial } from "../../supabase/functions/_shared/reports/shownFields";
 
 type TimeRange = "7d" | "30d" | "90d" | "all" | "custom";
 type AnalyticsView = "performance" | "trends";
@@ -252,10 +254,13 @@ export default function Analytics() {
     }));
   }, [latestRd]);
 
+  // The latest report's insights, worked out from its figures (report_insights); its own fields otherwise (shownFields.ts).
+  const { data: latestInsightsRow } = useReportInsights("reports", (latestReport as { id?: string } | null)?.id);
+
   // Extract AI summary from latest report for "Key Takeaway" card
   const latestAISummary = useMemo(() => {
     if (!latestRd) return null;
-    const ai = latestRd.ai_analysis || {};
+    const ai = shownSocial(latestRd.ai_analysis, latestInsightsRow).analysis || {};
     // Try multiple paths where the AI summary might live
     const summary =
       ai.sprout_performance_analysis?.month_over_month_summary ||
@@ -265,7 +270,7 @@ export default function Analytics() {
       null;
     if (!summary || (typeof summary === "string" && summary.trim().length === 0)) return null;
     return typeof summary === "string" ? summary : JSON.stringify(summary);
-  }, [latestRd]);
+  }, [latestRd, latestInsightsRow]);
 
   // Extract top-performing content insight
   const topContentInsight = useMemo(() => {
@@ -1020,7 +1025,7 @@ function LiveSproutSection({
             <div className="grid gap-inner md:grid-cols-2">
               {posts.slice(0, 6).map((p: any, i: number) => (
                 <div key={i} className="flex gap-4 glass-inner p-inner">
-                  <PostVisual url={p.permalink} preview={p.permalink ? previews[p.permalink] : null} mediaType={p.post_type} platform={p.network_type} className="w-28 shrink-0 self-start" compact />
+                  <PostVisual url={p.permalink} preview={p.permalink ? previews[p.permalink] : null} mediaType={postType(p)} platform={p.network_type} className="w-28 shrink-0 self-start" compact />
                   <div className="flex-1 min-w-0 space-y-2">
                     <div className="flex items-center justify-between gap-2">
                       {p.network_type ? <PlatformBadge platform={p.network_type} size="sm" /> : <span />}

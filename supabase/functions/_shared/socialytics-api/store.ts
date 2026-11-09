@@ -10,6 +10,7 @@ import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { decodeCursor, type Cursor } from "../api/cursor.ts";
 import type { ClientScope } from "../api/router.ts";
 import { DESIGN_SETUP_STEPS, type DesignStepRow } from "../design/setup.ts";
+import { readShownInsights } from "../reports/shownFields.ts";
 import type { AlertRow, ClientRow, CompetitiveReportRow, CompetitorRow, CompetitorSetRow, DesignSettingsRow, DesignSystemRow, HandleRow, MediaJobRow, PostRow, ReportRow, ScheduledPostRow, ScheduleRow, SetWithCompetitors, SproutProfileRow } from "./serializers.ts";
 
 export interface Page { limit: number; cursor: Cursor | null }
@@ -173,7 +174,9 @@ export function makeStore(db: SupabaseClient): Store {
     },
     async getReport(id, scope) {
       if (!isId(id)) return null;
-      return scoped(await one<ReportRow>(db.from("reports").select(REPORT_COLUMNS).eq("id", id).maybeSingle()), scope);
+      const r = scoped(await one<ReportRow>(db.from("reports").select(REPORT_COLUMNS).eq("id", id).maybeSingle()), scope);
+      // With its shown insights, read as the person (RLS and the column grant apply).
+      return r ? { ...r, insights: await readShownInsights(db, "reports", r.id) } : null;
     },
     async listCompetitiveReports(scope, f, page) {
       if (f.client_id !== undefined && !isId(f.client_id)) return [];
@@ -184,7 +187,8 @@ export function makeStore(db: SupabaseClient): Store {
     },
     async getCompetitiveReport(id, scope) {
       if (!isId(id)) return null;
-      return scoped(await one<CompetitiveReportRow>(db.from("competitive_reports").select(COMPETITIVE_COLUMNS).eq("id", id).maybeSingle()), scope);
+      const r = scoped(await one<CompetitiveReportRow>(db.from("competitive_reports").select(COMPETITIVE_COLUMNS).eq("id", id).maybeSingle()), scope);
+      return r ? { ...r, insights: await readShownInsights(db, "competitive_reports", r.id) } : null;
     },
     async listSets(scope, f, page) {
       if (f.client_id !== undefined && !isId(f.client_id)) return [];

@@ -17,8 +17,8 @@ import { createClient } from "../_shared/supabase.ts";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
 import { clipText } from "../_shared/text/clip.ts";
-import { normalizedCompetitiveMetrics } from "../_shared/competitive/reportMetrics.ts";
-import { withCompetitiveEvidenceLimits } from "../_shared/competitive/reportEvidence.ts";
+import { readShownInsights } from "../_shared/reports/shownFields.ts";
+import { revisionContext } from "./context.ts";
 import { type CompetitiveLearning, learningLines, parseLearnings, parseRevision, SUGGESTION_LIMITS } from "../_shared/competitive/suggestionEdits.ts";
 
 const MODEL = "claude-opus-5-5";
@@ -60,11 +60,6 @@ Deno.serve(async (req) => {
 
     const { data: client } = await admin.from("clients").select("name, brand_identity").eq("id", report.client_id).maybeSingle();
     const brand = client?.name ?? "the client";
-    // deno-lint-ignore no-explicit-any
-    const rd: any = withCompetitiveEvidenceLimits(normalizedCompetitiveMetrics(report.report_data || {}));
-    const ai = rd.ai_analysis || {};
-    // deno-lint-ignore no-explicit-any
-    const companies: any[] = rd.aggregates?.companies || [];
     const current = {
       gap: text(body?.current?.gap, 400),
       why_it_matters: text(body?.current?.why_it_matters, 1200),
@@ -72,8 +67,14 @@ Deno.serve(async (req) => {
     };
     if (!current.gap) return json({ error: "The suggestion to rewrite is missing." }, 400);
     const originalGap = text(body?.original_gap, 400) || current.gap;
+    // The report as the screen shows it: its insights where it has them, through the evidence limits (shownFields.ts).
+    const shown = revisionContext(report.report_data, await readShownInsights(admin, "competitive_reports", report.id), originalGap);
     // deno-lint-ignore no-explicit-any
-    const others = (Array.isArray(ai.gaps_for_client) ? ai.gaps_for_client : []).map((g: any) => text(g?.gap, 200)).filter((g: string) => g && g !== originalGap);
+    const rd: any = shown.report;
+    const ai = rd.ai_analysis || {};
+    // deno-lint-ignore no-explicit-any
+    const companies: any[] = rd.aggregates?.companies || [];
+    const others = shown.others.map((g) => text(g, 200)).filter(Boolean);
 
     const facts = companies.map((c) => ({
       company: c.name,
@@ -91,7 +92,7 @@ Deno.serve(async (req) => {
       `You are revising one suggested test in a competitive social media report for ${brand}${rd.period?.start ? `, covering ${rd.period.start} to ${rd.period.end}` : ""}.`,
       client?.brand_identity?.tone_of_voice ? `${brand}'s voice: ${text(client.brand_identity.tone_of_voice, 400)}` : "",
       `What the report measured, per company:\n${JSON.stringify(facts, null, 1)}`,
-      ai.executive_summary ? `The report's summary: ${text(ai.executive_summary, 1500)}` : "",
+      shown.summary ? `The report's summary: ${text(shown.summary, 1500)}` : "",
       // deno-lint-ignore no-explicit-any
       Array.isArray(ai.winner_teardown) && ai.winner_teardown.length ? `What works for competitors:\n${ai.winner_teardown.slice(0, 4).map((w: any) => `- ${text(w.competitor, 80)}: ${text(w.pattern, 300)}`).join("\n")}` : "",
       others.length ? `The report's other suggestions (do not duplicate them):\n${others.map((o: string) => `- ${o}`).join("\n")}` : "",

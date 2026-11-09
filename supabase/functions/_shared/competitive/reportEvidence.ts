@@ -30,10 +30,16 @@ export function sourceCompetitiveSummary(report: Record<string, any>): string | 
   return lines.join("\n\n");
 }
 
-export function withCompetitiveEvidenceLimits<T>(input: T): T {
+/**
+ * `keepSummary`: the summary given was worked out from the figures the report
+ * shows (report insights, _shared/reports/shownFields.ts), so it is kept in
+ * place of the one written here; it is still withheld when the client has no
+ * posts, and every other limit applies.
+ */
+export function withCompetitiveEvidenceLimits<T>(input: T, opts: { keepSummary?: boolean } = {}): T {
   if (!input || typeof input !== "object") return input;
   const source = input as Record<string, any>;
-  const summary = sourceCompetitiveSummary(source);
+  const summary = opts.keepSummary ? null : sourceCompetitiveSummary(source);
   let report = summary ? { ...source, ai_analysis: { ...source.ai_analysis, executive_summary: summary } } : source;
   const schedule = report.ai_analysis?.recommended_schedule;
   if (schedule) {

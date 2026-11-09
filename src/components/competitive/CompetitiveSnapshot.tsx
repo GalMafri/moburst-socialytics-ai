@@ -18,13 +18,14 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { LoadRetry } from "@/components/ui/load-error";
 import { Loading } from "@/components/ui/loading";
 import { insightKey, partitionGaps, useInsightFeedback, type InsightFeedbackRow } from "@/hooks/useInsightFeedback";
+import { useReportInsights } from "@/hooks/useReportInsights";
+import { shownCompetitive, type ShownInsightsRow } from "../../../supabase/functions/_shared/reports/shownFields";
 import { firstRunSentence, formatDate, formatRange, platformName } from "@/lib/display";
 import { useNextRun } from "@/lib/nextRun";
 import { Prose } from "@/components/ui/prose";
 import { InsightGrid } from "@/components/ui/insight-card";
 import { Crosshair, ArrowRight, Lightbulb, ThumbsUp, Rss } from "lucide-react";
-import { normalizedCompetitiveMetrics } from "@/lib/competitiveMetrics";
-import { competitiveReportQuality, withCompetitiveEvidenceLimits } from "../../../supabase/functions/_shared/competitive/reportEvidence";
+import { competitiveReportQuality } from "../../../supabase/functions/_shared/competitive/reportEvidence";
 import { landscapeLabel } from "@/lib/competitiveStatus";
 import { editedSuggestion } from "../../../supabase/functions/_shared/competitive/suggestionEdits";
 
@@ -67,6 +68,8 @@ export function CompetitiveSnapshot({
     enabled: !!clientId,
   });
   const nextRun = useNextRun(clientId, "competitive", !isLoading && !latest);
+  // The report's insights, worked out from its figures (report_insights), in place of the model-written summary and gaps.
+  const { data: insightsRow } = useReportInsights("competitive_reports", latest?.id);
 
   if (isLoading) return <Loading label="Loading competitive analysis" />;
   if (isError) return <LoadRetry context="competitive snapshot" error={error} onRetry={() => refetch()} />;
@@ -76,7 +79,9 @@ export function CompetitiveSnapshot({
     const first = firstRunSentence("competitive", nextRun.data);
     return first ? <EmptyState icon={Crosshair} title="No competitive analysis yet" description={first} /> : null;
   }
-  const rd: any = withCompetitiveEvidenceLimits(normalizedCompetitiveMetrics(latest.report_data));
+  // Read as every reader reads it: its insights where it has them, through the evidence limits (shownFields.ts).
+  const shown = shownCompetitive(latest.report_data, insightsRow, { staff: isMoburstStaff });
+  const rd: any = shown.report;
   const ai = rd.ai_analysis || {};
   const companies: any[] = rd.aggregates?.companies || [];
   const me = companies.find((c) => c.is_client);
@@ -90,7 +95,7 @@ export function CompetitiveSnapshot({
   const avg = (f: (c: any) => number) => { const values = active.map(f).filter(n => typeof n === "number" && Number.isFinite(n)); return values.length ? values.reduce((a, b) => a + b, 0) / values.length : null; };
   const totalPosts = companies.reduce((s, c) => s + (c.post_count || 0), 0);
   const share = me && totalPosts ? Math.round((me.post_count / totalPosts) * 100) : null;
-  const { visible } = partitionGaps<any>(ai.gaps_for_client || [], feedback);
+  const { visible } = partitionGaps<any>(shown.gaps, feedback);
   const gaps = visible.slice(0, 3);
   const period = rd.period?.start ? formatRange(rd.period) : latest.date_range_start ? formatRange({ start: latest.date_range_start, end: latest.date_range_end }) : "";
 
@@ -131,8 +136,15 @@ export function CompetitiveSnapshot({
         </StatGrid></div>
       )}
 
-      {ai.executive_summary && (
-        <Card id="snapshot-summary" className="scroll-mt-[156px]"><CardContent className="pt-5"><Prose text={ai.executive_summary} /></CardContent></Card>
+      {shown.summary.length > 0 && (
+        <Card id="snapshot-summary" className="scroll-mt-[156px]"><CardContent className="pt-5 space-y-3">
+          {shown.summary.map((p, i) => (
+            <div key={i} className="space-y-1">
+              <Prose text={p.text} />
+              {p.basedOn && <p className="t-secondary">Based on {p.basedOn}.</p>}
+            </div>
+          ))}
+        </CardContent></Card>
       )}
 
       {Array.isArray(takeaways) && takeaways.length > 0 && (
@@ -183,9 +195,11 @@ export function CompetitiveSnapshot({
 export function buildCompetitiveContext(
   reportRow: { created_at: string; report_data: unknown } | null | undefined,
   feedback?: InsightFeedbackRow[] | null,
+  insights?: ShownInsightsRow | null,
 ) {
   if (!reportRow) return null;
-  const rd: any = normalizedCompetitiveMetrics(reportRow.report_data);
+  // Read as every reader reads it: its insights where it has them, through the evidence limits (shownFields.ts).
+  const rd: any = shownCompetitive(reportRow.report_data, insights ?? null).report;
   const ai = rd.ai_analysis || {};
   const companies: any[] = rd.aggregates?.companies || [];
   const me = companies.find((c) => c.is_client);

@@ -1,5 +1,5 @@
 import { COMPARED_RATE_LABEL, COMPARED_RATE_SHORT } from "@/lib/rateLabels";
-import { competitiveReportQuality, withCompetitiveEvidenceLimits } from "../../supabase/functions/_shared/competitive/reportEvidence";
+import { competitiveReportQuality } from "../../supabase/functions/_shared/competitive/reportEvidence";
 // Renders one competitive_reports row (project step 11's in-app half).
 //
 // Open to client members for status='complete' rows via RLS, exactly like the
@@ -33,6 +33,8 @@ import { useToast } from "@/hooks/use-toast";
 import { PostVisual, usePostPreviews, normalizePlatform, platformLabel } from "@/components/competitive/PostVisual";
 import { PlatformIcon } from "@/lib/platform-config";
 import { partitionGaps, useCompetitiveLearnings, useInsightFeedback } from "@/hooks/useInsightFeedback";
+import { useReportInsights } from "@/hooks/useReportInsights";
+import { shownCompetitive } from "../../supabase/functions/_shared/reports/shownFields";
 import { toast as sonnerToast } from "sonner";
 import { formatRange } from "@/lib/dateRange";
 import { ReportActions } from "@/components/reports/ReportActions";
@@ -43,7 +45,7 @@ import { Section, SectionNav } from "@/components/ui/section";
 import { RankedBars, compactNumber } from "@/components/ui/bars";
 import { ChangeCards } from "@/components/competitive/ChangeCards";
 import { companiesFromReport, diffCompanies, pickComparableReport, reportPeriod as periodOf } from "@/lib/competitiveChanges";
-import { comparisonScale, normalizedCompetitiveMetrics, postReach } from "@/lib/competitiveMetrics";
+import { comparisonScale, postReach } from "@/lib/competitiveMetrics";
 import { editedSuggestion } from "../../supabase/functions/_shared/competitive/suggestionEdits";
 import { SuggestionEditor } from "@/components/competitive/SuggestionEditor";
 import { ArrowLeft, Crosshair, ExternalLink, Gauge, Lightbulb, Clock, Trophy, Hash, Layers, ThumbsUp, ThumbsDown, History, CalendarCheck, Eye, RotateCcw, Rss, Images, Users } from "lucide-react";
@@ -288,7 +290,11 @@ export default function CompetitiveReportView() {
     enabled: !!clientId && !!report?.id,
   });
 
-  const rd: any = useMemo(() => withCompetitiveEvidenceLimits(normalizedCompetitiveMetrics(report?.report_data)), [report?.report_data]);
+  // The report's insights, worked out from its figures (report_insights), in place of the model-written summary and gaps.
+  const { data: insightsRow } = useReportInsights("competitive_reports", report?.id);
+  // Read as every reader reads it: its insights where it has them, its own fields otherwise, through the evidence limits (shownFields.ts).
+  const shown = useMemo(() => shownCompetitive(report?.report_data, insightsRow, { staff: isMoburstStaff }), [report?.report_data, insightsRow, isMoburstStaff]);
+  const rd: any = shown.report;
   useEffect(() => {
     if (!report || !['failed', 'running'].includes(report.status)) return;
     const timer = setInterval(() => setNow(Date.now()), 15000);
@@ -397,7 +403,7 @@ export default function CompetitiveReportView() {
   const clientName = client?.name || rd.aggregates?.client_name || "Client";
   const ordered = [...(me ? [me] : []), ...rivals];
 
-  const gapsForPlatform = (ai.gaps_for_client || []).filter((g: any) => effectivePlat === "all" || !g.platform || g.platform === "all" || normalizePlatform(g.platform) === effectivePlat);
+  const gapsForPlatform = shown.gaps.filter((g: any) => effectivePlat === "all" || !g.platform || g.platform === "all" || normalizePlatform(g.platform) === effectivePlat);
   const { visible: gaps, hidden: hiddenGaps } = partitionGaps<any>(gapsForPlatform, feedback);
   const schedule = ai.recommended_schedule;
 
@@ -492,7 +498,7 @@ export default function CompetitiveReportView() {
    * cannot disagree.
    */
   const present: Record<string, boolean> = {
-    summary: !!ai.executive_summary,
+    summary: shown.summary.length > 0,
     changes: !!previous,
     scorecard: (scorecard?.dimensions?.length || 0) > 0,
     field: companies.length > 0,
@@ -726,13 +732,22 @@ export default function CompetitiveReportView() {
 
 
         {/* Executive summary */}
-        {ai.executive_summary && (
+        {shown.summary.length > 0 && (
             <Section id="summary" index={num("summary")} style={{ order: orderOf("summary") }} title={<>Executive summary</>} action={acrossAll}>
             {/* Plain card: glass-elevated is the opaque grey surface used for
                 things that float (the user chip, the progress card), and it
                 read as a different material next to every other section. */}
             <Card>
-              <CardContent><Prose text={ai.executive_summary} /></CardContent>
+              <CardContent>
+                <div className="space-y-3">
+                  {shown.summary.map((p, i) => (
+                    <div key={i} className="space-y-1">
+                      <Prose text={p.text} />
+                      {p.basedOn && <p className="t-secondary">Based on {p.basedOn}.</p>}
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
             </Card>
             </Section>
         )}
@@ -1075,6 +1090,7 @@ export default function CompetitiveReportView() {
                           <span className="font-semibold">Proposed test: </span>{nameifyDomains(shown.suggested_play)}
                         </div>
                       )}
+                      {g.based_on && <p className="t-secondary">Based on {g.based_on}.</p>}
                       {isMoburstStaff && (
                         <div data-print="hide" className="flex items-center gap-2 pt-1">
                           <Button size="sm" variant={v === "up" ? "default" : "outline"} onClick={() => castVote(g, "up")} aria-pressed={v === "up"}>

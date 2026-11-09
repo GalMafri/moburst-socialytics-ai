@@ -28,4 +28,13 @@ describe("report counts", () => {
     expect(reportCounts(rd).recommendations).toBe(5);
     expect(reportCounts(rd).calendarPosts).toBe(3);
   });
+
+  it("counts the recommendations the page lists: the report's insights where it has them (shownFields.ts)", () => {
+    const rd = { ai_analysis: { competitive_takeaways: ["a"], sprout_performance_analysis: { pillar_alignment: { recommendations: ["c"] } } } };
+    const insights = (recommendations: Array<{ text: string; facts: string[] }> | null) => ({ report_id: "r1", confirmed_at: "x", facts: [], fields: { kind: "social" as const, summary: null, insights: [{ text: "i", facts: [] }], recommendations } });
+    expect(reportCounts(rd, insights([{ text: "x", facts: [] }, { text: "y", facts: [] }, { text: "z", facts: [] }])).recommendations).toBe(4);
+    // Code wrote none: the report's own are listed and counted.
+    expect(reportCounts(rd, insights(null)).recommendations).toBe(2);
+    expect(reportCounts(rd, null).recommendations).toBe(2);
+  });
 });

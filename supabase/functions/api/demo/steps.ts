@@ -426,7 +426,12 @@ export const DEMO_STEPS: StepDef<DemoCtx>[] = [
     name: "collect",
     async run(job, ctx) {
       const client = await clientOf(job, ctx);
-      const [sets, reports, competitive, posts, designs] = await Promise.all([ctx.db.setsOf(client.id), ctx.db.getReports(job.run_ids), ctx.db.getCompetitiveReports(job.run_ids), ctx.db.postsForJob(job.id), ctx.db.designSystemsOf(client.id)]);
+      const [sets, found, foundCompetitive, posts, designs] = await Promise.all([ctx.db.setsOf(client.id), ctx.db.getReports(job.run_ids), ctx.db.getCompetitiveReports(job.run_ids), ctx.db.postsForJob(job.id), ctx.db.designSystemsOf(client.id)]);
+      // Each report read as every reader reads it: its insights where it has them (reports/shownFields.ts).
+      const [reports, competitive] = await Promise.all([
+        Promise.all(found.map(async (r) => ({ ...r, insights: await ctx.db.insightsOf("reports", r.id) }))),
+        Promise.all(foundCompetitive.map(async (r) => ({ ...r, insights: await ctx.db.insightsOf("competitive_reports", r.id) }))),
+      ]);
       const comp = stepData(job, "competitors");
       const set = sets.find((s) => s.id === comp.set_id) ?? newestSet(sets.filter((s) => CONFIRMED_SET.includes(s.status))) ?? newestSet(sets);
       const analytics = (stepData(job, "analytics").snapshot as Record<string, unknown> | undefined) ?? null;

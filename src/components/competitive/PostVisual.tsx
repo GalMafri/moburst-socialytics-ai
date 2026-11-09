@@ -16,11 +16,13 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Play, Layers, Image as ImageIcon, ExternalLink, ImageOff, FileText, Link as LinkIcon } from "lucide-react";
 import { normalizePlatform, platformLabel } from "@/lib/platform";
+import { mediaKind, mediaLabel, platformFromUrl, postType, type MediaKind } from "../../../supabase/functions/_shared/reports/mediaKind";
 
 // Re-exported so existing imports keep working; the helpers live in src/lib/platform.ts.
 export { normalizePlatform, platformLabel };
 
-export type MediaKind = "video" | "carousel" | "image" | "document" | "link" | "text";
+// What kind of post a post is and its label, shared with a report's facts (supabase/functions/_shared/reports/mediaKind.ts).
+export { mediaKind, mediaLabel, platformFromUrl, postType, type MediaKind };
 
 export type PostPreview = {
   url: string;
@@ -31,45 +33,6 @@ export type PostPreview = {
   status: "ok" | "unavailable" | "miss" | "pending" | "error";
 };
 
-
-export function platformFromUrl(url: string | null | undefined): string {
-  const u = String(url || "").toLowerCase();
-  if (u.includes("instagram.com")) return "instagram";
-  if (u.includes("tiktok.com")) return "tiktok";
-  if (u.includes("facebook.com") || u.includes("fb.watch")) return "facebook";
-  if (u.includes("linkedin.com")) return "linkedin";
-  if (u.includes("youtube.com") || u.includes("youtu.be")) return "youtube";
-  if (u.includes("twitter.com") || u.includes("x.com")) return "x";
-  return "";
-}
-
-export function mediaKind(value: string | null | undefined, url?: string | null): MediaKind {
-  const v = String(value || "").toLowerCase();
-  if (v.includes("video") || v.includes("reel") || v.includes("short") || v.includes("igtv")) return "video";
-  // A LinkedIn document post and a PDF carousel are their own thing: they
-  // used to be folded into "text", which read as a post with no creative.
-  // Checked before carousel, since "pdf_carousel" is a document.
-  if (v.includes("document") || v.includes("pdf")) return "document";
-  if (v.includes("carousel") || v.includes("album") || v.includes("multi") || v.includes("sidecar")) return "carousel";
-  if (v.includes("link") || v.includes("article") || v.includes("share")) return "link";
-  if (v.includes("photo") || v.includes("image") || v.includes("picture")) return "image";
-  if (v.includes("text") || v.includes("status")) return "text";
-  const p = platformFromUrl(url);
-  if (p === "tiktok" || p === "youtube") return "video";
-  if (String(url || "").includes("/reel/")) return "video";
-  return "image";
-}
-
-export function mediaLabel(kind: MediaKind): string {
-  switch (kind) {
-    case "video": return "Video";
-    case "carousel": return "Carousel";
-    case "document": return "Document";
-    case "link": return "Link";
-    case "text": return "Text";
-    default: return "Image";
-  }
-}
 
 export type PreviewHint = { url: string | null | undefined; image?: string | null; mediaType?: string | null };
 
