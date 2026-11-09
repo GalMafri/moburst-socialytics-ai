@@ -188,6 +188,21 @@ describe("the report_text job", () => {
     warn.mockRestore();
   });
 
+  it("queues the report's insights when its text job ends either way, and not while it will be tried again", async () => {
+    // Its figures are settled in the first step, so a text that could not be corrected still gets insights from them.
+    const { db } = fakeDb("competitive_reports", row(), { socialPosts: BADER_POSTS });
+    const rpc = vi.fn(async () => ({ data: null, error: null }));
+    const bad = async () => JSON.stringify({ sentences: [{ id: "s1", text: "Rate at 7.5%." }] });
+    expect((await runReportText({ ...db, rpc }, job(2), { now, complete: bad })).status).toBe("queued");
+    expect(rpc).not.toHaveBeenCalled();
+    expect((await runReportText({ ...db, rpc }, job(7), { now, complete: bad })).status).toBe("failed");
+    expect(rpc).toHaveBeenCalledWith("report_insights_queue", { p_table: "competitive_reports", p_report: "1c4f4805" });
+    // A job that names no report queues nothing.
+    rpc.mockClear();
+    expect((await runReportText({ ...db, rpc }, { ...job(1), payload: {} }, { now, complete: bad })).status).toBe("skipped");
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
   it("tries again later, quietly, when the answer adds a number the report does not show", async () => {
     const { db, row: stored } = fakeDb("competitive_reports", row(), { socialPosts: BADER_POSTS });
     const outcome = await runReportText(db, job(2), { now, complete: async () => JSON.stringify({ sentences: [{ id: "s1", text: "Rate at 7.5%." }] }) });

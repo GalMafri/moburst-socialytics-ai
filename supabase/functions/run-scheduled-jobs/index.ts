@@ -21,8 +21,8 @@
 //                              answers {"posted": true|false}, nothing else.
 //
 // Report insights (_shared/reports/insights.ts): a report_insights job words
-// one finished report's facts, queued when its report_text job finishes and
-// when the team's verdict on a competitive suggestion changes.
+// one finished report's facts, queued when its report_text job ends, done
+// or failed.
 //
 // In-app report pipelines (_shared/pipelines): each tick also runs due
 // report_pipeline steps in a lane of their own (worker.ts), and the daily

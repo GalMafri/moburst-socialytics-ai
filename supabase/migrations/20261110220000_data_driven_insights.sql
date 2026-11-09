@@ -13,8 +13,9 @@
 --      so a report whose input returns to an earlier one shows that answer.
 --   2. report_insights_live_from(): when insights went live; reports stored
 --      before keep their text (decision 4)
---   3. the report_insights job, at most one waiting per report, queued by
---      report_text when it finishes (report_insights_queue). The team's
+--   3. the report_insights job, at most one per report while queued or
+--      running, queued by report_text when it ends, done or failed
+--      (report_insights_queue): its figures are settled in its first step. The team's
 --      verdicts and edits are no part of a report's insights: they apply
 --      when a report is read, keyed by a gap's own words, so no vote
 --      queues or re-words anything.
@@ -113,12 +114,12 @@ begin
   execute format('alter table public.scheduled_jobs add constraint scheduled_jobs_kind_check check (kind = any (%L::text[]))', v_kinds);
 end $$;
 
--- One waiting job per report.
-create unique index if not exists scheduled_jobs_one_queued_report_insights
+-- One job per report while it is queued or running, so a retry of report_text cannot meet a second one.
+create unique index if not exists scheduled_jobs_one_open_report_insights
   on public.scheduled_jobs ((payload ->> 'report_id'))
-  where kind = 'report_insights' and status = 'queued';
+  where kind = 'report_insights' and status in ('queued', 'running');
 
--- Queue a finished report's insights, unless one is already waiting.
+-- Queue a finished report's insights, unless one is already queued or running.
 create or replace function public.report_insights_queue(p_table text, p_report uuid)
 returns void
 language plpgsql security definer set search_path = public as $$

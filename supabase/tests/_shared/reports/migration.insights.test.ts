@@ -125,6 +125,17 @@ describe("20261110220000_data_driven_insights.sql", () => {
     await db.query(`select public.report_insights_queue('nope', $1)`, [MONTHLY]);
     await db.query(`select public.report_insights_queue('competitive_reports', $1)`, [MONTHLY]);
     expect(await queued()).toEqual([{ kind: "report_insights", client_id: MOBURST, payload: { table: "reports", report_id: MONTHLY }, priority: 71, status: "queued" }]);
+    // One while it runs too, so a retry of report_text cannot meet a second one.
+    await db.exec(`update public.scheduled_jobs set status = 'running' where kind = 'report_insights'`);
+    await as("service_role", { role: "service_role" });
+    await db.query(`select public.report_insights_queue('reports', $1)`, [MONTHLY]);
+    expect((await queued()).map((j) => j.status)).toEqual(["running"]);
+    // Once it is done, the next finish queues the next one.
+    await db.exec(`update public.scheduled_jobs set status = 'done' where kind = 'report_insights'`);
+    await as("service_role", { role: "service_role" });
+    await db.query(`select public.report_insights_queue('reports', $1)`, [MONTHLY]);
+    expect((await queued()).map((j) => j.status).sort()).toEqual(["done", "queued"]);
+    await db.exec(`delete from public.scheduled_jobs where kind = 'report_insights' and status = 'done'`);
     await as("authenticated", APP);
     await expect(db.query(`select public.report_insights_queue('reports', $1)`, [MONTHLY])).rejects.toThrow();
   });

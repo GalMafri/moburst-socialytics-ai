@@ -16,8 +16,10 @@
 //   4. The corrected sentences are written in place. The report's text and
 //      client figures as they were before the first change are kept in the
 //      row's correction_audit, with a record of every change.
-//   5. Its text settled, the report's insights are queued (insights.ts,
-//      report_insights): facts from the figures it now shows.
+//   5. When the job ends, done or failed, the report's insights are queued
+//      (insights.ts, report_insights): its figures are settled in step 1,
+//      so a text that could not be corrected still gets insights from the
+//      figures it shows. A job that will be tried again queues nothing yet.
 //
 // Nothing here is shown to anyone: a job that does not finish is tried again
 // with growing waits, and the report keeps showing its figures meanwhile.
@@ -119,6 +121,13 @@ export async function reportTextCheck(db: Db, table: string, reportId: string): 
 }
 
 export async function runReportText(db: Db, job: ReportTextJob, deps: ReportTextDeps): Promise<ReportTextOutcome> {
+  const outcome = await reportTextOutcome(db, job, deps);
+  // Either final state: the figures were settled in the first step.
+  if (outcome.status === "done" || outcome.status === "failed") await queueReportInsights(db, String(job.payload?.table || ""), String(job.payload?.report_id || ""));
+  return outcome;
+}
+
+async function reportTextOutcome(db: Db, job: ReportTextJob, deps: ReportTextDeps): Promise<ReportTextOutcome> {
   const table = String(job.payload?.table || "");
   const reportId = String(job.payload?.report_id || "");
   const retry = (reason: string): ReportTextOutcome => job.attempts >= job.max_attempts
@@ -153,10 +162,7 @@ export async function runReportText(db: Db, job: ReportTextJob, deps: ReportText
     // 2. The sentences that quote a figure the report no longer shows.
     const check = await reportTextCheck(db, table, reportId);
     if (!check) return { status: "skipped", reason: "The report no longer exists." };
-    if (!check.stale.length) {
-      await queueReportInsights(db, table, reportId);
-      return { status: "done", result: { ...result, stale_sentences: 0 } };
-    }
+    if (!check.stale.length) return { status: "done", result: { ...result, stale_sentences: 0 } };
 
     // 3. One model call for the report's sentences, checked before anything is written.
     const rd = Array.isArray(check.row.report_data) ? check.row.report_data[0] : check.row.report_data;
@@ -181,7 +187,6 @@ export async function runReportText(db: Db, job: ReportTextJob, deps: ReportText
     const nextData = { ...rd, ai_analysis: applied.ai };
     const { error } = await db.from(table).update({ report_data: Array.isArray(check.row.report_data) ? [nextData, ...check.row.report_data.slice(1)] : nextData, correction_audit: nextAudit }).eq("id", reportId);
     if (error) throw new Error(`Could not save the corrected text: ${error.message}`);
-    await queueReportInsights(db, table, reportId);
     return { status: "done", result: { ...result, stale_sentences: check.stale.length, fields: applied.changed.length } };
   } catch (e) {
     return retry(e instanceof Error ? e.message : String(e));
