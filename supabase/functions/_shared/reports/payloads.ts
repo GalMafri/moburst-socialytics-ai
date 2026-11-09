@@ -203,7 +203,9 @@ export async function buildSocialPayload(args: {
       url: p.native_link,
     })),
     social_keywords: client.social_keywords || [],
-    trends_keywords: client.trends_keywords || "",
+    // Empty, from no column (dropped in 20261111100000): n8n's social workflow, kept unpublished as a fallback until the
+    // 7 Dec reports run clean, still reads the field. Trends come from each client's trend profile now.
+    trends_keywords: "",
     content_pillars: client.content_pillars || [],
     primary_platforms: (client.primary_platforms || []).join(","),
     geo: splitList(client.geo, ["US"]),
