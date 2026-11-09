@@ -2,10 +2,11 @@ import { COMPARED_RATE_LABEL, SPROUT_RATE_LABEL } from "@/lib/rateLabels";
 import { useNavigate, useParams } from "react-router-dom";
 import { cleanText, countryNames, formatDate, formatDateTime, formatNumbersInText, formatRange, languageNames, monthlyReportStatus, platformKey, platformName } from "@/lib/display";
 import { reportsMeasure } from "@/lib/platformMeasures";
-import { reportCounts, sproutEngagementRate, sproutEngagements } from "@/lib/reportFigures";
+import { reportCounts, reportTrends, sproutEngagementRate, sproutEngagements } from "@/lib/reportFigures";
 import { StatCard } from "@/components/ui/stat-card";
 import { useQuery } from "@tanstack/react-query";
 import { useReportInsights } from "@/hooks/useReportInsights";
+import { useTrendThemes } from "@/hooks/useTrendThemes";
 import { readShownInsights, shownCompetitive, shownSocial } from "../../supabase/functions/_shared/reports/shownFields";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -46,7 +47,7 @@ import {
 import { PlatformBadge, PlatformIcon, getPlatformColor } from "@/lib/platform-config";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Loading } from "@/components/ui/loading";
-import { useRef, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
 import { useAuth } from "@/hooks/useAuth";
 import { useTrackView } from "@/hooks/useTrackView";
@@ -63,6 +64,7 @@ import { competitiveReportQuality } from "../../supabase/functions/_shared/compe
 import { Prose } from "@/components/ui/prose";
 import { Section, SectionNav } from "@/components/ui/section";
 import { ReportDecks } from "@/components/reports/ReportDecks";
+import { IndustryTrendsSection } from "@/components/reports/IndustryTrendsSection";
 import { InsightGrid } from "@/components/ui/insight-card";
 import { CompareBars, RankedBars, compactNumber } from "@/components/ui/bars";
 import {
@@ -134,6 +136,15 @@ export default function ReportView() {
   // The report's insights, worked out from its figures (report_insights), in place of the model-written ones.
   const { data: insightsRow } = useReportInsights("reports", reportId);
 
+  // The weekly Trends collection's stored themes for the report's own period. When there are any, the report
+  // shows them in place of its own TikTok and Instagram trends, whichever engine wrote it (reportTrends).
+  const storedThemes = useTrendThemes(report?.client_id ?? "", report?.date_range_start ?? "", report?.date_range_end ?? "");
+  useEffect(() => {
+    if (!storedThemes.isError) return;
+    const why = storedThemes.error && typeof storedThemes.error === "object" && "message" in storedThemes.error ? String((storedThemes.error as { message: unknown }).message) : String(storedThemes.error);
+    console.warn("[report trends] the period's themes were not read; the report's own trends show:", why);
+  }, [storedThemes.isError, storedThemes.error]);
+
   const overviewPostUrls = useMemo(() => {
     const rawRd = (report as any)?.report_data;
     const rd0 = Array.isArray(rawRd) ? rawRd[0] : rawRd;
@@ -204,6 +215,12 @@ export default function ReportView() {
   const aiAnalysis = rd?.ai_analysis || {};
   const tiktokTrends = rd?.tiktok_trends || {};
   const instagramTrends = rd?.instagram_trends || {};
+  // Which trends the report shows, read once for every part of it (reportTrends). Themes that could not be read
+  // count as none, so the report's own trends show and nothing failed is on screen; until they answer, neither shows.
+  const hasTrendPeriod = !!(report.client_id && report.date_range_start && report.date_range_end);
+  const themesPending = hasTrendPeriod && !storedThemes.data && !storedThemes.isError;
+  const themesRead = storedThemes.data?.themes ?? null;
+  const trends = reportTrends(aiAnalysis, themesRead, { pending: themesPending });
   const contentCalendar = rd?.content_calendar || aiAnalysis?.content_calendar || [];
 
   // ── Per-platform performance (dynamic; degrades gracefully for older reports) ──
@@ -264,12 +281,14 @@ export default function ReportView() {
     ),
   ] as string[];
 
-  const hasTrends = !!(
+  const hasOwnTrends = !!(
     aiAnalysis?.tiktok_trends_analysis ||
     tiktokTrends?.posts?.length ||
     aiAnalysis?.instagram_trends_analysis ||
     instagramTrends?.posts?.length
   );
+  // A report with trends of its own keeps its tab while the themes are read: it shows trends either way.
+  const hasTrends = trends.source === "industry" || hasOwnTrends;
   // Reports since 19 Oct 2026 write no posts (the calendar is planned a week at a
   // time); the tab still links to the calendar.
   const hasContent = !!aiAnalysis || contentCalendar.length > 0;
@@ -285,10 +304,6 @@ export default function ReportView() {
   const competitiveTakeaways: string[] = shown.takeaways;
   const pillarRecs: string[] = shown.recommendations.map((r) => r.text);
   const pillarRecsBasis = shown.recommendations.map((r) => r.basedOn);
-  const trendOpportunities: string[] = [
-    ...(aiAnalysis?.tiktok_trends_analysis?.opportunities_for_client || []),
-    ...(aiAnalysis?.instagram_trends_analysis?.opportunities_for_client || []),
-  ];
   const hero = (() => {
     const ch = monthComparison?.changes || {};
     let best: { label: string; pct: number } | null = null;
@@ -334,7 +349,7 @@ export default function ReportView() {
     return `The best post reached ${compactNumber(Number(best.impressions ?? 0))} impressions${plat ? ` on ${plat}` : ""}${best.engagements != null ? ` with ${compactNumber(Number(best.engagements))} engagements` : ""}. Lifetime metrics for posts published in the report period; ranked by impressions and engagement.`;
   })();
   // Counted as the page lists them: the report's insights where it has them (shownFields.ts).
-  const counts = reportCounts(rd, insightsRow);
+  const counts = reportCounts(rd, insightsRow, trends);
   // Every recommendation the page can show: the report's own, and competitor gaps the team endorsed.
   const totalRecommendations = counts.recommendations + endorsedGaps.length;
   type Action = { source: "Competitors" | "Performance" | "Trends"; title: string; detail?: string; tab?: string; anchor?: string; href?: string };
@@ -342,7 +357,8 @@ export default function ReportView() {
   for (const g of endorsedGaps.slice(0, 2)) actions.push({ source: "Competitors", title: g.gap, detail: g.suggested_play, href: `/clients/${report.client_id}/competitive/reports/${latestCompetitive!.id}` });
   for (const t of competitiveTakeaways.slice(0, 2)) if (actions.length < 4) actions.push({ source: "Competitors", title: t, tab: "competitive" });
   for (const r of pillarRecs.slice(0, 2)) if (actions.length < 6) actions.push({ source: "Performance", title: r, anchor: "pillars" });
-  for (const o of trendOpportunities.slice(0, 2)) if (actions.length < 6) actions.push({ source: "Trends", title: o, tab: "trends" });
+  // A theme's angle under its theme's title, as a competitor gap carries its play; a report's own opportunity alone.
+  for (const o of trends.items.slice(0, 2)) if (actions.length < 6) actions.push({ source: "Trends", title: o.theme ?? o.text, detail: o.theme ? o.text : undefined, tab: "trends" });
   const compAgg = (latestCompetitive?.report_data as any)?.aggregates;
   const compMe = compAgg?.companies?.find((c: any) => c.is_client);
   const compTotal = (compAgg?.companies || []).reduce((s: number, c: any) => s + (c.post_count || 0), 0);
@@ -382,6 +398,12 @@ export default function ReportView() {
             { id: "ideas-week", label: "This week" },
             { id: "ideas-calendar", label: "Calendar" },
           ]
+        : tab === "trends" && trends.source === "industry"
+          ? [
+              { id: "industry-trends", label: "Industry trends" },
+              { id: "industry-opportunities", label: "Opportunities" },
+              { id: "industry-takeaways", label: "Key takeaways" },
+            ]
         : tab === "trends"
           ? [
               { id: "tiktok-overview", label: "TikTok trends" },
@@ -618,8 +640,9 @@ export default function ReportView() {
                   <p className="t-subhead">In this report</p>
                   <ul className="flex items-center gap-x-6 gap-y-2 flex-wrap t-body">
                     {counts.postsAnalyzed != null && <li className="flex items-center gap-2"><span>Posts analyzed</span><span className="font-semibold tabular-nums">{counts.postsAnalyzed}</span></li>}
-                    <li className="flex items-center gap-2"><span>TikTok trends</span><span className="font-semibold tabular-nums">{counts.tiktokTrends}</span></li>
-                    <li className="flex items-center gap-2"><span>Instagram trends</span><span className="font-semibold tabular-nums">{counts.instagramTrends}</span></li>
+                    {trends.source === "industry" && <li className="flex items-center gap-2"><span>Industry trends</span><span className="font-semibold tabular-nums">{counts.industryTrends}</span></li>}
+                    {trends.source === "own" && <li className="flex items-center gap-2"><span>TikTok trends</span><span className="font-semibold tabular-nums">{counts.tiktokTrends}</span></li>}
+                    {trends.source === "own" && <li className="flex items-center gap-2"><span>Instagram trends</span><span className="font-semibold tabular-nums">{counts.instagramTrends}</span></li>}
                     <li className="flex items-center gap-2"><span>Recommendations</span><span className="font-semibold tabular-nums">{counts.recommendations}</span></li>
                     {counts.calendarPosts > 0 && <li className="flex items-center gap-2"><span>Calendar posts</span><span className="font-semibold tabular-nums">{counts.calendarPosts}</span></li>}
                     {latestCompetitive && <li className="t-secondary">Latest competitive analysis included</li>}
@@ -643,6 +666,7 @@ export default function ReportView() {
                   clientTimezone={clientContext.timezone}
                   availablePlatforms={availablePlatforms}
                   availableLanguages={availableLanguages}
+                  trends={trends}
                 />
               </ReportCalendarLink>
             </TabsContent>
@@ -651,8 +675,17 @@ export default function ReportView() {
           {/* ── TRENDS ── */}
           {hasTrends && (
             <TabsContent value="trends" className="space-y-section">
-              <TrendsSection title="TikTok trends" analysis={aiAnalysis?.tiktok_trends_analysis} posts={tiktokTrends?.posts} platform="tiktok" clientName={clientName} />
-              <TrendsSection title="Instagram trends" analysis={aiAnalysis?.instagram_trends_analysis} posts={instagramTrends?.posts} platform="instagram" clientName={clientName} />
+              {/* The month's stored themes in one section, in place of the report's own TikTok and Instagram ones. */}
+              {trends.source === "industry" ? (
+                <IndustryTrendsSection themes={themesRead} loading={themesPending} aiAnalysis={aiAnalysis} clientName={clientName} />
+              ) : trends.source === "pending" ? (
+                <Loading label="Loading trends" />
+              ) : (
+                <>
+                  <TrendsSection title="TikTok trends" analysis={aiAnalysis?.tiktok_trends_analysis} posts={tiktokTrends?.posts} platform="tiktok" clientName={clientName} />
+                  <TrendsSection title="Instagram trends" analysis={aiAnalysis?.instagram_trends_analysis} posts={instagramTrends?.posts} platform="instagram" clientName={clientName} />
+                </>
+              )}
             </TabsContent>
           )}
 

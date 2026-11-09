@@ -1,21 +1,28 @@
 import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { ChevronDown, ChevronRight, Sparkles } from "lucide-react";
+import { reportTrends, type ReportTrends } from "@/lib/reportFigures";
 
 interface Props {
   aiAnalysis: any;
   sproutMonthSummary?: string | null;
+  /** Which trends the report shows (reportTrends); read from the report's own analysis when not given. */
+  trends?: ReportTrends;
 }
 
-export function WeeklyHighlights({ aiAnalysis, sproutMonthSummary }: Props) {
+export function WeeklyHighlights({ aiAnalysis, sproutMonthSummary, trends }: Props) {
   const [open, setOpen] = useState(false);
 
-  // Pull the highest-value insights for collapsed peek.
-  const tiktokOpps: string[] = aiAnalysis?.tiktok_trends_analysis?.opportunities_for_client || [];
-  const igOpps: string[] = aiAnalysis?.instagram_trends_analysis?.opportunities_for_client || [];
+  // Pull the highest-value insights for collapsed peek. The trend items are the
+  // ones the report shows: the stored themes' angles, or the report's own
+  // TikTok and Instagram opportunities (none while the themes are being read).
+  const trend = trends ?? reportTrends(aiAnalysis, null);
+  const industry = trend.source === "industry" ? trend.items : [];
+  const tiktokOpps: string[] = trend.source === "own" ? aiAnalysis?.tiktok_trends_analysis?.opportunities_for_client || [] : [];
+  const igOpps: string[] = trend.source === "own" ? aiAnalysis?.instagram_trends_analysis?.opportunities_for_client || [] : [];
   const underrepresented: string[] = aiAnalysis?.sprout_performance_analysis?.pillar_alignment?.underrepresented || [];
 
-  const hasAnyContent = sproutMonthSummary || tiktokOpps.length > 0 || igOpps.length > 0 || underrepresented.length > 0;
+  const hasAnyContent = sproutMonthSummary || industry.length > 0 || tiktokOpps.length > 0 || igOpps.length > 0 || underrepresented.length > 0;
   if (!hasAnyContent) return null;
 
   return (
@@ -59,6 +66,21 @@ export function WeeklyHighlights({ aiAnalysis, sproutMonthSummary }: Props) {
               {underrepresented.map((p, i) => (
                 <li key={i} className="t-secondary">
                   • {p}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {industry.length > 0 && (
+          <div>
+            <p className="t-subhead mb-1.5">
+              Industry trends
+            </p>
+            <ul className="space-y-1">
+              {industry.slice(0, 3).map((o, i) => (
+                <li key={i} className="t-secondary">
+                  • {o.theme && <span className="text-white">{o.theme}: </span>}{o.text}
                 </li>
               ))}
             </ul>

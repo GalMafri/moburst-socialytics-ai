@@ -15,6 +15,7 @@ import { GenerationProvider } from "./GenerationContext";
 import { GenerationProgress } from "./GenerationProgress";
 import { DesignRequestsProvider } from "./DesignRequestsContext";
 import type { ClientContext } from "@/lib/clientContext";
+import type { ReportTrends } from "@/lib/reportFigures";
 import { applyCopyRevisions, calendarWithRevisions, iterationMatchesPost } from "@/lib/calendarRevision";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -32,6 +33,8 @@ interface Props {
   mode?: "report" | "calendar";
   /** A post to open as soon as the board has it (arriving from the all-clients calendar). */
   openPostKey?: string;
+  /** Which trends the report shows, for its highlights (reportTrends). */
+  trends?: ReportTrends;
 }
 
 export function ContentIdeasTab({
@@ -46,6 +49,7 @@ export function ContentIdeasTab({
   availableLanguages,
   mode = "report",
   openPostKey,
+  trends,
 }: Props) {
   const [filters, setFilters] = useState<CalendarFilterState>({
     day: "all",
@@ -248,6 +252,7 @@ export function ContentIdeasTab({
             <WeeklyHighlights
               aiAnalysis={aiAnalysis}
               sproutMonthSummary={sproutPerformance?.month_comparison?.summary || null}
+              trends={trends}
             />
           </div>
         )}
