@@ -333,7 +333,8 @@ export default function ReportView() {
     const plat = platformLabelOf(best.network_type || best.platform || "");
     return `The best post reached ${compactNumber(Number(best.impressions ?? 0))} impressions${plat ? ` on ${plat}` : ""}${best.engagements != null ? ` with ${compactNumber(Number(best.engagements))} engagements` : ""}. Lifetime metrics for posts published in the report period; ranked by impressions and engagement.`;
   })();
-  const counts = reportCounts(rd);
+  // Counted as the page lists them: the report's insights where it has them (shownFields.ts).
+  const counts = reportCounts(rd, insightsRow);
   // Every recommendation the page can show: the report's own, and competitor gaps the team endorsed.
   const totalRecommendations = counts.recommendations + endorsedGaps.length;
   type Action = { source: "Competitors" | "Performance" | "Trends"; title: string; detail?: string; tab?: string; anchor?: string; href?: string };
