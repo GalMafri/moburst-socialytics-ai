@@ -1,8 +1,8 @@
 // @vitest-environment node
-// 20261110160000_lifecycle_looks.sql, applied twice to PGlite over the
-// smallest schema it touches: a look asked for after one already ran in the
-// same minute is queued, and a look that has not started yet covers the
-// requests it will see.
+// 20261110160000_lifecycle_looks.sql and 20261110210000_lifecycle_look_time.sql,
+// each applied twice to PGlite over the smallest schema they touch: a look
+// asked for after one already ran in the same minute is queued, and a look
+// that has not started yet covers only the requests it runs at or after.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +11,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 const migrations = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "migrations");
 const migration = readFileSync(join(migrations, "20261110160000_lifecycle_looks.sql"), "utf8");
+const lookTime = readFileSync(join(migrations, "20261110210000_lifecycle_look_time.sql"), "utf8");
 
 const YANGRA = "00000000-0000-4000-8000-000000000001";
 const ARCHIVED = "00000000-0000-4000-8000-000000000002";
@@ -32,7 +33,7 @@ insert into public.clients values ('${YANGRA}', 'Yangra', null), ('${ARCHIVED}',
 
 let db: PGlite;
 const looks = async (client = YANGRA) =>
-  (await db.query<{ status: string; available_at: string }>("select status, to_char(available_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI') as available_at from scheduled_jobs where kind = 'lifecycle' and client_id = $1 order by available_at", [client])).rows;
+  (await db.query<{ status: string; available_at: string }>("select status, to_char(available_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI:SS') as available_at from scheduled_jobs where kind = 'lifecycle' and client_id = $1 order by available_at", [client])).rows;
 const ask = (at?: string, client = YANGRA) =>
   at ? db.query("select public.lifecycle_enqueue($1, 30::smallint, $2::timestamptz)", [client, at]) : db.query("select public.lifecycle_enqueue($1)", [client]);
 
@@ -41,11 +42,13 @@ beforeAll(async () => {
   await db.exec(SETUP);
   await db.exec(migration);
   await db.exec(migration);
+  await db.exec(lookTime);
+  await db.exec(lookTime);
 });
 afterAll(async () => { await db.close(); });
 beforeEach(async () => { await db.exec("delete from scheduled_jobs"); });
 
-describe("lifecycle_enqueue after 20261110160000_lifecycle_looks.sql", () => {
+describe("lifecycle_enqueue after 20261110210000_lifecycle_look_time.sql", () => {
   it("queues a look after one already ran in the same minute", async () => {
     await ask();
     await db.exec("update scheduled_jobs set status = 'done'");
@@ -63,8 +66,26 @@ describe("lifecycle_enqueue after 20261110160000_lifecycle_looks.sql", () => {
   it("queues a later look even when an earlier one is waiting", async () => {
     await ask();
     await ask("2099-11-09T14:14:00Z");
-    await ask("2099-11-09T14:14:30Z");
-    expect((await looks()).map((l) => l.available_at.slice(0, 16))).toEqual([expect.any(String), "2099-11-09 14:14"]);
+    expect((await looks()).map((l) => l.available_at)).toEqual([expect.any(String), "2099-11-09 14:14:00"]);
+  });
+
+  // BetterBee, 9 Nov 2026: the content strategy asked to be looked at 06:14:41
+  // UTC; a look queued for 06:14:03 counted as covering it, ran 24 seconds
+  // before the step was due, and the strategy waited a day.
+  it("queues a look when the one waiting runs before the request, even in the same minute", async () => {
+    await ask("2099-11-09T06:14:03Z");
+    await ask("2099-11-09T06:14:41Z");
+    expect((await looks()).map((l) => l.available_at)).toEqual(["2099-11-09 06:14:03", "2099-11-09 06:14:41"]);
+  });
+
+  it("asks once when the look waiting runs at the request or less than a minute after it", async () => {
+    await ask("2099-11-09T06:14:41Z");
+    await ask("2099-11-09T06:14:41Z");
+    await ask("2099-11-09T06:14:03Z");
+    await ask("2099-11-09T06:13:42Z");
+    expect((await looks()).map((l) => l.available_at)).toEqual(["2099-11-09 06:14:41"]);
+    await ask("2099-11-09T06:13:41Z");
+    expect((await looks()).map((l) => l.available_at)).toEqual(["2099-11-09 06:13:41", "2099-11-09 06:14:41"]);
   });
 
   it("queues a look now when only a later one is waiting", async () => {
