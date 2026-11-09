@@ -30,11 +30,11 @@ regardless of which portal the user came from. The legacy path was not modified.
 | gOS role | Socialytics role |
 |----------|------------------|
 | `super_admin`, `admin`, `account_manager` | `admin` |
-| `user`, `staff` at Moburst (no organization, or one naming Moburst) | `moburst_user`: with companies assigned, limited to them with full staff features (company-scoped staff); with none, every client |
+| `user`, `staff` at Moburst (no organization, or one naming Moburst) | `moburst_user`: every client, with full staff features, whatever companies the Hub lists (migration `20261111110000`) |
 | `user`, `staff` in an outside organization | `client` |
 | `client`, `viewer` | `client` |
 
-The mapping is `supabase/functions/gos-auth-bridge/role.ts` (tested in `supabase/tests/gos-auth-bridge/role.test.ts`). Until 9 Nov 2026 a `user` with companies became a `client`, so Moburst people with assigned companies could not make designs; each gets the new role at their next sign-in through the Hub.
+The mapping is `supabase/functions/gos-auth-bridge/role.ts` (tested in `supabase/tests/gos-auth-bridge/role.test.ts`). Until 9 Nov 2026 a `user` with companies became a `client`, so Moburst people with assigned companies could not make designs; each gets the new role at their next sign-in through the Hub. Company scoping now applies to clients only: `allowed_company_slugs` limits a client, never a Moburst user.
 
 ## Company scoping
 

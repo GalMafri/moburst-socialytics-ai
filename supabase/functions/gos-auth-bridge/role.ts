@@ -2,19 +2,20 @@
 //
 //   super_admin, admin, account_manager         → admin
 //   client, viewer                              → client (their companies, read only)
-//   user / staff / moburst_user at Moburst      → moburst_user: with companies
-//                                                  assigned, limited to them with
-//                                                  full staff features (the database's
-//                                                  company-scoped staff, migration
-//                                                  20260720130000); with none, all
+//   user / staff / moburst_user at Moburst      → moburst_user: every client, with
+//                                                  full staff features, whatever
+//                                                  companies the Hub lists (Lital,
+//                                                  9 Nov 2026; migration
+//                                                  20261111110000)
 //   user / staff in an outside organization     → client
 //   anything else                               → null (refused with a clear message)
 //
 // "At Moburst" is what the Hub says about the person: no organization, or one
 // that names Moburst. Until 9 Nov 2026 a user with companies became a client,
 // so six Moburst people (Liran Gal among them) could not make designs.
-// The bridge writes profiles.hub_company_name as NULL for every Hub sign-in, so
-// a Moburst user with companies is always limited to them (is_company_restricted).
+// Because a Moburst user sees every client, this test is what keeps anyone
+// outside Moburst a client: a Hub client or viewer, or a user the Hub places in
+// an outside organization.
 
 export type ToolRole = "admin" | "moburst_user" | "client" | null;
 

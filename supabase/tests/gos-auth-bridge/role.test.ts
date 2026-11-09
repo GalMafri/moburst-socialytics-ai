@@ -1,8 +1,8 @@
 // @vitest-environment node
 // The Hub (gOS) role a person signs in with, as a Socialytics role.
 // 9 Nov 2026: six Moburst people with company assignments (Liran Gal among
-// them) landed as clients and could not make designs; a Moburst user limited
-// to their companies (20260720130000_company_scoped_staff.sql) is what they are.
+// them) landed as clients and could not make designs. A Moburst person is a
+// Moburst user, who sees every client (20261111110000).
 import { describe, expect, it } from "vitest";
 import { mapGosRole } from "../../functions/gos-auth-bridge/role.ts";
 
@@ -11,7 +11,7 @@ describe("mapGosRole", () => {
     for (const role of ["super_admin", "admin", "account_manager", " Admin "]) expect(mapGosRole(role, null)).toBe("admin");
   });
 
-  it("makes a Moburst user with companies a Moburst user, limited to them by the database", () => {
+  it("makes a Hub user at Moburst a Moburst user", () => {
     expect(mapGosRole("user", null)).toBe("moburst_user");
     expect(mapGosRole("staff", null)).toBe("moburst_user");
     expect(mapGosRole("user", "Moburst")).toBe("moburst_user");
