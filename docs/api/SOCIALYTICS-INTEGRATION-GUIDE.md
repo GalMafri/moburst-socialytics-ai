@@ -2,7 +2,7 @@
 
 REST integration. No SDK, no repository access required.
 
-API contract version: 1 (paths start with `/v1`). Guide revised 2026-10-06. AdVisor has its own guide with the same shape.
+API contract version: 1 (paths start with `/v1`). Guide revised 2026-11-09; section 12 lists what changed since 13 October. AdVisor has its own guide with the same shape.
 
 For the gOS (moburst.ai) team building the Socialytics demo screen, and for any other Moburst tool, agent or app that reads Socialytics data. Everything you need is in this document; the API also serves its own OpenAPI 3.1 document.
 
@@ -20,7 +20,7 @@ The API never accepts a gOS user session. The credential is an API key held by g
 
 **Five facts that shape the gOS screen**
 
-- A demo is **asynchronous**: 10 to 35 minutes for a new brand (the monthly report workflow sets the pace), about 3 minutes for a repeat of the same brand within 7 days. Your screen needs a progress state (poll every minute, or receive the callback) and should show the finished steps while the rest run.
+- A demo is **asynchronous**: 10 to 35 minutes for a new brand (the social report sets the pace), about 3 minutes for a repeat of the same brand within 7 days. Your screen needs a progress state (poll every minute, or receive the callback) and should show the finished steps while the rest run.
 - **Render the outputs yourself.** The job's `outputs` carry everything a rep shows: the brand identity, the brief and pillars, the deck URL, the calendar, the generated post with its image, the competitor set and the gaps in plain words.
 - **A demo has two halves.** The prospect half is this job, on the prospect's own brand from public data. The parts of Socialytics that need the brand's own connections, which are competitor tracking and the competitive report (RivalIQ) and performance analytics and publishing (Sprout), are deliberately **not run for a prospect**: the job records them as `connected_only` gaps. They are shown on the connected half, Moburst's own Socialytics workspace (`company_slug` `moburst`, 3 Sprout profiles, monthly social and competitive reports), through the read routes or in the app.
 - **Only tool admins can open a demo inside Socialytics.** Through the gOS auth bridge, `super_admin`, `admin` and `account_manager` become tool admins; every other gOS role never sees a demo client or anything it created. Links into the app are for admins; everyone else sees what your screen renders.
@@ -92,7 +92,7 @@ Authorization: Bearer soc_...
 
 **Confidentiality, by construction.** Responses never carry Sprout customer or profile ids, RivalIQ landscape or company ids, media provider request ids or model paths, app settings, integration tokens or key hashes. A contract test fails the build if any of these appears in a documented response.
 
-**Change policy.** Changes are additive within `/v1`: new routes, new fields, new gap codes and new step outcomes may appear; existing fields keep their meaning. Read the OpenAPI document for the current shapes rather than hardcoding them.
+**Change policy.** Changes are additive within `/v1`: new routes, new fields, new gap codes and new step outcomes may appear; existing fields keep their meaning. New steps may also appear in a demo job's `steps[]`: show a step you don't know by its `message`. Read the OpenAPI document for the current shapes rather than hardcoding them. Section 12 lists every change.
 
 ## 5. Reading data (scope `read`)
 
@@ -103,9 +103,9 @@ Authorization: Bearer soc_...
 | `GET /clients/{id}/setup` | `{ ready, issues[] }`: brand identity, pillars, keywords, Sprout profile, confirmed competitor set, design settings, schedule. Issue kinds: `brand_identity_missing`, `pillars_missing`, `keywords_missing`, `sprout_missing`, `competitors_missing`, `design_style_missing` (the design settings are not confirmed yet; its `text` says what the client's setup waits for, in the words the app uses), `schedule_missing`. |
 | `GET /clients/{id}/analytics?start=&end=` | Sprout performance over a window (default the last 30 days): totals, the previous window, changes, per profile, top posts. `422 unprocessable` with `reason: no_sprout_profiles` for a brand not managed in Sprout. |
 | `GET /reports?client_id=&status=&from=&to=` | Social reports: period, previous period, status, deck, counts, metric changes, warnings, trend status, links. |
-| `GET /reports/{id}` | One social report, plus `analysis`, `calendar` (the content calendar), `performance` and `trends` summaries. |
+| `GET /reports/{id}` | One social report, plus `analysis`, `calendar` (the content calendar), `performance`, `trends` summaries and `industry_trends` (the themes stored for the weeks of the report's period, each with example posts; `null` when there are none). |
 | `GET /competitive-reports?client_id=&status=` | Competitive reports: period, status, deck, totals, quality check. |
-| `GET /competitive-reports/{id}` | One competitive report, plus `analysis` (executive summary, scorecard, gaps, teardown, breakdowns, schedule) and `aggregates` per company. |
+| `GET /competitive-reports/{id}` | One competitive report, plus `analysis` (executive summary, scorecard, gaps, teardown, breakdowns, schedule) and `aggregates` per company. Each gap in `analysis.gaps_for_client` has `gap`, `platform`, `why_it_matters` and `suggested_play`, and from 9 November 2026 also `based_on` (section 12). |
 | `GET /competitor-sets?client_id=&status=`, `GET /competitor-sets/{id}` | Competitor sets with competitors (website, rationale, similarity, selection, rank) and their social handles (platform, handle, URL, confidence, source). |
 | `GET /posts?client_id=&report_id=&source=&approved=&include_archived=`, `GET /posts/{id}` | Generated posts: platform, format, copy, hashtags, CTA, concept, visual direction, media URLs, variant, approval state, finishing. |
 | `GET /media-jobs?client_id=&status=` | Media generation jobs: kind, provider, status, output, review. |
@@ -182,7 +182,7 @@ The answer is `202` with the job object. At most three demo jobs run at once; a 
 | `analytics` | **Skipped for a prospect** (no Sprout profile, `analytics_unavailable`). Shown on Moburst's workspace. |
 | `collect`, `callback` | The outputs below; the signed POST to `callback_url`. |
 
-**Duration.** 10 to 35 minutes for a new brand; the social report is almost all of it (recent reports took 10 to 32 minutes). About 3 minutes for a repeat demo of the same brand within 7 days: brand, brief, pillars and the report are reused, competitors and a fresh post still run.
+**Duration.** 10 to 35 minutes for a new brand; the social report is almost all of it (social reports took 10 to 17 minutes in recent runs). About 3 minutes for a repeat demo of the same brand within 7 days: brand, brief, pillars and the report are reused, competitors and a fresh post still run.
 
 ### Outputs
 
@@ -287,7 +287,7 @@ End-to-end checklist:
 | `partial` with `connected_only` gaps | Expected for a prospect | Show tracking, the competitive report and analytics from Moburst's workspace. |
 | `competitors_unconfirmed` or `no_competitors` | Fewer than three proposed competitors had a website and a verified social profile | Pass `competitors[]` with the names you want; the demo detects their handles. |
 | `post_image_missing` | The image provider refused or ran out of credits; the reason is in the gap | Show the copy; the admin checks the provider. |
-| Job stays `running` past 35 minutes | The monthly workflow is slow or has stalled; the API records `report_timeout` at 100 minutes and folds the report in when it lands | Keep polling or wait for the callback. |
+| Job stays `running` past 35 minutes | The social report is slow or has stalled and is being tried again; the API records `report_timeout` at 100 minutes and folds the report in when it lands | Keep polling or wait for the callback. |
 | The client link opens a Setup page with a red notice about social accounts | That is the configuration screen; the notice is the normal state of a brand without Sprout | Open `social_report.app_link` or the deck URL instead; `client.app_link` now opens the Reports page. |
 | Callback never arrives | Endpoint unreachable or not `2xx` | Check `callback_status` on the job; the API tried three times. |
 | Links open the Lovable address | `PUBLIC_APP_URL` not set | Ask the admin to set it to the branded host. |
@@ -297,3 +297,12 @@ End-to-end checklist:
 - OpenAPI: `GET {base}/openapi.json`.
 - Repo documents: `docs/api/SOCIALYTICS-API.md` (the full route and field notes), `docs/api/EXTENDING.md` (how the shared core is extended).
 - Key management (admins): `POST /v1/admin/keys` `{ name, scopes, company_slugs?, client_ids?, rate_limit_per_minute?, expires_at?, note? }` answers `201` with the key once; `GET /v1/admin/keys` lists keys without secrets; `DELETE /v1/admin/keys/{id}` revokes. Accepted callers: a signed-in Socialytics admin, a key with the `admin` scope, or the platform's internal secret.
+
+## 12. What changed
+
+Every change since 13 October 2026, newest first. Apart from the issue kind noted on 2 November, each one only adds: no field was renamed, removed or given a new type, so a reader of the fields above keeps working as it is.
+
+- **9 November 2026: `industry_trends` on `GET /reports/{id}`.** The themes the weekly trend collection stored for the weeks that start inside the report's period, newest week first: each with what is happening, why it matters, the angle for the brand, its platforms and example posts. `null` when there are none.
+- **9 November 2026: report text from the report's own figures.** For reports made from 9 November 2026, 10:33 UTC: a social report's summary, insights and recommendations (in `analysis`, and the demo's `social_report.highlights`) and a competitive report's executive summary and gaps (`analysis.executive_summary`, `analysis.gaps_for_client`) are written from facts Socialytics works out from the report's figures, and every number in them is checked against those figures. The fields and their types are the same. Each competitive gap also carries `based_on`: the figures it rests on, in one sentence. Reports made before then keep their text.
+- **8 November 2026: reports made by Socialytics itself.** Social and competitive reports, a demo's social report included, are made inside Socialytics. No route or field changed. A social report took about 10 minutes in recent runs, so the demo timings in section 6 still hold.
+- **2 November 2026: design readiness.** A client's `design` block gained `ready` and `waiting_for`; `system` (the retired design system) stays for existing readers. In `setup.issues`, the kind `design_style_missing` replaced `design_system_missing`, which no longer appears.

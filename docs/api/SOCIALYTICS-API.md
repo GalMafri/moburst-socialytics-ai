@@ -41,9 +41,9 @@ Every request is recorded (key, route, status, duration; never the body or the k
 | `GET /v1/clients/{id}/setup` | `{ ready, issues[] }`: brand identity, pillars, keywords, Sprout profile, confirmed competitor set, design settings, schedule. Issue kinds: `brand_identity_missing`, `pillars_missing`, `keywords_missing`, `sprout_missing`, `competitors_missing`, `design_style_missing` (the design settings are not confirmed yet; its `text` says what the client's setup waits for, in the words the app uses), `schedule_missing`. |
 | `GET /v1/clients/{id}/analytics?start=&end=` | Sprout performance over a window (default the last 30 days): totals, the previous window, changes, per profile, top posts. `422 unprocessable` with `reason: no_sprout_profiles` for a brand not managed in Sprout. |
 | `GET /v1/reports?client_id=&status=&from=&to=` | Social reports: period, previous period, status, deck, counts, metric changes, warnings, trend status, links. |
-| `GET /v1/reports/{id}` | One social report, plus `analysis`, `calendar` (the content calendar), `performance` (without raw post ids) and `trends` summaries. |
+| `GET /v1/reports/{id}` | One social report, plus `analysis`, `calendar` (the content calendar), `performance` (without raw post ids), `trends` summaries and `industry_trends`: the themes (title, what is happening, why it matters, the angle for the brand, platforms, and example posts) stored for the weeks that start inside the report's period, newest week first, or `null` when there are none. |
 | `GET /v1/competitive-reports?client_id=&status=` | Competitive reports: period, status, deck, totals, quality check. |
-| `GET /v1/competitive-reports/{id}` | One competitive report, plus `analysis` (executive summary, scorecard, gaps, teardown, breakdowns, schedule) and `aggregates` per company. |
+| `GET /v1/competitive-reports/{id}` | One competitive report, plus `analysis` (executive summary, scorecard, gaps, teardown, breakdowns, schedule) and `aggregates` per company. Each gap in `analysis.gaps_for_client` has `gap`, `platform`, `why_it_matters` and `suggested_play`, and for reports made from 9 November 2026 also `based_on`: the figures it rests on, in one sentence. |
 | `GET /v1/competitor-sets?client_id=&status=`, `GET /v1/competitor-sets/{id}` | Competitor sets with competitors (website, rationale, similarity, selection, rank) and their social handles (platform, handle, URL, confidence, source). |
 | `GET /v1/posts?client_id=&report_id=&source=&approved=&include_archived=`, `GET /v1/posts/{id}` | Generated posts: platform, format, copy, hashtags, CTA, concept, visual direction, media URLs, variant, approval state, finishing. |
 | `GET /v1/media-jobs?client_id=&status=` | Media generation jobs: kind, provider, status, output, review. |
@@ -52,6 +52,8 @@ Every request is recorded (key, route, status, duration; never the body or the k
 | `GET /v1/alerts?client_id=&status=` | Competitive alerts: topic, summary, companies, platforms, post URLs, window. |
 | `GET /v1/design-systems?client_id=` | Design systems: version, status, templates, tokens (font family, colours), preview URLs. |
 | `GET /v1/status` | Health: reports running past 90 minutes, schedules whose last run failed, media failed in 24 hours, demo jobs stuck or failed, schema drift. A company-scoped key sees its own clients' findings only. |
+
+**Report text.** For reports made from 9 November 2026, 10:33 UTC, a social report's summary, insights and recommendations and a competitive report's executive summary and gaps are written from facts worked out from the report's own figures, and every number is checked against them (`_shared/reports/facts.ts`, `insights.ts`, read through `shownFields.ts`, the same reading the app's screens use). The fields and their types are unchanged; reports made before keep their text.
 
 Never returned, by construction: Sprout customer and profile ids, RivalIQ landscape and company ids, media provider request ids and model paths, app settings, integration tokens, key hashes. The schema contract test fails if any of these names appears in a documented response.
 
@@ -102,7 +104,11 @@ The callback body is the job's `status`, `client_id`, `outputs`, `gaps`, `finish
 
 - A brand not managed in Moburst's Sprout account gets a social report without a performance section, no performance analytics, no scheduled posting and no design references from its own posts; the demo says so in `gaps`. Its post comes from the report's calendar.
 - Demos never start RivalIQ tracking or the competitive report (`connected_only`). RivalIQ's plan tracks a fixed number of distinct companies (40 on 2026-10-01, all in use); the seats stay with signed clients. `setup-rivaliq-landscape` has a `cleanup` mode that deletes a landscape a failed setup created and left empty.
-- Social and competitive reports take 20 to 60 minutes each in n8n.
+- Socialytics makes social and competitive reports itself (since 8 November 2026): a social report takes about 10 minutes and a competitive one about 20 in recent runs.
+
+## Changes
+
+The integration guide (`docs/api/SOCIALYTICS-INTEGRATION-GUIDE.md`, section 12) lists every change since 13 October 2026. Changes within `/v1` add routes, fields, issue kinds, gap codes and demo steps; the one exception so far is `design_system_missing`, replaced by `design_style_missing` on 2 November 2026.
 
 ## Admin routes (scope `admin`, or a signed-in Socialytics admin)
 
