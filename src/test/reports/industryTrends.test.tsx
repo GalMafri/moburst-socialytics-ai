@@ -5,8 +5,10 @@
 // shows one "Industry trends" section built from them, whichever engine wrote
 // it, and its own TikTok and Instagram trends are not shown; "Where to act
 // next" and Weekly highlights take their trend items from the themes' angles.
-// A report with no stored theme in its period, or whose themes could not be
-// read, keeps its own sections, with nothing failed on screen.
+// A report's weeks are those whose Monday falls inside its period (one rule
+// with the API and the in-app report). A report with no stored theme in its
+// period keeps its own sections; while the themes are being read, or a read
+// did not answer, every trend part stays loading and tries again quietly.
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
@@ -14,7 +16,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import ReportView from "@/pages/ReportView";
 import { WeeklyHighlights } from "@/components/reports/calendar/WeeklyHighlights";
-import { reportCounts, reportTrends } from "@/lib/reportFigures";
+import { reportCounts, reportTrends, themesInPeriod } from "@/lib/reportFigures";
 
 const f = vi.hoisted(() => ({ staff: false, report: null as any, themes: [] as any[], themesFail: false, themesHang: false, rpcs: [] as any[] }));
 vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
@@ -102,6 +104,13 @@ function mount() {
   );
 }
 async function settle() { await act(async () => { await new Promise((r) => setTimeout(r, 0)); }); await act(async () => { await new Promise((r) => setTimeout(r, 0)); }); }
+async function tick(ms: number) { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); }
+// What the PDF export prints: the panel without anything marked data-print="hide" (src/lib/exportPdf.ts).
+function printed(el: HTMLElement) {
+  const copy = el.cloneNode(true) as HTMLElement;
+  copy.querySelectorAll('[data-print="hide"]').forEach((n) => n.remove());
+  return copy.textContent ?? "";
+}
 // Every tab panel is in the page (for the PDF export); the one on screen is the active one.
 const activePanel = () => document.querySelector<HTMLElement>('[role="tabpanel"][data-state="active"]')!;
 async function openTab(name: string) {
@@ -171,31 +180,90 @@ describe("report screen: the month's stored trends", () => {
     expect(within(panel).queryByRole("heading", { name: "Industry trends" })).not.toBeInTheDocument();
   });
 
-  it("shows the report's own sections, with no failure text, when the themes cannot be read", async () => {
-    f.themesFail = true;
+  it("stays loading, with no failure text, while the themes do not answer, and fills in when a try answers", async () => {
+    vi.useFakeTimers();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
+      f.themesFail = true;
       const { container } = mount();
-      const panel = await openTab("Trends");
-      expect(within(panel).getByRole("heading", { name: /TikTok trends/ })).toBeInTheDocument();
-      expect(within(panel).getByRole("heading", { name: /Instagram trends/ })).toBeInTheDocument();
-      expect(within(panel).queryByRole("heading", { name: "Industry trends" })).not.toBeInTheDocument();
+      await tick(50);
+      fireEvent.mouseDown(screen.getByRole("tab", { name: "Trends" }), { button: 0, ctrlKey: false });
+      await tick(50);
+      let panel = activePanel();
+      expect(within(panel).getByRole("status")).toHaveTextContent("Loading trends");
+      // Never the trends the report wrote itself, and nothing failed on screen.
+      expect(within(panel).queryByRole("heading", { name: /TikTok trends/ })).not.toBeInTheDocument();
+      expect(panel.textContent).not.toMatch(/Old scraped|Old TikTok/);
       expect(container.textContent).not.toMatch(failureWords);
+      // The team's console gets the cause.
+      expect(warn).toHaveBeenCalled();
+      f.themesFail = false;
+      // The first quiet try comes after 3 seconds, as LoadRetry's does.
+      await tick(3_000);
+      await tick(50);
+      panel = activePanel();
+      expect(within(panel).getByRole("heading", { name: "Industry trends" })).toBeInTheDocument();
+      expect(f.rpcs.length).toBeGreaterThanOrEqual(2);
     } finally {
       warn.mockRestore();
+      vi.useRealTimers();
     }
   });
 
-  it("shows neither kind of trend while the themes are still being read", async () => {
+  it("shows only the weeks whose Monday falls inside the report's period", async () => {
+    // trend_themes_in_range answers by overlap (for Analytics): the week of Mon 29 Sep ends in October, and is September's.
+    f.themes = [...storedThemes(), {
+      id: "t0", week_start: "2026-09-29", title: "September carryover", happening: "Late summer leagues.", why_it_matters: "x",
+      angle: "Post the last summer fixtures.", platforms: ["tiktok"], posts: [post({ url: "https://www.tiktok.com/@sept/video/2", text: "September post" })],
+    }];
+    mount();
+    const panel = await openTab("Trends");
+    expect(within(panel).getByText("Captain POV skits")).toBeInTheDocument();
+    expect(within(panel).queryByText("September carryover")).not.toBeInTheDocument();
+    expect(panel.textContent).not.toMatch(/September post|Post the last summer fixtures/);
+    const overview = await openTab("Overview");
+    expect(overview.textContent).not.toMatch(/September carryover|Post the last summer fixtures/);
+    expect(within(overview).getByText("Industry trends").nextSibling).toHaveTextContent("2");
+    expect(themesInPeriod(f.themes, "2026-10-01", "2026-10-31").map((t) => t.id)).toEqual(["t1", "t2"]);
+    expect(themesInPeriod(f.themes, "2026-09-01", "2026-09-30").map((t) => t.id)).toEqual(["t0"]);
+    // Both ends of the period are in it.
+    expect(themesInPeriod([{ week_start: "2026-10-01" }, { week_start: "2026-10-31" }, { week_start: "2026-11-01" }], "2026-10-01", "2026-10-31")).toEqual([{ week_start: "2026-10-01" }, { week_start: "2026-10-31" }]);
+  });
+
+  it("shows neither kind of trend while the themes are still being read, and holds every figure that depends on them", async () => {
     f.themesHang = true;
     mount();
     const panel = await openTab("Trends");
     expect(within(panel).getByRole("status")).toHaveTextContent("Loading trends");
     expect(within(panel).queryByRole("heading", { name: /TikTok trends/ })).not.toBeInTheDocument();
     expect(panel.textContent).not.toMatch(/Old scraped/);
-    // Nor does the overview list the report's own trend opportunities in the meantime.
+    // The overview holds "Where to act next" and the counts that the themes change, rather than show a number that moves.
     const overview = await openTab("Overview");
     expect(overview.textContent).not.toMatch(/Old TikTok opportunity|Old Instagram opportunity/);
+    const actions = within(overview).getByRole("heading", { name: /Where to act next/ }).closest("section")!;
+    expect(within(actions).getByRole("status")).toHaveTextContent("Loading recommendations");
+    expect(actions.textContent).not.toMatch(/\d+ recommendations?/);
+    expect(within(overview).queryByText("Recommendations")).not.toBeInTheDocument();
+    expect(within(overview).queryByText("TikTok trends")).not.toBeInTheDocument();
+    expect(within(overview).queryByText("Industry trends")).not.toBeInTheDocument();
+    // A loading row never prints.
+    expect(printed(overview)).not.toMatch(/Loading|Where to act next/);
+    expect(printed(panel)).not.toMatch(/Loading/);
+  });
+});
+
+describe("report screen: printing", () => {
+  it("never prints the platform filter, and prints which platform a filtered list shows", async () => {
+    mount();
+    const panel = await openTab("Trends");
+    const filter = within(panel).getByRole("button", { name: "TikTok" });
+    expect(filter.closest('[data-print="hide"]')).not.toBeNull();
+    expect(printed(panel)).not.toMatch(/Showing .* only/);
+    fireEvent.click(filter);
+    expect(within(panel).getByText("Showing TikTok only.")).toBeInTheDocument();
+    expect(printed(panel)).toContain("Showing TikTok only.");
+    expect(printed(panel)).toContain("Captain POV skits");
+    expect(printed(panel)).not.toContain("Lineup templates as carousels");
   });
 });
 
@@ -249,6 +317,17 @@ describe("report screen: trend recommendations come from the theme angles", () =
     expect(within(overview).getByText("Industry trends").nextSibling).toHaveTextContent("2");
   });
 
+  it("lists the report's industry analysis opportunities when it has them, in place of the angles", async () => {
+    f.report = reportRow({ ...ownTrends(), ai_analysis: { ...ownTrends().ai_analysis, industry_trends_analysis: { overview: "x", themes: [], opportunities_for_client: ["Run a weekly captain series."], key_takeaways: [] } } });
+    mount(); await settle();
+    const overview = activePanel();
+    const actions = within(overview).getByRole("heading", { name: /Where to act next/ }).closest("section")!;
+    expect(within(actions).getByText("Run a weekly captain series.")).toBeInTheDocument();
+    expect(actions.textContent).not.toMatch(/Show a captain chasing RSVPs|Old TikTok opportunity/);
+    const rd = f.report.report_data;
+    expect(reportCounts(rd, null, reportTrends(rd.ai_analysis, storedThemes())).recommendations).toBe(1);
+  });
+
   it("keeps the report's own trend opportunities on a report with no stored theme", async () => {
     f.themes = [];
     mount(); await settle();
@@ -280,6 +359,9 @@ describe("report screen: trend recommendations come from the theme angles", () =
     // Nothing else to show, and no trend item yet: no highlights card at all.
     const pending = render(<WeeklyHighlights aiAnalysis={ai} trends={reportTrends(ai, null, { pending: true })} />);
     expect(pending.container.textContent).not.toMatch(/Old TikTok opportunity|Old Instagram opportunity/);
+    pending.unmount();
+    // Held: the stored themes are not counted or listed until they are read.
+    expect(reportTrends(ai, storedThemes(), { pending: true })).toMatchObject({ held: true, items: [] });
   });
 
   it("counts the themes' angles as the report's trend recommendations", () => {

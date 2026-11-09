@@ -33,15 +33,40 @@ export interface TrendItem {
 /** Which trends a monthly report shows, and the trend recommendations it makes (reportTrends). */
 export interface ReportTrends {
   /**
-   * "industry": the month's stored themes, or the report's own industry_trends_analysis.
+   * "industry": the period's stored themes, or the report's own industry_trends_analysis.
    * "own": the report's TikTok and Instagram trends, as before stored trends.
    * "pending": the themes are still being read and the report has no industry analysis: no trend shows yet.
    */
   source: "industry" | "own" | "pending";
-  /** The trend recommendations, in the order every part of the report lists them. */
+  /** The trend recommendations, in the order every part of the report lists them. Empty while held. */
   items: TrendItem[];
-  /** How many industry themes the report shows (0 unless source is "industry"). */
+  /** How many industry themes the report shows (0 unless source is "industry"; 0 while held). */
   themes: number;
+  /**
+   * The stored themes are still being read: every figure they change (the
+   * trend recommendations, the recommendations count, the theme count) waits,
+   * so no number shows and then changes when they arrive.
+   */
+  held: boolean;
+}
+
+/**
+ * The stored themes that belong to a report: those of the weeks whose Monday
+ * (week_start) falls inside its period, both ends included. One rule with the
+ * API's industry_trends and the in-app report. trend_themes_in_range answers
+ * a window by overlap, for Analytics' arbitrary windows, so a week that starts
+ * in the month before is in its answer for a month and not on that month's
+ * report. Dismissed themes and posts the tripwire flagged are never in the
+ * answer.
+ */
+export function themesInPeriod<T extends { week_start?: string | null }>(themes: readonly T[] | null | undefined, start: string | null | undefined, end: string | null | undefined): T[] {
+  const from = String(start ?? "").slice(0, 10);
+  const to = String(end ?? "").slice(0, 10);
+  if (!themes || !from || !to) return [];
+  return themes.filter((t) => {
+    const week = String(t.week_start ?? "").slice(0, 10);
+    return !!week && week >= from && week <= to;
+  });
 }
 
 /** The report's own industry trends analysis (written from the stored themes since Trends Task 16), normalized; null when it has none. */
@@ -78,39 +103,47 @@ export function industryTrendsAnalysis(aiAnalysis: unknown): IndustryTrendsAnaly
  * docs/superpowers/specs/2026-10-28-trends-redesign-design.md, "Monthly
  * report", Lital's option A; Trends plan Task 15).
  *
- * When stored weekly themes fall in the report's period, the report shows
- * them in one Industry trends section, whichever engine wrote it, and its
- * recommendations are the themes' angles, each under its theme's title (an
- * angle repeated in a later week is listed once). A report whose own analysis
- * has industry trends (Task 16) shows them too; while its themes can't be
- * had, its recommendations are that analysis' opportunities. Either way the
- * report's own TikTok and Instagram trends are not shown.
+ * When stored weekly themes belong to the report's period (themesInPeriod),
+ * the report shows them in one Industry trends section, whichever engine
+ * wrote it. A report whose own analysis has industry trends (Task 16) shows
+ * that section too. Either way the report's own TikTok and Instagram trends
+ * are not shown. Its trend recommendations are what the section lists: the
+ * analysis' opportunities when it has them, otherwise the themes' angles,
+ * each under its theme's title (an angle repeated in a later week is listed
+ * once).
  *
- * Otherwise (no theme in the period, or the themes could not be read) the
- * report shows its own TikTok and Instagram trends and opportunities, as
- * before. While the themes are still being read (`pending`) it shows neither,
- * so the one is never shown and then swapped for the other.
+ * A report with no stored theme in its period, read and answered, shows its
+ * own TikTok and Instagram trends and opportunities, as before.
  *
- * `themes` are the stored themes for the report's period, newest week first
- * (useTrendThemes); null when there are none to read.
+ * While the themes are being read (`pending`, which a read that did not
+ * answer stays in: useTrendThemes' untilRead) the report shows neither kind,
+ * and every figure the themes change is held.
+ *
+ * `themes` are the stored themes that belong to the report's period, newest
+ * week first; null or empty when there are none.
  */
 export function reportTrends(aiAnalysis: unknown, themes: readonly StoredThemeLike[] | null | undefined, opts: { pending?: boolean } = {}): ReportTrends {
   const ai = record(aiAnalysis);
-  const stored = Array.isArray(themes) && themes.length > 0 ? themes : null;
+  const held = !!opts.pending;
+  const stored = !held && Array.isArray(themes) && themes.length > 0 ? themes : null;
   const analysis = industryTrendsAnalysis(ai);
-  if (stored) {
+  if (stored || analysis) {
+    if (held) return { source: "industry", items: [], themes: 0, held };
     const items: TrendItem[] = [];
-    for (const t of stored) {
-      const text = words(t.angle);
-      const theme = words(t.title);
-      if (text && !items.some((i) => i.text === text)) items.push(theme ? { text, theme } : { text });
+    if (analysis?.opportunities.length) {
+      for (const text of analysis.opportunities) items.push({ text });
+    } else {
+      for (const t of stored ?? []) {
+        const text = words(t.angle);
+        const theme = words(t.title);
+        if (text && !items.some((i) => i.text === text)) items.push(theme ? { text, theme } : { text });
+      }
     }
-    return { source: "industry", items, themes: stored.length };
+    return { source: "industry", items, themes: stored?.length ?? analysis?.themes.length ?? 0, held };
   }
-  if (analysis) return { source: "industry", items: analysis.opportunities.map((text) => ({ text })), themes: analysis.themes.length };
-  if (opts.pending) return { source: "pending", items: [], themes: 0 };
+  if (held) return { source: "pending", items: [], themes: 0, held };
   const own = [...strings(record(ai?.tiktok_trends_analysis)?.opportunities_for_client), ...strings(record(ai?.instagram_trends_analysis)?.opportunities_for_client)];
-  return { source: "own", items: own.map((text) => ({ text })), themes: 0 };
+  return { source: "own", items: own.map((text) => ({ text })), themes: 0, held };
 }
 
 /**

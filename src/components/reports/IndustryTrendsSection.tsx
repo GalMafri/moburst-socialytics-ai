@@ -23,12 +23,13 @@ const NO_THEMES: TrendTheme[] = [];
  * or Client setup. The report's own industry analysis shows above and below
  * the themes when it has one (Trends Task 16).
  *
- * `themes` null: none could be read; the analysis alone shows. `loading`:
- * they are still being read.
+ * `themes`: the stored themes that belong to the report's period
+ * (themesInPeriod); null or empty when there are none, and the analysis alone
+ * shows. `loading`: they are still being read.
  */
 export function IndustryTrendsSection({ themes, loading, aiAnalysis, clientName }: { themes: TrendTheme[] | null; loading: boolean; aiAnalysis: unknown; clientName: string }) {
   const { isMoburstStaff } = useAuth();
-  const { filter, shown } = useThemePlatformFilter(themes ?? NO_THEMES);
+  const { filter, shown, note } = useThemePlatformFilter(themes ?? NO_THEMES);
   const analysis = industryTrendsAnalysis(aiAnalysis);
   const withPosts = loading || shown.length > 0;
 
@@ -63,7 +64,8 @@ export function IndustryTrendsSection({ themes, loading, aiAnalysis, clientName 
             </CardContent>
           </Card>
         )}
-        {loading ? <Loading label="Loading trends" /> : <ThemeWeeks themes={shown} staff={isMoburstStaff} />}
+        {/* A loading row never prints. */}
+        {loading ? <div data-print="hide"><Loading label="Loading trends" /></div> : <>{note}<ThemeWeeks themes={shown} staff={isMoburstStaff} /></>}
       </Section>
 
       {analysis && analysis.opportunities.length > 0 && (

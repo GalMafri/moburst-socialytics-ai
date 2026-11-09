@@ -2,7 +2,7 @@ import { COMPARED_RATE_LABEL, SPROUT_RATE_LABEL } from "@/lib/rateLabels";
 import { useNavigate, useParams } from "react-router-dom";
 import { cleanText, countryNames, formatDate, formatDateTime, formatNumbersInText, formatRange, languageNames, monthlyReportStatus, platformKey, platformName } from "@/lib/display";
 import { reportsMeasure } from "@/lib/platformMeasures";
-import { reportCounts, reportTrends, sproutEngagementRate, sproutEngagements } from "@/lib/reportFigures";
+import { reportCounts, reportTrends, sproutEngagementRate, sproutEngagements, themesInPeriod } from "@/lib/reportFigures";
 import { StatCard } from "@/components/ui/stat-card";
 import { useQuery } from "@tanstack/react-query";
 import { useReportInsights } from "@/hooks/useReportInsights";
@@ -47,7 +47,7 @@ import {
 import { PlatformBadge, PlatformIcon, getPlatformColor } from "@/lib/platform-config";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Loading } from "@/components/ui/loading";
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useRef, useState, useMemo } from "react";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
 import { useAuth } from "@/hooks/useAuth";
 import { useTrackView } from "@/hooks/useTrackView";
@@ -137,13 +137,9 @@ export default function ReportView() {
   const { data: insightsRow } = useReportInsights("reports", reportId);
 
   // The weekly Trends collection's stored themes for the report's own period. When there are any, the report
-  // shows them in place of its own TikTok and Instagram trends, whichever engine wrote it (reportTrends).
-  const storedThemes = useTrendThemes(report?.client_id ?? "", report?.date_range_start ?? "", report?.date_range_end ?? "");
-  useEffect(() => {
-    if (!storedThemes.isError) return;
-    const why = storedThemes.error && typeof storedThemes.error === "object" && "message" in storedThemes.error ? String((storedThemes.error as { message: unknown }).message) : String(storedThemes.error);
-    console.warn("[report trends] the period's themes were not read; the report's own trends show:", why);
-  }, [storedThemes.isError, storedThemes.error]);
+  // shows them in place of its own TikTok and Instagram trends, whichever engine wrote it (reportTrends). A read
+  // that does not answer is tried again quietly until one does, and the trend parts stay loading meanwhile.
+  const storedThemes = useTrendThemes(report?.client_id ?? "", report?.date_range_start ?? "", report?.date_range_end ?? "", { untilRead: true });
 
   const overviewPostUrls = useMemo(() => {
     const rawRd = (report as any)?.report_data;
@@ -215,11 +211,11 @@ export default function ReportView() {
   const aiAnalysis = rd?.ai_analysis || {};
   const tiktokTrends = rd?.tiktok_trends || {};
   const instagramTrends = rd?.instagram_trends || {};
-  // Which trends the report shows, read once for every part of it (reportTrends). Themes that could not be read
-  // count as none, so the report's own trends show and nothing failed is on screen; until they answer, neither shows.
+  // Which trends the report shows, read once for every part of it (reportTrends): the weeks whose Monday falls in
+  // its period (themesInPeriod). Until the themes are read, neither kind shows and every figure they change is held.
   const hasTrendPeriod = !!(report.client_id && report.date_range_start && report.date_range_end);
-  const themesPending = hasTrendPeriod && !storedThemes.data && !storedThemes.isError;
-  const themesRead = storedThemes.data?.themes ?? null;
+  const themesPending = hasTrendPeriod && !storedThemes.data;
+  const themesRead = themesInPeriod(storedThemes.data?.themes, report.date_range_start, report.date_range_end);
   const trends = reportTrends(aiAnalysis, themesRead, { pending: themesPending });
   const contentCalendar = rd?.content_calendar || aiAnalysis?.content_calendar || [];
 
@@ -515,7 +511,14 @@ export default function ReportView() {
               </Section>
             )}
 
-            {actions.length > 0 && (
+            {trends.held ? (
+              // Held until the themes are read: the list and its count change when they arrive. Never printed.
+              <div data-print="hide">
+                <Section id="actions" index={3} title="Where to act next">
+                  <Loading label="Loading recommendations" />
+                </Section>
+              </div>
+            ) : actions.length > 0 && (
               <Section id="actions" index={3} title="Where to act next" description={`${actions.length < totalRecommendations ? `${actions.length} of ${totalRecommendations}` : actions.length} recommendation${totalRecommendations === 1 ? "" : "s"}${(() => { const c: Record<string, number> = {}; for (const a of actions) c[a.source] = (c[a.source] || 0) + 1; const parts = Object.entries(c).map(([k, n]) => `${n} from ${k === "Competitors" ? "the competitive analysis" : k === "Trends" ? "the trends" : "performance"}`); return parts.length ? `: ${parts.join(", ")}` : ""; })()}. Each one opens its evidence.`}>
                 <div className="grid gap-inner md:grid-cols-2 xl:grid-cols-3">
                   {actions.map((a, i) => (
@@ -640,10 +643,11 @@ export default function ReportView() {
                   <p className="t-subhead">In this report</p>
                   <ul className="flex items-center gap-x-6 gap-y-2 flex-wrap t-body">
                     {counts.postsAnalyzed != null && <li className="flex items-center gap-2"><span>Posts analyzed</span><span className="font-semibold tabular-nums">{counts.postsAnalyzed}</span></li>}
-                    {trends.source === "industry" && <li className="flex items-center gap-2"><span>Industry trends</span><span className="font-semibold tabular-nums">{counts.industryTrends}</span></li>}
+                    {/* The trend counts and the recommendations wait for the themes (reportTrends' held). */}
+                    {trends.source === "industry" && !trends.held && <li className="flex items-center gap-2"><span>Industry trends</span><span className="font-semibold tabular-nums">{counts.industryTrends}</span></li>}
                     {trends.source === "own" && <li className="flex items-center gap-2"><span>TikTok trends</span><span className="font-semibold tabular-nums">{counts.tiktokTrends}</span></li>}
                     {trends.source === "own" && <li className="flex items-center gap-2"><span>Instagram trends</span><span className="font-semibold tabular-nums">{counts.instagramTrends}</span></li>}
-                    <li className="flex items-center gap-2"><span>Recommendations</span><span className="font-semibold tabular-nums">{counts.recommendations}</span></li>
+                    {!trends.held && <li className="flex items-center gap-2"><span>Recommendations</span><span className="font-semibold tabular-nums">{counts.recommendations}</span></li>}
                     {counts.calendarPosts > 0 && <li className="flex items-center gap-2"><span>Calendar posts</span><span className="font-semibold tabular-nums">{counts.calendarPosts}</span></li>}
                     {latestCompetitive && <li className="t-secondary">Latest competitive analysis included</li>}
                   </ul>
@@ -679,7 +683,7 @@ export default function ReportView() {
               {trends.source === "industry" ? (
                 <IndustryTrendsSection themes={themesRead} loading={themesPending} aiAnalysis={aiAnalysis} clientName={clientName} />
               ) : trends.source === "pending" ? (
-                <Loading label="Loading trends" />
+                <div data-print="hide"><Loading label="Loading trends" /></div>
               ) : (
                 <>
                   <TrendsSection title="TikTok trends" analysis={aiAnalysis?.tiktok_trends_analysis} posts={tiktokTrends?.posts} platform="tiktok" clientName={clientName} />

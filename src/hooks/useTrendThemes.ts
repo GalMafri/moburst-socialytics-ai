@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { sendQuietly, writeResendable } from "@/lib/quietSend";
+import { LOAD_RETRY_WAITS_MS } from "@/components/ui/load-error";
 
 /** A post a theme is built on. `engagement` (the weighted score) is only there for Moburst staff. */
 export interface TrendPost {
@@ -48,11 +49,26 @@ const themesKey = (clientId: string, ...range: string[]) => ["trend-themes", cli
  * cannot read the week rows a range needs, and the function also keeps the
  * team's own columns out of the answer. Dismissed themes and posts the
  * tripwire flagged are not in it.
+ *
+ * `untilRead`: for a screen that shows nothing in place of the themes (a
+ * report's trends and the figures they change). A read that does not answer
+ * is tried again quietly, on LoadRetry's waits, until one does: the query
+ * stays loading, never failed, and the cause goes to the console for the
+ * team. Without it, a failed read is the caller's to try again (LoadRetry).
  */
-export function useTrendThemes(clientId: string, from: string, to: string) {
+export function useTrendThemes(clientId: string, from: string, to: string, opts: { untilRead?: boolean } = {}) {
   return useQuery({
     queryKey: themesKey(clientId, from, to),
     enabled: !!clientId && !!from && !!to,
+    ...(opts.untilRead
+      ? {
+        retry: true,
+        retryDelay: (tries: number, error: unknown) => {
+          console.warn("[trend themes] not read yet; trying again quietly:", error && typeof error === "object" && "message" in error ? String((error as { message: unknown }).message) : String(error));
+          return LOAD_RETRY_WAITS_MS[Math.min(tries, LOAD_RETRY_WAITS_MS.length - 1)];
+        },
+      }
+      : {}),
     queryFn: async () => {
       const { data, error } = await supabase.rpc("trend_themes_in_range", { p_client: clientId, p_from: from, p_to: to });
       if (error) throw error;

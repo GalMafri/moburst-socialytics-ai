@@ -812,7 +812,7 @@ export default function Analytics() {
 
                 {/* AI-powered cumulative insights */}
                 <div id="insights" className="scroll-mt-[156px]">
-                  <AIDeepInsights reports={filtered} chartData={chartData} />
+                  <AIDeepInsights clientId={id!} reports={filtered} chartData={chartData} />
                 </div>
               </TabsContent>
 

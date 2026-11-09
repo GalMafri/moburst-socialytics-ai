@@ -23,7 +23,7 @@ export function TrendInsightsSection({ clientId, from, to }: { clientId: string;
   const [dismissing, setDismissing] = useState<TrendTheme | null>(null);
 
   const themes = useMemo(() => data?.themes ?? [], [data]);
-  const { filter, shown } = useThemePlatformFilter(themes);
+  const { filter, shown, note } = useThemePlatformFilter(themes);
 
   return (
     <Section id="trends" title="Trend insights" description="Each week's industry themes, with the example posts behind them." action={filter || undefined}>
@@ -36,7 +36,10 @@ export function TrendInsightsSection({ clientId, from, to }: { clientId: string;
         // Nothing collected yet is a different fact from nothing collected in the viewed period.
         <EmptyState compact icon={TrendingUp} title={data?.collected ? "No trends in this period." : "Trends show here after the first weekly collection."} />
       ) : (
-        <ThemeWeeks themes={shown} staff={isMoburstStaff} onDismiss={setDismissing} />
+        <>
+          {note}
+          <ThemeWeeks themes={shown} staff={isMoburstStaff} onDismiss={setDismissing} />
+        </>
       )}
       <ConfirmDialog
         open={!!dismissing}

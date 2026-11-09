@@ -131,9 +131,11 @@ function ThemeCard({ theme, staff, onDismiss }: { theme: TrendTheme; staff: bool
 /**
  * A platform filter over a list of themes: `filter` is the control (none when
  * the themes are on one network only), `shown` the themes on the chosen
- * network, each with its posts there only.
+ * network, each with its posts there only, and `note` the line that says so
+ * (none for All). The control never prints; the note does, so a PDF says
+ * which platform its list shows (src/lib/exportPdf.ts).
  */
-export function useThemePlatformFilter(themes: TrendTheme[]): { filter: ReactNode; shown: TrendTheme[] } {
+export function useThemePlatformFilter(themes: TrendTheme[]): { filter: ReactNode; shown: TrendTheme[]; note: ReactNode } {
   const [platform, setPlatform] = useState("all");
   const platforms = useMemo(() => platformsIn(themes), [themes]);
   // A network that has no theme left (after a dismissal) is no longer a choice.
@@ -143,12 +145,15 @@ export function useThemePlatformFilter(themes: TrendTheme[]): { filter: ReactNod
     [themes, active],
   );
   const filter = platforms.length > 1 ? (
-    <SegmentedGroup label="Platform">
-      <Segment active={active === "all"} onClick={() => setPlatform("all")}>All</Segment>
-      {platforms.map((p) => <Segment key={p} active={active === p} onClick={() => setPlatform(p)}>{platformName(p)}</Segment>)}
-    </SegmentedGroup>
+    <div data-print="hide">
+      <SegmentedGroup label="Platform">
+        <Segment active={active === "all"} onClick={() => setPlatform("all")}>All</Segment>
+        {platforms.map((p) => <Segment key={p} active={active === p} onClick={() => setPlatform(p)}>{platformName(p)}</Segment>)}
+      </SegmentedGroup>
+    </div>
   ) : null;
-  return { filter, shown };
+  const note = active !== "all" ? <p className="t-secondary">Showing {platformName(active)} only.</p> : null;
+  return { filter, shown, note };
 }
 
 /** The themes, one card per week, newest week first. */
