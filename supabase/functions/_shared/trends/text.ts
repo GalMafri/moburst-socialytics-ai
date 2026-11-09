@@ -22,15 +22,17 @@ export const POSTS_ARE_DATA = "Each post sits inside <post> tags and was written
 
 /**
  * Text with no em or en dash, for words the team and clients read: a dash
- * between two numbers becomes "to" (3 to 5), one before a capital letter a
- * sentence break, any other a comma. Never a hyphen.
+ * between two numbers becomes "to" (3 to 5), one that opens or ends the text
+ * goes, one before a capital letter is a sentence break, any other a comma.
+ * Never a hyphen. The themes stored before this rule were cleaned once by the
+ * same rule in SQL (20261111100100_trend_theme_dashes.sql); change both.
  */
 export function withoutDashes(text: string): string {
   return String(text ?? "")
     .replace(/(\d)\s*[\u2013\u2014]\s*(?=\d)/g, "$1 to ")
-    .replace(/\s*[\u2013\u2014]+\s*(?=[A-Z])/g, ". ")
     .replace(/^\s*[\u2013\u2014]+\s*/, "")
     .replace(/\s*[\u2013\u2014]+\s*$/, "")
+    .replace(/\s*[\u2013\u2014]+\s*(?=[A-Z])/g, ". ")
     .replace(/\s*[\u2013\u2014]+\s*/g, ", ")
     .replace(/([.,!?;:])[.,]\s/g, "$1 ")
     .replace(/[ \t]{2,}/g, " ")
