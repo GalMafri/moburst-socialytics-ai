@@ -1,7 +1,8 @@
 {
   "version": "5",
   "redirects": {
-    "https://esm.sh/@supabase/supabase-js@2": "https://esm.sh/@supabase/supabase-js@2.117.2"
+    "https://esm.sh/@supabase/supabase-js@2": "https://esm.sh/@supabase/supabase-js@2.117.2",
+    "https://esm.sh/@types/opentype.js@~1.3.8/index.d.ts": "https://esm.sh/@types/opentype.js@1.3.10/index.d.ts"
   },
   "remote": {
     "https://deno.land/std@0.168.0/async/abortable.ts": "80b2ac399f142cc528f95a037a7d0e653296352d95c681e284533765961de409",
@@ -59,7 +60,10 @@
     "https://deno.land/x/media_types@v2.9.0/deps.ts": "364b24c35845cfd5c6903ab22b8ba9873bf1022bbbf6bf3d001695332d4bbb4f",
     "https://deno.land/x/media_types@v2.9.0/mod.ts": "d63583b978d32eff8b76e1ae5d83cba2fb27baa90cc1bcb0ad15a06122ea8c19",
     "https://deno.land/x/xhr@0.1.0/mod.ts": "5200325d879e571961f0927e8e32e66fd33f4ba0d29a219560cf9e0fe9bc6cdf",
-    "https://esm.sh/@supabase/supabase-js@2.117.2": "6da4477d96ad4392b5a8be8f423384a3812cdd651df483e433ba422a69ff879b"
+    "https://esm.sh/@resvg/resvg-wasm@2.6.2": "0657db3e6d5f5b08b63e93c566b7ea08569c5f895188c13b27dd495908e7e3df",
+    "https://esm.sh/@supabase/supabase-js@2.117.2": "6da4477d96ad4392b5a8be8f423384a3812cdd651df483e433ba422a69ff879b",
+    "https://esm.sh/opentype.js@1.3.4": "d2889c7e228e7e150df05eb994bacabc70c5d49dcdce8c9e794adf9cbaef7c7d",
+    "https://esm.sh/unpdf@2.1.0": "f6d4ecc3a60aa1e060aafba969daf940d495637655e89a2342e58964d9aa721e"
   },
   "workspace": {
     "packageJson": {
@@ -67,6 +71,8 @@
         "npm:@electric-sql/pglite@0.5.10",
         "npm:@eslint/js@^9.32.0",
         "npm:@hookform/resolvers@^3.10.0",
+        "npm:@lovable.dev/vite-plugin-dev-server-bridge@^1.0.2",
+        "npm:@lovable.dev/vite-plugin-hmr-gate@^1.8.0",
         "npm:@modelcontextprotocol/server@2.3.1",
         "npm:@radix-ui/react-accordion@^1.2.11",
         "npm:@radix-ui/react-alert-dialog@^1.1.14",

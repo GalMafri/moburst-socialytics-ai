@@ -73,6 +73,8 @@
   "devDependencies": {
     "@electric-sql/pglite": "0.5.10",
     "@eslint/js": "^9.32.0",
+    "@lovable.dev/vite-plugin-dev-server-bridge": "^1.0.2",
+    "@lovable.dev/vite-plugin-hmr-gate": "^1.8.0",
     "@modelcontextprotocol/server": "2.3.1",
     "@supabase/middleware": "1.0.0",
     "@supabase/server": "1.9.2",
