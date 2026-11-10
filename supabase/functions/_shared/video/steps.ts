@@ -14,12 +14,13 @@
 //                route, from the brief alone), at most MAX_FRAMES times;
 //   frame_check  the frame must show no writing (other than the client's own
 //                scene words) and no other brand's marks, or it is drawn again;
-//   clip         at the price approved for the video (clip.ts
-//                clipOrderDecision), the one clip is ordered from Higgsfield:
-//                the order is saved on the job before the call, so it is
-//                never made twice, whatever the worker's retries;
+//   clip         at the price approved for the video, the one clip is
+//                ordered from Higgsfield (clipStep.ts): its order is
+//                recorded on the job, once and under a renewed lease, before
+//                the call, so it is never made twice;
 //   clip_wait    the clip is stored once it is ready; one that failed or
-//                never came back ends the video with a reason;
+//                never came back (CLIP_LOST_MS) ends the video with a reason,
+//                and nothing else here uses one of the job's tries;
 //   assemble     join clip, title and the client's logo file in a hosted
 //                sandbox (sandbox.ts), keeping the clip's sound, and keep
 //                four stills of the clip alone;
@@ -36,8 +37,8 @@ import { decode as base64Decode, encode as base64Encode } from "https://deno.lan
 import { MCP_URL, accessTokenFor } from "../higgsfield/oauth.ts";
 import { McpClient } from "../higgsfield/mcp.ts";
 import { awaitJobs, creditBalance, importReferences, submitVideo } from "../higgsfield/generate.ts";
-import { withCredits } from "./credits.ts";
-import { OLD_STEPS, QUOTE_WAIT_MS, REASONS, clipOrderDecision, clipOutcome, clipRequest, framePrompt, quoteClip } from "./clip.ts";
+import { OLD_STEPS, REASONS, clipOutcome, footageRules, framePrompt, quoteClip } from "./clip.ts";
+import { runClip } from "./clipStep.ts";
 import { BUCKET } from "../canva/jobs.ts";
 import { canvasLogoRect } from "../canva/brief.ts";
 import { anthropicMessages } from "../anthropic.ts";
@@ -62,17 +63,6 @@ const MAX_CLIPS = 3;
 /** Where filmed clips are kept, privately. */
 const FOOTAGE_BUCKET = "post-footage";
 const REFERENCES = "design-references";
-/** What all footage keeps to; people as the client's own videos show them (made-up characters, or nobody). */
-function footageRules(people: string | undefined, sceneWords: string[] = []): string {
-  const lettering = sceneWords.length
-    ? `Lettering only as these names, spelled exactly: ${sceneWords.map((w) => `"${w}"`).join(", ")}; no other text, captions, subtitles, signs, logos, watermarks or real brand marks anywhere in frame`
-    : "No text, letters, numbers, captions, subtitles, signs, logos or watermarks anywhere in frame";
-  return ` Vertical 9:16, every part in sharp focus. ${lettering}, and no screens, dashboards, charts, documents or interfaces. ` +
-    // Sportswear marks are what the video model adds most often, and the hardest to clean off moving feet.
-    "Boots, shoes, socks and balls are plain, and no clothing carries a maker's mark: no swooshes, stripes or makers' logos. " +
-    (people === "fictional" ? "Any people are made-up characters, never real or famous people." : "No real or identifiable people.");
-}
-
 export type VideoJob = { id: string; client_id: string; step: string; state: any; input: any; design_request_id: string | null; option_index: number | null };
 /** next: run the following step now; wait: ask again on a later pass; done: the MP4 is stored (state.final_path); held: work goes on in the background under its own lease (hold). */
 export type VideoStepResult = "next" | "wait" | "done" | "held";
@@ -81,6 +71,8 @@ export type VideoStepResult = "next" | "wait" | "done" | "held";
 const ACTIVE = ["queued", "running"];
 /** Tries of one step before its job fails. */
 export const MAX_VIDEO_ATTEMPTS = 4;
+/** A job is held this long while a pass works on it (video-worker), and again right before its clip is ordered. */
+export const VIDEO_JOB_LEASE_MS = 120_000;
 /** A job held for model work keeps its lease this long (as the design worker's). */
 const MODEL_LEASE_MS = 420_000;
 
@@ -296,75 +288,69 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       job.step = "clip"; return "next";
     }
     case "clip": {
-      const mcp = await higgsfield(admin);
-      const ordered = !!s.clip_order;
-      if (!ordered && recently(s.quote_checked_at)) return "wait";
-      // An order already recorded is never made again: no price or balance is read for it.
-      const balance = ordered ? null : (await creditBalance(mcp))?.credits ?? null;
-      const live = ordered ? null : await quoteClip(mcp);
-      s.quote_checked_at = Date.now();
-      const decision = clipOrderDecision(s, input.approved_credits ?? null, live, balance);
-      if (decision.action === "stop") throw new Error(`FINAL: ${decision.reason}`);
-      if (decision.action === "wait") {
-        if (s.clip_order?.job_id) { job.step = "clip_wait"; return "wait"; }
-        // The price could not be read: asked again on later passes, for QUOTE_WAIT_MS.
-        if (typeof s.quote_waiting_since !== "number") s.quote_waiting_since = Date.now();
-        if (Date.now() - s.quote_waiting_since > QUOTE_WAIT_MS) throw new Error(`FINAL: ${REASONS.quote}`);
-        return "wait";
-      }
-      // The order is on the job's row before Higgsfield is called: any pass
-      // after this one finds it, and never orders again.
-      s.clip_order = { price: live, at: new Date().toISOString() };
-      try {
-        await saveOrder(admin, job);
-      } catch (e) {
-        // Not saved, so not ordered: the job's error must not keep an order that was never made.
-        delete s.clip_order;
-        throw e;
-      }
-      const { data: client } = input.video_route === "posts" ? { data: null } : await admin.from("clients").select("video_style").eq("id", job.client_id).maybeSingle();
-      if (!s.frame_ref_id) {
-        const [id] = await importReferences(mcp, [publicUrl(admin, BUCKET, s.frame_path)], "image");
-        if (!id) throw new Error("Could not hand the opening frame to the video service.");
-        s.frame_ref_id = id;
-      }
-      if (!Array.isArray(s.kit_ref_ids)) {
-        const kit = kitPaths(client?.video_style);
-        s.kit_ref_ids = kit.length ? await importReferences(mcp, kit.map((p) => publicUrl(admin, REFERENCES, p)), "image") : [];
-      }
-      const [first] = await submitVideo(mcp, clipRequest(`${input.video.prompt}${footageRules(input.people, input.scene_words ?? [])}`, s.frame_ref_id, s.kit_ref_ids));
-      if (!first?.job_id) throw new Error("Higgsfield did not start the clip.");
-      const at = new Date().toISOString();
-      s.clip_order.job_id = first.job_id;
-      s.clip_job = first;
-      s.credits = withCredits(s.credits, { what: "footage", job_id: first.job_id, credits: live, at });
-      s.clip_started_at = Date.now();
-      s.clip_checked_at = Date.now();
-      // The pass ends here with the order saved, its job id at once: a pass
-      // that died before the worker's own save would take the order as lost.
-      job.step = "clip_wait";
-      await saveJob(admin, job, { step: job.step });
-      return "wait";
+      // Higgsfield is reached only when the step prices, imports or orders: an
+      // order already recorded moves on (or waits) without it.
+      let mcp: McpClient | null = null;
+      const hf = async () => mcp ??= await higgsfield(admin);
+      return runClip({
+        quote: async () => quoteClip(await hf()),
+        balance: async () => (await creditBalance(await hf()))?.credits ?? null,
+        importImages: async (want) => {
+          const out: { frame?: string | null; kit?: string[] } = {};
+          if (want.frame) out.frame = (await importReferences(await hf(), [publicUrl(admin, BUCKET, s.frame_path)], "image"))[0] ?? null;
+          if (want.kit) {
+            const { data: client } = input.video_route === "posts" ? { data: null } : await admin.from("clients").select("video_style").eq("id", job.client_id).maybeSingle();
+            const kit = kitPaths(client?.video_style);
+            out.kit = kit.length ? await importReferences(await hf(), kit.map((p) => publicUrl(admin, REFERENCES, p)), "image") : [];
+          }
+          return out;
+        },
+        submit: async (req) => (await submitVideo(await hf(), req))[0],
+        saveOrder: async (order) => {
+          const { data, error } = await admin.rpc("video_clip_order", { p_job: job.id, p_order: order });
+          if (error) throw new Error(`Could not save the clip's order: ${error.message}`);
+          return data === true;
+        },
+        saveJob: () => saveJob(admin, job, { step: job.step }),
+        renewLease: async () => {
+          const { error } = await admin.from("canva_finish_jobs").update({ lease_until: new Date(Date.now() + VIDEO_JOB_LEASE_MS).toISOString() }).eq("id", job.id).in("status", ACTIVE);
+          if (error) throw new Error(`Could not hold the video for its order: ${error.message}`);
+        },
+        now: () => Date.now(),
+        pollMs: VIDEO_POLL_MS,
+      }, job);
     }
     case "clip_wait": {
+      // The clip is paid for: nothing here spends one of the job's tries.
+      // Only the clip's own end, or CLIP_LOST_MS, ends the video.
       if (recently(s.clip_checked_at)) return "wait";
       s.clip_checked_at = Date.now();
-      const res = await awaitJobs(await higgsfield(admin), [s.clip_job], { budgetMs: 0 });
-      const o = res.outcomes[0];
-      const outcome = clipOutcome(o, typeof s.clip_started_at === "number" ? s.clip_started_at : Date.now(), Date.now());
-      if (outcome === "running") return "wait";
-      if (outcome === "failed") {
-        console.error(`[video-worker] job ${job.id} clip ${o?.status}: ${o?.error ?? ""}`);
-        throw new Error(`FINAL: ${REASONS.provider}`);
+      try {
+        const res = await awaitJobs(await higgsfield(admin), [s.clip_job], { budgetMs: 0 });
+        const o = res.outcomes[0];
+        const outcome = clipOutcome(o, typeof s.clip_started_at === "number" ? s.clip_started_at : Date.now(), Date.now());
+        if (outcome === "running") return "wait";
+        if (outcome === "failed") {
+          console.error(`[video-worker] job ${job.id} clip ${o?.status}: ${o?.error ?? ""}`);
+          throw new Error(`FINAL: ${REASONS.provider}`);
+        }
+        if (outcome === "lost") throw new Error(`FINAL: ${REASONS.lost}`);
+        const resp = await fetch(o.result_url!, { signal: AbortSignal.timeout(90_000) });
+        if (!resp.ok) throw new Error(`Could not fetch the clip: ${resp.status}`);
+        const path = `${base}/clip.mp4`;
+        const { error } = await admin.storage.from(BUCKET).upload(path, new Uint8Array(await resp.arrayBuffer()), { contentType: "video/mp4", upsert: true });
+        if (error) throw new Error(`Could not store the clip: ${error.message}`);
+        s.footage_path = path;
+        delete s.clip_wait_error;
+        job.step = "assemble"; return "next";
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.startsWith("FINAL:")) throw e;
+        // Asked again on a later pass, until the clip ends or is lost.
+        console.error(`[video-worker] job ${job.id} clip_wait:`, msg);
+        s.clip_wait_error = msg.slice(0, 300);
+        return "wait";
       }
-      if (outcome === "lost") throw new Error(`FINAL: ${REASONS.lost}`);
-      const resp = await fetch(o.result_url!, { signal: AbortSignal.timeout(90_000) });
-      if (!resp.ok) throw new Error(`Could not fetch the clip: ${resp.status}`);
-      const path = `${base}/clip.mp4`;
-      const { error } = await admin.storage.from(BUCKET).upload(path, new Uint8Array(await resp.arrayBuffer()), { contentType: "video/mp4", upsert: true });
-      if (error) throw new Error(`Could not store the clip: ${error.message}`);
-      s.footage_path = path;
-      job.step = "assemble"; return "next";
     }
     case "assemble": {
       s.composes = (s.composes ?? 0) + 1;
@@ -450,13 +436,6 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
     }
   }
   throw new Error(`FINAL: Unknown video step '${job.step}'`);
-}
-
-/** The clip's order saved to the job's row before Higgsfield is called; a job no longer active is never ordered for. */
-async function saveOrder(admin: any, job: VideoJob): Promise<void> {
-  const { data, error } = await admin.from("canva_finish_jobs").update({ state: job.state, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE).select("id");
-  if (error) throw new Error(`Could not save the clip's order: ${error.message}`);
-  if (!data?.length) throw new Error("FINAL: The video was stopped before its clip was ordered.");
 }
 
 function anthropicKey(): string {

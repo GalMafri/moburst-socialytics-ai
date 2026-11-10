@@ -72,9 +72,13 @@ export const OLD_STEPS = ["references", "references_wait", "footage", "footage_w
 /** How long the clip step keeps waiting for a readable price before it stops with REASONS.quote. */
 export const QUOTE_WAIT_MS = 30 * 60_000;
 
+/** An order recorded without the video service's job id is still being submitted by its pass for this long; after it, the order was lost. */
+export const ORDER_GRACE_MS = 10 * 60_000;
+
 /**
  * Whether to order the clip now. An order already recorded is never repeated:
- * with a job id the step waits for it, without one the order was lost.
+ * with a job id the step waits for it; without one it waits ORDER_GRACE_MS
+ * (its pass may still be submitting), after which the order was lost.
  * A video with no approved price stops at once (it was never quoted); a
  * price that cannot be read yet means wait; a price above the approved one
  * stops; so does a balance below the floor.
@@ -84,9 +88,14 @@ export function clipOrderDecision(
   approved: number | null,
   live: number | null,
   balance: number | null,
+  now: number,
 ): ClipDecision {
   const order = state.clip_order;
-  if (order) return order.job_id ? { action: "wait" } : { action: "stop", reason: REASONS.lostOrder };
+  if (order) {
+    if (order.job_id) return { action: "wait" };
+    const at = Date.parse(order.at);
+    return Number.isFinite(at) && now - at < ORDER_GRACE_MS ? { action: "wait" } : { action: "stop", reason: REASONS.lostOrder };
+  }
   if (approved === null) return { action: "stop", reason: REASONS.unquoted };
   if (live === null) return { action: "wait" };
   if (balance !== null && balance < CLIP_CREDIT_FLOOR) return { action: "stop", reason: REASONS.balance };
@@ -128,4 +137,15 @@ export function framePrompt(brief: string, rules: string): string {
     "The frame is a whole scene that fills the picture edge to edge, with no border, band, panel or empty area.",
     rules.trim(),
   ].join(" ");
+}
+
+/** What all footage keeps to, the opening frame and the clip alike; people as the client's own videos show them (made-up characters, or nobody). */
+export function footageRules(people: string | undefined, sceneWords: string[] = []): string {
+  const lettering = sceneWords.length
+    ? `Lettering only as these names, spelled exactly: ${sceneWords.map((w) => `"${w}"`).join(", ")}; no other text, captions, subtitles, signs, logos, watermarks or real brand marks anywhere in frame`
+    : "No text, letters, numbers, captions, subtitles, signs, logos or watermarks anywhere in frame";
+  return ` Vertical 9:16, every part in sharp focus. ${lettering}, and no screens, dashboards, charts, documents or interfaces. ` +
+    // Sportswear marks are what the video model adds most often, and the hardest to clean off moving feet.
+    "Boots, shoes, socks and balls are plain, and no clothing carries a maker's mark: no swooshes, stripes or makers' logos. " +
+    (people === "fictional" ? "Any people are made-up characters, never real or famous people." : "No real or identifiable people.");
 }

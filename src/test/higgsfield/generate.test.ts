@@ -245,7 +245,7 @@ describe("references and credits", () => {
   });
 
   it("quotes a clip with exactly the settings it is submitted with, without submitting it", async () => {
-    const req = { prompt: "p", aspect: "9:16", seconds: 8, resolution: "1080p" as const, model: "seedance_2_5", withAudio: true, videoReferenceIds: ["ref-1"] };
+    const req = { prompt: "p", aspect: "9:16", seconds: 8, resolution: "1080p" as const, model: "seedance_2_5", withAudio: true, referenceIds: ["ref-1"] };
     const { caller, calls } = stub({ generate_video: { cost: { credits: 100, credits_exact: 99.5 } }, generate_video_batch: jobsReply });
     expect(await quoteVideo(caller, req)).toBe(99.5);
     await submitVideo(caller, req);

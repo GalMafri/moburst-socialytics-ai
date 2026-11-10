@@ -12,7 +12,7 @@ import { createClient } from "../_shared/supabase.ts";
 import { secretEquals } from "../_shared/auth/secretEquals.ts";
 import { settleRequest } from "../_shared/canva/jobs.ts";
 import { wakeVideoWorker } from "../_shared/canva/worker.ts";
-import { type VideoJob, recordVideoFailure, runVideoStep } from "../_shared/video/steps.ts";
+import { VIDEO_JOB_LEASE_MS, type VideoJob, recordVideoFailure, runVideoStep } from "../_shared/video/steps.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
@@ -20,8 +20,8 @@ const WORKER = "video-worker";
 const PASS_LEASE_S = 150;
 /** A pass stops starting steps after this long, to end inside its lease. */
 const PASS_BUDGET_MS = 90_000;
-/** A job is held this long while a pass works on it. */
-const JOB_LEASE_MS = 120_000;
+/** A job is held this long while a pass works on it (the clip step renews it before ordering). */
+const JOB_LEASE_MS = VIDEO_JOB_LEASE_MS;
 /** Between passes that found nothing to advance (footage still rendering). */
 const IDLE_PAUSE_MS = 15_000;
 /** A job is only ever moved on while it is active: a job stopped meanwhile (its request closed or canceled) stays stopped. */

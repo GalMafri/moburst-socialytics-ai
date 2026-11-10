@@ -2,8 +2,9 @@
 -- while a video job waits at one of its steps (_shared/video/stepNames.ts
 -- VIDEO_STEPS): a video's kit, title, opening frame, one clip and assembly, a
 -- filmed clip's sound, and a client's style. The steps from before the
--- one-clip video (references, footage, hook, compose, clean) are gone; a job
--- found at one ends with a reason. Safe to apply twice.
+-- one-clip video (references, footage, hook, compose, clean) are gone: the
+-- timer no longer runs for them, and a job at one ends with a reason at the
+-- next video worker pass that reaches it. Safe to apply twice.
 do $$
 begin
   if exists (select 1 from cron.job where jobname = 'video-worker') then perform cron.unschedule('video-worker'); end if;
