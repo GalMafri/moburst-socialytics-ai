@@ -10,12 +10,21 @@ import type { Route } from "../_shared/api/router.ts";
 export interface StoredKey {
   id: string; name: string; key_prefix: string; key_hash: string; scopes: string[]; company_slugs: string[] | null; client_ids: string[] | null;
   rate_limit_per_minute: number; created_by: string | null; created_at: string; expires_at: string | null; last_used_at: string | null; revoked_at: string | null; note: string | null;
+  /** The person a personal key belongs to; null for a tool key. */
+  owner_user_id: string | null;
+  /** The owner's email from their profile, read by the store and never written; null for a tool key. */
+  owner_email: string | null;
 }
 
 export interface KeyStore {
-  insert(k: Omit<StoredKey, "id" | "created_at" | "last_used_at" | "revoked_at">): Promise<StoredKey>;
+  insert(k: Omit<StoredKey, "id" | "created_at" | "last_used_at" | "revoked_at" | "owner_email">): Promise<StoredKey>;
+  /** Every key, newest first. */
   list(): Promise<StoredKey[]>;
+  /** One person's own keys, newest first. */
+  listByOwner(userId: string): Promise<StoredKey[]>;
   revoke(id: string): Promise<boolean>;
+  /** Revokes one of the person's own keys; one revoked before answers with the time it was. Null when no key with this id is theirs. */
+  revokeOwned(id: string, userId: string): Promise<{ id: string; revoked_at: string } | null>;
 }
 
 const SCOPES = ["read", "demo", "admin"];
@@ -47,7 +56,7 @@ export function adminRoutes(deps: { keys: KeyStore; tool: "adv" | "soc" }): Rout
         const { key, key_prefix } = generateKey(deps.tool);
         const row = await deps.keys.insert({
           name, key_prefix, key_hash: await hashKey(key), scopes: [...new Set(scopes)], company_slugs: slugs.length ? [...new Set(slugs)] : null, client_ids: clientIds.length ? [...new Set(clientIds)] : null,
-          rate_limit_per_minute: rate, created_by: ctx.auth.userId ?? null, expires_at: expires, note: typeof b.note === "string" ? b.note.trim() || null : null,
+          rate_limit_per_minute: rate, created_by: ctx.auth.userId ?? null, owner_user_id: null, expires_at: expires, note: typeof b.note === "string" ? b.note.trim() || null : null,
         });
         return { status: 201, body: { data: { ...publicKey(row), key, warning: "Copy the key now; it is not shown again." } } };
       },

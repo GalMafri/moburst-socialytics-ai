@@ -1,23 +1,25 @@
 /**
  * api: Socialytics' public, key-authenticated API. One versioned router
  * (/functions/v1/api/v1/...) over the shared core in _shared/api, with the
- * Socialytics resources, the ad-hoc demo job, key management and the worker
- * route the api-demo-worker cron calls every minute.
+ * Socialytics resources, the ad-hoc demo job, key management, a person's own
+ * keys and the worker route the api-demo-worker cron calls every minute.
  *
  * verify_jwt is off (machine callers hold API keys, not user sessions);
- * the core checks keys, scopes and rate limits itself. The project's own
+ * the core checks keys, scopes and rate limits itself, and the personal key
+ * routes check the person's session (routes-me.ts). The project's own
  * functions are driven through the operational secret, acting for the user
  * the demo resolved (see _shared/invoke.ts and requireStaff).
  */
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "../_shared/supabase.ts";
-import { handleRequest, type CoreDeps } from "../_shared/api/core.ts";
+import type { CoreDeps } from "../_shared/api/core.ts";
 import type { KeyRow } from "../_shared/api/keys.ts";
 import { callEnvFromDeno, callFunction } from "../_shared/invoke.ts";
 import { oauthClientOf } from "../_shared/auth/authz.ts";
-import { API_VERSION, TOOL, socialyticsRoutes } from "./openapi.ts";
+import { API_VERSION, TOOL, socialyticsHandler, type AllDeps } from "./openapi.ts";
 import { makeJobStore } from "./jobs-store.ts";
 import { makeKeyStore } from "./keys-store.ts";
+import { makeVerifyStaffSession } from "./routes-me.ts";
 import { makeStore } from "../_shared/socialytics-api/store.ts";
 import { schemaCheck, TABLE_COLUMNS } from "./schema-check.ts";
 import { buildFindings, loadHealthRows } from "./health.ts";
@@ -42,7 +44,7 @@ async function health(): Promise<unknown> {
 }
 
 const ctx = makeDemoCtx(db, env);
-const routes = socialyticsRoutes({
+const routeDeps: Omit<AllDeps, "sessionToken"> = {
   store, health,
   analytics: async (clientId, start, end) => {
     const r = await callFunction("sprout-analytics", { client_id: clientId, start, end }, env);
@@ -51,10 +53,23 @@ const routes = socialyticsRoutes({
   jobs, kickWorker: async () => { await callFunction("api/internal/worker", { kick: true }, env); }, discard: (job) => discardJob(job, { db, call: (name, body, actAs) => callFunction(name, body, { ...env, actAs }) }),
   capacity: 3, stepNames: DEMO_STEPS.map((s) => s.name), keys, serverUrl, refresh: (job) => refreshOutputs(job, ctx),
   extraRoutes: [workerRoute({ jobs, ctx, steps: DEMO_STEPS })],
-});
+  // Beside verifyAdminJwt below: a person's app session, and whether they are Moburst staff (admin or moburst_user).
+  verifyStaffSession: makeVerifyStaffSession({
+    userOf: async (token) => {
+      const { data, error } = await db.auth.getUser(token);
+      return error || !data?.user ? null : data.user.id;
+    },
+    rolesOf: async (userId) => {
+      const { data, error } = await db.from("user_roles").select("role").eq("user_id", userId);
+      if (error) throw new Error(error.message);
+      return ((data ?? []) as Array<{ role: string }>).map((r) => r.role);
+    },
+  }),
+  now: () => new Date(),
+};
 
-const deps: CoreDeps = {
-  tool: TOOL, version: API_VERSION, routes,
+const deps: Omit<CoreDeps, "routes"> = {
+  tool: TOOL, version: API_VERSION,
   touchKey: async (hash) => {
     const { data, error } = await db.rpc("api_key_touch", { p_key_hash: hash });
     if (error) throw new Error(error.message);
@@ -82,4 +97,5 @@ const deps: CoreDeps = {
   waitUntil: (p) => { if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) EdgeRuntime.waitUntil(p); },
 };
 
-serve((req) => handleRequest(req, deps));
+// The route table is built per request so the personal key routes see that request's own session (openapi.ts).
+serve(socialyticsHandler(deps, routeDeps));

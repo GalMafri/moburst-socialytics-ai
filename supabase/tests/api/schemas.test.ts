@@ -31,7 +31,7 @@ describe("response schemas", () => {
     expect(design.waiting_for.enum).toEqual(["look", "designed_posts", "social_accounts", "logo_file", null]);
   });
   it("cover every documented response", () => {
-    for (const name of ["ClientList", "Client", "Setup", "Analytics", "ReportList", "Report", "CompetitiveReportList", "CompetitiveReport", "CompetitorSetList", "CompetitorSet", "PostList", "Post", "MediaJobList", "ScheduleList", "ScheduledPostList", "AlertList", "DesignSystemList", "Status", "Health", "DemoInput", "DemoJob", "DemoJobList", "ApiKeyCreate", "ApiKeyCreated", "ApiKeyList", "Empty", "Discarded"]) {
+    for (const name of ["ClientList", "Client", "Setup", "Analytics", "ReportList", "Report", "CompetitiveReportList", "CompetitiveReport", "CompetitorSetList", "CompetitorSet", "PostList", "Post", "MediaJobList", "ScheduleList", "ScheduledPostList", "AlertList", "DesignSystemList", "Status", "Health", "DemoInput", "DemoJob", "DemoJobList", "ApiKeyCreate", "ApiKeyCreated", "ApiKeyList", "PersonalKeyCreate", "PersonalKeyCreated", "PersonalKeyList", "PersonalKeyRevoked", "Empty", "Discarded"]) {
       expect(SCHEMAS[name], name).toBeDefined();
     }
   });

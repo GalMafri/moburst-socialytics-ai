@@ -7,7 +7,8 @@ const routes = socialyticsRoutes({
   store: makeFakeStore(emptyData()), analytics: async () => ({ ok: true, status: 200, data: {} }), health: async () => ({}),
   jobs: { create: async (j) => ({ ...j, id: "x" }), byIdempotency: async () => null, get: async () => null, list: async () => [], update: async (_i, p) => p as never, runningCount: async () => 0 },
   kickWorker: async () => {}, discard: async () => ({ removed: { client: false, competitor_sets: 0, reports: 0, competitive_reports: 0, posts: 0, media_jobs: 0 } }), capacity: 3, stepNames: [],
-  keys: { insert: async (k) => ({ ...k, id: "k", created_at: "", last_used_at: null, revoked_at: null }), list: async () => [], revoke: async () => false },
+  keys: { insert: async (k) => ({ ...k, id: "k", created_at: "", last_used_at: null, revoked_at: null, owner_email: null }), list: async () => [], listByOwner: async () => [], revoke: async () => false, revokeOwned: async () => null },
+  verifyStaffSession: async () => null, sessionToken: () => null, now: () => new Date(),
   serverUrl: "https://x.supabase.co/functions/v1/api",
 });
 const doc = socialyticsOpenApi(routes, "https://x.supabase.co/functions/v1/api") as { openapi: string; paths: Record<string, Record<string, { responses: Record<string, unknown>; requestBody?: unknown }>>; components: { schemas: Record<string, unknown> } };

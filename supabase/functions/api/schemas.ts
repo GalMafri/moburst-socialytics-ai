@@ -89,9 +89,14 @@ const DemoJob = obj({
   links: obj({ self: { type: "string" }, client: str }),
 });
 const Discarded = obj({ job_id: { type: "string" }, removed: obj({ client: bool, competitor_sets: { type: "integer" }, reports: { type: "integer" }, competitive_reports: { type: "integer" }, posts: { type: "integer" }, media_jobs: { type: "integer" } }) });
-const ApiKey = obj({ id: { type: "string" }, name: { type: "string" }, key_prefix: { type: "string" }, scopes: arr({ type: "string", enum: ["read", "demo", "admin"] }), company_slugs: { type: ["array", "null"], items: { type: "string" } }, client_ids: { type: ["array", "null"], items: { type: "string" } }, rate_limit_per_minute: { type: "integer" }, created_at: { type: "string" }, expires_at: str, last_used_at: str, revoked_at: str, note: str });
+const ApiKey = obj({ id: { type: "string" }, name: { type: "string" }, key_prefix: { type: "string" }, scopes: arr({ type: "string", enum: ["read", "demo", "admin"] }), company_slugs: { type: ["array", "null"], items: { type: "string" } }, client_ids: { type: ["array", "null"], items: { type: "string" } }, rate_limit_per_minute: { type: "integer" }, created_at: { type: "string" }, expires_at: str, last_used_at: str, revoked_at: str, note: str, owner_user_id: str, owner_email: str });
 const ApiKeyCreate = obj({ name: { type: "string" }, scopes: arr({ type: "string", enum: ["read", "demo", "admin"] }), company_slugs: arr({ type: "string" }), client_ids: arr({ type: "string" }), rate_limit_per_minute: { type: "integer" }, expires_at: str, note: str }, ["name", "scopes"]);
 const ApiKeyCreated = obj({ ...(ApiKey.properties as Record<string, unknown>), key: { type: "string", description: "Shown once; store it now." }, warning: { type: "string" } });
+// A person's own key (/v1/me/keys): read only, 90 days, reaching what its owner can see in Socialytics at the time of each call.
+const PersonalKey = obj({ id: { type: "string" }, name: { type: "string" }, key_prefix: { type: "string" }, scopes: arr({ type: "string", enum: ["read"] }), created_at: { type: "string" }, expires_at: str, last_used_at: str, revoked_at: str });
+const PersonalKeyCreate = obj({ name: { type: "string", minLength: 1, maxLength: 80, description: "1 to 80 characters, after trimming." } }, ["name"]);
+const PersonalKeyCreated = obj({ ...(PersonalKey.properties as Record<string, unknown>), key: { type: "string", description: "Shown once; store it now." } });
+const PersonalKeyRevoked = obj({ id: { type: "string" }, revoked_at: { type: "string" } }, ["id", "revoked_at"]);
 
 export const SCHEMAS: Record<string, S> = {
   Error: obj({ error: obj({ code: { type: "string" }, message: { type: "string" }, details: {} }, ["code", "message"]) }, ["error"]),
@@ -111,4 +116,6 @@ export const SCHEMAS: Record<string, S> = {
   StatusObject: Status, Status: one("StatusObject"), Health,
   DemoInput, DemoJobObject: DemoJob, DemoJob: one("DemoJobObject"), DemoJobList: list("DemoJobObject"), DiscardedObject: Discarded, Discarded: one("DiscardedObject"),
   ApiKeyCreate, ApiKeyObject: ApiKey, ApiKeyCreatedObject: ApiKeyCreated, ApiKeyCreated: one("ApiKeyCreatedObject"), ApiKeyList: list("ApiKeyObject"),
+  PersonalKeyCreate, PersonalKeyObject: PersonalKey, PersonalKeyList: list("PersonalKeyObject"), PersonalKeyCreatedObject: PersonalKeyCreated, PersonalKeyCreated: one("PersonalKeyCreatedObject"),
+  PersonalKeyRevokedObject: PersonalKeyRevoked, PersonalKeyRevoked: one("PersonalKeyRevokedObject"),
 };

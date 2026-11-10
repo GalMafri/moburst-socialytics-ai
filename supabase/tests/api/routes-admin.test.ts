@@ -5,9 +5,11 @@ import { handleRequest, type CoreDeps } from "../../functions/_shared/api/core";
 function memoryKeys() {
   const rows: StoredKey[] = [];
   const store: KeyStore = {
-    async insert(k) { const row = { ...k, id: `key-${rows.length + 1}`, created_at: "2026-09-30T12:00:00.000Z", last_used_at: null, revoked_at: null } as StoredKey; rows.push(row); return row; },
+    async insert(k) { const row = { ...k, id: `key-${rows.length + 1}`, created_at: "2026-09-30T12:00:00.000Z", last_used_at: null, revoked_at: null, owner_email: null } as StoredKey; rows.push(row); return row; },
     async list() { return rows; },
+    async listByOwner(userId) { return rows.filter((x) => x.owner_user_id === userId); },
     async revoke(id) { const r = rows.find((x) => x.id === id); if (!r) return false; r.revoked_at = "2026-09-30T13:00:00.000Z"; return true; },
+    async revokeOwned(id, userId) { const r = rows.find((x) => x.id === id && x.owner_user_id === userId); if (!r) return null; r.revoked_at ??= "2026-09-30T13:00:00.000Z"; return { id: r.id, revoked_at: r.revoked_at }; },
   };
   return { rows, store };
 }
@@ -33,6 +35,9 @@ describe("admin key routes", () => {
     expect(r.body.data.warning).toMatch(/not shown again/);
     expect(rows[0].key_hash).toMatch(/^[0-9a-f]{64}$/);
     expect(JSON.stringify(r.body)).not.toContain(rows[0].key_hash);
+    // A tool key: no owner, so its reach is what the admin set.
+    expect(rows[0].owner_user_id).toBeNull();
+    expect(r.body.data).toMatchObject({ owner_user_id: null, owner_email: null });
   });
   it("records the admin who created it from the session", async () => {
     const { call, rows } = await app();
