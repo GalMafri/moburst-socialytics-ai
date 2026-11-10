@@ -38,6 +38,11 @@ function ScopeChips({ scopes }: { scopes: string[] }) {
 }
 
 function KeyRow({ k, onRevoke }: { k: ApiKey; onRevoke: (k: ApiKey) => void }) {
+  // A personal key reaches what its owner can see, worked out on every call
+  // (a Moburst user's key never reaches a demo client), so its empty client
+  // list does not mean "all clients" the way a tool key's does.
+  const personal = !!k.owner_user_id;
+  const owner = personal ? k.owner_email ?? "Unknown" : "Tool";
   const reach = k.company_slugs?.length ? k.company_slugs : k.client_ids?.length ? [`${k.client_ids.length} client${k.client_ids.length === 1 ? "" : "s"}`] : null;
   return (
     <li className={cn("glass-inner flex flex-wrap items-center gap-x-4 gap-y-2 p-inner", k.revoked_at && "opacity-50")}>
@@ -45,9 +50,15 @@ function KeyRow({ k, onRevoke }: { k: ApiKey; onRevoke: (k: ApiKey) => void }) {
         <p className="t-h4">{k.name}</p>
         <p className="mt-0.5 font-mono t-label">{k.key_prefix}…</p>
       </div>
+      <div className="min-w-[140px] max-w-[240px]">
+        <p className="t-label">Owner</p>
+        <p className="mt-0.5 t-body truncate" title={owner}>{owner}</p>
+      </div>
       <ScopeChips scopes={k.scopes} />
       <span className="flex flex-wrap gap-1">
-        {reach ? reach.map((r) => (
+        {personal ? (
+          <Badge variant="outline">Owner's access</Badge>
+        ) : reach ? reach.map((r) => (
           <Badge key={r} variant="outline">
             {r}
           </Badge>

@@ -6,5 +6,6 @@ export function activeNavigationSection(path: string): string {
   if (/^\/clients\/[^/]+\/strategy(?:\/|$)/.test(path) || /^\/strategy(?:\/|$)/.test(path)) return "/strategy";
   if (/^\/usage(?:\/|$)/.test(path)) return "/usage";
   if (/^\/settings(?:\/|$)/.test(path)) return "/settings";
+  if (/^\/api-keys(?:\/|$)/.test(path)) return "/api-keys";
   return "/";
 }

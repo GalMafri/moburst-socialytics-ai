@@ -4,8 +4,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ApiAccessCard } from "./ApiAccessCard";
 
 const keys = [
-  { id: "k1", name: "gOS", key_prefix: "soc_AbCdEfGh", scopes: ["read", "demo"], company_slugs: null, client_ids: null, rate_limit_per_minute: 120, created_at: "2026-09-30T10:00:00.000Z", expires_at: null, last_used_at: "2026-09-30T11:00:00.000Z", revoked_at: null, note: null },
-  { id: "k2", name: "Bader agent", key_prefix: "soc_ZyXwVuTs", scopes: ["read"], company_slugs: ["bader-law"], client_ids: null, rate_limit_per_minute: 60, created_at: "2026-09-29T10:00:00.000Z", expires_at: null, last_used_at: null, revoked_at: null, note: null },
+  { id: "k1", name: "gOS", key_prefix: "soc_AbCdEfGh", scopes: ["read", "demo"], company_slugs: null, client_ids: null, rate_limit_per_minute: 120, created_at: "2026-09-30T10:00:00.000Z", expires_at: null, last_used_at: "2026-09-30T11:00:00.000Z", revoked_at: null, note: null, owner_user_id: null, owner_email: null },
+  { id: "k2", name: "Bader agent", key_prefix: "soc_ZyXwVuTs", scopes: ["read"], company_slugs: ["bader-law"], client_ids: null, rate_limit_per_minute: 60, created_at: "2026-09-29T10:00:00.000Z", expires_at: null, last_used_at: null, revoked_at: null, note: null, owner_user_id: null, owner_email: null },
 ];
 
 const calls: Array<{ url: string; init?: RequestInit }> = [];

@@ -31,6 +31,7 @@ import CalendarIndex from "./pages/CalendarIndex";
 import ClientCalendar from "./pages/ClientCalendar";
 import Settings from "./pages/Settings";
 import Usage from "./pages/Usage";
+import ApiKeys from "./pages/ApiKeys";
 import NotFound from "./pages/NotFound";
 import DevCalendarPreview from "./pages/DevCalendarPreview";
 import StrategyIndex from "./pages/StrategyIndex";
@@ -77,6 +78,7 @@ const App = () => (
               <Route path="/strategy" element={<StaffOnlyRoute><StrategyIndex /></StaffOnlyRoute>} />
               <Route path="/clients/:id/strategy" element={<StaffOnlyRoute><ClientStrategy /></StaffOnlyRoute>} />
               <Route path="/settings" element={<StaffOnlyRoute><Settings /></StaffOnlyRoute>} />
+              <Route path="/api-keys" element={<StaffOnlyRoute><ApiKeys /></StaffOnlyRoute>} />
               <Route path="/usage" element={<AdminOnlyRoute><Usage /></AdminOnlyRoute>} />
               {/* Open to Clients for their own mapped clients only (RLS-scoped) */}
               <Route path="/clients/:id/reports/:reportId" element={<ReportView />} />

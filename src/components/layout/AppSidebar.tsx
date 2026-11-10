@@ -13,7 +13,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { Home, FileText, Settings, TrendingUp, LogOut, ExternalLink, Gauge, Crosshair, CalendarDays, Compass } from "lucide-react";
+import { Home, FileText, Settings, TrendingUp, LogOut, ExternalLink, Gauge, Crosshair, CalendarDays, Compass, KeyRound } from "lucide-react";
 import { PORTAL_URL } from "@/utils/gosAuth";
 
 // One nav row, written once (the Intercept nav spec: 52px rows, 24px icons).
@@ -36,6 +36,9 @@ export function AppSidebar() {
     // Competitive analysis: staff review competitor sets and run the RivalIQ
     // deep analysis here; clients reach finished reports from their dashboard.
     ...(isMoburstStaff ? [{ icon: Crosshair, label: "Competitive", href: "/competitive" }] : []),
+    // Each staff member's own API keys (read only, 90 days). Settings, with
+    // every key including tool keys, stays admin only.
+    ...(isMoburstStaff ? [{ icon: KeyRound, label: "API keys", href: "/api-keys" }] : []),
     ...(isAdmin ? [{ icon: Gauge, label: "User analytics", href: "/usage" }] : []),
     ...(isAdmin ? [{ icon: Settings, label: "Settings", href: "/settings" }] : []),
   ];

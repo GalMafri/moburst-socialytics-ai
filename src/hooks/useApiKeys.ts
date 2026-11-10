@@ -19,6 +19,10 @@ export interface ApiKey {
   last_used_at: string | null;
   revoked_at: string | null;
   note: string | null;
+  /** The person a personal key belongs to; null for a tool key. */
+  owner_user_id: string | null;
+  /** That person's email, or null for a tool key (or an owner whose account is gone). */
+  owner_email: string | null;
 }
 
 export interface CreateKeyInput {
