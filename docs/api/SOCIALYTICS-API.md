@@ -18,7 +18,7 @@ Authorization: Bearer soc_...
 
 (`X-Api-Key: soc_...` is accepted too.) Keys are created on the Settings page of Socialytics by an admin ("API access" card) or through `POST /v1/admin/keys`. The plaintext is shown once; only its SHA-256 is stored. A key carries:
 
-- **scopes**: `read` (every GET), `demo` (demo jobs), `admin` (key management through the API).
+- **scopes**: `read` (every read route), `demo` (demo jobs), `admin` (key management through the API).
 - **reach**: `company_slugs` (the gOS canonical slugs the key may see, matched against `clients.company_slug`) or `client_ids`; a key with neither sees every client. Anything outside a key's reach answers `404`.
 - **rate limit**: per minute, default 120. Over the limit the API answers `429` with `Retry-After`.
 
@@ -28,11 +28,11 @@ Every request is recorded (key, route, status, duration; never the body or the k
 
 A Moburst person (a Socialytics admin or Moburst user; never a client) can make keys of their own for their own scripts and tools, on the "API keys" screen of Socialytics (`/api-keys`, in the sidebar for Moburst staff) or through the `/v1/me/keys` routes. A personal key is a `soc_` key like any other, with these differences:
 
-- **scopes**: `read` only (every GET route). No demo jobs, no key management.
+- **scopes**: `read` only (every read route). No demo jobs, no key management.
 - **rate limit**: 120 requests a minute.
 - **expiry**: 90 days after it is made.
 - **count**: at most 10 active keys per person.
-- **reach**: what its owner can see in Socialytics, worked out on every call, not stored on the key. An admin's key reaches every client. A Moburst user's key reaches every client except demo clients. If the owner loses the admin and Moburst user roles, or the account is removed, the key stops working (`401`).
+- **reach**: what its owner can see in Socialytics, worked out on every call, not stored on the key. An admin's key reaches every client. A Moburst user's key reaches every client except demo clients. A personal key stops working (`401`) when its owner loses their Socialytics role (admin or Moburst user) or their Socialytics account is removed, and otherwise when it expires or is revoked.
 - **record**: every call is recorded as the owner (`user_id` on the request row), so usage reads per person.
 
 Tool keys are unchanged.
@@ -126,7 +126,7 @@ The integration guide (`docs/api/SOCIALYTICS-INTEGRATION-GUIDE.md`, section 12) 
 
 ## Admin routes (scope `admin`, or a signed-in Socialytics admin)
 
-`GET /v1/admin/keys`, `POST /v1/admin/keys` (`{ name, scopes, company_slugs?, client_ids?, rate_limit_per_minute?, expires_at?, note? }`; the answer carries `key` once), `DELETE /v1/admin/keys/{id}` (revoke). Each key in `GET /v1/admin/keys` carries `owner_user_id` and `owner_email`, both `null` for a tool key and set for a personal key.
+`GET /v1/admin/keys`, `POST /v1/admin/keys` (`{ name, scopes, company_slugs?, client_ids?, rate_limit_per_minute?, expires_at?, note? }`; the answer carries `key` once), `DELETE /v1/admin/keys/{id}` (revoke). Each key in `GET /v1/admin/keys`, and in the `201` reply of `POST /v1/admin/keys`, carries `owner_user_id` and `owner_email`, both `null` for a tool key and set for a personal key.
 
 ## Personal key routes (the person's own Socialytics sign-in session)
 

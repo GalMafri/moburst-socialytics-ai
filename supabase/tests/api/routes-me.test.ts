@@ -12,7 +12,7 @@ const UNAUTHORIZED = "unauthorized";
 const STAFF_ONLY = "Personal API keys are for Moburst staff.";
 const AT_LIMIT = "You have 10 active keys. Revoke one to make another.";
 const NAME_RULE = "Give the key a name of 1 to 80 characters.";
-const NO_CONTROL = "A key name can't have line breaks, tabs or other control characters.";
+const NO_CONTROL = "A key name can't have line breaks or tabs.";
 const VISIBLE = "Give the key a name with at least one visible character.";
 const PERSONAL_FIELDS = ["created_at", "expires_at", "id", "key_prefix", "last_used_at", "name", "revoked_at", "scopes"];
 

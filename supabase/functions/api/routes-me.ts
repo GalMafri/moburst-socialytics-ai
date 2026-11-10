@@ -26,7 +26,7 @@ const SIGN_IN = "Sign in to Socialytics to manage your API keys.";
 const STAFF_ONLY = "Personal API keys are for Moburst staff.";
 const AT_LIMIT = `You have ${LIVE_LIMIT} active keys. Revoke one to make another.`;
 const NAME_RULE = `Give the key a name of 1 to ${NAME_MAX} characters.`;
-const NO_CONTROL = "A key name can't have line breaks, tabs or other control characters.";
+const NO_CONTROL = "A key name can't have line breaks or tabs.";
 const VISIBLE = "Give the key a name with at least one visible character.";
 
 // Control characters (Cc: line breaks, tabs, NUL, DEL and the C1 range) are refused anywhere in a name, ends included.
