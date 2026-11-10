@@ -2,7 +2,7 @@
 
 REST integration. No SDK, no repository access required.
 
-API contract version: 1 (paths start with `/v1`). Guide revised 2026-11-09; section 12 lists what changed since 13 October. AdVisor has its own guide with the same shape.
+API contract version: 1 (paths start with `/v1`). Guide revised 2026-11-10; section 12 lists what changed since 13 October. AdVisor has its own guide with the same shape.
 
 For the gOS (moburst.ai) team building the Socialytics demo screen, and for any other Moburst tool, agent or app that reads Socialytics data. Everything you need is in this document; the API also serves its own OpenAPI 3.1 document.
 
