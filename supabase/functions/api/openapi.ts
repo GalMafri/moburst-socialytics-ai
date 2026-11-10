@@ -22,11 +22,21 @@ export interface AllDeps extends ReadDeps, DemoDeps, MeDeps {
   extraRoutes?: Route[];
 }
 
+/** The routes a person reaches with their sign-in session rather than a key (routes-me.ts). */
+const SESSION_PATHS = "/v1/me/";
+
 export function socialyticsOpenApi(routes: Route[], serverUrl: string): Record<string, unknown> {
-  return buildOpenApi(routes, {
+  const doc = buildOpenApi(routes, {
     title: "Socialytics API", version: API_VERSION, serverUrl,
-    description: "Everything Socialytics holds for the clients a key may see (clients with their brand, pillars and design, social and competitive reports with their decks, competitor sets, generated posts and media, schedules, scheduled posts, competitive alerts, design systems, Sprout performance, health), plus the ad-hoc demo job that onboards any brand from a name and a website and runs every feature for it. Authenticate with `Authorization: Bearer <key>`. Lists are paginated with `limit` and `cursor`.",
-  }, SCHEMAS);
+    description: "Everything Socialytics holds for the clients a key may see (clients with their brand, pillars and design, social and competitive reports with their decks, competitor sets, generated posts and media, schedules, scheduled posts, competitive alerts, design systems, Sprout performance, health), plus the ad-hoc demo job that onboards any brand from a name and a website and runs every feature for it. Authenticate with `Authorization: Bearer <key>`. The personal key routes under /v1/me take a Socialytics sign-in session instead, for Moburst staff only. Lists are paginated with `limit` and `cursor`.",
+  }, SCHEMAS) as { paths: Record<string, Record<string, Record<string, unknown>>>; components: { securitySchemes: Record<string, unknown> } };
+  // The core documents security only for the routes it authenticates, and these it hands to their handlers ("none").
+  doc.components.securitySchemes.Session = { type: "http", scheme: "bearer", description: "A Socialytics sign-in session token, for Moburst staff only." };
+  for (const [path, operations] of Object.entries(doc.paths)) {
+    if (!path.startsWith(SESSION_PATHS)) continue;
+    for (const operation of Object.values(operations)) operation.security = [{ Session: [] }];
+  }
+  return doc;
 }
 
 export function socialyticsRoutes(deps: AllDeps): Route[] {

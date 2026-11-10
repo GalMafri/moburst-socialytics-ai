@@ -3,7 +3,7 @@ import { makeVerifyStaffSession } from "../../functions/api/routes-me";
 import { API_VERSION, TOOL, socialyticsHandler } from "../../functions/api/openapi";
 import type { KeyStore, StoredKey } from "../../functions/api/routes-admin";
 import type { CoreDeps } from "../../functions/_shared/api/core";
-import { hashKey, type KeyRow } from "../../functions/_shared/api/keys";
+import { hashKey, keyIsLive, type KeyRow } from "../../functions/_shared/api/keys";
 import { emptyData, makeFakeStore } from "../../functions/_shared/socialytics-api/store.fake";
 
 const NOW = new Date("2026-11-10T09:00:00.000Z");
@@ -11,6 +11,9 @@ const DAY = 86_400_000;
 const UNAUTHORIZED = "unauthorized";
 const STAFF_ONLY = "Personal API keys are for Moburst staff.";
 const AT_LIMIT = "You have 10 active keys. Revoke one to make another.";
+const NAME_RULE = "Give the key a name of 1 to 80 characters.";
+const NO_CONTROL = "A key name can't have line breaks, tabs or other control characters.";
+const VISIBLE = "Give the key a name with at least one visible character.";
 const PERSONAL_FIELDS = ["created_at", "expires_at", "id", "key_prefix", "last_used_at", "name", "revoked_at", "scopes"];
 
 // App sessions: token to user, user to roles, user to the email on their profile.
@@ -35,7 +38,7 @@ const STUBS = {
 
 type NewKey = Omit<StoredKey, "id" | "created_at" | "last_used_at" | "revoked_at" | "owner_email">;
 
-/** api_keys in memory, keeping the KeyStore contract: newest first, owner_email from the owner's profile, owner-scoped revoke. */
+/** api_keys in memory, keeping the KeyStore contract: newest first, owner_email on the admin list only, live counts, owner-scoped revoke. */
 function memoryKeys() {
   const rows: StoredKey[] = [];
   let n = 0;
@@ -48,9 +51,10 @@ function memoryKeys() {
     return row;
   };
   const store: KeyStore = {
-    async insert(k) { return withEmail(add(k)); },
+    async insert(k) { return { ...add(k) }; },
     async list() { return [...rows].sort(newest).map(withEmail); },
-    async listByOwner(userId) { return rows.filter((r) => r.owner_user_id === userId).sort(newest).map(withEmail); },
+    async listByOwner(userId) { return rows.filter((r) => r.owner_user_id === userId).sort(newest).map((r) => ({ ...r })); },
+    async countLive(userId, now) { return rows.filter((r) => r.owner_user_id === userId && keyIsLive(r, now)).length; },
     async revoke(id) { const r = rows.find((x) => x.id === id && !x.revoked_at); if (!r) return false; r.revoked_at = NOW.toISOString(); return true; },
     async revokeOwned(id, userId) {
       const r = rows.find((x) => x.id === id && x.owner_user_id === userId);
@@ -163,6 +167,27 @@ describe("POST /v1/me/keys", () => {
     const padded = await call("POST", ME, as("jwt-lital"), { name: `  ${"y".repeat(80)}  ` });
     expect(padded.status).toBe(201);
     expect(padded.body.data.name).toBe("y".repeat(80));
+  });
+
+  it("refuses a name with a control character or nothing visible, and keeps a name with emoji", async () => {
+    const { call, rows } = app();
+    const refused: Array<[string, string]> = [
+      ["Lital\nlaptop", NO_CONTROL], ["Lital\tlaptop", NO_CONTROL], ["laptop\n", NO_CONTROL], ["Lital\u0000laptop", NO_CONTROL], ["Lital\u007flaptop", NO_CONTROL], ["Lital\u0085laptop", NO_CONTROL],
+      ["\u200b", VISIBLE], ["\u200b\u200c\u200d\ufeff", VISIBLE], [" \u200b \u2060 ", VISIBLE], ["\u3164", VISIBLE],
+      ["", NAME_RULE], ["\u{1F4BB}".repeat(81), NAME_RULE],
+    ];
+    for (const [name, message] of refused) {
+      const r = await call("POST", ME, as("jwt-lital"), { name });
+      expect(r.status, JSON.stringify(name)).toBe(400);
+      expect(r.body.error).toEqual({ code: "invalid_request", message, details: { field: "name" } });
+    }
+    expect(rows).toHaveLength(0);
+    // Emoji count as one character each, and a joined emoji keeps its zero-width joiner.
+    for (const name of ["Lital's laptop \u{1F4BB}", "\u{1F469}\u200d\u{1F4BB} dev box", "\u{1F4BB}".repeat(80), "Caf\u00e9 \u05d1\u05d3\u05d9\u05e7\u05d4"]) {
+      const r = await call("POST", ME, as("jwt-lital"), { name });
+      expect(r.status, JSON.stringify(name)).toBe(201);
+      expect(r.body.data.name).toBe(name);
+    }
   });
 
   it("stops at 10 live keys with 409, counting neither revoked, expired nor anyone else's keys", async () => {
@@ -307,6 +332,8 @@ describe("what the person reads", () => {
       (await call("GET", ME)).body.error.message,
       (await call("GET", ME, as("jwt-client"))).body.error.message,
       (await call("POST", ME, as("jwt-lital"), { name: "" })).body.error.message,
+      (await call("POST", ME, as("jwt-lital"), { name: "a\nb" })).body.error.message,
+      (await call("POST", ME, as("jwt-lital"), { name: "\u200b" })).body.error.message,
       (await call("POST", ME, as("jwt-lital"), { name: "x" })).body.error.message,
       (await call("DELETE", `${ME}/00000000-0000-4000-8000-999999999999`, as("jwt-lital"))).body.error.message,
     ];

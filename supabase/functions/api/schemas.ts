@@ -94,7 +94,7 @@ const ApiKeyCreate = obj({ name: { type: "string" }, scopes: arr({ type: "string
 const ApiKeyCreated = obj({ ...(ApiKey.properties as Record<string, unknown>), key: { type: "string", description: "Shown once; store it now." }, warning: { type: "string" } });
 // A person's own key (/v1/me/keys): read only, 90 days, reaching what its owner can see in Socialytics at the time of each call.
 const PersonalKey = obj({ id: { type: "string" }, name: { type: "string" }, key_prefix: { type: "string" }, scopes: arr({ type: "string", enum: ["read"] }), created_at: { type: "string" }, expires_at: str, last_used_at: str, revoked_at: str });
-const PersonalKeyCreate = obj({ name: { type: "string", minLength: 1, maxLength: 80, description: "1 to 80 characters, after trimming." } }, ["name"]);
+const PersonalKeyCreate = obj({ name: { type: "string", minLength: 1, maxLength: 80, description: "1 to 80 characters after trimming, with at least one visible character and no line breaks, tabs or other control characters." } }, ["name"]);
 const PersonalKeyCreated = obj({ ...(PersonalKey.properties as Record<string, unknown>), key: { type: "string", description: "Shown once; store it now." } });
 const PersonalKeyRevoked = obj({ id: { type: "string" }, revoked_at: { type: "string" } }, ["id", "revoked_at"]);
 

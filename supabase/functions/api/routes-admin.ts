@@ -12,16 +12,18 @@ export interface StoredKey {
   rate_limit_per_minute: number; created_by: string | null; created_at: string; expires_at: string | null; last_used_at: string | null; revoked_at: string | null; note: string | null;
   /** The person a personal key belongs to; null for a tool key. */
   owner_user_id: string | null;
-  /** The owner's email from their profile, read by the store and never written; null for a tool key. */
+  /** The owner's email from their profile, filled by list() for the admin list only and never written; null everywhere else and for a tool key. */
   owner_email: string | null;
 }
 
 export interface KeyStore {
   insert(k: Omit<StoredKey, "id" | "created_at" | "last_used_at" | "revoked_at" | "owner_email">): Promise<StoredKey>;
-  /** Every key, newest first. */
+  /** Every key, newest first, with owner_email. */
   list(): Promise<StoredKey[]>;
   /** One person's own keys, newest first. */
   listByOwner(userId: string): Promise<StoredKey[]>;
+  /** How many of the person's keys are live at `now`: not revoked, and no expiry or one later than `now`. */
+  countLive(userId: string, now: Date): Promise<number>;
   revoke(id: string): Promise<boolean>;
   /** Revokes one of the person's own keys; one revoked before answers with the time it was. Null when no key with this id is theirs. */
   revokeOwned(id: string, userId: string): Promise<{ id: string; revoked_at: string } | null>;

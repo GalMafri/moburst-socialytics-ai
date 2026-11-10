@@ -8,6 +8,7 @@ function memoryKeys() {
     async insert(k) { const row = { ...k, id: `key-${rows.length + 1}`, created_at: "2026-09-30T12:00:00.000Z", last_used_at: null, revoked_at: null, owner_email: null } as StoredKey; rows.push(row); return row; },
     async list() { return rows; },
     async listByOwner(userId) { return rows.filter((x) => x.owner_user_id === userId); },
+    async countLive(userId) { return rows.filter((x) => x.owner_user_id === userId && !x.revoked_at).length; },
     async revoke(id) { const r = rows.find((x) => x.id === id); if (!r) return false; r.revoked_at = "2026-09-30T13:00:00.000Z"; return true; },
     async revokeOwned(id, userId) { const r = rows.find((x) => x.id === id && x.owner_user_id === userId); if (!r) return null; r.revoked_at ??= "2026-09-30T13:00:00.000Z"; return { id: r.id, revoked_at: r.revoked_at }; },
   };

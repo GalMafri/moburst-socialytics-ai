@@ -11,7 +11,7 @@
  * comes in through sessionToken (see socialyticsHandler in openapi.ts).
  */
 import { ApiError, forbidden, invalid, notFound, unauthorized } from "../_shared/api/errors.ts";
-import { generateKey, hashKey, keyIsLive } from "../_shared/api/keys.ts";
+import { generateKey, hashKey } from "../_shared/api/keys.ts";
 import type { Route } from "../_shared/api/router.ts";
 import { oauthClientOf } from "../_shared/auth/authz.ts";
 import type { KeyStore, StoredKey } from "./routes-admin.ts";
@@ -25,6 +25,26 @@ const SIGN_IN = "Sign in to Socialytics to manage your API keys.";
 const STAFF_ONLY = "Personal API keys are for Moburst staff.";
 const AT_LIMIT = `You have ${LIVE_LIMIT} active keys. Revoke one to make another.`;
 const NAME_RULE = `Give the key a name of 1 to ${NAME_MAX} characters.`;
+const NO_CONTROL = "A key name can't have line breaks, tabs or other control characters.";
+const VISIBLE = "Give the key a name with at least one visible character.";
+
+// Control characters (Cc: line breaks, tabs, NUL, DEL and the C1 range) are refused anywhere in a name, ends included.
+const CONTROL = /\p{Cc}/u;
+// A name must show something: whitespace and default-ignorable characters (zero-width spaces and joiners, word joiner,
+// byte order mark, Hangul fillers, variation selectors) show nothing on their own. They stay allowed beside visible ones,
+// so a joined emoji keeps its joiner.
+const VISIBLE_CHAR = /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}]/u;
+
+/** The key's name as stored: trimmed, 1 to 80 code points, no control character, at least one visible character. */
+function keyName(raw: unknown): string {
+  if (typeof raw !== "string") throw invalid(NAME_RULE, { field: "name" });
+  if (CONTROL.test(raw)) throw invalid(NO_CONTROL, { field: "name" });
+  const name = raw.trim();
+  const length = [...name].length;
+  if (length < 1 || length > NAME_MAX) throw invalid(NAME_RULE, { field: "name" });
+  if (!VISIBLE_CHAR.test(name)) throw invalid(VISIBLE, { field: "name" });
+  return name;
+}
 
 /** A signed-in person, and whether they hold a staff role (admin or moburst_user). */
 export interface StaffSession {
@@ -89,13 +109,10 @@ export function meRoutes(deps: MeDeps): Route[] {
       handler: async (ctx) => {
         const userId = await staffUserId();
         const b = (ctx.body && typeof ctx.body === "object" ? ctx.body : {}) as Record<string, unknown>;
-        const name = typeof b.name === "string" ? b.name.trim() : "";
-        const length = [...name].length;
-        if (length < 1 || length > NAME_MAX) throw invalid(NAME_RULE, { field: "name" });
+        const name = keyName(b.name);
         const now = deps.now();
         // Counted here, not locked: two makes at the same moment could reach 11, still bounded by revoking and expiry.
-        const live = (await deps.keys.listByOwner(userId)).filter((k) => keyIsLive(k, now));
-        if (live.length >= LIVE_LIMIT) throw new ApiError(409, "conflict", AT_LIMIT);
+        if ((await deps.keys.countLive(userId, now)) >= LIVE_LIMIT) throw new ApiError(409, "conflict", AT_LIMIT);
         const { key, key_prefix } = generateKey("soc");
         const row = await deps.keys.insert({
           name, key_prefix, key_hash: await hashKey(key), scopes: ["read"], company_slugs: null, client_ids: null, rate_limit_per_minute: 120,
