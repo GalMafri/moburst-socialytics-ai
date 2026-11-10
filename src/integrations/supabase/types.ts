@@ -580,6 +580,7 @@ export type Database = {
         Row: {
           attempts: number
           client_id: string
+          clip_order: Json | null
           created_at: string
           created_by: string | null
           design_request_id: string | null
@@ -599,6 +600,7 @@ export type Database = {
         Insert: {
           attempts?: number
           client_id: string
+          clip_order?: Json | null
           created_at?: string
           created_by?: string | null
           design_request_id?: string | null
@@ -618,6 +620,7 @@ export type Database = {
         Update: {
           attempts?: number
           client_id?: string
+          clip_order?: Json | null
           created_at?: string
           created_by?: string | null
           design_request_id?: string | null
@@ -2077,6 +2080,7 @@ export type Database = {
       }
       design_requests: {
         Row: {
+          approved_credits: number | null
           batch_id: string | null
           briefs: Json
           calendar_post_key: string
@@ -2108,6 +2112,7 @@ export type Database = {
           visual_direction: string | null
         }
         Insert: {
+          approved_credits?: number | null
           batch_id?: string | null
           briefs?: Json
           calendar_post_key: string
@@ -2139,6 +2144,7 @@ export type Database = {
           visual_direction?: string | null
         }
         Update: {
+          approved_credits?: number | null
           batch_id?: string | null
           briefs?: Json
           calendar_post_key?: string
@@ -4933,6 +4939,27 @@ export type Database = {
           quarter: string
           rows: number
         }[]
+      }
+      video_clip_order: {
+        Args: { p_job: string; p_order: Json }
+        Returns: boolean
+      }
+      video_clip_order_time: { Args: { p_at: string }; Returns: string }
+      video_clip_ordered: {
+        Args: { p_credits: number; p_job: string; p_job_id: string }
+        Returns: boolean
+      }
+      video_clip_stop: {
+        Args: { p_job: string; p_reason: string }
+        Returns: boolean
+      }
+      video_style_claim_kit: {
+        Args: { p_client: string; p_job: string; p_stale: string }
+        Returns: boolean
+      }
+      video_style_merge: {
+        Args: { p_client: string; p_patch: Json }
+        Returns: undefined
       }
     }
     Enums: {
