@@ -1,6 +1,6 @@
 # Video posts: one paid clip per video
 
-Status: design for Lital's review, 10 Nov 2026. Nothing is built.
+Status: approved by Lital 10 Nov 2026 17:34 IST ("Approve it"). Decision 1 (one paid clip, then "not made" until a person presses again) is approved with it. Decision 2 (the quality check's credits) is asked again, explicitly, when the build reaches it; no credits are spent before that yes. Nothing is built yet.
 
 ## Why
 
