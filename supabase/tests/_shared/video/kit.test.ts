@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { KIT_BATCH, KIT_MAKE_MS, KIT_MAX, MAX_KIT_TRIES, type KitDone, kitClaim, kitDoneCount, kitDoneOf, kitForStyle, kitKeptFrom, kitWork, KIT_MIN, kitChosen, kitCleanPrompt, kitKept, kitNext, kitPath, kitPaths, kitPickPrompt, kitState, parseKitPick, postsRouteInput, videoRouteFor } from "../../../functions/_shared/video/kit";
+import { KIT_BATCH, KIT_MAKE_MS, KIT_MAX, MAX_KIT_TRIES, type KitDone, kitClaim, kitDoneCount, kitDoneOf, kitForStyle, kitKeptFrom, kitWork, KIT_MIN, kitCleanPrompt, kitKept, kitNext, kitPath, kitPaths, kitPickPrompt, kitState, parseKitPick, postsRouteInput, videoRouteFor } from "../../../functions/_shared/video/kit";
 
 describe("kit limits and paths", () => {
   it("keeps at most six stills and needs at least two", () => {
@@ -55,7 +55,11 @@ describe("parseKitPick", () => {
 
   it("is null when the list has no usable number", () => {
     expect(parseKitPick("[9, 10]", 8, 6)).toBeNull();
-    expect(parseKitPick("[]", 8, 6)).toBeNull();
+  });
+
+  it("reads an empty list as the answer that no still qualifies", () => {
+    expect(parseKitPick("[]", 8, 6)).toEqual([]);
+    expect(parseKitPick("None of them: []", 8, 6)).toEqual([]);
   });
 
   it("drops values that are not whole numbers", () => {
@@ -72,23 +76,28 @@ describe("kitPickPrompt", () => {
     expect(p).toContain("Choose up to 6");
     expect(p).toContain("JSON array of the chosen numbers only, at most 6 of them");
   });
+
+  it("leaves out stills with a person's face and allows an empty answer", () => {
+    const p = kitPickPrompt("Pay The Pyper", 8, 6);
+    expect(p).toMatch(/person's face/);
+    expect(p).toContain("Answer [] when no still qualifies");
+    expect(p).not.toMatch(/its people/);
+  });
 });
 
 describe("kitCleanPrompt", () => {
-  it("removes text and marks but keeps the scene's own names spelled as given", () => {
-    const p = kitCleanPrompt("Pay The Pyper", ["PAY THE PYPER"]);
-    expect(p).toContain("PAY THE PYPER");
-    for (const w of ["captions", "subtitles", "logos"]) expect(p).toContain(w);
-  });
-
-  it("says no lettering stays when there are no scene words", () => {
-    const p = kitCleanPrompt("Pay The Pyper", []);
-    expect(p).toMatch(/no lettering/i);
-    for (const w of ["captions", "subtitles", "logos"]) expect(p).toContain(w);
+  it("removes all text and marks and names no words to keep", () => {
+    const p = kitCleanPrompt("Pay The Pyper");
+    for (const w of ["captions", "subtitles", "logos", "watermarks", "screens"]) expect(p).toContain(w);
+    expect(p).toMatch(/No lettering of any kind stays/);
+    expect(p).toMatch(/nothing new is added/);
+    // The kit never carries the client's scene words: naming them made the model paint them.
+    expect(p).not.toMatch(/stays is|spelled exactly|scene_words|only lettering/);
+    expect(kitCleanPrompt.length).toBe(1);
   });
 
   it("has no em or en dashes", () => {
-    for (const p of [kitCleanPrompt("B", ["X"]), kitCleanPrompt("B", []), kitPickPrompt("B", 4, 2)]) expect(p).not.toMatch(/[\u2013\u2014]/);
+    for (const p of [kitCleanPrompt("B"), kitPickPrompt("B", 4, 2)]) expect(p).not.toMatch(/[\u2013\u2014]/);
   });
 });
 
@@ -139,18 +148,6 @@ describe("kitNext", () => {
     expect(kitNext(vs, now, "j1")).toBe("make");
     expect(kitNext(vs, now, "j1", now - 60_000)).toBe("wait");
     expect(kitNext(vs, now, "j1", now - KIT_MAKE_MS - 1)).toBe("make");
-  });
-});
-
-describe("kitChosen", () => {
-  it("uses the model's pick when it can be read", () => {
-    expect(kitChosen("[4, 1]", 9, 6)).toEqual([4, 1]);
-  });
-
-  it("falls back to the first stills, at most max", () => {
-    expect(kitChosen("sorry", 9, 6)).toEqual([0, 1, 2, 3, 4, 5]);
-    expect(kitChosen("sorry", 3, 6)).toEqual([0, 1, 2]);
-    expect(kitChosen("sorry", 0, 6)).toEqual([]);
   });
 });
 

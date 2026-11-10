@@ -1,8 +1,8 @@
 // supabase/functions/_shared/video/kit.ts
 //
-// The client's kit: up to KIT_MAX stills from their own videos, cleaned of
-// captions, logos and other lettering, that every clip is given as its image
-// references. The rules here (where a still is stored, what the kit's state
+// The client's kit: up to KIT_MAX stills from their own videos, with no
+// person's face and cleaned of all lettering, that every clip is given as
+// its image references (a look reference: places, products, light, color). The rules here (where a still is stored, what the kit's state
 // is, the two questions to the models and how their answers are read) are
 // free of Deno and network imports so they can be tested.
 
@@ -37,13 +37,14 @@ export function kitPaths(videoStyle: unknown): string[] {
 export function kitPickPrompt(brand: string, count: number, max: number): string {
   return [
     `These ${count} stills come from ${brand}'s own videos, numbered 0 to ${count - 1} in the order given.`,
-    `Choose up to ${max} that best show ${brand}'s look: its people, places, products, light and color.`,
+    `Choose up to ${max} that best show ${brand}'s look: its places, products, graphics, materials, light and color.`,
+    "Leave out every still that shows a person's face or a recognizable person: the kit is a look reference, and no real person may be carried into new footage.",
     "Prefer stills with the least text on screen, and choose stills that differ from each other.",
-    `Answer with a JSON array of the chosen numbers only, at most ${max} of them, for example [0, 3].`,
+    `Answer with a JSON array of the chosen numbers only, at most ${max} of them, for example [0, 3]. Answer [] when no still qualifies.`,
   ].join(" ");
 }
 
-/** The chosen still numbers: unique, in range, in the order given, at most `max`; null when no list can be read or none of its numbers can be used. */
+/** The chosen still numbers: unique, in range, in the order given, at most `max`; [] when the model chose none; null when no list can be read or none of its numbers can be used. */
 export function parseKitPick(text: string, count: number, max: number): number[] | null {
   const m = /\[[^\[\]]*\]/.exec(text);
   if (!m) return null;
@@ -54,6 +55,8 @@ export function parseKitPick(text: string, count: number, max: number): number[]
     return null;
   }
   if (!Array.isArray(list)) return null;
+  // An empty list is an answer: no still qualifies.
+  if (!list.length) return [];
   const out: number[] = [];
   for (const v of list) {
     if (out.length >= max) break;
@@ -63,16 +66,16 @@ export function parseKitPick(text: string, count: number, max: number): number[]
   return out.length ? out : null;
 }
 
-/** The image edit that cleans one kit still. */
-export function kitCleanPrompt(brand: string, sceneWords: string[]): string {
-  const words = sceneWords.map((w) => w.trim()).filter(Boolean);
-  const keep = words.length
-    ? `The only lettering that stays is these names where they appear in the scene itself, spelled exactly as given: ${words.map((w) => `"${w}"`).join(", ")}.`
-    : "No lettering stays anywhere in the picture.";
+/**
+ * The image edit that cleans one kit still. A look reference, so no lettering
+ * of any kind stays or is added: the client's scene words are not named here
+ * (naming them made the image model paint every one of them into the still).
+ */
+export function kitCleanPrompt(brand: string): string {
   return [
-    `This is a still from one of ${brand}'s videos.`,
+    `This is a still from one of ${brand}'s videos, kept as a reference for the look of new footage.`,
     "Remove all captions, subtitles, lettering, logos, watermarks and screens (phone, computer and TV screens), filling each area with what would naturally be behind it.",
-    keep,
+    "No lettering of any kind stays anywhere in the picture, and nothing new is added: no words, signs, labels, buttons or graphics.",
     "Keep everything else exactly as it is: the framing, the light, the color, the subjects and any motion blur.",
   ].join(" ");
 }
@@ -103,11 +106,6 @@ export function kitNext(videoStyle: unknown, now: number, jobId?: string, heldAt
   if (fresh(started) && (jobId === undefined || vs.kit_job !== jobId)) return "wait";
   if (typeof heldAt === "number" && fresh(heldAt)) return "wait";
   return "make";
-}
-
-/** The stills to clean: the model's pick, or the first `max` when its answer cannot be used. */
-export function kitChosen(text: string, count: number, max: number): number[] {
-  return parseKitPick(text, count, max) ?? Array.from({ length: Math.min(count, max) }, (_, i) => i);
 }
 
 /** The kit from each picked still's clean path (null when it was dropped): the clean ones in order, or none with fewer than KIT_MIN. */

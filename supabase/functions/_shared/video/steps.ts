@@ -45,7 +45,7 @@ import { canvasLogoRect } from "../canva/brief.ts";
 import { anthropicMessages } from "../anthropic.ts";
 import { openaiKey } from "../openai/key.ts";
 import { ModelBusy, OPENAI_IMAGE_MODEL, imageEdit } from "../media/imageEdit.ts";
-import { KIT_MAKE_MS, KIT_MAX, KIT_MIN, MAX_KIT_TRIES, kitChosen, kitCleanPrompt, kitNext, kitPath, kitPaths, kitPickPrompt, type KitDone, kitClaim, kitDoneCount, kitDoneOf, kitForStyle, kitKeptFrom, kitState, kitWork, postsRouteInput } from "./kit.ts";
+import { KIT_MAKE_MS, KIT_MAX, KIT_MIN, MAX_KIT_TRIES, parseKitPick, kitCleanPrompt, kitNext, kitPath, kitPaths, kitPickPrompt, type KitDone, kitClaim, kitDoneCount, kitDoneOf, kitForStyle, kitKeptFrom, kitState, kitWork, postsRouteInput } from "./kit.ts";
 import { copyMatches, marksPrompt, parseMarks, parseRead, readPrompt } from "../design/pipeline.ts";
 import { parseVideoStyle, videoStylePrompt } from "../canva/options.ts";
 import { CARD_SIZE, FOOTAGE_STILLS, STYLE_FRAMES, VIDEO_SIZE, audioScript, captionWeight, captionsAss, framesScript, hookPlacement, parseAudio, videoLogoBox, parseFrames, composeScript, footageTextPrompt, parseComposed, parseFootageText } from "./compose.ts";
@@ -517,9 +517,11 @@ async function jpegBlocks(admin: any, bucket: string, paths: string[]): Promise<
  * style job right after it reads the style, or a video job that finds no kit.
  *   kit       claim the making on the client (video_style_claim_kit; the
  *             holder renews its claim each pass), let the
- *             vision model pick up to KIT_MAX of the style's stills, then clean
- *             up to KIT_BATCH of them per pass with the image model in the
- *             background (hold): a still whose writing shows again is cleaned
+ *             vision model pick up to KIT_MAX of the style's stills (none with
+ *             a person's face; [] when none qualifies; an answer that cannot
+ *             be read is a claim with no progress), then clean up to KIT_BATCH
+ *             of them per pass with the image model in the background (hold),
+ *             of all lettering: a still whose writing shows again is cleaned
  *             once more, then dropped. Each still's outcome is saved on the job
  *             as it comes. Once every picked still is done, the clean ones
  *             (kitPath) are listed on video_style.kit ([] with fewer than
@@ -595,7 +597,6 @@ async function makeKit(admin: any, job: VideoJob, videoStyle: any, brand: string
     await storeKit(admin, job.client_id, []);
     job.step = "kit_wait"; return "next";
   }
-  const sceneWords: string[] = Array.isArray(videoStyle.profile?.scene_words) ? videoStyle.profile.scene_words : [];
   // Each picked still's outcome by its index; a still not in it is pending.
   const done: KitDone = s.kit_done = kitDoneOf(s.kit_done);
   // Decided on every claim, before the pick too: claims that never reach their pick also spend tries.
@@ -607,7 +608,11 @@ async function makeKit(admin: any, job: VideoJob, videoStyle: any, brand: string
     const content = await jpegBlocks(admin, REFERENCES, frames);
     content.push({ type: "text", text: kitPickPrompt(brand, frames.length, KIT_MAX) });
     const result = await anthropicMessages({ apiKey, body: { model: "claude-opus-5-5", max_tokens: CHECK_TOKENS, messages: [{ role: "user", content }] } });
-    s.kit_pick = kitChosen(result.text, frames.length, KIT_MAX).map((i) => frames[i]);
+    const pick = parseKitPick(result.text, frames.length, KIT_MAX);
+    // An answer that cannot be read is a claim with no progress: the next pass asks again, as a try of the kit.
+    if (pick === null) { keepKitError(s, "The kit's pick could not be read."); return "wait"; }
+    // [] is an answer too: no still qualifies, and the kit is stored as none (the posts route).
+    s.kit_pick = pick.map((i) => frames[i]);
     work = kitWork(s.kit_pick.length, done, s.kit_tries);
   }
   const picked: string[] = Array.isArray(s.kit_pick) ? s.kit_pick : [];
@@ -626,7 +631,7 @@ async function makeKit(admin: any, job: VideoJob, videoStyle: any, brand: string
       // Inside the kit's own handling: a missing key is a claim with no progress, never a failed job.
       const apiKey = await openaiKey(admin);
       const size: [number, number] = [CARD_SIZE.width, CARD_SIZE.height];
-      const prompt = kitCleanPrompt(brand, sceneWords);
+      const prompt = kitCleanPrompt(brand);
       const outcomes = await Promise.allSettled(todo.map(async (i) => {
         const path = kitPath(job.client_id, i);
         const { data, error } = await admin.storage.from(REFERENCES).download(picked[i]);
@@ -646,7 +651,8 @@ async function makeKit(admin: any, job: VideoJob, videoStyle: any, brand: string
           const jpeg = await (await Image.decode(png)).encodeJPEG(90);
           const { error: upError } = await admin.storage.from(REFERENCES).upload(path, jpeg, { contentType: "image/jpeg", upsert: true });
           if (upError) throw new Error(`Could not store a kit still: ${upError.message}`);
-          const seen = await footageWriting(admin, [path], sceneWords, REFERENCES);
+          // A look reference: any writing left, the client's scene words included, is writing.
+          const seen = await footageWriting(admin, [path], [], REFERENCES);
           if (!seen.writing) clean = path;
           else {
             console.warn(`[video-worker] kit ${job.client_id} still ${i}: writing after cleaning ${n} (${seen.where}).`);
