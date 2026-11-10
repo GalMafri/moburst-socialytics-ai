@@ -15,7 +15,7 @@ What's missing is a key that belongs to a person, for their own scripts and tool
 
 ## What it does
 
-1. **Anyone at Moburst with a Socialytics account makes their own key**, on a "Your API keys" card they can open from the account menu (Settings stays admin-only). They name it, copy it once, and can revoke it. Admins also see every personal key, whose it is, when it was last used, and can revoke it.
+1. **Anyone at Moburst with a Socialytics account makes their own key**, on an "API keys" screen in the sidebar (Settings stays admin-only). They name it, copy it once, and can revoke it. Admins also see every personal key, whose it is, when it was last used, and can revoke it.
 2. **A personal key reaches exactly what its owner can see in Socialytics, live.** Its reach is worked out on every call from the owner's own access, by the same rule the app uses (`can_access_client`): today an admin or a Moburst user reaches every client, and a change to the person's access applies to their key at once. A person who loses access, or whose account is removed, has a key that no longer works.
 3. **Read only, to start.** A personal key has the `read` scope: every GET route of the API, as documented. No demo jobs and no key management. Saving through a personal key (notes, copy, strategy sections, the saves the connector already has) is added when someone needs it, as its own change.
 4. **Recorded as the person.** Every call with a personal key writes the owner's id with the request (`api_requests.user_id`), so usage reads per person.
