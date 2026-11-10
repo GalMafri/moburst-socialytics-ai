@@ -113,7 +113,8 @@ async function pass(admin: any): Promise<number> {
       } else if (result !== "held") {
         await admin.from("canva_finish_jobs").update({ step: job.step, state: job.state, error: null, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE);
       }
-      if (result === "held" || result === "done" || job.step !== before) advanced++;
+      // A held job is not counted: a busy image model must not keep passes from their idle pause.
+      if (result !== "held" && (result === "done" || job.step !== before)) advanced++;
     } catch (e) {
       await recordVideoFailure(admin, job, e);
     }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { KIT_MAKE_MS, KIT_MAX, KIT_MIN, kitChosen, kitCleanPrompt, kitKept, kitNext, kitPath, kitPaths, kitPickPrompt, kitState, parseKitPick, postsRouteInput, videoRouteFor } from "../../../functions/_shared/video/kit";
+import { KIT_BATCH, KIT_MAKE_MS, KIT_MAX, MAX_KIT_TRIES, kitWork, KIT_MIN, kitChosen, kitCleanPrompt, kitKept, kitNext, kitPath, kitPaths, kitPickPrompt, kitState, parseKitPick, postsRouteInput, videoRouteFor } from "../../../functions/_shared/video/kit";
 
 describe("kit limits and paths", () => {
   it("keeps at most six stills and needs at least two", () => {
@@ -168,5 +168,26 @@ describe("postsRouteInput", () => {
     const out = postsRouteInput(input);
     expect(out).toEqual({ kind: "video", copy: ["Hi"], video_route: "posts", show_logo: true, logo_at: null, logo_width: null, people: "none", scene_words: [], footage_upload: null });
     expect(input.video_route).toBeNull();
+  });
+});
+
+describe("kitWork", () => {
+  it("cleans at most three stills not done yet, in pick order", () => {
+    expect(KIT_BATCH).toBe(3);
+    expect(kitWork(6, [], 1)).toEqual({ kind: "clean", todo: [0, 1, 2] });
+    expect(kitWork(6, ["a", null, "c"], 2)).toEqual({ kind: "clean", todo: [3, 4, 5] });
+    expect(kitWork(6, ["a", undefined, "c", null], 2)).toEqual({ kind: "clean", todo: [1, 4, 5] });
+  });
+
+  it("stores the kit once every picked still is done, even on a late try", () => {
+    expect(kitWork(3, ["a", null, "c"], 1)).toEqual({ kind: "store" });
+    expect(kitWork(2, ["a", "b"], MAX_KIT_TRIES + 5)).toEqual({ kind: "store" });
+    expect(kitWork(0, [], 1)).toEqual({ kind: "store" });
+  });
+
+  it("gives up after three claims with stills still to clean", () => {
+    expect(MAX_KIT_TRIES).toBe(3);
+    expect(kitWork(6, ["a"], MAX_KIT_TRIES)).toEqual({ kind: "clean", todo: [1, 2, 3] });
+    expect(kitWork(6, ["a"], MAX_KIT_TRIES + 1)).toEqual({ kind: "spent" });
   });
 });

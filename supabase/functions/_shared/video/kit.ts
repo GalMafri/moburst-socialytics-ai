@@ -124,3 +124,23 @@ export function kitKept(cleaned: Array<string | null>): string[] {
 export function postsRouteInput<T extends Record<string, unknown>>(input: T): T {
   return { ...input, video_route: "posts", show_logo: true, logo_at: null, logo_width: null, people: "none", scene_words: [] };
 }
+
+/** The most stills one background cleaning takes on; the rest wait for the next pass. */
+export const KIT_BATCH = 3;
+/** Claims of the kit by one job before it is stored as [] (the client's videos then take the posts route). */
+export const MAX_KIT_TRIES = 3;
+
+/**
+ * What the kit's maker does next, from each picked still's outcome so far
+ * (`done[i]`: its clean path, null when dropped, undefined while not done)
+ * and how many times it has claimed the kit: store it once every still is
+ * done; give up (store []) once its tries are spent; else clean the next
+ * KIT_BATCH stills not done yet.
+ */
+export function kitWork(count: number, done: ReadonlyArray<string | null | undefined>, tries: number): { kind: "store" } | { kind: "spent" } | { kind: "clean"; todo: number[] } {
+  const todo: number[] = [];
+  for (let i = 0; i < count; i++) if (done[i] === undefined) todo.push(i);
+  if (!todo.length) return { kind: "store" };
+  if (tries > MAX_KIT_TRIES) return { kind: "spent" };
+  return { kind: "clean", todo: todo.slice(0, KIT_BATCH) };
+}

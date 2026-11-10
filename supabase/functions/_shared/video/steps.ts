@@ -38,7 +38,7 @@ import { canvasLogoRect } from "../canva/brief.ts";
 import { anthropicMessages } from "../anthropic.ts";
 import { openaiKey } from "../openai/key.ts";
 import { ModelBusy, imageEdit } from "../media/imageEdit.ts";
-import { KIT_MAKE_MS, KIT_MAX, KIT_MIN, kitChosen, kitCleanPrompt, kitKept, kitNext, kitPath, kitPickPrompt, kitState, postsRouteInput } from "./kit.ts";
+import { KIT_MAKE_MS, KIT_MAX, KIT_MIN, MAX_KIT_TRIES, kitChosen, kitCleanPrompt, kitKept, kitNext, kitPath, kitPickPrompt, kitState, kitWork, postsRouteInput } from "./kit.ts";
 import { copyMatches, parseRead, readPrompt } from "../design/pipeline.ts";
 import { parseVideoStyle, videoStylePrompt } from "../canva/options.ts";
 import { CARD_SIZE, FOOTAGE_STILLS, STYLE_FRAMES, TIMING, VIDEO_SIZE, audioScript, captionWeight, captionsAss, cleanFootagePrompt, framesScript, hookPlacement, parseAudio, videoLogoBox, parseFrames, clipScript, composeScript, footageTextPrompt, parseClipped, parseComposed, parseFootageText, referenceClipPath } from "./compose.ts";
@@ -503,14 +503,19 @@ async function jpegBlocks(admin: any, bucket: string, paths: string[]): Promise<
 /**
  * The client's kit (kit.ts), made once by the first job that needs it: the
  * style job right after it reads the style, or a video job that finds no kit.
- *   kit       claim the making on the client (video_style.kit_started_at and
- *             kit_job), let the vision model pick up to KIT_MAX of the style's
- *             stills, then clean each with the image model in the background
- *             (hold): a still whose writing shows again is cleaned once more,
- *             then dropped. The clean ones are kept at kitPath and listed on
- *             video_style.kit ([] with fewer than KIT_MIN);
- *   kit_wait  until the kit is stored. The style job then ends; a video job
- *             goes on, on the posts route when the kit has too few stills.
+ *   kit       claim the making on the client (video_style_claim_kit; the
+ *             holder renews its claim each pass, each claim is a try), let the
+ *             vision model pick up to KIT_MAX of the style's stills, then clean
+ *             up to KIT_BATCH of them per pass with the image model in the
+ *             background (hold): a still whose writing shows again is cleaned
+ *             once more, then dropped. Each still's outcome is saved on the job
+ *             as it comes. Once every picked still is done, the clean ones
+ *             (kitPath) are listed on video_style.kit ([] with fewer than
+ *             KIT_MIN). After MAX_KIT_TRIES claims the kit is stored as []:
+ *             the client's videos take the posts route, and nothing fails;
+ *   kit_wait  until the kit is stored. The style job then plans the video
+ *             posts that waited for the style and ends; a video job goes on,
+ *             on the posts route when the kit has too few stills.
  * after: what the job does once the kit is in ("finish" for the style job).
  */
 async function runKitStep(admin: any, job: VideoJob, after: "finish" | "video"): Promise<VideoStepResult> {
@@ -523,43 +528,56 @@ async function runKitStep(admin: any, job: VideoJob, after: "finish" | "video"):
     // The last maker stopped without storing a kit: it is made again.
     if (next === "make") { job.step = "kit"; return "next"; }
     if (after === "finish") {
+      // Planned now, so planning sees the kit as it is.
+      await planWaitingVideos(admin, job.client_id);
       s.final_path = null;
       job.step = "finished"; return "done";
     }
-    if (next === "none") {
-      // Too few clean stills: the client's videos follow its posts.
-      job.input = postsRouteInput(job.input);
-      const { error } = await admin.from("canva_finish_jobs").update({ input: job.input }).eq("id", job.id).in("status", ACTIVE);
-      if (error) throw new Error(`Could not move the video to the posts route: ${error.message}`);
-    }
+    if (next === "none") await toPostsRoute(admin, job);
     job.step = "references"; return "next";
   }
   if (next === "wait") return "wait";
-  const frames: string[] = Array.isArray(videoStyle?.frames) ? videoStyle.frames.filter((f: unknown) => typeof f === "string" && f) : [];
   if (!videoStyle) {
     // No style at all (the client has no videos to learn from): nothing to make a kit from.
     if (after === "finish") throw new Error("FINAL: The client's video style is missing.");
-    job.input = postsRouteInput(job.input);
-    const { error } = await admin.from("canva_finish_jobs").update({ input: job.input }).eq("id", job.id).in("status", ACTIVE);
-    if (error) throw new Error(`Could not move the video to the posts route: ${error.message}`);
+    await toPostsRoute(admin, job);
     job.step = "references"; return "next";
   }
-  // The claim: only when nobody else holds a fresh start (checked again by the database, so two jobs never both make it).
-  const stale = new Date(Date.now() - KIT_MAKE_MS).toISOString();
-  const { data: claimed, error: claimError } = await admin.from("clients")
-    .update({ video_style: { ...videoStyle, kit_started_at: new Date().toISOString(), kit_job: job.id } })
-    .eq("id", job.client_id)
-    .or(`video_style->>kit_started_at.is.null,video_style->>kit_started_at.lt.${stale},video_style->>kit_job.eq.${job.id}`)
-    .select("id");
+  // The claim: only when no other job holds a fresh start (decided in the database, so two jobs never both make it).
+  const { data: claimed, error: claimError } = await admin.rpc("video_style_claim_kit", { p_client: job.client_id, p_job: job.id, p_stale: `${KIT_MAKE_MS / 1000} seconds` });
   if (claimError) throw new Error(`Could not start the client's kit: ${claimError.message}`);
-  if (!claimed?.length) return "wait";
-  const brand: string = job.input?.brand_name ?? client?.name ?? "the brand";
-  const sceneWords: string[] = Array.isArray(videoStyle.profile?.scene_words) ? videoStyle.profile.scene_words : [];
+  if (!claimed) return "wait";
+  s.kit_tries = (s.kit_tries ?? 0) + 1;
+  job.step = "kit";
+  // Saved before any model call, so an error from here on never runs the steps before the kit again.
+  await saveJob(admin, job, { step: job.step });
+  try {
+    return await makeKit(admin, job, videoStyle, job.input?.brand_name ?? client?.name ?? "the brand");
+  } catch (e) {
+    // A kit never fails its job: the error is kept, the next pass claims again
+    // as another try, and spent tries store the kit as [] (the posts route).
+    keepKitError(s, e);
+    return "wait";
+  }
+}
+
+/** A kit error kept on the job (the last three). */
+function keepKitError(s: any, e: unknown): void {
+  const msg = e instanceof Error ? e.message : String(e);
+  console.error(`[video-worker] kit:`, msg);
+  s.kit_errors = [...(Array.isArray(s.kit_errors) ? s.kit_errors : []), msg.slice(0, 300)].slice(-3);
+}
+
+/** The kit's work after a claim: the pick, then the next batch of cleaning, or the kit stored. */
+async function makeKit(admin: any, job: VideoJob, videoStyle: any, brand: string): Promise<VideoStepResult> {
+  const s = job.state;
+  const frames: string[] = Array.isArray(videoStyle.frames) ? videoStyle.frames.filter((f: unknown) => typeof f === "string" && f) : [];
   if (frames.length < KIT_MIN) {
     await storeKit(admin, job.client_id, []);
     job.step = "kit_wait"; return "next";
   }
-  // The pick is kept on the job, so a try after a busy image model cleans the same stills.
+  const sceneWords: string[] = Array.isArray(videoStyle.profile?.scene_words) ? videoStyle.profile.scene_words : [];
+  // The pick is kept on the job, so every later pass cleans the same stills.
   if (!Array.isArray(s.kit_pick)) {
     const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
     if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
@@ -569,52 +587,105 @@ async function runKitStep(admin: any, job: VideoJob, after: "finish" | "video"):
     s.kit_pick = kitChosen(result.text, frames.length, KIT_MAX).map((i) => frames[i]);
   }
   const picked: string[] = s.kit_pick;
-  // Each picked still's outcome: its clean path, or null when it was dropped. Kept as they come, so none is paid for twice.
+  // Each picked still's outcome: its clean path, or null when it was dropped.
   const done: Array<string | null | undefined> = Array.isArray(s.kit_done) ? s.kit_done : (s.kit_done = []);
+  const work = kitWork(picked.length, done, s.kit_tries);
+  if (work.kind !== "clean") {
+    if (work.kind === "spent") console.warn(`[video-worker] kit ${job.client_id}: not finished after ${MAX_KIT_TRIES} tries; the client's videos take the posts route.`);
+    await storeKit(admin, job.client_id, work.kind === "store" ? kitKept(picked.map((_, i) => done[i] ?? null)) : []);
+    job.step = "kit_wait"; return "next";
+  }
   s.kit_held_at = Date.now();
   return hold(admin, job, async () => {
     try {
       const apiKey = await openaiKey(admin);
       const size: [number, number] = [CARD_SIZE.width, CARD_SIZE.height];
       const prompt = kitCleanPrompt(brand, sceneWords);
-      const outcomes = await Promise.allSettled(picked.map(async (frame, i) => {
-        if (done[i] !== undefined) return;
+      const outcomes = await Promise.allSettled(work.todo.map(async (i) => {
         const path = kitPath(job.client_id, i);
-        const { data, error } = await admin.storage.from(REFERENCES).download(frame);
+        const { data, error } = await admin.storage.from(REFERENCES).download(picked[i]);
         if (error || !data) throw new Error(`Could not read a still: ${error?.message ?? "missing"}`);
         let still = { bytes: new Uint8Array(await data.arrayBuffer()), name: "still.jpg" };
-        for (let clean = 1; clean <= 2; clean++) {
-          const png = await imageEdit(apiKey, [still], prompt, size);
+        let clean: string | null = null;
+        for (let n = 1; n <= 2 && !clean; n++) {
+          let png: Uint8Array;
+          try {
+            png = await imageEdit(apiKey, [still], prompt, size);
+          } catch (e) {
+            if (e instanceof ModelBusy) throw e;
+            // The image model would not clean this still: it is dropped.
+            console.warn(`[video-worker] kit ${job.client_id} still ${i}:`, e instanceof Error ? e.message : e);
+            break;
+          }
           const jpeg = await (await Image.decode(png)).encodeJPEG(90);
           const { error: upError } = await admin.storage.from(REFERENCES).upload(path, jpeg, { contentType: "image/jpeg", upsert: true });
           if (upError) throw new Error(`Could not store a kit still: ${upError.message}`);
           const seen = await footageWriting(admin, [path], sceneWords, REFERENCES);
-          if (!seen.writing) { done[i] = path; return; }
-          console.warn(`[video-worker] kit ${job.client_id} still ${i}: writing after cleaning ${clean} (${seen.where}).`);
-          still = { bytes: jpeg, name: "still.jpg" };
+          if (!seen.writing) clean = path;
+          else {
+            console.warn(`[video-worker] kit ${job.client_id} still ${i}: writing after cleaning ${n} (${seen.where}).`);
+            still = { bytes: jpeg, name: "still.jpg" };
+          }
         }
-        done[i] = null;
-        await admin.storage.from(REFERENCES).remove([path]);
+        if (!clean) await admin.storage.from(REFERENCES).remove([path]);
+        done[i] = clean;
+        // Kept on the job at once: a hold that dies loses no still it paid for.
+        await saveJob(admin, job, {});
       }));
       const failed = outcomes.filter((o): o is PromiseRejectedResult => o.status === "rejected").map((o) => o.reason);
-      const hard = failed.find((e) => !(e instanceof ModelBusy));
-      if (hard) throw hard;
-      if (failed.length) throw failed[0];
-      await storeKit(admin, job.client_id, kitKept(picked.map((_, i) => done[i] ?? null)));
-      job.step = "kit_wait";
+      // Any other error is kept and tried again on the next pass, as a try of the kit, never of the job.
+      for (const e of failed) if (!(e instanceof ModelBusy)) keepKitError(s, e);
+      const busy = failed.find((e) => e instanceof ModelBusy);
+      if (busy) throw busy;
+      // The next pass claims again and goes on with the stills still to clean, or stores the kit.
     } finally {
       delete s.kit_held_at;
     }
   });
 }
 
-/** The kit on the client's video style (merged: the style's other fields stay), with its time; the claim is cleared. */
+/** The job's state (and any other fields given) saved to its row while it is active. */
+async function saveJob(admin: any, job: VideoJob, fields: Record<string, unknown>): Promise<void> {
+  const { error } = await admin.from("canva_finish_jobs").update({ ...fields, state: job.state, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE);
+  if (error) throw new Error(`Could not save the video's progress: ${error.message}`);
+}
+
+/** A video job moved to the posts route: its input is saved on its row, since the worker saves only step and state. */
+async function toPostsRoute(admin: any, job: VideoJob): Promise<void> {
+  job.input = postsRouteInput(job.input);
+  const { error } = await admin.from("canva_finish_jobs").update({ input: job.input }).eq("id", job.id).in("status", ACTIVE);
+  if (error) throw new Error(`Could not move the video to the posts route: ${error.message}`);
+}
+
+/** Keys merged into the client's video style in one statement (video_style_merge); a null key is taken as missing. */
+async function mergeVideoStyle(admin: any, clientId: string, patch: Record<string, unknown>): Promise<void> {
+  const { error } = await admin.rpc("video_style_merge", { p_client: clientId, p_patch: patch });
+  if (error) throw new Error(`Could not keep the client's video style: ${error.message}`);
+}
+
+/** The kit on the client's video style, with its time; the claim is cleared. */
 async function storeKit(admin: any, clientId: string, kit: string[]): Promise<void> {
-  const { data: client, error: readError } = await admin.from("clients").select("video_style").eq("id", clientId).maybeSingle();
-  if (readError) throw new Error(`Could not read the client's video style: ${readError.message}`);
-  const { kit_started_at: _started, kit_job: _job, ...style } = client?.video_style ?? {};
-  const { error } = await admin.from("clients").update({ video_style: { ...style, kit, kit_at: new Date().toISOString() } }).eq("id", clientId);
-  if (error) throw new Error(`Could not keep the client's kit: ${error.message}`);
+  await mergeVideoStyle(admin, clientId, { kit, kit_at: new Date().toISOString(), kit_started_at: null, kit_job: null });
+}
+
+/** Video posts that waited for the client's video style are planned. */
+async function planWaitingVideos(admin: any, clientId: string): Promise<void> {
+  const { data: waiting } = await admin.from("design_requests").select("id, briefs")
+    .eq("client_id", clientId).eq("kind", "video").eq("status", "preparing").eq("stage", "planning");
+  for (const w of waiting ?? []) {
+    if (Array.isArray(w.briefs) && w.briefs.length) continue;
+    await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/design-request`, {
+      method: "POST",
+      // The system's own call: it never acts as a person, and the request
+      // it plans already names the person who asked.
+      headers: { "Content-Type": "application/json", "X-Socialytics-Secret": Deno.env.get("SOCIALYTICS_N8N_SECRET") ?? "" },
+      body: JSON.stringify({ action: "replan", request_id: w.id }),
+      signal: AbortSignal.timeout(15_000),
+    }).then(async (r) => {
+      const text = await r.text();
+      if (!r.ok) throw new Error(`replan answered ${r.status}: ${text.slice(0, 200)}`);
+    }).catch((e) => console.error(`[video-worker] could not plan ${w.id}:`, e instanceof Error ? e.message : e));
+  }
 }
 
 /**
@@ -623,14 +694,15 @@ async function storeKit(admin: any, clientId: string, kit: string[]): Promise<vo
  *   style_cut   STYLE_FRAMES stills from each video, taken in the sandbox;
  *   style_wait  until they are stored;
  *   style_read  the vision model describes the style; it is kept on the client
- *               (clients.video_style) with the stills, and video posts waiting
- *               for it are planned.
+ *               (clients.video_style) with the stills; the kit is made next
+ *               (runKitStep), and then the video posts waiting for the style
+ *               are planned.
  */
 async function runStyleStep(admin: any, job: VideoJob): Promise<VideoStepResult> {
   const s = job.state ?? (job.state = {});
   const recently = (at: unknown) => typeof at === "number" && Date.now() - at < VIDEO_POLL_MS;
   if (job.step === "kit" || job.step === "kit_wait") return runKitStep(admin, job, "finish");
-  const { data: client } = await admin.from("clients").select("name, video_references, video_style").eq("id", job.client_id).maybeSingle();
+  const { data: client } = await admin.from("clients").select("name, video_references").eq("id", job.client_id).maybeSingle();
   const videos: string[] = (Array.isArray(client?.video_references) ? client.video_references : []).map((r: { path?: unknown }) => String(r?.path ?? "")).filter(Boolean).slice(0, 3);
   if (!videos.length) throw new Error("FINAL: The client has no published videos to learn from.");
   switch (job.step) {
@@ -675,26 +747,9 @@ async function runStyleStep(admin: any, job: VideoJob): Promise<VideoStepResult>
       const result = await anthropicMessages({ apiKey, body: { model: "claude-opus-5-5", max_tokens: 4000, messages: [{ role: "user", content }] } });
       const style = parseVideoStyle(result.text);
       if (!style) throw new Error(`The client's videos could not be read: ${result.text.slice(0, 200)}`);
-      // Merged: a kit made before (and a kit being made) stays.
-      await admin.from("clients").update({ video_style: { ...(client?.video_style ?? {}), profile: style, frames: s.frames, videos: videos.length, frames_per_video: STYLE_FRAMES, made_at: new Date().toISOString() } }).eq("id", job.client_id);
+      // A style learned again gets a new kit, made next from these stills.
+      await mergeVideoStyle(admin, job.client_id, { profile: style, frames: s.frames, videos: videos.length, frames_per_video: STYLE_FRAMES, made_at: new Date().toISOString(), kit: null, kit_at: null });
       s.style = style;
-      // Video posts that waited for the style are planned now.
-      const { data: waiting } = await admin.from("design_requests").select("id, briefs")
-        .eq("client_id", job.client_id).eq("kind", "video").eq("status", "preparing").eq("stage", "planning");
-      for (const w of waiting ?? []) {
-        if (Array.isArray(w.briefs) && w.briefs.length) continue;
-        await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/design-request`, {
-          method: "POST",
-          // The system's own call: it never acts as a person, and the request
-          // it plans already names the person who asked.
-          headers: { "Content-Type": "application/json", "X-Socialytics-Secret": Deno.env.get("SOCIALYTICS_N8N_SECRET") ?? "" },
-          body: JSON.stringify({ action: "replan", request_id: w.id }),
-          signal: AbortSignal.timeout(15_000),
-        }).then(async (r) => {
-          const text = await r.text();
-          if (!r.ok) throw new Error(`replan answered ${r.status}: ${text.slice(0, 200)}`);
-        }).catch((e) => console.error(`[video-worker] could not plan ${w.id}:`, e instanceof Error ? e.message : e));
-      }
       // The client's kit is made next, from these stills.
       job.step = "kit"; return "next";
     }
