@@ -52,7 +52,8 @@ const NEVER = personal({ id: "k2", name: "Board deck", key_prefix: "soc_BoardDk2
 const EXPIRED = personal({ id: "k3", name: "Old script", key_prefix: "soc_OldScrp3", created_at: iso(created.getTime() - 100 * DAY), expires_at: iso(created.getTime() - 10 * DAY) });
 const REVOKED = personal({ id: "k4", name: "Spare", key_prefix: "soc_SpareKy4", revoked_at: iso(now - DAY) });
 
-type Handler = (method: string, url: string, body: any) => { status: number; body: unknown } | undefined;
+/** A reply, or "network" for a request whose reply never arrived (fetch rejects). */
+type Handler = (method: string, url: string, body: any) => { status: number; body: unknown } | "network" | undefined;
 const calls: Array<{ method: string; url: string; body: any; auth: string | undefined }> = [];
 let handle: Handler;
 function respond(h: Handler) {
@@ -63,6 +64,7 @@ function respond(h: Handler) {
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     calls.push({ method, url, body, auth: (init?.headers as Record<string, string> | undefined)?.Authorization });
     const r = handle(method, url, body) ?? { status: 404, body: { error: { code: "not_found", message: "Not found" } } };
+    if (r === "network") throw new TypeError("Failed to fetch");
     return new Response(JSON.stringify(r.body), { status: r.status, headers: { "Content-Type": "application/json" } });
   }) as unknown as typeof fetch;
 }
@@ -265,6 +267,105 @@ describe("making a key", () => {
     expect(screen.getByLabelText("Name")).toHaveValue("Reporting script");
     expect(screen.queryByText(/insert failed|duplicate|constraint/)).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+describe("a new key whose reply is lost, rate limited, or shown once", () => {
+  const PLAIN = "soc_LostKey7_the_rest_of_the_secret_shown_only_once";
+  const LOST = personal({ id: "k7", name: "Reporting script", key_prefix: "soc_LostKey7" });
+  const posts = () => calls.filter((c) => c.method === "POST").length;
+  const reads = () => calls.filter((c) => c.method === "GET" && c.url.endsWith("/me/keys")).length;
+
+  async function create(name: string) {
+    fireEvent.click(await screen.findByRole("button", { name: "Create key" }));
+    fireEvent.change(await screen.findByLabelText("Name"), { target: { value: name } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+  }
+
+  it.each([
+    ["no reply at all", "network" as const],
+    ["a gateway's reply (502)", { status: 502, body: { message: "Bad gateway" } }],
+  ])("after %s, never sends the key again: reads the list again and says to check it first", async (_what, lost) => {
+    // The server made the key; only its reply was lost.
+    let made = false;
+    respond((method, url) => {
+      if (method === "POST") { made = true; return lost; }
+      if (method === "GET" && url.endsWith("/me/keys")) return list(made ? [LOST, ACTIVE] : [ACTIVE]);
+      return undefined;
+    });
+    mountPage();
+    await screen.findByText("Nightly export");
+    const readsBefore = reads();
+    await create("Reporting script");
+
+    expect(await screen.findByText("We couldn't confirm the new key. Check your keys below before making another.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    // The key the server did make is in the list, by its prefix only.
+    const row = (await screen.findByText("Reporting script")).closest("li")!;
+    expect(within(row).getByText("Starts with soc_LostKey7…")).toBeInTheDocument();
+    expect(reads()).toBeGreaterThan(readsBefore);
+    expect(posts()).toBe(1);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(document.body.textContent).not.toMatch(/Bad gateway|Failed to fetch|try again|refresh/i);
+    readsPlainly();
+  });
+
+  it("sends again after a rate limit, which made nothing, and shows the key once", async () => {
+    let tries = 0;
+    respond((method, url, body) => {
+      if (method === "POST") {
+        tries++;
+        if (tries === 1) return { status: 429, body: { error: { code: "rate_limited", message: "Too many requests" } } };
+        return { status: 201, body: { data: { ...LOST, name: body.name, key: PLAIN } } };
+      }
+      if (method === "GET" && url.endsWith("/me/keys")) return list([]);
+      return undefined;
+    });
+    mountPage();
+    await create("Reporting script");
+    expect(await within(await screen.findByRole("dialog")).findByText(PLAIN)).toBeInTheDocument();
+    expect(posts()).toBe(2);
+    expect(screen.queryByText(/Too many requests/)).toBeNull();
+  });
+
+  it("keeps the shown-once key through Escape and the corner close, until Done", async () => {
+    respond((method, url, body) => {
+      if (method === "POST") return { status: 201, body: { data: { ...LOST, name: body.name, key: PLAIN } } };
+      if (method === "GET" && url.endsWith("/me/keys")) return list([]);
+      return undefined;
+    });
+    mountPage();
+    await create("Reporting script");
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText(PLAIN)).toBeInTheDocument();
+
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect(within(dialog).getByText(PLAIN)).toBeInTheDocument();
+
+    // The corner close is hidden while the key is shown (jsdom has no stylesheet, so it is
+    // still in the tree here), and pressing it anyway changes nothing.
+    expect(dialog.className).toContain("[&>button]:hidden");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect(within(dialog).getByText(PLAIN)).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(document.body.textContent).not.toContain(PLAIN);
+  });
+
+  it("leaves the end date out of the sentence when a key has none", async () => {
+    respond((method, url, body) => {
+      if (method === "POST") return { status: 201, body: { data: { ...LOST, expires_at: null, name: body.name, key: PLAIN } } };
+      if (method === "GET" && url.endsWith("/me/keys")) return list([]);
+      return undefined;
+    });
+    mountPage();
+    await create("Reporting script");
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText("It sees what you see in Socialytics and is read only.")).toBeInTheDocument();
+    expect(dialog.textContent).not.toMatch(/stops working on|on \./);
   });
 });
 

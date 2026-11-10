@@ -39,6 +39,25 @@ function notMadeLine(error: unknown): string {
   return "No key yet. The name you typed is kept.";
 }
 
+/**
+ * Each send makes a new key, so a create is sent again only when the server
+ * provably did no work: a rate limit (429) or a service that was not up
+ * (503). Revoking, which answers the first revoke, has its own wider rule.
+ */
+const createResendable = (error: unknown) => error instanceof PersonalKeyError && (error.status === 429 || error.status === 503);
+
+/**
+ * No reply at all (the request may have reached the server) or a gateway's
+ * reply (502, 504) in place of the server's: the key may have been made and
+ * its reply lost. Never sent again; the list is read again instead.
+ */
+function unconfirmed(error: unknown): boolean {
+  if (error instanceof PersonalKeyError) return error.status === 502 || error.status === 504;
+  return error != null;
+}
+
+const UNCONFIRMED_LINE = "We couldn't confirm the new key. Check your keys below before making another.";
+
 function KeyRow({ k, onRevoke }: { k: PersonalKey; onRevoke: (k: PersonalKey) => void }) {
   const state = stateOf(k);
   return (
@@ -72,6 +91,8 @@ function KeyRow({ k, onRevoke }: { k: PersonalKey; onRevoke: (k: PersonalKey) =>
 
 function OneTimeKey({ created, onDone }: { created: CreatedPersonalKey; onDone: () => void }) {
   const [copied, setCopied] = useState(false);
+  // Empty when the key has no end date, so the sentence never ends on "on ."
+  const until = formatDate(created.expires_at);
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(created.key);
@@ -87,7 +108,7 @@ function OneTimeKey({ created, onDone }: { created: CreatedPersonalKey; onDone: 
       <DialogHeader>
         <DialogTitle>{created.name} is ready</DialogTitle>
         <DialogDescription>
-          It sees what you see in Socialytics, is read only, and stops working on {formatDate(created.expires_at)}.
+          {until ? `It sees what you see in Socialytics, is read only, and stops working on ${until}.` : "It sees what you see in Socialytics and is read only."}
         </DialogDescription>
       </DialogHeader>
       <div className="space-y-3" data-testid="personal-key-created">
@@ -107,7 +128,7 @@ function OneTimeKey({ created, onDone }: { created: CreatedPersonalKey; onDone: 
   );
 }
 
-function CreateKeyDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+function CreateKeyDialog({ open, onOpenChange, onUnconfirmed }: { open: boolean; onOpenChange: (open: boolean) => void; onUnconfirmed: () => void }) {
   const create = useCreatePersonalKey();
   const [name, setName] = useState("");
   const [line, setLine] = useState<string | null>(null);
@@ -130,11 +151,19 @@ function CreateKeyDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
     if (!name.trim() || sending) return;
     setLine(null);
     setSending(true);
-    // Sent again quietly only when it never reached the server: each send makes a new key.
-    const { data, error } = await sendQuietly(() => create.mutateAsync(name.trim()).then((data) => ({ data, error: null }), (error: unknown) => ({ data: null, error })));
+    const { data, error } = await sendQuietly(
+      () => create.mutateAsync(name.trim()).then((data) => ({ data, error: null }), (error: unknown) => ({ data: null, error })),
+      { again: createResendable },
+    );
     setSending(false);
     if (error || !data) {
       console.warn("[personal api key] not made yet", error);
+      if (unconfirmed(error)) {
+        // The list is the truth: the page reads it again and says to look there first.
+        close();
+        onUnconfirmed();
+        return;
+      }
       setLine(notMadeLine(error));
       return;
     }
@@ -144,12 +173,16 @@ function CreateKeyDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
   };
 
   return (
-    // Kept open while a key is being made, so a key made after a close is never shown on the next open.
-    <Dialog open={open} onOpenChange={(o) => (o ? onOpenChange(true) : !sending && close())}>
+    // Kept open while a key is being made, so a key made after a close is never
+    // shown on the next open; and while the key is shown, only Done closes it.
+    <Dialog open={open} onOpenChange={(o) => (o ? onOpenChange(true) : !sending && !created && close())}>
       <DialogContent
-        className="max-w-lg"
-        // A stray click outside must not lose a key that is shown only once.
+        // While the key is shown the corner close is hidden (as the mobile
+        // sidebar hides its own), and neither Escape nor a stray click outside
+        // can lose a key that is shown only once.
+        className={cn("max-w-lg", created && "[&>button]:hidden")}
         onInteractOutside={(e) => { if (created) e.preventDefault(); }}
+        onEscapeKeyDown={(e) => { if (created) e.preventDefault(); }}
       >
         {created ? (
           <OneTimeKey created={created} onDone={close} />
@@ -184,13 +217,14 @@ export default function ApiKeys() {
   const revoke = useRevokePersonalKey();
   const [creating, setCreating] = useState(false);
   const [toRevoke, setToRevoke] = useState<PersonalKey | null>(null);
-  const [notRevoked, setNotRevoked] = useState<string | null>(null);
+  /** One quiet line over the list: a key not revoked yet, or a new key that could not be confirmed. */
+  const [notice, setNotice] = useState<string | null>(null);
   const loaded = !isLoading && !isError;
   const active = keys.filter((k) => stateOf(k) === "active").length;
 
   const confirmRevoke = async (k: PersonalKey) => {
     setToRevoke(null);
-    setNotRevoked(null);
+    setNotice(null);
     // Revoking twice answers the first revoke, so a send that failed on the server is safe to repeat.
     const { error: notDone } = await sendQuietly(
       () => revoke.mutateAsync(k.id).then(() => ({ error: null }), (e: unknown) => ({ error: e })),
@@ -198,7 +232,7 @@ export default function ApiKeys() {
     );
     if (notDone) {
       console.warn("[personal api key] not revoked yet", notDone);
-      setNotRevoked(`${k.name} is not revoked yet.`);
+      setNotice(`${k.name} is not revoked yet.`);
       refetch();
     }
   };
@@ -209,7 +243,7 @@ export default function ApiKeys() {
       description="A key lets your own tools and scripts read Socialytics for you. Each key sees what you see here, is read only, and expires after 90 days."
       meta={loaded ? <span className="t-label">{active} of {ACTIVE_LIMIT} active</span> : undefined}
       actions={
-        <Button onClick={() => setCreating(true)}>
+        <Button onClick={() => { setNotice(null); setCreating(true); }}>
           <Plus aria-hidden />
           Create key
         </Button>
@@ -217,7 +251,7 @@ export default function ApiKeys() {
     >
       <Card>
         <CardContent className="space-y-3">
-          {notRevoked && <p role="status" className="t-secondary">{notRevoked}</p>}
+          {notice && <p role="status" className="t-secondary">{notice}</p>}
           {isLoading ? (
             <Loading label="Loading your keys" />
           ) : isError ? (
@@ -234,7 +268,7 @@ export default function ApiKeys() {
           )}
         </CardContent>
       </Card>
-      <CreateKeyDialog open={creating} onOpenChange={setCreating} />
+      <CreateKeyDialog open={creating} onOpenChange={setCreating} onUnconfirmed={() => { setNotice(UNCONFIRMED_LINE); refetch(); }} />
       <AlertDialog open={!!toRevoke} onOpenChange={(o) => !o && setToRevoke(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
