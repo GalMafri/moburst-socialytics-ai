@@ -15,9 +15,11 @@
 
 import { createClient } from "../_shared/supabase.ts";
 import { Image } from "https://deno.land/x/imagescript@1.3.0/mod.ts";
-import { decode as base64Decode, encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
+import { encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { secretEquals } from "../_shared/auth/secretEquals.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
+import { ModelBusy, imageEdit } from "../_shared/media/imageEdit.ts";
+import { openaiKey } from "../_shared/openai/key.ts";
 import { endRequest, settleRequest, BUCKET } from "../_shared/canva/jobs.ts";
 import { MAX_PLAN_ATTEMPTS, NO_PROGRESS_MINUTES } from "../_shared/design/requestRules.ts";
 import { type GenerateInput, canvasLogoRect, designPrompt, resampleRGBA } from "../_shared/canva/brief.ts";
@@ -43,7 +45,6 @@ const MAX_UNLOGO = 4;
 /** Removals that name another brand's marks before the design is made again. */
 const MAX_MARK_CLEANS = 2;
 const DEFAULT_PAGE = { width: 1088, height: 1360 };
-const IMAGE_MODEL = "gpt-image-2.5-flare";
 const READ_MODEL = "claude-opus-5-5";
 /**
  * Room for each check's answer. The model may think before it answers and
@@ -306,7 +307,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
         const g: GenerateInput = job.input.generate;
         const page = pageOf(job);
         const size = pictureSize([page.width, page.height]);
-        const bytes = await imageEdit([{ bytes: await download(admin, s.design_path), name: "design.png" }], removePrompt(g.brand_name, s.marks_where), size);
+        const bytes = await imageEdit(await openaiKey(db()), [{ bytes: await download(admin, s.design_path), name: "design.png" }], removePrompt(g.brand_name, s.marks_where), size);
         const path = `${base}/nologo-${s.generations}-${s.unlogos}.png`;
         await upload(admin, path, bytes, "image/png");
         s.nologo_path = path;
@@ -497,15 +498,12 @@ async function generateDesign(admin: any, job: Job, path: string): Promise<strin
     if (error || !data) throw new Error(`Could not read the client post ${p}: ${error?.message ?? "missing"}`);
     images.push({ bytes: new Uint8Array(await data.arrayBuffer()), name: `ref${i}${p.slice(p.lastIndexOf("."))}` });
   }
-  const bytes = await imageEdit(images, designPrompt(g, job.input.copy, g.refs.length, slide), size, await mask.encode());
+  const bytes = await imageEdit(await openaiKey(db()), images, designPrompt(g, job.input.copy, g.refs.length, slide), size, await mask.encode());
   await upload(admin, path, bytes, "image/png");
   return path;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-
-/** The image model is at its rate limit or briefly down; the step is tried again on a later pass. */
-class ModelBusy extends Error {}
 
 /** A job that has nothing left to do because its option is over: it stops, which is not a failure of its own. */
 class Stopped extends Error {}
@@ -544,43 +542,6 @@ async function readCheck<T>(ask: () => Promise<string>, parse: (text: string) =>
   throw new Error(`${what} could not be read: ${last.slice(0, 200)}`);
 }
 
-async function imageEdit(images: { bytes: Uint8Array; name: string }[], prompt: string, size: [number, number], mask?: Uint8Array): Promise<Uint8Array> {
-  const form = new FormData();
-  form.append("model", IMAGE_MODEL);
-  form.append("size", `${size[0]}x${size[1]}`);
-  form.append("quality", "high");
-  form.append("n", "1");
-  for (const im of images) {
-    const type = /\.png$/i.test(im.name) ? "image/png" : /\.webp$/i.test(im.name) ? "image/webp" : "image/jpeg";
-    form.append("image[]", new Blob([im.bytes as unknown as BlobPart], { type }), im.name);
-  }
-  if (mask) form.append("mask", new Blob([mask as unknown as BlobPart], { type: "image/png" }), "mask.png");
-  form.append("prompt", prompt);
-  const resp = await fetch("https://api.openai.com/v1/images/edits", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${await openaiKey()}` },
-    body: form,
-    signal: AbortSignal.timeout(360_000),
-  });
-  const text = await resp.text();
-  if (resp.status === 429 || resp.status >= 500) throw new ModelBusy(`Image model ${resp.status}: ${text.slice(0, 200)}`);
-  if (!resp.ok) throw new Error(`Image model ${resp.status}: ${text.slice(0, 300)}`);
-  const b64 = JSON.parse(text)?.data?.[0]?.b64_json;
-  if (!b64) throw new Error("The image model returned no image.");
-  const bytes = base64Decode(b64);
-  const [w, h] = pngSize(bytes);
-  if (w !== size[0] || h !== size[1]) throw new Error(`The image model answered at ${w}x${h}; ${size[0]}x${size[1]} was asked for.`);
-  return bytes;
-}
-
-async function openaiKey(): Promise<string> {
-  const key = Deno.env.get("OPENAI_API_KEY");
-  if (key) return key;
-  const { data } = await db().from("app_settings").select("value").eq("key", "openai_api_key").maybeSingle();
-  if (!data?.value) throw new Error("FINAL: No OpenAI key is configured.");
-  return data.value as string;
-}
-
 async function download(admin: any, path: string): Promise<Uint8Array> {
   const { data, error } = await admin.storage.from(BUCKET).download(path);
   if (error || !data) throw new Error(`Could not read ${path}: ${error?.message ?? "missing"}`);
@@ -590,12 +551,6 @@ async function download(admin: any, path: string): Promise<Uint8Array> {
 async function upload(admin: any, path: string, bytes: Uint8Array, contentType: string): Promise<void> {
   const { error } = await admin.storage.from(BUCKET).upload(path, bytes, { contentType, upsert: true });
   if (error) throw new Error(`Could not store ${path}: ${error.message}`);
-}
-
-function pngSize(bytes: Uint8Array): [number, number] {
-  const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  if (bytes.length < 24 || v.getUint32(0) !== 0x89504e47) throw new Error("The image model did not return a PNG.");
-  return [v.getUint32(16), v.getUint32(20)];
 }
 
 function hexRgb(hex: string): [number, number, number] {

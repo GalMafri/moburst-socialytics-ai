@@ -34,6 +34,8 @@ import { wakeWorker } from "../_shared/canva/worker.ts";
 import { type Box, type Layer, type Placement, CLEAN_PROMPT, composeOver, outputSize, pictureSize, copyOperations, elementBox, inkBox, logoRect, pickLogoLayers, placementRegion } from "../_shared/canva/finish.ts";
 import { type GenerateInput, canvasLogoRect, designPrompt, resampleRGBA } from "../_shared/canva/brief.ts";
 import { VIDEO_STEPS_FILTER } from "../_shared/video/steps.ts";
+import { ModelBusy } from "../_shared/media/imageEdit.ts";
+import { openaiKey } from "../_shared/openai/key.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
@@ -744,20 +746,9 @@ async function cleanBackground(admin: any, job: Job): Promise<void> {
   await admin.from("canva_finish_jobs").update({ step: next, state, error: null, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id);
 }
 
-/** The image model is at its rate limit or briefly down; the step is tried again on a later pass. */
-class ModelBusy extends Error {}
-
 /** A small fully transparent PNG; as the page background it leaves only the copy and the logo in the export. */
 async function blankPng(): Promise<Uint8Array> {
   return await new Image(32, 32).encode();
-}
-
-async function openaiKey(admin: any): Promise<string> {
-  const fromEnv = Deno.env.get("OPENAI_API_KEY");
-  if (fromEnv) return fromEnv;
-  const { data } = await admin.from("app_settings").select("value").eq("key", "openai_api_key").maybeSingle();
-  if (!data?.value) throw new Error("FINAL: No OpenAI key is configured.");
-  return data.value as string;
 }
 
 function hexRgb(hex: string): [number, number, number] {

@@ -36,6 +36,7 @@ import { CLIP_CREDIT_FLOOR, withCredits } from "./credits.ts";
 import { BUCKET } from "../canva/jobs.ts";
 import { canvasLogoRect } from "../canva/brief.ts";
 import { anthropicMessages } from "../anthropic.ts";
+import { openaiKey } from "../openai/key.ts";
 import { copyMatches, parseRead, readPrompt } from "../design/pipeline.ts";
 import { parseVideoStyle, videoStylePrompt } from "../canva/options.ts";
 import { CARD_SIZE, FOOTAGE_STILLS, STYLE_FRAMES, TIMING, VIDEO_SIZE, audioScript, captionWeight, captionsAss, cleanFootagePrompt, framesScript, hookPlacement, parseAudio, videoLogoBox, parseFrames, clipScript, composeScript, footageTextPrompt, parseClipped, parseComposed, parseFootageText, referenceClipPath } from "./compose.ts";
@@ -600,12 +601,4 @@ function sentenceBreaksInside(segments: Array<{ start?: unknown; end?: unknown; 
     tokens.forEach((t, i) => { if (i + 1 < inSeg.length && /[.!?]["']?$/.test(t)) out.push(inSeg[i + 1].start); });
   }
   return out;
-}
-
-async function openaiKey(admin: any): Promise<string> {
-  const key = Deno.env.get("OPENAI_API_KEY");
-  if (key) return key;
-  const { data } = await admin.from("app_settings").select("value").eq("key", "openai_api_key").maybeSingle();
-  if (!data?.value) throw new Error("FINAL: No OpenAI key is configured.");
-  return data.value as string;
 }
