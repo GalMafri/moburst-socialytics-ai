@@ -107,7 +107,8 @@ export function clipOrderDecision(
   }
   if (approved === null) return { action: "stop", reason: REASONS.unquoted };
   if (live === null) return { action: "wait" };
-  if (balance !== null && balance < CLIP_CREDIT_FLOOR) return { action: "stop", reason: REASONS.balance };
+  // The balance must cover the clip at its live price, and never less than the floor.
+  if (balance !== null && balance < Math.max(CLIP_CREDIT_FLOOR, live)) return { action: "stop", reason: REASONS.balance };
   if (live > approved) return { action: "stop", reason: REASONS.price };
   return { action: "order" };
 }

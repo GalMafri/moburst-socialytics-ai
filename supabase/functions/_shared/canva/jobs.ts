@@ -5,7 +5,7 @@
 // (after every step, to record progress, hand finished options to the post,
 // and replace any option that did not finish).
 
-import { type Brief, optionStates, requestProgress, type JobState } from "./options.ts";
+import { type Brief, candidatesFor, optionStates, requestProgress, type JobState } from "./options.ts";
 import type { EndReason } from "../design/requestRules.ts";
 import { STORY_PAGE, STORY_SURFACE, isStoryPost, storyLogoPlacement } from "../design/story.ts";
 import { videoRouteFor } from "../video/kit.ts";
@@ -204,8 +204,8 @@ export async function settleRequest(admin: any, requestId: string): Promise<void
 async function settleRequestNow(admin: any, requestId: string): Promise<void> {
   const { data: req } = await admin.from("design_requests").select("*").eq("id", requestId).maybeSingle();
   if (!req || req.status !== "preparing") return;
-  const { data: jobs } = await admin.from("canva_finish_jobs").select("id, status, step, option_index, slide_index, slide_count, output_path, state, input").eq("design_request_id", requestId).order("created_at");
-  type Row = JobState & { id: string; option_index: number; slide_index: number | null; slide_count: number | null; output_path: string | null; state: any; input: any };
+  const { data: jobs } = await admin.from("canva_finish_jobs").select("id, status, step, option_index, slide_index, slide_count, output_path, state, input, error").eq("design_request_id", requestId).order("created_at");
+  type Row = JobState & { id: string; option_index: number; slide_index: number | null; slide_count: number | null; output_path: string | null; state: any; input: any; error?: string | null };
   const list = (jobs ?? []) as Row[];
 
   // One finished option, one design on the post: a single design, or a
@@ -257,9 +257,14 @@ async function settleRequestNow(admin: any, requestId: string): Promise<void> {
   }
 
   const options = optionStates(list);
-  const progress = requestProgress(options, req.options_wanted, (req.briefs ?? []).length);
-  // Every option tried and none finished: closed quietly, and made again later.
-  if (progress.status === "closed") return endRequest(admin, requestId, "no_design");
+  // A video starts one option only (each buys a clip), so it is never replaced.
+  const progress = requestProgress(options, req.options_wanted, (req.briefs ?? []).length, candidatesFor(req.kind));
+  // Every option tried and none finished: closed, and made again later. A
+  // video keeps its job's reason, so the post shows why.
+  if (progress.status === "closed") {
+    const why = req.kind === "video" ? list.find((j) => j.status === "failed" && j.error)?.error ?? null : null;
+    return endRequest(admin, requestId, "no_design", why);
+  }
   let started = options.length;
   if (progress.start_brief !== null) {
     const { data: settings } = await admin.from("design_brand_settings").select("*").eq("client_id", req.client_id).maybeSingle();
@@ -282,7 +287,7 @@ async function settleRequestNow(admin: any, requestId: string): Promise<void> {
  * stop, nobody is shown anything, and the week's design button counts the
  * post again the next time it is pressed when the reason calls for it
  * (weekDecision, _shared/design/requestRules.ts). Nothing is made again on
- * its own. The note is kept for the logs only.
+ * its own. The note is kept on the request as its error.
  */
 export async function endRequest(admin: any, requestId: string, reason: EndReason, note?: string | null): Promise<void> {
   const now = new Date().toISOString();

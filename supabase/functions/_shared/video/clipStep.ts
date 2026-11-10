@@ -73,7 +73,7 @@ async function recordOrdered(deps: ClipDeps, job: VideoJob, jobId: string, credi
     }
   }
   const why = last instanceof Error ? last.message : String(last);
-  throw new Error(`The clip was ordered as Higgsfield job ${jobId}, but its job id could not be recorded: ${why}`);
+  throw new Error(`The clip was ordered as video job ${jobId}, but its id could not be recorded: ${why}`);
 }
 
 /** The job ended with the reason, unless an order stands in the way: then the row is left to the pass that placed it. */
@@ -133,7 +133,7 @@ export async function runClip(deps: ClipDeps, job: VideoJob): Promise<VideoStepR
   // A failure from here on leaves the order without a job id: later passes
   // wait out ORDER_GRACE_MS and then end the video, never ordering again.
   const first = await deps.submit(clipRequest(prompt, s.frame_ref_id, s.kit_ref_ids));
-  if (!first?.job_id) throw new Error("Higgsfield did not start the clip.");
+  if (!first?.job_id) throw new Error("The video service did not start the clip.");
   await recordOrdered(deps, job, first.job_id, live);
   job.clip_order = { ...order, job_id: first.job_id, credits: live };
   s.clip_started_at = deps.now();

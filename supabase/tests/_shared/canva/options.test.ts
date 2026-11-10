@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { MAX_CANDIDATES, carouselPlannerPrompt, parseBriefs, plannerPrompt, requestProgress, videoPlannerPrompt, type JobState } from "../../../functions/_shared/canva/options";
+import { MAX_CANDIDATES, VIDEO_CANDIDATES, candidatesFor, carouselPlannerPrompt, parseBriefs, plannerPrompt, requestProgress, videoPlannerPrompt, type JobState } from "../../../functions/_shared/canva/options";
 
 const done: JobState = { status: "done", step: "finished" };
 const failed: JobState = { status: "failed", step: "edit" };
@@ -39,6 +39,18 @@ describe("requestProgress", () => {
   });
   it("closes quietly when nothing finished, so a new request is made later", () => {
     expect(requestProgress(Array(MAX_CANDIDATES).fill(failed))).toMatchObject({ status: "closed", options_ready: 0, start_brief: null });
+  });
+  it("never replaces a video that did not finish: its one option bought its one clip", () => {
+    expect(candidatesFor("video")).toBe(VIDEO_CANDIDATES);
+    expect(VIDEO_CANDIDATES).toBe(1);
+    expect(requestProgress([failed], 1, 3, candidatesFor("video"))).toMatchObject({ status: "closed", options_ready: 0, start_brief: null });
+    expect(requestProgress([], 1, 3, candidatesFor("video"))).toMatchObject({ status: "preparing", start_brief: 0 });
+  });
+  it("keeps three candidates for stills", () => {
+    for (const kind of ["single", "carousel", undefined]) {
+      expect(candidatesFor(kind)).toBe(MAX_CANDIDATES);
+      expect(requestProgress([failed], 1, 3, candidatesFor(kind))).toMatchObject({ status: "preparing", start_brief: 1 });
+    }
   });
 });
 

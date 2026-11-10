@@ -26,6 +26,11 @@ describe("clipOrderDecision", () => {
     expect(clipOrderDecision(null, 128, 128, 100, NOW)).toEqual({ action: "stop", reason: REASONS.balance });
     expect(clipOrderDecision(null, 128, 128, null, NOW)).toEqual({ action: "order" });
   });
+  it("needs a balance that covers the live price, not only the floor", () => {
+    expect(clipOrderDecision(null, 144, 144, 135, NOW)).toEqual({ action: "stop", reason: REASONS.balance });
+    expect(clipOrderDecision(null, 144, 128, 135, NOW)).toEqual({ action: "order" });
+    expect(clipOrderDecision(null, 144, 144, 144, NOW)).toEqual({ action: "order" });
+  });
   it("never orders again once an order is recorded", () => {
     expect(clipOrderDecision({ price: 128, at: "x", job_id: "j" }, 128, 100, 1000, NOW)).toEqual({ action: "wait" });
     // Without a job id, the order's pass may still be submitting: it is waited for, then taken as lost.

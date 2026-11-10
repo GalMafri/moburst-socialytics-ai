@@ -9,11 +9,20 @@
 // finish is replaced from the next brief. Nobody ever sees a failure. When the
 // replacements run out with nothing finished, the request closes quietly and a
 // new one is made later, until the post's own time
-// (_shared/design/requestRules.ts).
+// (_shared/design/requestRules.ts). A video is the exception: its one option
+// buys one clip, so it is never replaced; when it does not finish, the
+// request closes with its reason.
 
 export const OPTIONS_WANTED = 1;
-/** How many options a request may start in all, replacements included. */
+/** How many options a still request may start in all, replacements included. */
 export const MAX_CANDIDATES = 3;
+/** A video request starts one option only: each option buys a clip. */
+export const VIDEO_CANDIDATES = 1;
+
+/** How many options a request of this kind may start in all. */
+export function candidatesFor(kind: string | null | undefined): number {
+  return kind === "video" ? VIDEO_CANDIDATES : MAX_CANDIDATES;
+}
 export const BRIEFS_PLANNED = 3;
 
 export interface Slide {
@@ -193,13 +202,13 @@ export interface RequestProgress {
 }
 
 /** Where a request stands, and whether it needs a replacement option, from its jobs. */
-export function requestProgress(jobs: JobState[], wanted = OPTIONS_WANTED, briefCount = BRIEFS_PLANNED): RequestProgress {
+export function requestProgress(jobs: JobState[], wanted = OPTIONS_WANTED, briefCount = BRIEFS_PLANNED, maxCandidates = MAX_CANDIDATES): RequestProgress {
   const ready = jobs.filter((j) => j.status === "done").length;
   const active = jobs.filter((j) => j.status === "queued" || j.status === "running");
   const started = jobs.length;
   if (ready >= wanted) return { status: "ready", stage: "ready", options_ready: ready, start_brief: null };
   const stillNeeded = wanted - ready - active.length;
-  if (stillNeeded > 0 && started < MAX_CANDIDATES) {
+  if (stillNeeded > 0 && started < maxCandidates) {
     return { status: "preparing", stage: stageOf(active), options_ready: ready, start_brief: started % Math.max(1, briefCount) };
   }
   if (active.length) return { status: "preparing", stage: stageOf(active), options_ready: ready, start_brief: null };

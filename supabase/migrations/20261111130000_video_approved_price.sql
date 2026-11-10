@@ -5,7 +5,8 @@
 -- the week's press, or at a single post's request, and kept on the request.
 -- The clip step orders only when the live price at that moment is at most
 -- this one. Null for a still, and for a video whose price could not be read
--- (its clip step then waits). Re-runnable.
+-- (its clip step then stops with "This video was not priced when it was
+-- queued. Press again to make it."). Re-runnable.
 
 alter table public.design_requests add column if not exists approved_credits numeric;
 

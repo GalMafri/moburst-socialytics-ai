@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
-import { type DesignRequest, type Settings, BUCKET, pngSize, startOption } from "../../../functions/_shared/canva/jobs";
+import { type DesignRequest, type Settings, BUCKET, pngSize, settleRequest, startOption } from "../../../functions/_shared/canva/jobs";
 import { designPrompt, type GenerateInput } from "../../../functions/_shared/canva/brief";
 import { STORY_PAGE, storyLogoPlacement } from "../../../functions/_shared/design/story";
 
@@ -105,5 +105,42 @@ describe("pngSize", () => {
     const jpeg = new Uint8Array(24).fill(0xff);
     expect(() => pngSize(jpeg)).toThrow("The logo must be a PNG file.");
     expect(() => pngSize(jpeg, "The image model's answer")).toThrow("The image model's answer must be a PNG file.");
+  });
+});
+
+describe("settleRequest", () => {
+  const lease = { claim_worker_lease: () => true, release_worker_lease: () => true };
+  const failedJob = (kind: "video" | undefined) => ({
+    id: "job-0", design_request_id: "req-1", status: "failed", step: "assemble_wait", option_index: 0, slide_index: null, slide_count: null,
+    output_path: null, state: {}, input: kind ? { kind } : {}, error: "The video's title could not be drawn with the exact words.", created_at: "2026-11-10T08:00:00Z",
+  });
+  const world = (req: DesignRequest, kind: "video" | undefined) => {
+    const db = fakeDb({
+      design_requests: [{ ...req }],
+      canva_finish_jobs: [failedJob(kind)],
+      design_brand_settings: [{ ...settings }],
+      clients: [{ id: "c1", name: "Pay The Pyper", video_references: [], video_style: null }],
+      post_iterations: [],
+    }, lease);
+    db.uploads.set(`${BUCKET}/${settings.logo_path}`, pngHeader(701, 251));
+    return db;
+  };
+
+  it("closes a video request whose one job failed, with that job's reason, and starts no second clip", async () => {
+    const req = request({ kind: "video", approved_credits: 144, briefs: [0, 1, 2].map((i) => ({ headline: [`Hook ${i}`], picture: "p", footage: "a slow push in on a hockey bench at dawn", text_style: "bold white sans-serif" })) });
+    const db = world(req, "video");
+    await settleRequest(db, "req-1");
+    expect(db.tables.canva_finish_jobs).toHaveLength(1);
+    expect(db.tables.design_requests[0]).toMatchObject({ status: "closed", end_reason: "no_design", error: "The video's title could not be drawn with the exact words." });
+  });
+
+  it("still replaces a still design that did not finish, from the next brief", async () => {
+    const req = request({ briefs: [0, 1, 2].map((i) => ({ headline: [`Line ${i}`], picture: `picture ${i}` })) });
+    const db = world(req, undefined);
+    await settleRequest(db, "req-1");
+    expect(db.tables.canva_finish_jobs).toHaveLength(2);
+    expect(db.tables.canva_finish_jobs[1]).toMatchObject({ option_index: 1, step: "generate" });
+    expect(db.tables.canva_finish_jobs[1].input.copy).toEqual(["Line 1"]);
+    expect(db.tables.design_requests[0]).toMatchObject({ status: "preparing", candidates_started: 2 });
   });
 });
