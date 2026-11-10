@@ -62,7 +62,12 @@ export const REASONS = {
   writing: "The clip shows writing of its own, so it was not used.",
   frame: "The video's opening shot could not be drawn to the brand's rules.",
   quote: "The video's price could not be read, so the clip was not ordered. Press again later.",
+  unquoted: "This video was not priced when it was queued. Press again to make it.",
+  outdated: "This video was started before the video update. Press again to make it.",
 } as const;
+
+/** The steps of a video job from before the one-clip video (11 Nov); a job found at one ends with REASONS.outdated. */
+export const OLD_STEPS = ["references", "references_wait", "footage", "footage_wait", "hook", "hook_check", "compose", "compose_wait", "clean", "clean_wait"] as const;
 
 /** How long the clip step keeps waiting for a readable price before it stops with REASONS.quote. */
 export const QUOTE_WAIT_MS = 30 * 60_000;
@@ -70,8 +75,9 @@ export const QUOTE_WAIT_MS = 30 * 60_000;
 /**
  * Whether to order the clip now. An order already recorded is never repeated:
  * with a job id the step waits for it, without one the order was lost.
- * A price that cannot be read yet means wait; a price above the approved one,
- * or none approved, stops; so does a balance below the floor.
+ * A video with no approved price stops at once (it was never quoted); a
+ * price that cannot be read yet means wait; a price above the approved one
+ * stops; so does a balance below the floor.
  */
 export function clipOrderDecision(
   state: { clip_order?: ClipOrder | null },
@@ -81,8 +87,45 @@ export function clipOrderDecision(
 ): ClipDecision {
   const order = state.clip_order;
   if (order) return order.job_id ? { action: "wait" } : { action: "stop", reason: REASONS.lostOrder };
+  if (approved === null) return { action: "stop", reason: REASONS.unquoted };
   if (live === null) return { action: "wait" };
   if (balance !== null && balance < CLIP_CREDIT_FLOOR) return { action: "stop", reason: REASONS.balance };
-  if (approved === null || live > approved) return { action: "stop", reason: REASONS.price };
+  if (live > approved) return { action: "stop", reason: REASONS.price };
   return { action: "order" };
+}
+
+/** A clip not back this long after its order is taken as lost (Seedance usually takes 3 to 10 minutes). */
+export const CLIP_LOST_MS = 3 * 60 * 60_000;
+
+const ENDED = new Set(["completed", "failed", "nsfw", "canceled", "timed_out"]);
+
+/**
+ * Where an ordered clip stands, from the video service's answer about it:
+ * ready with its file; failed when it ended any other way; lost when it has
+ * not ended CLIP_LOST_MS after the order; else running.
+ */
+export function clipOutcome(
+  o: { status?: string; error?: string | null; result_url?: string | null } | undefined,
+  startedAt: number,
+  now: number,
+): "running" | "ready" | "failed" | "lost" {
+  if (o?.status === "completed" && o.result_url) return "ready";
+  if (o && (o.error || (o.status && ENDED.has(o.status)))) return "failed";
+  return now - startedAt > CLIP_LOST_MS ? "lost" : "running";
+}
+
+/**
+ * The image edit that draws a video's opening frame: the first moment of its
+ * brief as one still, in the look of the kit's stills when they are given,
+ * kept to the footage's rules (no writing, no marks, people as the client's
+ * videos have them). The clip starts from this frame.
+ */
+export function framePrompt(brief: string, rules: string): string {
+  return [
+    "Draw the opening frame of a vertical 9:16 social video: the very first moment of this video, as one photograph.",
+    `The video: ${brief.trim()}`,
+    "When reference images are given, they are stills from the brand's own videos: match their people, places, products, light, color and grade, without copying any one of them.",
+    "The frame is a whole scene that fills the picture edge to edge, with no border, band, panel or empty area.",
+    rules.trim(),
+  ].join(" ");
 }

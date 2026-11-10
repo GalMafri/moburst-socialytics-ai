@@ -310,38 +310,6 @@ export function quoteVideo(mcp: ToolCaller, req: VideoRequest): Promise<number |
   return costOf(mcp, "video", videoParams(req));
 }
 
-/**
- * Edit one video with the video model (Seedance's video_edit mode, billed by
- * the video's length): the prompt says what changes, everything else is kept.
- */
-export interface EditRequest {
-  prompt: string;
-  videoId: string;
-  model?: string;
-  resolution?: "480p" | "720p" | "1080p";
-}
-
-function editParams(req: EditRequest): Record<string, unknown> {
-  return {
-    model: req.model || VIDEO_MODEL,
-    prompt: req.prompt,
-    mode: "video_edit",
-    medias: [{ value: req.videoId, role: "video_references" }],
-    resolution: req.resolution || "1080p",
-    generate_audio: false,
-    use_unlim: false,
-  };
-}
-
-export async function editVideo(mcp: ToolCaller, req: EditRequest): Promise<JobRef[]> {
-  return startVideoJob(mcp, editParams(req));
-}
-
-/** What submitting this edit costs, from Higgsfield's own quote; null when unknown. */
-export function quoteEdit(mcp: ToolCaller, req: EditRequest): Promise<number | null> {
-  return costOf(mcp, "video", editParams(req));
-}
-
 async function startVideoJob(mcp: ToolCaller, params: Record<string, unknown>): Promise<JobRef[]> {
   // Read the first answer even if it is flagged as an error: a preset
   // recommendation arrives that way, and the id needed to decline it is in

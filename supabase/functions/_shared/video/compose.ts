@@ -2,8 +2,8 @@
 //
 // A video post, put together (13 Oct: video must follow the client's own
 // videos, carry the exact copy and the logo file, and have sound):
-//   - the footage, made by the video model with the client's own published
-//     videos as its reference, with its own sound;
+//   - the footage: one clip made by the video model from its opening frame
+//     and the client's kit (steps.ts), with its own sound, or a filmed clip;
 //   - the hook, drawn by the image model in the type of the client's posts on
 //     a transparent layer (its words checked), laid over the whole clip;
 //   - the client's logo file at its habitual spot.
@@ -18,8 +18,6 @@ export const CARD_SIZE = { width: 1088, height: 1936 } as const;
 export const TIMING = {
   /** The hook fades in over this long at the start. */
   fadeIn: 0.4,
-  /** Footage seconds asked of the video model when the plan gives none. */
-  footage: 8,
 } as const;
 
 export interface LogoBox { x: number; y: number; width: number }
@@ -83,8 +81,6 @@ export interface ComposeInput {
   uploadUrl: string;
   /** Signed upload URLs for stills of the footage alone, spread across it, read for stray writing. */
   frameUploads?: string[];
-  /** The footage as first made, whose sound is kept when its picture was cleaned of writing. */
-  audioUrl?: string;
   /** Captions of a filmed clip's speech, typeset in the client's caption font (an ASS file, base64). */
   captions?: { assB64: string; fontUrl: string };
   /** The client's own end card, cut from the end of one of its published videos and played after the clip. */
@@ -110,8 +106,6 @@ export function composeScript(input: ComposeInput): string {
   if (input.overlayUrl) inputs.push("-loop 1 -i hook.png");
   const logoIn = input.logoUrl && input.logo ? next++ : -1;
   if (logoIn >= 0) inputs.push("-loop 1 -i logo.png");
-  const soundIn = input.audioUrl ? next++ : -1;
-  if (input.audioUrl) inputs.push("-i sound.mp4");
 
   const filter = [`[0:v]${FIT}${input.captions ? ",ass=captions.ass:fontsdir=fonts" : ""},format=yuv420p[base]`];
   let last = "base";
@@ -132,7 +126,7 @@ export function composeScript(input: ComposeInput): string {
   filter.push(`[${last}]format=yuv420p[v]`);
   // The end card follows the clip, with its own sound (or silence); added by the script only when it is vertical.
   const endFilter = input.endCard
-    ? `;[v]setsar=1[vm];[${soundIn >= 0 ? soundIn : 0}:a]aformat=sample_rates=48000:channel_layouts=stereo[am];[@EC@:v]${FIT},format=yuv420p[ecv];[@ECA@]aformat=sample_rates=48000:channel_layouts=stereo[eca];[vm][am][ecv][eca]concat=n=2:v=1:a=1[vout][aout]`
+    ? `;[v]setsar=1[vm];[0:a]aformat=sample_rates=48000:channel_layouts=stereo[am];[@EC@:v]${FIT},format=yuv420p[ecv];[@ECA@]aformat=sample_rates=48000:channel_layouts=stereo[eca];[vm][am][ecv][eca]concat=n=2:v=1:a=1[vout][aout]`
     : "";
 
   return [
@@ -142,7 +136,6 @@ export function composeScript(input: ComposeInput): string {
     `curl -fsSL --retry 3 -o clip.mp4 ${shellQuote(input.footageUrl)}`,
     ...(input.overlayUrl ? [`curl -fsSL --retry 3 -o hook.png ${shellQuote(input.overlayUrl)}`] : []),
     ...(logoIn >= 0 && input.logoUrl ? [`curl -fsSL --retry 3 -o logo.png ${shellQuote(input.logoUrl)}`] : []),
-    ...(input.audioUrl ? [`curl -fsSL --retry 3 -o sound.mp4 ${shellQuote(input.audioUrl)}`] : []),
     // The caption font (kept in the app's storage: the sandbox reaches nothing else), and the captions.
     ...(input.captions ? [
       "mkdir -p fonts",
@@ -168,8 +161,8 @@ export function composeScript(input: ComposeInput): string {
     ...(input.logo?.end ? ['FILTER="${FILTER//@END@/$END}"'] : []),
     ...(input.endCard ? [
       // With a vertical end card, the clip and the card are joined; otherwise the clip stands alone.
-      `if [ "\${EC:-0}" = 1 ]; then ECIN="-i endcard.mp4"; ECN=${inputs.length}; if [ "\${EC_SILENT:-0}" = 1 ]; then ECIN="$ECIN -f lavfi -t ${input.endCard.seconds.toFixed(1)} -i anullsrc=r=48000:cl=stereo"; ECA="$((ECN + 1)):a"; else ECA="$ECN:a"; fi; END_F=${shellQuote(endFilter)}; END_F="\${END_F//@EC@/$ECN}"; FILTER="$FILTER\${END_F//@ECA@/$ECA}"; MAPS='-map [vout] -map [aout]'; else ECIN=""; MAPS='-map [v] -map ${soundIn >= 0 ? soundIn : 0}:a?'; fi`,
-    ] : [`ECIN=""; MAPS='-map [v] -map ${soundIn >= 0 ? soundIn : 0}:a?'`]),
+      `if [ "\${EC:-0}" = 1 ]; then ECIN="-i endcard.mp4"; ECN=${inputs.length}; if [ "\${EC_SILENT:-0}" = 1 ]; then ECIN="$ECIN -f lavfi -t ${input.endCard.seconds.toFixed(1)} -i anullsrc=r=48000:cl=stereo"; ECA="$((ECN + 1)):a"; else ECA="$ECN:a"; fi; END_F=${shellQuote(endFilter)}; END_F="\${END_F//@EC@/$ECN}"; FILTER="$FILTER\${END_F//@ECA@/$ECA}"; MAPS='-map [vout] -map [aout]'; else ECIN=""; MAPS='-map [v] -map 0:a?'; fi`,
+    ] : [`ECIN=""; MAPS='-map [v] -map 0:a?'`]),
     // The maps hold brackets; no file name may stand in for them.
     "set -f",
     [
@@ -228,55 +221,6 @@ export function parseComposed(reply: string): { bytes: number; seconds: number; 
   return bytes > 10_000 && seconds > 3 ? { bytes, seconds, audio } : null;
 }
 
-/**
- * The longest stretch of a client's own video handed to the video model as a
- * reference. Its references must be short (Moburst's videos, 20 to 80 seconds
- * long, were refused; LegaBot's 5-second Reels were taken).
- */
-export const REFERENCE_SECONDS = 5;
-
-/** Where the short reference cut from a client's video is kept, beside the video. */
-export function referenceClipPath(videoPath: string): string {
-  return `${videoPath.replace(/\.mp4$/i, "")}-ref${REFERENCE_SECONDS}s.mp4`;
-}
-
-export interface ClipInput {
-  /** The client's own video. */
-  sourceUrl: string;
-  /** A signed upload URL for its short reference (Supabase Storage, PUT). */
-  uploadUrl: string;
-}
-
-/**
- * The bash script that cuts REFERENCE_SECONDS from the middle of each video
- * (past any opening title or closing card), keeping its sound, and uploads
- * each cut. Its last line is "CLIPPED <count>" on success.
- */
-export function clipScript(clips: ClipInput[]): string {
-  const lines = [
-    "set -euo pipefail",
-    "command -v ffmpeg >/dev/null || (apt-get update -qq && apt-get install -y -qq ffmpeg >/dev/null)",
-    "W=$(mktemp -d) && cd \"$W\"",
-  ];
-  clips.forEach((c, i) => {
-    lines.push(
-      `curl -fsSL --retry 3 -o src${i}.mp4 ${shellQuote(c.sourceUrl)}`,
-      `D=$(ffprobe -v error -show_entries format=duration -of csv=p=0 src${i}.mp4)`,
-      `S=$(awk -v d="$D" 'BEGIN { s = d / 2 - ${REFERENCE_SECONDS / 2}; if (s < 0) s = 0; print s }')`,
-      `ffmpeg -hide_banner -loglevel error -y -ss "$S" -i src${i}.mp4 -t ${REFERENCE_SECONDS} -map 0:v:0 -map "0:a?" -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart clip${i}.mp4`,
-      `curl -fsS --retry 3 -X PUT -H 'Content-Type: video/mp4' -H 'x-upsert: true' --data-binary @clip${i}.mp4 ${shellQuote(c.uploadUrl)} >/dev/null`,
-    );
-  });
-  lines.push(`echo "CLIPPED ${clips.length}"`);
-  return lines.join("\n");
-}
-
-/** Whether the sandbox's reply says every cut was made and uploaded. */
-export function parseClipped(reply: string, count: number): boolean {
-  const m = /CLIPPED\s+(\d+)/.exec(reply);
-  return !!m && Number(m[1]) === count;
-}
-
 /** How many stills of the footage are read for stray writing. */
 export const FOOTAGE_STILLS = 4;
 
@@ -297,17 +241,6 @@ export function parseFootageText(text: string): { writing: boolean; where: strin
   const where = /"where"\s*:\s*"([\s\S]*?)"\s*}/.exec(text);
   return { writing: w[1].toLowerCase() === "true", where: where ? where[1] : "" };
 }
-
-/** The instruction for cleaning writing out of footage, keeping everything else (and the brand's own scene names). */
-export function cleanFootagePrompt(allowed: string[] = [], found = ""): string {
-  const keep = "Where each was, continue the plain surface it was on. Keep everything else exactly as it is: the subjects, the motion, the camera, the light, the colors, the sharpness and the timing.";
-  if (allowed.length) {
-    return `Remove these from this video: ${found || "any writing that is misspelled or garbled"}. Remove any logo, stripe, swoosh or emblem of a real brand too, on clothing, shoes and balls. ` +
-      `Keep these names exactly where and as they are: ${allowed.map((w) => `"${w}"`).join(", ")}. ${keep}`;
-  }
-  return "Remove every piece of writing from this video: letters, words, numbers, logos, brand marks, stripes or emblems of real brands, signs, boards, labels and printing, on any surface, including clothing, shoes, balls, walls, boards and screens. " + keep;
-}
-
 
 /** A spoken word and when it is said, in seconds from the clip's start. */
 export interface SpokenWord { word: string; start: number; end: number }

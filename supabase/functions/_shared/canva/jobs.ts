@@ -125,7 +125,8 @@ async function startVideoOption(admin: any, req: DesignRequest, settings: Settin
     design_request_id: req.id,
     option_index: optionIndex,
     // A filmed clip is the footage: its speech is captioned, then the hook is drawn and laid over it.
-    step: req.footage_path ? "transcribe" : "references",
+    // A generated video starts at its title; the worker makes the client's kit first when it is missing.
+    step: req.footage_path ? "transcribe" : "title",
     input: {
       kind: "video",
       title,

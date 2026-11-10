@@ -33,7 +33,7 @@ import { settleRequest } from "../_shared/canva/jobs.ts";
 import { wakeWorker } from "../_shared/canva/worker.ts";
 import { type Box, type Layer, type Placement, CLEAN_PROMPT, composeOver, outputSize, pictureSize, copyOperations, elementBox, inkBox, logoRect, pickLogoLayers, placementRegion } from "../_shared/canva/finish.ts";
 import { type GenerateInput, canvasLogoRect, designPrompt, resampleRGBA } from "../_shared/canva/brief.ts";
-import { VIDEO_STEPS_FILTER } from "../_shared/video/steps.ts";
+import { VIDEO_STEPS_FILTER } from "../_shared/video/stepNames.ts";
 import { ModelBusy } from "../_shared/media/imageEdit.ts";
 import { openaiKey } from "../_shared/openai/key.ts";
 
@@ -307,8 +307,14 @@ async function runPass(admin: any) {
  * Requests in planning are left out: design-request starts the worker itself
  * once their first options exist.
  */
+/**
+ * No video job, whatever its step: a design job's input has no kind, so a
+ * plain neq would leave out every design job too (NULL is not "<> video").
+ */
+const NOT_VIDEO = "input->>kind.is.null,input->>kind.neq.video";
+
 async function workRemains(admin: any): Promise<boolean> {
-  const { count: jobs } = await admin.from("canva_finish_jobs").select("id", { count: "exact", head: true }).in("status", ["queued", "running"]).not("step", "in", VIDEO_STEPS_FILTER);
+  const { count: jobs } = await admin.from("canva_finish_jobs").select("id", { count: "exact", head: true }).in("status", ["queued", "running"]).not("step", "in", VIDEO_STEPS_FILTER).or(NOT_VIDEO);
   if (jobs) return true;
   const { count: open } = await admin.from("design_requests").select("id", { count: "exact", head: true }).eq("status", "preparing").neq("stage", "planning");
   return !!open;
@@ -319,14 +325,16 @@ type Job = { id: string; client_id: string; step: string; status: string; attemp
 type StepResult = "next" | "wait" | "done" | "held";
 
 async function tick(admin: any) {
-  // Canva jobs only: a video's footage and join are the video worker's
-  // (video-worker), which does not use Canva.
-  const { data: due } = await admin.from("canva_finish_jobs").select("id")
+  // Canva jobs only: a video's steps are the video worker's (video-worker),
+  // which does not use Canva. A video job is never taken, whatever its step
+  // (its kind is read with the row: this query's one or is the lease's).
+  const { data: rows } = await admin.from("canva_finish_jobs").select("id, kind:input->>kind")
     .in("status", ["queued", "running"])
     .not("step", "in", VIDEO_STEPS_FILTER)
     .or(`lease_until.is.null,lease_until.lt.${new Date().toISOString()}`)
     .order("created_at").limit(10);
-  if (!due?.length) {
+  const due = (rows ?? []).filter((r: { kind?: string | null }) => r.kind !== "video");
+  if (!due.length) {
     await settleOpenRequests(admin, new Set());
     return { ran: 0 };
   }

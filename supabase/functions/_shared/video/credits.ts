@@ -1,7 +1,7 @@
 // supabase/functions/_shared/video/credits.ts
 //
-// The Higgsfield credits a video post's clips cost, recorded on its job as
-// each clip and each cleaning is submitted (job state.credits), so staff see
+// The Higgsfield credits a video post's clip cost, recorded on its job as the
+// clip is ordered (job state.credits), so staff see
 // what a week of designs used. The week's estimate and each video's approved
 // price are Higgsfield's live price for the clip (_shared/video/clip.ts
 // quoteClip), not these records. Free of Deno and network imports so it can
@@ -10,9 +10,9 @@
 /** Credits the account must hold before a clip is started (a 1080p clip with sound is about 100). */
 export const CLIP_CREDIT_FLOOR = 130;
 
-/** One submission to the video model: new footage, or a cleaning of footage. */
+/** One submission to the video model: a video's one clip. (Jobs from before 11 Nov also hold cleanings, still counted by creditsUsed.) */
 export interface ClipCredits {
-  what: "footage" | "clean";
+  what: "footage";
   /** The video model's job id. */
   job_id: string;
   /** What Higgsfield quoted for it (costOf); null when the quote could not be read. */
@@ -28,7 +28,7 @@ export function withCredits(recorded: unknown, entry: ClipCredits): ClipCredits[
   return before.some((c) => c.job_id === entry.job_id) ? before : [...before, entry];
 }
 
-/** Every credit quoted on these jobs' clips and cleanings, from their states. */
+/** Every credit recorded on these jobs' clips, from their states. */
 export function creditsUsed(states: unknown[]): number {
   let total = 0;
   for (const s of states) {

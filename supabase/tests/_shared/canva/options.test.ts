@@ -69,11 +69,18 @@ describe("optionStates", () => {
   });
   it("counts a canceled option as ended, so its request starts another or settles", () => {
     const jobs = [
-      { option_index: 0, slide_count: null, status: "failed", step: "compose_wait" },
-      { option_index: 1, slide_count: null, status: "canceled", step: "references" },
+      { option_index: 0, slide_count: null, status: "failed", step: "assemble_wait" },
+      { option_index: 1, slide_count: null, status: "canceled", step: "title" },
     ];
     expect(optionStates(jobs as never)).toEqual([{ status: "failed", step: "failed" }, { status: "failed", step: "failed" }]);
     expect(requestProgress(optionStates(jobs as never), 1, 3)).toMatchObject({ status: "preparing", start_brief: 2 });
+  });
+  it("counts a video as designing until its clip is ordered, and finishing from then on", () => {
+    const at = (step: string, footage_upload: string | null = null) => optionStates([{ option_index: 0, slide_count: null, status: "running", step, input: { kind: "video", footage_upload } }] as never)[0].step;
+    for (const step of ["kit", "kit_wait", "title", "title_check", "frame", "frame_check", "clip"]) expect(at(step)).toBe("generate");
+    for (const step of ["clip_wait", "assemble", "assemble_wait"]) expect(at(step)).toBe("finishing");
+    // A filmed clip needs no footage made: its title and logo are its finishing.
+    expect(at("title", "c/clip.mp4")).toBe("finishing");
   });
   it("treats a single design as an option of one", () => {
     expect(optionStates([{ option_index: 0, slide_count: null, status: "done", step: "finished" }] as never)).toEqual([{ status: "done", step: "finished" }]);

@@ -1,5 +1,5 @@
-// The video worker: a video post's footage and its join with the cover and
-// end cards (_shared/video/steps.ts). It is its own worker, with its own lease
+// The video worker: a video post's kit, title, opening frame, one clip and
+// its assembly (_shared/video/steps.ts). It is its own worker, with its own lease
 // and timer, because none of its work uses Canva: the Canva worker
 // (canva-finish) takes one editing session at a time, and footage that took
 // a place in that queue waited behind other posts' slides (13 Oct).

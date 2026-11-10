@@ -30,8 +30,6 @@ export interface Brief extends Slide {
   footage?: string;
   /** A video's on-screen hook: how it looks and where it sits, from the type in the client's own posts. */
   text_style?: string;
-  /** A video's length in seconds. */
-  seconds?: number;
   /** The client's own posts (paths in its library) whose layout this design builds on. */
   refs?: string[];
   /** A few words naming that layout, e.g. "quote card with portrait". */
@@ -133,9 +131,6 @@ export function parseCarouselBriefs(text: string, slideCount = CAROUSEL_SLIDES, 
   return out;
 }
 
-/** A video's length, as the planner may choose it. */
-export const VIDEO_SECONDS = { min: 6, max: 10, default: 8 } as const;
-
 /**
  * Video briefs from the planner's reply: the on-screen hook, how it looks,
  * and the footage under it. An option missing any of them is dropped.
@@ -154,18 +149,14 @@ export function parseVideoBriefs(text: string, library: string[] = [], opts: { f
     // A client whose videos carry no text over the footage gets none: the video has no hook.
     if (opts.textless) {
       if (footage.length < 20) continue;
-      const n = Math.round(Number(o?.seconds));
-      const seconds = Number.isFinite(n) ? Math.min(VIDEO_SECONDS.max, Math.max(VIDEO_SECONDS.min, n)) : VIDEO_SECONDS.default;
-      out.push({ headline: [], picture: footage, footage, text_style: "", seconds });
+      out.push({ headline: [], picture: footage, footage, text_style: "" });
       continue;
     }
     const hook = cleanSlide({ headline: o?.headline, picture: footage || (opts.filmed ? "the filmed clip" : "") });
     const textStyle = String(o?.text ?? "").replace(/\s+/g, " ").trim().slice(0, 300);
     // A filmed clip is the footage, so a filmed plan has no footage of its own.
     if (!hook || (!opts.filmed && footage.length < 20) || textStyle.length < 10) continue;
-    const n = Math.round(Number(o?.seconds));
-    const seconds = Number.isFinite(n) ? Math.min(VIDEO_SECONDS.max, Math.max(VIDEO_SECONDS.min, n)) : VIDEO_SECONDS.default;
-    out.push(withChoice({ ...hook, footage, text_style: textStyle, seconds }, o, library));
+    out.push(withChoice({ ...hook, footage, text_style: textStyle }, o, library));
   }
   return out;
 }
@@ -218,7 +209,7 @@ export function requestProgress(jobs: JobState[], wanted = OPTIONS_WANTED, brief
 }
 
 /** The steps of a design or video still being made, before the logo and words go on. */
-const DESIGNING_STEPS = new Set(["generate", "references", "references_wait", "footage", "hook", "hook_check", "footage_wait"]);
+const DESIGNING_STEPS = new Set(["generate", "kit", "kit_wait", "title", "title_check", "frame", "frame_check", "clip"]);
 
 function stageOf(active: JobState[]): RequestProgress["stage"] {
   if (!active.length) return "designing";
@@ -530,9 +521,9 @@ export function styleLines(brand: string, s: VideoStyle): string {
 }
 
 /**
- * The planner's instruction for a video post. The footage is made by the
- * video model with the client's own published videos as its reference, so it
- * moves and looks like them; the hook is set over it as on-screen text in the
+ * The planner's instruction for a video post. The footage is one 8-second
+ * clip the video model makes from an opening frame drawn in the look of the
+ * client's own videos (their kit) or posts; the hook is set over it as on-screen text in the
  * type of the client's posts, with the client's logo file (13 Oct: video must
  * follow the client's own videos, carry the exact copy and logo, and have sound).
  */
@@ -553,10 +544,9 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
       args.visual ? `The post's planned visual: ${args.visual}` : "",
       args.voice ? `${args.brand}'s voice: ${args.voice}` : "",
       noteLine(args.note),
-      `A video model makes the footage, with short clips of these videos as its reference, and with sound; it can cut between shots. The new video looks and moves like ${args.brand}'s own videos: the same kind of subjects, shots, cuts, camera, light and grade.`,
+      `A video model makes the footage as one 8-second clip with sound, starting from an opening frame drawn in the look of these videos; it can cut between shots. The new video looks and moves like ${args.brand}'s own videos: the same kind of subjects, shots, cuts, camera, light and grade.`,
       "For each option give:",
       `- footage: the video for the video model in three to five sentences, shot by shot (two to four shots, each with its seconds), in the style of ${args.brand}'s videos, all in sharp focus. ${sceneLettering(args.brand, s.scene_words)} It shows no screens, dashboards, charts, documents or interfaces (the video model fills those with garbled writing). ${people} It is whole scenes: no band, panel or empty area kept for text.${s.logo === "shown" && s.logo_at === "end" ? ` ${args.brand}'s videos close on their logo, which is laid over the last moments afterwards: the last shot ends the way their videos end before the logo.` : ""}`,
-      `- seconds: the length, from ${VIDEO_SECONDS.min} to ${VIDEO_SECONDS.max}.`,
       s.on_screen_text === "none"
         ? `${args.brand}'s videos carry no text over the footage, so this video carries none: the copy goes with the post.`
         : [
@@ -565,8 +555,8 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
           ].join("\n"),
       "The options differ from each other in footage. Put the strongest first: it is the one that will be made.",
       s.on_screen_text === "none"
-        ? 'Reply with JSON only: {"options":[{"footage":"...","seconds":8}]}'
-        : 'Reply with JSON only: {"options":[{"footage":"...","seconds":8,"headline":["line one","optional line two"],"text":"..."}]}',
+        ? 'Reply with JSON only: {"options":[{"footage":"..."}]}'
+        : 'Reply with JSON only: {"options":[{"footage":"...","headline":["line one","optional line two"],"text":"..."}]}',
     ].filter(Boolean).join("\n");
   }
   if (args.filmed) {
@@ -598,15 +588,14 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
     args.visual ? `The post's planned visual: ${args.visual}` : "",
     args.voice ? `${args.brand}'s voice: ${args.voice}` : "",
     noteLine(args.note),
-    `The video is one continuous shot of footage, made by a video model that is given ${args.brand}'s own published videos as its reference, so it moves and looks like them, with sound. Over it the hook is set as on-screen text, with ${args.brand}'s logo.`,
+    `The video is one continuous 8-second shot of footage with sound, made by a video model from an opening frame drawn in the world of ${args.brand}'s posts. Over it the hook is set as on-screen text, with ${args.brand}'s logo.`,
     "For each option give:",
     CHOOSE_POSTS(args.brand),
     `- headline: the hook set on screen, written in ${args.brand}'s voice from the copy, in the copy's language. One line of at most 8 words, optionally a second, shorter line.`,
     "- text: one sentence on how the hook looks on screen, taken from the type in the posts you chose (weight, case, color, glow or shadow) and where on the frame it sits (top, center or lower third), so it reads clearly over moving footage.",
     `- footage: one shot, described for the video model in two or three sentences: what is in frame, how it moves, how the camera moves, the light and the palette, in the world of ${args.brand}'s posts and videos, all of it in sharp focus. It holds no lettering, numbers, signs, logos or brand marks, and no screens, dashboards, charts, documents or interfaces (the video model fills those with garbled writing), and names no brand. It shows no real or identifiable person: use objects, materials, places, hands or abstract motion instead. It is one whole scene: it holds no band, panel or empty area kept for the hook, which is laid over it as it is.`,
-    `- seconds: the length, from ${VIDEO_SECONDS.min} to ${VIDEO_SECONDS.max}.`,
     "The options differ from each other in footage and wording. Put the strongest first: it is the one that will be made, so it should be the one you would publish.",
-    'Reply with JSON only: {"options":[{"posts":[2],"layout":"...","headline":["line one","optional line two"],"text":"...","footage":"...","seconds":8}]}',
+    'Reply with JSON only: {"options":[{"posts":[2],"layout":"...","headline":["line one","optional line two"],"text":"...","footage":"..."}]}',
   ].filter(Boolean).join("\n");
 }
 

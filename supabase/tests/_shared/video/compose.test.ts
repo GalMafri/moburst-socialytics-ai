@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { REFERENCE_SECONDS, VIDEO_SIZE, audioScript, captionFontName, captionWeight, captionsAss, cleanFootagePrompt, framesScript, parseAudio, parseFrames, videoLogoBox, clipScript, composeScript, footageTextPrompt, hookPlacement, parseClipped, parseComposed, parseFootageText, referenceClipPath, shellQuote } from "../../../functions/_shared/video/compose";
-import { filmedNeed, parseShotBrief, parseVideoBriefs, parseVideoStyle, sceneLettering, shotBriefPrompt, videoPlannerPrompt, videoStylePrompt, VIDEO_SECONDS } from "../../../functions/_shared/canva/options";
+import { VIDEO_SIZE, audioScript, captionFontName, captionWeight, captionsAss, framesScript, parseAudio, parseFrames, videoLogoBox, composeScript, footageTextPrompt, hookPlacement, parseComposed, parseFootageText, shellQuote } from "../../../functions/_shared/video/compose";
+import { filmedNeed, parseShotBrief, parseVideoBriefs, parseVideoStyle, sceneLettering, shotBriefPrompt, videoPlannerPrompt, videoStylePrompt } from "../../../functions/_shared/canva/options";
 import { hookPrompt } from "../../../functions/_shared/video/hook";
 
 describe("video assembly", () => {
@@ -30,7 +30,7 @@ describe("video assembly", () => {
 
 describe("video briefs", () => {
   const library = ["a.jpg", "b.jpg"];
-  it("keeps options with a hook, how it looks and a written shot, and keeps the length in range", () => {
+  it("keeps options with a hook, how it looks and a written shot, and no length of their own", () => {
     const text = JSON.stringify({ options: [
       { posts: [2], layout: "statement", headline: ["AI answers changed search"], text: "bold white sans-serif with a soft cyan glow, centered", footage: "A glass prism turns slowly on a navy stage while light splits into blue beams; the camera pushes in.", seconds: 30 },
       { headline: ["x"], text: "y", footage: "short" },
@@ -40,12 +40,14 @@ describe("video briefs", () => {
     expect(briefs[0].headline).toEqual(["AI answers changed search"]);
     expect(briefs[0].text_style).toContain("cyan glow");
     expect(briefs[0].refs).toEqual(["b.jpg"]);
-    expect(briefs[0].seconds).toBe(VIDEO_SECONDS.max);
+    // Every clip is 8 seconds (_shared/video/clip.ts CLIP): a length in the reply is not kept.
+    expect(briefs[0]).not.toHaveProperty("seconds");
   });
   it("asks for footage in the client's own video style, free of text, logos and people, with the hook over it", () => {
     const p = videoPlannerPrompt({ brand: "Moburst", platform: "Instagram", copy: "c", voice: null, visual: "a robot scans cards", count: 3, postCount: 13, recent: "" });
     expect(p).toContain("vertical video post (9:16)");
-    expect(p).toContain("given Moburst's own published videos as its reference");
+    expect(p).toContain("one continuous 8-second shot of footage with sound");
+    expect(p).not.toContain("seconds\":");
     expect(p).toContain("The post's planned visual: a robot scans cards");
     expect(p).toMatch(/footage: .*no lettering.*logos.*no real or identifiable person/);
   });
@@ -55,28 +57,6 @@ describe("video briefs", () => {
     expect(p).toContain("transparent");
     expect(p).toContain("lower third");
     expect(p).toMatch(/no logo/i);
-  });
-});
-
-describe("reference cuts", () => {
-  it("cuts a short stretch from the middle of each of the client's videos, keeping its sound", () => {
-    const script = clipScript([
-      { sourceUrl: "https://s/a.mp4", uploadUrl: "https://s/up-a" },
-      { sourceUrl: "https://s/b.mp4", uploadUrl: "https://s/up-b" },
-    ]);
-    expect(script).toContain("-o src0.mp4 'https://s/a.mp4'");
-    expect(script).toContain("-o src1.mp4 'https://s/b.mp4'");
-    expect(script).toContain(`-t ${REFERENCE_SECONDS}`);
-    expect(script).toContain("s = d / 2 -");
-    expect(script).toContain('-map "0:a?"');
-    expect(script).toContain("@clip1.mp4 'https://s/up-b'");
-    expect(script.split("\n").pop()).toBe('echo "CLIPPED 2"');
-  });
-  it("keeps each cut beside its video, and accepts only a reply that counts every cut", () => {
-    expect(referenceClipPath("c/video-ab.mp4")).toBe(`c/video-ab-ref${REFERENCE_SECONDS}s.mp4`);
-    expect(parseClipped("CLIPPED 3", 3)).toBe(true);
-    expect(parseClipped("CLIPPED 2", 3)).toBe(false);
-    expect(parseClipped("FAILED: curl (22)", 1)).toBe(false);
   });
 });
 
@@ -96,22 +76,6 @@ describe("footage stills", () => {
     expect(parseFootageText('{"writing": true, "where": "labels on the "dashboard" panels"}')).toEqual({ writing: true, where: 'labels on the "dashboard" panels' });
     expect(parseFootageText('{"writing": false, "where": ""}')).toEqual({ writing: false, where: "" });
     expect(parseFootageText("no idea")).toBeNull();
-  });
-});
-
-describe("cleaned footage", () => {
-  it("keeps the first footage's sound when the picture was cleaned", () => {
-    const script = composeScript({
-      footageUrl: "https://s/clean.mp4", overlayUrl: "https://s/hook.png", logoUrl: "https://s/logo.png",
-      logo: { x: 1, y: 2, width: 3 }, uploadUrl: "https://s/up", audioUrl: "https://s/first.mp4",
-    });
-    expect(script).toContain("-o sound.mp4 'https://s/first.mp4'");
-    expect(script).toContain("-i sound.mp4");
-    expect(script).toContain("MAPS='-map [v] -map 3:a?'");
-  });
-  it("asks for every piece of writing and brand mark to go, keeping the rest", () => {
-    expect(cleanFootagePrompt()).toMatch(/stripes or emblems of real brands/);
-    expect(cleanFootagePrompt()).toMatch(/Keep everything else exactly as it is/);
   });
 });
 
@@ -166,7 +130,8 @@ describe("videos in the client's own video style", () => {
     expect(p).toContain("carry no text over the footage, so this video carries none");
     expect(p).not.toContain("- headline:");
     const briefs = parseVideoBriefs(JSON.stringify({ options: [{ footage: "Shot 1 (3s): a striker in a violet kit stares down the tunnel. Shot 2 (3s): close-up of laces.", seconds: 7 }] }), [], { textless: true });
-    expect(briefs).toEqual([expect.objectContaining({ headline: [], seconds: 7 })]);
+    expect(briefs).toEqual([expect.objectContaining({ headline: [] })]);
+    expect(briefs[0]).not.toHaveProperty("seconds");
   });
   it("asks for captions written the way the client's videos put text on screen", () => {
     const captioned = { ...style, people: "none" as const, on_screen_text: "captions" as const, text_style: "white sentence-case captions near the bottom" };
@@ -250,15 +215,11 @@ describe("the names in the client's own scenes", () => {
     expect(p).not.toContain("It holds no lettering");
     expect(sceneLettering("Moburst", [])).toContain("It holds no lettering");
   });
-  it("counts only writing that is not one of those names, and keeps them when cleaning", () => {
+  it("counts only writing that is not one of those names", () => {
     expect(footageTextPrompt(["CAIRO SUN"])).toContain('"CAIRO SUN"');
     expect(footageTextPrompt(["CAIRO SUN"])).toContain("letters can be read and are wrong");
     expect(footageTextPrompt(["CAIRO SUN"])).toContain("motion blur or distance");
     expect(footageTextPrompt()).not.toContain("belong to the brand");
-    const clean = cleanFootagePrompt(["CAIRO SUN"], "three-stripe marks on both boots");
-    expect(clean).toContain("Remove these from this video: three-stripe marks on both boots");
-    expect(clean).toContain('Keep these names exactly where and as they are: "CAIRO SUN"');
-    expect(cleanFootagePrompt()).toContain("Remove every piece of writing");
   });
 });
 

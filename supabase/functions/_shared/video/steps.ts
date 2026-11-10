@@ -1,69 +1,66 @@
 // supabase/functions/_shared/video/steps.ts
 //
-// A video job's steps, run by the video worker (video-worker):
-//   references   short cuts of the client's own published videos, made once
-//                per video in a hosted sandbox (the video model refuses long
-//                references), then kept beside the videos;
-//   references_wait  until the cuts are stored;
-//   footage      start the footage on Higgsfield, with those cuts as its
-//                reference and with sound;
-//   hook         while it renders, the image model draws the hook on a
-//                transparent layer in the type of the client's posts;
-//   hook_check   the hook's words are read back and must be the copy's exactly;
-//   footage_wait store the footage once it is ready;
-//   compose      join footage, hook and the client's logo file in a hosted
-//                sandbox (sandbox.ts), keeping the footage's sound, and keep
-//                four stills of the footage alone;
-//   compose_wait store the finished MP4; footage with no sound is made
-//                again, and footage with any writing in its stills (14 Oct:
-//                garbled words on dashboard screens, brand stripes on boots)
-//                is cleaned;
-//   clean        the video model removes the writing from the footage and
-//                keeps everything else (its first sound is kept);
-//   clean_wait   store the cleaned footage, then join and read it again.
-//                Footage still written on after two cleanings is made again.
-// Each footage and each cleaning records what Higgsfield quoted for it
-// (state.credits, credits.ts), so staff see what a week of designs used.
-// (13 Oct: video follows the client's own videos, carries the exact copy and
-// the logo file, and is never silent.)
+// A video job's steps, run by the video worker (video-worker). A generated
+// video is made in this order, and orders one paid clip at most:
+//   kit          the client's kit (runKitStep, kit.ts), made first by a job
+//                that finds none; a client with too few clean stills takes
+//                the posts route instead;
+//   title        the image model draws the title on a transparent layer in
+//                the type of the client's posts (skipped when the video
+//                carries no text over its footage);
+//   title_check  the title's words are read back and must be the copy's exactly;
+//   frame        the image model draws the clip's opening frame from the
+//                brief, with the kit's stills as its references (on the posts
+//                route, from the brief alone), at most MAX_FRAMES times;
+//   frame_check  the frame must show no writing (other than the client's own
+//                scene words) and no other brand's marks, or it is drawn again;
+//   clip         at the price approved for the video (clip.ts
+//                clipOrderDecision), the one clip is ordered from Higgsfield:
+//                the order is saved on the job before the call, so it is
+//                never made twice, whatever the worker's retries;
+//   clip_wait    the clip is stored once it is ready; one that failed or
+//                never came back ends the video with a reason;
+//   assemble     join clip, title and the client's logo file in a hosted
+//                sandbox (sandbox.ts), keeping the clip's sound, and keep
+//                four stills of the clip alone;
+//   assemble_wait  store the finished MP4. A clip with no sound, or with
+//                writing of its own in its stills, ends the video with a
+//                reason: nothing orders a second clip.
+// A filmed clip (input.footage_upload) is the footage: transcribe,
+// transcribe_wait, title, title_check, assemble, assemble_wait.
+// The clip records the price it was ordered at (state.credits, credits.ts),
+// so staff see what a week of designs used.
 
 import { Image } from "https://deno.land/x/imagescript@1.3.0/mod.ts";
 import { decode as base64Decode, encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { MCP_URL, accessTokenFor } from "../higgsfield/oauth.ts";
 import { McpClient } from "../higgsfield/mcp.ts";
-import { VIDEO_MODEL, type VideoRequest, awaitJobs, creditBalance, editVideo, importReferences, quoteEdit, quoteVideo, submitVideo } from "../higgsfield/generate.ts";
-import { CLIP_CREDIT_FLOOR, withCredits } from "./credits.ts";
+import { awaitJobs, creditBalance, importReferences, submitVideo } from "../higgsfield/generate.ts";
+import { withCredits } from "./credits.ts";
+import { OLD_STEPS, QUOTE_WAIT_MS, REASONS, clipOrderDecision, clipOutcome, clipRequest, framePrompt, quoteClip } from "./clip.ts";
 import { BUCKET } from "../canva/jobs.ts";
 import { canvasLogoRect } from "../canva/brief.ts";
 import { anthropicMessages } from "../anthropic.ts";
 import { openaiKey } from "../openai/key.ts";
-import { ModelBusy, imageEdit } from "../media/imageEdit.ts";
-import { KIT_MAKE_MS, KIT_MAX, KIT_MIN, MAX_KIT_TRIES, kitChosen, kitCleanPrompt, kitNext, kitPath, kitPickPrompt, type KitDone, kitClaim, kitDoneCount, kitDoneOf, kitForStyle, kitKeptFrom, kitState, kitWork, postsRouteInput } from "./kit.ts";
-import { copyMatches, parseRead, readPrompt } from "../design/pipeline.ts";
+import { ModelBusy, OPENAI_IMAGE_MODEL, imageEdit } from "../media/imageEdit.ts";
+import { KIT_MAKE_MS, KIT_MAX, KIT_MIN, MAX_KIT_TRIES, kitChosen, kitCleanPrompt, kitNext, kitPath, kitPaths, kitPickPrompt, type KitDone, kitClaim, kitDoneCount, kitDoneOf, kitForStyle, kitKeptFrom, kitState, kitWork, postsRouteInput } from "./kit.ts";
+import { copyMatches, marksPrompt, parseMarks, parseRead, readPrompt } from "../design/pipeline.ts";
 import { parseVideoStyle, videoStylePrompt } from "../canva/options.ts";
-import { CARD_SIZE, FOOTAGE_STILLS, STYLE_FRAMES, TIMING, VIDEO_SIZE, audioScript, captionWeight, captionsAss, cleanFootagePrompt, framesScript, hookPlacement, parseAudio, videoLogoBox, parseFrames, clipScript, composeScript, footageTextPrompt, parseClipped, parseComposed, parseFootageText, referenceClipPath } from "./compose.ts";
+import { CARD_SIZE, FOOTAGE_STILLS, STYLE_FRAMES, VIDEO_SIZE, audioScript, captionWeight, captionsAss, framesScript, hookPlacement, parseAudio, videoLogoBox, parseFrames, composeScript, footageTextPrompt, parseComposed, parseFootageText } from "./compose.ts";
 import { hookPrompt } from "./hook.ts";
 import { checkScript, endScript, startScript } from "./sandbox.ts";
-
-/** The steps a video job goes through. */
-export const VIDEO_STEPS = ["kit", "kit_wait", "references", "references_wait", "footage", "hook", "hook_check", "footage_wait", "compose", "compose_wait", "clean", "clean_wait"] as const;
-/** The same, as a PostgREST list for not.in / in filters. */
-export const VIDEO_STEPS_FILTER = `(${VIDEO_STEPS.join(",")})`;
 
 /** Room for each check's answer (the model may think first, and that counts against it). */
 const CHECK_TOKENS = 2000;
 /** How often a running clip or join is asked about. */
 export const VIDEO_POLL_MS = 30_000;
-const MAX_FOOTAGE = 2;
 const MAX_HOOKS = 3;
+/** Opening frames drawn for one video before it ends with REASONS.frame. */
+const MAX_FRAMES = 3;
 const MAX_COMPOSE = 3;
 const MAX_CLIPS = 3;
 /** Where filmed clips are kept, privately. */
 const FOOTAGE_BUCKET = "post-footage";
-/** Cleanings of one footage before it is made again. */
-const MAX_CLEANS = 2;
-/** Footage still not back after this long is asked for again (Seedance usually takes 3 to 10 minutes). */
-export const FOOTAGE_WAIT_MS = 30 * 60_000;
 const REFERENCES = "design-references";
 /** What all footage keeps to; people as the client's own videos show them (made-up characters, or nobody). */
 function footageRules(people: string | undefined, sceneWords: string[] = []): string {
@@ -131,91 +128,30 @@ async function higgsfield(admin: any): Promise<McpClient> {
 
 const publicUrl = (admin: any, bucket: string, path: string) => admin.storage.from(bucket).getPublicUrl(path).data.publicUrl as string;
 
+
 export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStepResult> {
   if (job.input?.purpose === "style") return runStyleStep(admin, job);
   const s = job.state ?? (job.state = {});
   const input = job.input;
+  // A job from before the one-clip video is not carried on with steps that are gone.
+  if ((OLD_STEPS as readonly string[]).includes(job.step)) throw new Error(`FINAL: ${REASONS.outdated}`);
   // A generated video is made with the client's kit: a job that starts before
-  // the kit is ready makes it (or waits for it) first.
-  if (job.step === "references" && !input.footage_upload && input.video_route !== "posts") {
+  // the kit is ready makes it (or waits for it) first. Looked at once per job.
+  if (job.step === "title" && !s.kit_checked && !input.footage_upload && input.video_route !== "posts") {
     const { data: client } = await admin.from("clients").select("video_style").eq("id", job.client_id).maybeSingle();
+    s.kit_checked = true;
     if (kitState(client?.video_style) !== "ready") job.step = "kit";
   }
   if (job.step === "kit" || job.step === "kit_wait") return runKitStep(admin, job, "video");
   const base = `${job.client_id}/canva-finish/${job.id}`;
   const recently = (at: unknown) => typeof at === "number" && Date.now() - at < VIDEO_POLL_MS;
+  // After the title: a generated video's opening frame, a filmed clip's assembly.
+  const afterTitle = input.footage_upload ? "assemble" : "frame";
   switch (job.step) {
-    case "references": {
-      // The short cuts already kept for this client are reused.
-      const sources: string[] = (input.video_refs ?? []).slice(0, 3);
-      const clips = sources.map(referenceClipPath);
-      const missing: number[] = [];
-      for (let i = 0; i < clips.length; i++) if (!(await stored(admin, REFERENCES, clips[i]))) missing.push(i);
-      if (!missing.length) {
-        s.clip_paths = clips;
-        job.step = "footage"; return "next";
-      }
-      s.clip_tries = (s.clip_tries ?? 0) + 1;
-      if (s.clip_tries > MAX_CLIPS) throw new Error("FINAL: The client's own videos could not be prepared as references.");
-      const parts = [];
-      for (const i of missing) {
-        const { data: signed, error } = await admin.storage.from(REFERENCES).createSignedUploadUrl(clips[i], { upsert: true });
-        if (error || !signed?.signedUrl) throw new Error(`Could not prepare a reference upload: ${error?.message ?? "no URL"}`);
-        parts.push({ sourceUrl: publicUrl(admin, REFERENCES, sources[i]), uploadUrl: signed.signedUrl });
-      }
-      s.clip_session = await startScript(clipScript(parts), `Socialytics video references ${job.client_id}`);
-      s.clip_count = parts.length;
-      s.clip_checked_at = Date.now();
-      job.step = "references_wait"; return "next";
-    }
-    case "references_wait": {
-      if (recently(s.clip_checked_at)) return "wait";
-      s.clip_checked_at = Date.now();
-      const r = await checkScript(s.clip_session);
-      if (r.state === "running") return "wait";
-      await endScript(s.clip_session);
-      if (!(r.state === "finished" && parseClipped(r.reply, s.clip_count))) {
-        console.error(`[video-worker] job ${job.id} references:`, r.state === "failed" ? r.reason : r.reply.slice(0, 300));
-      }
-      // Either way the stored cuts are looked at again; any still missing are made again.
-      job.step = "references"; return "next";
-    }
-    case "footage": {
-      // A job from before the reference cuts gets them first.
-      if (!Array.isArray(s.clip_paths)) { job.step = "references"; return "next"; }
-      s.footage_tries = (s.footage_tries ?? 0) + 1;
-      if (s.footage_tries > MAX_FOOTAGE) throw new Error("FINAL: The footage could not be generated.");
-      const mcp = await higgsfield(admin);
-      const balance = await creditBalance(mcp);
-      if (balance && balance.credits < CLIP_CREDIT_FLOOR) throw new Error(`FINAL: The Higgsfield account has ${Math.floor(balance.credits)} credits left, too few for the footage.`);
-      // Short cuts of the client's own published videos are the reference, imported once per job.
-      if (!Array.isArray(s.video_ref_ids)) {
-        const refs: string[] = s.clip_paths.map((p: string) => publicUrl(admin, REFERENCES, p));
-        s.video_ref_ids = refs.length ? await importReferences(mcp, refs, "video") : [];
-      }
-      const clip: VideoRequest = {
-        prompt: `${input.video.prompt}${footageRules(input.people, input.scene_words ?? [])}`,
-        aspect: "9:16",
-        seconds: input.video.seconds ?? TIMING.footage,
-        resolution: "1080p",
-        model: VIDEO_MODEL,
-        withAudio: true,
-        videoReferenceIds: s.video_ref_ids,
-      };
-      const [first] = await submitVideo(mcp, clip);
-      if (!first?.job_id) throw new Error("Higgsfield did not start the footage.");
-      s.footage_job = first;
-      s.credits = withCredits(s.credits, { what: "footage", job_id: first.job_id, credits: await quoteVideo(mcp, clip), at: new Date().toISOString() });
-      s.footage_checked_at = Date.now();
-      s.footage_started_at = Date.now();
-      // The hook is drawn while the footage renders.
-      // A client whose videos carry no text over the footage gets no hook.
-      job.step = s.hook_path || !input.copy?.length ? "footage_wait" : "hook"; return "next";
-    }
     case "transcribe": {
       // A filmed clip is captioned the way the client's filmed videos are: its speech is transcribed first.
       if (!input.footage_upload || !input.filmed || input.filmed.captions === "none") {
-        job.step = input.filmed && input.filmed.title === "none" ? "compose" : "hook"; return "next";
+        job.step = input.filmed && input.filmed.title === "none" ? "assemble" : "title"; return "next";
       }
       s.audio_tries = (s.audio_tries ?? 0) + 1;
       if (s.audio_tries > 3) throw new Error("FINAL: The clip's sound could not be taken for its captions.");
@@ -244,32 +180,27 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       const said = await transcribeWords(await openaiKey(admin), data);
       s.words = said.words;
       s.sentence_starts = said.sentenceStarts;
-      job.step = input.filmed.title === "none" ? "compose" : "hook"; return "next";
+      job.step = input.filmed.title === "none" ? "assemble" : "title"; return "next";
     }
-    case "hook": {
+    case "title": {
+      // A client whose videos carry no text over the footage gets no title; a title already checked is kept.
+      if (!input.copy?.length || s.title_ok) { job.step = afterTitle; return "next"; }
       s.hooks = (s.hooks ?? 0) + 1;
       if (s.hooks > MAX_HOOKS) throw new Error("FINAL: The video's title could not be drawn with the exact words.");
-      const resp = await fetch("https://api.openai.com/v1/images/generations", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${await openaiKey(admin)}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "gpt-image-2.5-flare", prompt: hookPrompt(input.brand_name, input.copy, input.text_style),
-          size: `${CARD_SIZE.width}x${CARD_SIZE.height}`, quality: "high", background: "transparent", output_format: "png", n: 1,
-        }),
-        signal: AbortSignal.timeout(120_000),
-      });
-      const text = await resp.text();
-      if (resp.status === 429 || resp.status >= 500) { s.hooks -= 1; return "wait"; }
-      if (!resp.ok) throw new Error(`Image model ${resp.status}: ${text.slice(0, 300)}`);
-      const b64 = JSON.parse(text)?.data?.[0]?.b64_json;
-      if (!b64) throw new Error("The image model returned no title.");
+      let png: Uint8Array;
+      try {
+        png = await generateImage(await openaiKey(admin), hookPrompt(input.brand_name, input.copy, input.text_style), [CARD_SIZE.width, CARD_SIZE.height], true);
+      } catch (e) {
+        if (e instanceof ModelBusy) { s.hooks -= 1; return "wait"; }
+        throw e;
+      }
       const path = `${base}/hook-${s.hooks}.png`;
-      const { error } = await admin.storage.from(BUCKET).upload(path, base64Decode(b64), { contentType: "image/png", upsert: true });
+      const { error } = await admin.storage.from(BUCKET).upload(path, png, { contentType: "image/png", upsert: true });
       if (error) throw new Error(`Could not store the title: ${error.message}`);
       s.hook_path = path;
-      job.step = "hook_check"; return "next";
+      job.step = "title_check"; return "next";
     }
-    case "hook_check": {
+    case "title_check": {
       // Read over a mid-grey ground so light and dark lettering both show.
       const { data, error } = await admin.storage.from(BUCKET).download(s.hook_path);
       if (error || !data) throw new Error(`Could not read the title: ${error?.message ?? "missing"}`);
@@ -289,10 +220,8 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       const ground = new Image(hook.width, hook.height).fill(Image.rgbaToColor(70, 70, 76, 255));
       ground.composite(hook, 0, 0);
       const jpeg = await ground.resize(Math.round(hook.width / 2), Math.round(hook.height / 2)).encodeJPEG(92);
-      const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-      if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
       const result = await anthropicMessages({
-        apiKey,
+        apiKey: anthropicKey(),
         body: {
           model: "claude-opus-5-5", max_tokens: CHECK_TOKENS,
           messages: [{ role: "user", content: [
@@ -307,45 +236,137 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       if (!copyMatches(lines, input.copy)) {
         console.warn(`[video-worker] job ${job.id}: title read ${JSON.stringify(lines)}, wanted ${JSON.stringify(input.copy)}`);
         delete s.hook_path;
-        job.step = "hook"; return "next";
+        job.step = "title"; return "next";
       }
-      // A filmed clip is already the footage.
-      job.step = input.footage_upload ? "compose" : "footage_wait"; return "next";
+      s.title_ok = true;
+      job.step = afterTitle; return "next";
     }
-    case "footage_wait": {
-      if (recently(s.footage_checked_at)) return "wait";
-      s.footage_checked_at = Date.now();
-      const res = await awaitJobs(await higgsfield(admin), [s.footage_job], { budgetMs: 0 });
-      const o = res.outcomes[0];
-      const terminal = !!o && (o.status === "completed" || o.status === "failed" || o.status === "nsfw" || o.status === "canceled" || o.status === "timed_out" || !!o.error);
-      if (!terminal) {
-        // A render left waiting in the video model's queue is asked for again, as one of the footage's tries.
-        if (typeof s.footage_started_at === "number" && Date.now() - s.footage_started_at > FOOTAGE_WAIT_MS) {
-          console.warn(`[video-worker] job ${job.id}: the footage has not come back in ${FOOTAGE_WAIT_MS / 60_000} minutes; asking again.`);
-          delete s.footage_job;
-          job.step = "footage"; return "next";
+    case "frame": {
+      // The kit's stills, unless the video takes the posts route; a kit learned again since the check is made first.
+      let stills: string[] = [];
+      if (input.video_route !== "posts") {
+        const { data: client } = await admin.from("clients").select("video_style").eq("id", job.client_id).maybeSingle();
+        if (kitState(client?.video_style) !== "ready") { delete s.kit_checked; job.step = "kit"; return "next"; }
+        stills = kitPaths(client.video_style);
+      }
+      s.frames = (s.frames ?? 0) + 1;
+      if (s.frames > MAX_FRAMES) throw new Error(`FINAL: ${REASONS.frame}`);
+      const n = s.frames;
+      const prompt = framePrompt(input.video.prompt, footageRules(input.people, input.scene_words ?? []));
+      const size: [number, number] = [CARD_SIZE.width, CARD_SIZE.height];
+      return hold(admin, job, async () => {
+        try {
+          const apiKey = await openaiKey(admin);
+          const images = [];
+          for (const p of stills) {
+            const { data, error } = await admin.storage.from(REFERENCES).download(p);
+            if (error || !data) throw new Error(`Could not read a kit still: ${error?.message ?? "missing"}`);
+            images.push({ bytes: new Uint8Array(await data.arrayBuffer()), name: "still.jpg" });
+          }
+          const png = images.length ? await imageEdit(apiKey, images, prompt, size) : await generateImage(apiKey, prompt, size, false);
+          // Kept as a JPEG, as the kit's stills are: the checks read it and the video service starts from it.
+          const jpeg = await (await Image.decode(png)).encodeJPEG(92);
+          const path = `${base}/frame-${n}.jpg`;
+          const { error } = await admin.storage.from(BUCKET).upload(path, jpeg, { contentType: "image/jpeg", upsert: true });
+          if (error) throw new Error(`Could not store the opening frame: ${error.message}`);
+          s.frame_path = path;
+          job.step = "frame_check";
+        } catch (e) {
+          // The image model at its rate limit uses no frame.
+          if (e instanceof ModelBusy) s.frames = n - 1;
+          throw e;
         }
+      });
+    }
+    case "frame_check": {
+      if (!s.frame_path) { job.step = "frame"; return "next"; }
+      const scene: string[] = input.scene_words ?? [];
+      const seen = await footageWriting(admin, [s.frame_path], scene, BUCKET);
+      const content = await jpegBlocks(admin, BUCKET, [s.frame_path]);
+      content.push({ type: "text", text: marksPrompt(input.brand_name) });
+      const result = await anthropicMessages({ apiKey: anthropicKey(), body: { model: "claude-opus-5-5", max_tokens: CHECK_TOKENS, messages: [{ role: "user", content }] } });
+      const marks = parseMarks(result.text);
+      if (!marks) throw new Error(`The opening frame could not be read for other brands' marks: ${result.text.slice(0, 200)}`);
+      s.frame_check = { writing: seen, marks };
+      if (seen.writing || marks.marks) {
+        console.warn(`[video-worker] job ${job.id}: the opening frame has ${seen.writing ? `writing (${seen.where})` : `other brands' marks (${marks.where})`}; drawing it again.`);
+        delete s.frame_path;
+        job.step = "frame"; return "next";
+      }
+      job.step = "clip"; return "next";
+    }
+    case "clip": {
+      const mcp = await higgsfield(admin);
+      const ordered = !!s.clip_order;
+      if (!ordered && recently(s.quote_checked_at)) return "wait";
+      // An order already recorded is never made again: no price or balance is read for it.
+      const balance = ordered ? null : (await creditBalance(mcp))?.credits ?? null;
+      const live = ordered ? null : await quoteClip(mcp);
+      s.quote_checked_at = Date.now();
+      const decision = clipOrderDecision(s, input.approved_credits ?? null, live, balance);
+      if (decision.action === "stop") throw new Error(`FINAL: ${decision.reason}`);
+      if (decision.action === "wait") {
+        if (s.clip_order?.job_id) { job.step = "clip_wait"; return "wait"; }
+        // The price could not be read: asked again on later passes, for QUOTE_WAIT_MS.
+        if (typeof s.quote_waiting_since !== "number") s.quote_waiting_since = Date.now();
+        if (Date.now() - s.quote_waiting_since > QUOTE_WAIT_MS) throw new Error(`FINAL: ${REASONS.quote}`);
         return "wait";
       }
-      if (o.status !== "completed" || !o.result_url) {
-        // Generated again from the same shot; a second failure ends the option.
-        console.error(`[video-worker] job ${job.id} footage ${o.status}: ${o.error ?? ""}`);
-        job.step = "footage"; return "next";
+      // The order is on the job's row before Higgsfield is called: any pass
+      // after this one finds it, and never orders again.
+      s.clip_order = { price: live, at: new Date().toISOString() };
+      try {
+        await saveOrder(admin, job);
+      } catch (e) {
+        // Not saved, so not ordered: the job's error must not keep an order that was never made.
+        delete s.clip_order;
+        throw e;
       }
-      const resp = await fetch(o.result_url, { signal: AbortSignal.timeout(90_000) });
-      if (!resp.ok) throw new Error(`Could not fetch the footage: ${resp.status}`);
-      const bytes = new Uint8Array(await resp.arrayBuffer());
-      const path = `${base}/footage-${s.footage_tries}.mp4`;
-      const { error } = await admin.storage.from(BUCKET).upload(path, bytes, { contentType: "video/mp4", upsert: true });
-      if (error) throw new Error(`Could not store the footage: ${error.message}`);
-      s.footage_path = path;
-      s.footage_first_path = path;
-      // New footage starts its own count of cleans and assemblies.
-      delete s.cleans;
-      delete s.composes;
-      job.step = "compose"; return "next";
+      const { data: client } = input.video_route === "posts" ? { data: null } : await admin.from("clients").select("video_style").eq("id", job.client_id).maybeSingle();
+      if (!s.frame_ref_id) {
+        const [id] = await importReferences(mcp, [publicUrl(admin, BUCKET, s.frame_path)], "image");
+        if (!id) throw new Error("Could not hand the opening frame to the video service.");
+        s.frame_ref_id = id;
+      }
+      if (!Array.isArray(s.kit_ref_ids)) {
+        const kit = kitPaths(client?.video_style);
+        s.kit_ref_ids = kit.length ? await importReferences(mcp, kit.map((p) => publicUrl(admin, REFERENCES, p)), "image") : [];
+      }
+      const [first] = await submitVideo(mcp, clipRequest(`${input.video.prompt}${footageRules(input.people, input.scene_words ?? [])}`, s.frame_ref_id, s.kit_ref_ids));
+      if (!first?.job_id) throw new Error("Higgsfield did not start the clip.");
+      const at = new Date().toISOString();
+      s.clip_order.job_id = first.job_id;
+      s.clip_job = first;
+      s.credits = withCredits(s.credits, { what: "footage", job_id: first.job_id, credits: live, at });
+      s.clip_started_at = Date.now();
+      s.clip_checked_at = Date.now();
+      // The pass ends here with the order saved, its job id at once: a pass
+      // that died before the worker's own save would take the order as lost.
+      job.step = "clip_wait";
+      await saveJob(admin, job, { step: job.step });
+      return "wait";
     }
-    case "compose": {
+    case "clip_wait": {
+      if (recently(s.clip_checked_at)) return "wait";
+      s.clip_checked_at = Date.now();
+      const res = await awaitJobs(await higgsfield(admin), [s.clip_job], { budgetMs: 0 });
+      const o = res.outcomes[0];
+      const outcome = clipOutcome(o, typeof s.clip_started_at === "number" ? s.clip_started_at : Date.now(), Date.now());
+      if (outcome === "running") return "wait";
+      if (outcome === "failed") {
+        console.error(`[video-worker] job ${job.id} clip ${o?.status}: ${o?.error ?? ""}`);
+        throw new Error(`FINAL: ${REASONS.provider}`);
+      }
+      if (outcome === "lost") throw new Error(`FINAL: ${REASONS.lost}`);
+      const resp = await fetch(o.result_url!, { signal: AbortSignal.timeout(90_000) });
+      if (!resp.ok) throw new Error(`Could not fetch the clip: ${resp.status}`);
+      const path = `${base}/clip.mp4`;
+      const { error } = await admin.storage.from(BUCKET).upload(path, new Uint8Array(await resp.arrayBuffer()), { contentType: "video/mp4", upsert: true });
+      if (error) throw new Error(`Could not store the clip: ${error.message}`);
+      s.footage_path = path;
+      job.step = "assemble"; return "next";
+    }
+    case "assemble": {
       s.composes = (s.composes ?? 0) + 1;
       if (s.composes > MAX_COMPOSE) throw new Error("FINAL: The video could not be put together.");
       // Each finished file has a name of its own, so a video made again is never shown from a cached copy.
@@ -365,9 +386,9 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       const at = s.hook_box ? hookPlacement(s.hook_box, s.hook_layer ?? CARD_SIZE, input.text_style ?? "", logoBottom) : null;
       const stills: string[] = [];
       const frameUploads: string[] = [];
-      // A filmed clip is used as it is: it is not read for writing or cleaned.
+      // A filmed clip is used as it is: it is not read for writing.
       for (let i = 0; i < (input.footage_upload ? 0 : FOOTAGE_STILLS); i++) {
-        const path = `${base}/still-${s.footage_tries}-${i}.jpg`;
+        const path = `${base}/still-${i}.jpg`;
         const { data: up, error: upError } = await admin.storage.from(BUCKET).createSignedUploadUrl(path, { upsert: true });
         if (upError || !up?.signedUrl) throw new Error(`Could not prepare a still's upload: ${upError?.message ?? "no URL"}`);
         stills.push(path);
@@ -384,7 +405,6 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
           logo: input.show_logo === false ? undefined : { x: box.x, y: box.y, width: box.width, end: box.end },
           uploadUrl: signed.signedUrl,
           frameUploads,
-          audioUrl: s.footage_first_path && s.footage_first_path !== s.footage_path ? publicUrl(admin, BUCKET, s.footage_first_path) : undefined,
           captions: filmed && filmed.captions !== "none" && Array.isArray(s.words) && s.words.length
             ? { assB64: base64Encode(new TextEncoder().encode(captionsAss(s.words, filmed, s.sentence_starts ?? [])) as unknown as ArrayBuffer), fontUrl: await captionFontUrl(admin, filmed.caption_font, captionWeight(filmed.caption_style)) }
             : undefined,
@@ -394,9 +414,9 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       );
       s.compose_checked_at = Date.now();
       s.video_path = out;
-      job.step = "compose_wait"; return "next";
+      job.step = "assemble_wait"; return "next";
     }
-    case "compose_wait": {
+    case "assemble_wait": {
       if (recently(s.compose_checked_at)) return "wait";
       s.compose_checked_at = Date.now();
       const r = await checkScript(s.compose_session);
@@ -405,76 +425,65 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       const made = r.state === "finished" ? parseComposed(r.reply) : null;
       if (!made) {
         const why = r.state === "failed" ? r.reason : r.reply.slice(0, 300);
-        console.error(`[video-worker] job ${job.id} compose:`, why);
+        console.error(`[video-worker] job ${job.id} assemble:`, why);
         // Kept with the job: a join that never came back left no reason on 14 Oct.
         s.compose_errors = [...(Array.isArray(s.compose_errors) ? s.compose_errors : []), String(why ?? "").slice(0, 300)].slice(-3);
-        job.step = "compose"; return "next";
+        job.step = "assemble"; return "next";
       }
       if (input.footage_upload) {
         s.video_seconds = made.seconds;
         s.final_path = s.video_path;
         job.step = "finished"; return "done";
       }
-      // A video post is never silent: footage that came back without sound is made again.
-      if (made.audio < 1) {
-        console.warn(`[video-worker] job ${job.id}: the footage has no sound; making it again.`);
-        delete s.footage_job;
-        job.step = "footage"; return "next";
-      }
-      // The footage carries no writing of its own: the only words are the hook's.
+      // A video post is never silent, and its clip is ordered once: a silent clip ends the video.
+      if (made.audio < 1) throw new Error(`FINAL: ${REASONS.silent}`);
+      // The clip carries no writing of its own: the only words are the title's.
       const seen = await footageWriting(admin, s.still_paths ?? [], input.scene_words ?? []);
       s.footage_writing = seen;
       if (seen.writing) {
-        s.cleans = (s.cleans ?? 0) + 1;
-        if (s.cleans <= MAX_CLEANS) {
-          console.warn(`[video-worker] job ${job.id}: the footage has writing (${seen.where}); cleaning it.`);
-          job.step = "clean"; return "next";
-        }
-        console.warn(`[video-worker] job ${job.id}: the footage still has writing after cleaning (${seen.where}); making it again.`);
-        delete s.footage_job;
-        job.step = "footage"; return "next";
+        console.warn(`[video-worker] job ${job.id}: the clip has writing (${seen.where}).`);
+        throw new Error(`FINAL: ${REASONS.writing}`);
       }
       s.video_seconds = made.seconds;
       s.final_path = s.video_path;
       job.step = "finished"; return "done";
     }
-    case "clean": {
-      const mcp = await higgsfield(admin);
-      const [id] = await importReferences(mcp, [publicUrl(admin, BUCKET, s.footage_path)], "video");
-      if (!id) throw new Error("Could not hand the footage to the video model.");
-      const edit = { prompt: cleanFootagePrompt(input.scene_words ?? [], s.footage_writing?.where ?? ""), videoId: id };
-      const [first] = await editVideo(mcp, edit);
-      if (!first?.job_id) throw new Error("Higgsfield did not start the cleaning.");
-      s.clean_job = first;
-      s.credits = withCredits(s.credits, { what: "clean", job_id: first.job_id, credits: await quoteEdit(mcp, edit), at: new Date().toISOString() });
-      s.clean_checked_at = Date.now();
-      job.step = "clean_wait"; return "next";
-    }
-    case "clean_wait": {
-      if (recently(s.clean_checked_at)) return "wait";
-      s.clean_checked_at = Date.now();
-      const res = await awaitJobs(await higgsfield(admin), [s.clean_job], { budgetMs: 0 });
-      const o = res.outcomes[0];
-      const terminal = !!o && (o.status === "completed" || o.status === "failed" || o.status === "nsfw" || o.status === "canceled" || o.status === "timed_out" || !!o.error);
-      if (!terminal) return "wait";
-      if (o.status !== "completed" || !o.result_url) {
-        console.error(`[video-worker] job ${job.id} cleaning ${o.status}: ${o.error ?? ""}`);
-        // A cleaning that did not finish counts as one; the next is tried, then new footage.
-        job.step = (s.cleans ?? 0) < MAX_CLEANS ? "clean" : "footage";
-        if (job.step === "clean") s.cleans = (s.cleans ?? 0) + 1; else delete s.footage_job;
-        return "next";
-      }
-      const resp = await fetch(o.result_url, { signal: AbortSignal.timeout(90_000) });
-      if (!resp.ok) throw new Error(`Could not fetch the cleaned footage: ${resp.status}`);
-      const path = `${base}/footage-${s.footage_tries}-clean-${s.cleans}.mp4`;
-      const { error } = await admin.storage.from(BUCKET).upload(path, new Uint8Array(await resp.arrayBuffer()), { contentType: "video/mp4", upsert: true });
-      if (error) throw new Error(`Could not store the cleaned footage: ${error.message}`);
-      s.footage_path = path;
-      job.step = "compose"; return "next";
-    }
   }
   throw new Error(`FINAL: Unknown video step '${job.step}'`);
 }
+
+/** The clip's order saved to the job's row before Higgsfield is called; a job no longer active is never ordered for. */
+async function saveOrder(admin: any, job: VideoJob): Promise<void> {
+  const { data, error } = await admin.from("canva_finish_jobs").update({ state: job.state, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE).select("id");
+  if (error) throw new Error(`Could not save the clip's order: ${error.message}`);
+  if (!data?.length) throw new Error("FINAL: The video was stopped before its clip was ordered.");
+}
+
+function anthropicKey(): string {
+  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
+  return apiKey;
+}
+
+/** One picture drawn by the image model from a prompt alone, at exactly the size asked for; transparent for a title layer. */
+async function generateImage(apiKey: string, prompt: string, size: [number, number], transparent: boolean): Promise<Uint8Array> {
+  const resp = await fetch("https://api.openai.com/v1/images/generations", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: OPENAI_IMAGE_MODEL, prompt, size: `${size[0]}x${size[1]}`, quality: "high", output_format: "png", n: 1,
+      ...(transparent ? { background: "transparent" } : {}),
+    }),
+    signal: AbortSignal.timeout(transparent ? 120_000 : 360_000),
+  });
+  const text = await resp.text();
+  if (resp.status === 429 || resp.status >= 500) throw new ModelBusy(`Image model ${resp.status}: ${text.slice(0, 200)}`);
+  if (!resp.ok) throw new Error(`Image model ${resp.status}: ${text.slice(0, 300)}`);
+  const b64 = JSON.parse(text)?.data?.[0]?.b64_json;
+  if (!b64) throw new Error("The image model returned no image.");
+  return base64Decode(b64);
+}
+
 
 /** Whether the footage's stills show any writing, read by the vision model. */
 async function footageWriting(admin: any, paths: string[], allowed: string[] = [], bucket = BUCKET): Promise<{ writing: boolean; where: string }> {
@@ -535,14 +544,14 @@ async function runKitStep(admin: any, job: VideoJob, after: "finish" | "video"):
       job.step = "finished"; return "done";
     }
     if (next === "none") await toPostsRoute(admin, job);
-    job.step = "references"; return "next";
+    job.step = "title"; return "next";
   }
   if (next === "wait") return "wait";
   if (!videoStyle) {
     // No style at all (the client has no videos to learn from): nothing to make a kit from.
     if (after === "finish") throw new Error("FINAL: The client's video style is missing.");
     await toPostsRoute(admin, job);
-    job.step = "references"; return "next";
+    job.step = "title"; return "next";
   }
   // The claim: only when no other job holds a fresh start (decided in the database, so two jobs never both make it).
   const { data: claimed, error: claimError } = await admin.rpc("video_style_claim_kit", { p_client: job.client_id, p_job: job.id, p_stale: `${KIT_MAKE_MS / 1000} seconds` });

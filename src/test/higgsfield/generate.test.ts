@@ -3,13 +3,11 @@ import {
   awaitJobs,
   costOf,
   creditBalance,
-  editVideo,
   firstResult,
   HiggsfieldError,
   imageAspect,
   importReferences,
   submitImage,
-  quoteEdit,
   quoteVideo,
   submitVideo,
   videoAspect,
@@ -252,15 +250,6 @@ describe("references and credits", () => {
     expect(await quoteVideo(caller, req)).toBe(99.5);
     await submitVideo(caller, req);
     expect(calls.map((c) => c.name)).toEqual(["generate_video", "generate_video_batch"]);
-    const { get_cost, ...quoted } = calls[0].args.params;
-    expect(get_cost).toBe(true);
-    expect(quoted).toEqual(calls[1].args.requests[0].params);
-  });
-
-  it("quotes a cleaning with exactly the settings it is submitted with", async () => {
-    const { caller, calls } = stub({ generate_video: { cost: { credits: 40 } }, generate_video_batch: jobsReply });
-    expect(await quoteEdit(caller, { prompt: "remove the writing", videoId: "footage-1" })).toBe(40);
-    await editVideo(caller, { prompt: "remove the writing", videoId: "footage-1" });
     const { get_cost, ...quoted } = calls[0].args.params;
     expect(get_cost).toBe(true);
     expect(quoted).toEqual(calls[1].args.requests[0].params);
