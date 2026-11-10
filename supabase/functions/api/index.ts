@@ -15,11 +15,10 @@ import { createClient } from "../_shared/supabase.ts";
 import type { CoreDeps } from "../_shared/api/core.ts";
 import type { KeyRow } from "../_shared/api/keys.ts";
 import { callEnvFromDeno, callFunction } from "../_shared/invoke.ts";
-import { oauthClientOf } from "../_shared/auth/authz.ts";
 import { API_VERSION, TOOL, socialyticsHandler, type AllDeps } from "./openapi.ts";
 import { makeJobStore } from "./jobs-store.ts";
 import { makeKeyStore } from "./keys-store.ts";
-import { makeVerifyStaffSession } from "./routes-me.ts";
+import { makeSessionChecks } from "./sessions.ts";
 import { makeStore } from "../_shared/socialytics-api/store.ts";
 import { schemaCheck, TABLE_COLUMNS } from "./schema-check.ts";
 import { buildFindings, loadHealthRows } from "./health.ts";
@@ -43,6 +42,20 @@ async function health(): Promise<unknown> {
   return { tool: TOOL, time: now.toISOString(), findings: [...buildFindings(rows, now), ...drift], demo_jobs: demo, counts: { stuck_reports: rows.reports.length + rows.competitive.length, failed_media_24h: rows.mediaJobs.length, schema_tables_checked: TABLE_COLUMNS.length } };
 }
 
+// The one place a session token is looked up. Both checks (admin for /v1/admin/*, staff for /v1/me/*) refuse the
+// connector's OAuth tokens and API keys before these lookups run (sessions.ts).
+const sessions = makeSessionChecks({
+  userOf: async (token) => {
+    const { data, error } = await db.auth.getUser(token);
+    return error || !data?.user ? null : data.user.id;
+  },
+  rolesOf: async (userId) => {
+    const { data, error } = await db.from("user_roles").select("role").eq("user_id", userId);
+    if (error) throw new Error(error.message);
+    return ((data ?? []) as Array<{ role: string }>).map((r) => r.role);
+  },
+});
+
 const ctx = makeDemoCtx(db, env);
 const routeDeps: Omit<AllDeps, "sessionToken"> = {
   store, health,
@@ -53,18 +66,7 @@ const routeDeps: Omit<AllDeps, "sessionToken"> = {
   jobs, kickWorker: async () => { await callFunction("api/internal/worker", { kick: true }, env); }, discard: (job) => discardJob(job, { db, call: (name, body, actAs) => callFunction(name, body, { ...env, actAs }) }),
   capacity: 3, stepNames: DEMO_STEPS.map((s) => s.name), keys, serverUrl, refresh: (job) => refreshOutputs(job, ctx),
   extraRoutes: [workerRoute({ jobs, ctx, steps: DEMO_STEPS })],
-  // Beside verifyAdminJwt below: a person's app session, and whether they are Moburst staff (admin or moburst_user).
-  verifyStaffSession: makeVerifyStaffSession({
-    userOf: async (token) => {
-      const { data, error } = await db.auth.getUser(token);
-      return error || !data?.user ? null : data.user.id;
-    },
-    rolesOf: async (userId) => {
-      const { data, error } = await db.from("user_roles").select("role").eq("user_id", userId);
-      if (error) throw new Error(error.message);
-      return ((data ?? []) as Array<{ role: string }>).map((r) => r.role);
-    },
-  }),
+  verifyStaffSession: sessions.staff,
   now: () => new Date(),
 };
 
@@ -80,14 +82,7 @@ const deps: Omit<CoreDeps, "routes"> = {
     const { data } = await db.from("clients").select("id, company_slug").is("archived_at", null);
     return (data ?? []) as Array<{ id: string; company_slug: string | null }>;
   },
-  verifyAdminJwt: async (token) => {
-    // A token from Supabase's OAuth server (the Claude connector) only reads; it never manages keys.
-    if (oauthClientOf(token)) return null;
-    const { data, error } = await db.auth.getUser(token);
-    if (error || !data?.user) return null;
-    const { data: roles } = await db.from("user_roles").select("role").eq("user_id", data.user.id);
-    return (roles ?? []).some((r: { role: string }) => r.role === "admin") ? { userId: data.user.id } : null;
-  },
+  verifyAdminJwt: sessions.admin,
   cronSecret: Deno.env.get("SOCIALYTICS_N8N_SECRET") ?? null,
   serviceKey: SERVICE_KEY,
   audit: async (row) => {

@@ -29,11 +29,37 @@ describe("oauthClientOf", () => {
 
 describe("the guards that let a session act", () => {
   it("refuse an OAuth token before anything else is checked", () => {
-    // api/index.ts: the admin session that may manage API keys.
-    for (const path of ["_shared/auth/requireStaff.ts", "_shared/auth/requireMember.ts", "post-preview/index.ts", "api/index.ts"]) {
+    // Each guard with the call that first looks the token up. api/sessions.ts holds the api function's two session checks:
+    // the admin session that may manage every API key, and the staff session that manages a person's own keys.
+    const guards: Array<[path: string, lookup: string]> = [
+      ["_shared/auth/requireStaff.ts", "auth.getUser("], ["_shared/auth/requireMember.ts", "auth.getUser("], ["post-preview/index.ts", "auth.getUser("],
+      ["api/sessions.ts", "lookups.userOf("], ["api/sessions.ts", "lookups.rolesOf("],
+    ];
+    for (const [path, lookup] of guards) {
       const src = fn(path);
       expect(src, path).toContain("oauthClientOf(");
-      expect(src.indexOf("oauthClientOf("), path).toBeLessThan(src.indexOf("auth.getUser("));
+      expect(src, `${path} ${lookup}`).toContain(lookup);
+      expect(src.indexOf("oauthClientOf("), `${path} ${lookup}`).toBeLessThan(src.indexOf(lookup));
     }
+  });
+
+  it("look a session up in the api function only through the checks in api/sessions.ts", () => {
+    // api/index.ts writes the lookups once, inside the object it hands to makeSessionChecks, so no other path in the
+    // function can reach auth with a token that sessions.ts has not refused first.
+    const src = fn("api/index.ts");
+    expect(src.split("auth.getUser(")).toHaveLength(2);
+    const call = src.indexOf("makeSessionChecks(");
+    expect(call, "api/index.ts calls makeSessionChecks").toBeGreaterThanOrEqual(0);
+    let depth = 0;
+    let end = -1;
+    for (let i = call + "makeSessionChecks".length; i < src.length; i++) {
+      if (src[i] === "(") depth++;
+      else if (src[i] === ")" && --depth === 0) { end = i; break; }
+    }
+    const lookup = src.indexOf("auth.getUser(");
+    expect(lookup).toBeGreaterThan(call);
+    expect(lookup).toBeLessThan(end);
+    expect(src).toMatch(/verifyAdminJwt: sessions\.admin\b/);
+    expect(src).toMatch(/verifyStaffSession: sessions\.staff\b/);
   });
 });

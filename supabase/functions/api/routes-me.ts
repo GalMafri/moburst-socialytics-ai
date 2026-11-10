@@ -6,15 +6,16 @@
  * it reaches from the owner's roles on every call.
  *
  * To the core these routes are auth "none", because the core checks API keys
- * and admin sessions only; each handler checks the person's session itself.
- * The core's route context carries no headers, so each request's own bearer
- * comes in through sessionToken (see socialyticsHandler in openapi.ts).
+ * and admin sessions only; each handler checks the person's session itself,
+ * through the staff check in sessions.ts. The core's route context carries no
+ * headers, so each request's own bearer comes in through sessionToken (see
+ * socialyticsHandler in openapi.ts).
  */
 import { ApiError, forbidden, invalid, notFound, unauthorized } from "../_shared/api/errors.ts";
 import { generateKey, hashKey } from "../_shared/api/keys.ts";
 import type { Route } from "../_shared/api/router.ts";
-import { oauthClientOf } from "../_shared/auth/authz.ts";
 import type { KeyStore, StoredKey } from "./routes-admin.ts";
+import type { StaffSession } from "./sessions.ts";
 
 const LIFETIME_DAYS = 90;
 const LIVE_LIMIT = 10;
@@ -46,39 +47,13 @@ function keyName(raw: unknown): string {
   return name;
 }
 
-/** A signed-in person, and whether they hold a staff role (admin or moburst_user). */
-export interface StaffSession {
-  userId: string;
-  staff: boolean;
-}
-
 export interface MeDeps {
   keys: KeyStore;
-  /** Null when the token is not a person's app session (401); staff false when the person holds no staff role (403). */
+  /** The staff check from sessions.ts. Null when the token is not a person's app session (401); staff false when the person holds no staff role (403). */
   verifyStaffSession(token: string): Promise<StaffSession | null>;
   /** This request's bearer token, or null when it has none. */
   sessionToken(): string | null;
   now(): Date;
-}
-
-/**
- * verifyStaffSession over the two lookups index.ts makes against the
- * database: the user a session token belongs to, and that user's roles.
- * Mirrors verifyAdminJwt: a token from Supabase's OAuth server (the Claude
- * connector) only reads, and an API key is never a session, so neither is
- * sent to auth.
- */
-export function makeVerifyStaffSession(lookups: {
-  userOf(token: string): Promise<string | null>;
-  rolesOf(userId: string): Promise<string[]>;
-}): (token: string) => Promise<StaffSession | null> {
-  return async (token) => {
-    if (oauthClientOf(token) || /^(adv|soc)_/.test(token)) return null;
-    const userId = await lookups.userOf(token);
-    if (!userId) return null;
-    const roles = await lookups.rolesOf(userId);
-    return { userId, staff: roles.some((r) => r === "admin" || r === "moburst_user") };
-  };
 }
 
 /** What a person sees of their own key: never the hash, the owner or the reach. */

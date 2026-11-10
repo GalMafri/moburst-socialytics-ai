@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { makeVerifyStaffSession } from "../../functions/api/routes-me";
+import { makeSessionChecks } from "../../functions/api/sessions";
 import { API_VERSION, TOOL, socialyticsHandler } from "../../functions/api/openapi";
 import type { KeyStore, StoredKey } from "../../functions/api/routes-admin";
 import type { CoreDeps } from "../../functions/_shared/api/core";
@@ -69,11 +69,11 @@ function memoryKeys() {
   return { rows, store, personal, tool };
 }
 
-/** The api function as index.ts serves it (socialyticsHandler), over the memory store and fake sessions. */
+/** The api function as index.ts serves it (socialyticsHandler and the staff check from sessions.ts), over the memory store and fake lookups. */
 function app(opts: { userOf?: (token: string) => Promise<string | null> } = {}) {
   const keys = memoryKeys();
   const sessionLookups: string[] = [];
-  const verifyStaffSession = makeVerifyStaffSession({
+  const sessions = makeSessionChecks({
     userOf: async (token) => {
       sessionLookups.push(token);
       return opts.userOf ? opts.userOf(token) : USERS[token] ?? null;
@@ -85,7 +85,7 @@ function app(opts: { userOf?: (token: string) => Promise<string | null> } = {}) 
     tool: TOOL, version: API_VERSION, touchKey: async () => liveKey, clientsForScope: async () => [], verifyAdminJwt: async () => null,
     cronSecret: "cron-s", serviceKey: null, audit: async () => {}, requestId: () => "r", now: () => NOW,
   };
-  const handle = socialyticsHandler(core, { ...STUBS, keys: keys.store, serverUrl: "https://x.supabase.co/functions/v1/api", verifyStaffSession, now: () => NOW });
+  const handle = socialyticsHandler(core, { ...STUBS, keys: keys.store, serverUrl: "https://x.supabase.co/functions/v1/api", verifyStaffSession: sessions.staff, now: () => NOW });
   const call = async (method: string, path: string, headers: Record<string, string> = {}, body?: unknown) => {
     const res = await handle(new Request(`https://x.supabase.co/functions/v1/api${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) }));
     return { status: res.status, body: await res.json() };
@@ -304,23 +304,6 @@ describe("the request wiring", () => {
     expect(Object.keys(doc.paths["/v1/me/keys"]).sort()).toEqual(["get", "post"]);
     expect(doc.paths["/v1/me/keys"].post.requestBody).toBeDefined();
     expect(Object.keys(doc.paths["/v1/me/keys/{id}"])).toEqual(["delete"]);
-  });
-});
-
-describe("makeVerifyStaffSession", () => {
-  it("refuses an API key and the connector's token before asking auth, and reads staff from the roles", async () => {
-    const asked: string[] = [];
-    const verify = makeVerifyStaffSession({ userOf: async (t) => { asked.push(t); return USERS[t] ?? null; }, rolesOf: async (id) => ROLES[id] ?? [] });
-    expect(await verify(TOOL_KEY)).toBeNull();
-    expect(await verify(ADV_KEY)).toBeNull();
-    expect(await verify(OAUTH)).toBeNull();
-    expect(asked).toEqual([]);
-    expect(await verify("jwt-unknown")).toBeNull();
-    expect(await verify("jwt-lital")).toEqual({ userId: "u-lital", staff: true });
-    expect(await verify("jwt-admin")).toEqual({ userId: "u-admin", staff: true });
-    expect(await verify("jwt-both")).toEqual({ userId: "u-both", staff: true });
-    expect(await verify("jwt-client")).toEqual({ userId: "u-client", staff: false });
-    expect(await verify("jwt-norole")).toEqual({ userId: "u-norole", staff: false });
   });
 });
 
