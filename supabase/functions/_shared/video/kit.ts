@@ -127,20 +127,37 @@ export function postsRouteInput<T extends Record<string, unknown>>(input: T): T 
 
 /** The most stills one background cleaning takes on; the rest wait for the next pass. */
 export const KIT_BATCH = 3;
-/** Claims of the kit by one job before it is stored as [] (the client's videos then take the posts route). */
+/** Claims of the kit by one job that finished no still, before it is stored as [] (the client's videos then take the posts route). */
 export const MAX_KIT_TRIES = 3;
+
+/** How many picked stills are done (cleaned or dropped). */
+export function kitDoneCount(done: ReadonlyArray<string | null | undefined>): number {
+  return done.filter((d) => d !== undefined).length;
+}
+
+/**
+ * The kit's tries at a new claim. A try is a claim that finished no still:
+ * at each claim the stills done now are compared with those done at the
+ * claim before (`seen`); none new since then costs that claim a try. The
+ * first claim has nothing before it, so costs nothing.
+ */
+export function kitClaim(prev: { tries?: unknown; seen?: unknown }, doneNow: number): { tries: number; seen: number } {
+  const tries = typeof prev.tries === "number" ? prev.tries : 0;
+  if (typeof prev.seen !== "number") return { tries, seen: doneNow };
+  return { tries: doneNow > prev.seen ? tries : tries + 1, seen: doneNow };
+}
 
 /**
  * What the kit's maker does next, from each picked still's outcome so far
  * (`done[i]`: its clean path, null when dropped, undefined while not done)
- * and how many times it has claimed the kit: store it once every still is
- * done; give up (store []) once its tries are spent; else clean the next
+ * and its tries (kitClaim): store it once every still is done; give up
+ * (store []) once MAX_KIT_TRIES claims finished nothing; else clean the next
  * KIT_BATCH stills not done yet.
  */
 export function kitWork(count: number, done: ReadonlyArray<string | null | undefined>, tries: number): { kind: "store" } | { kind: "spent" } | { kind: "clean"; todo: number[] } {
   const todo: number[] = [];
   for (let i = 0; i < count; i++) if (done[i] === undefined) todo.push(i);
   if (!todo.length) return { kind: "store" };
-  if (tries > MAX_KIT_TRIES) return { kind: "spent" };
+  if (tries >= MAX_KIT_TRIES) return { kind: "spent" };
   return { kind: "clean", todo: todo.slice(0, KIT_BATCH) };
 }

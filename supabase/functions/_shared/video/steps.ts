@@ -38,7 +38,7 @@ import { canvasLogoRect } from "../canva/brief.ts";
 import { anthropicMessages } from "../anthropic.ts";
 import { openaiKey } from "../openai/key.ts";
 import { ModelBusy, imageEdit } from "../media/imageEdit.ts";
-import { KIT_MAKE_MS, KIT_MAX, KIT_MIN, MAX_KIT_TRIES, kitChosen, kitCleanPrompt, kitKept, kitNext, kitPath, kitPickPrompt, kitState, kitWork, postsRouteInput } from "./kit.ts";
+import { KIT_MAKE_MS, KIT_MAX, KIT_MIN, MAX_KIT_TRIES, kitChosen, kitCleanPrompt, kitKept, kitNext, kitPath, kitPickPrompt, kitClaim, kitDoneCount, kitState, kitWork, postsRouteInput } from "./kit.ts";
 import { copyMatches, parseRead, readPrompt } from "../design/pipeline.ts";
 import { parseVideoStyle, videoStylePrompt } from "../canva/options.ts";
 import { CARD_SIZE, FOOTAGE_STILLS, STYLE_FRAMES, TIMING, VIDEO_SIZE, audioScript, captionWeight, captionsAss, cleanFootagePrompt, framesScript, hookPlacement, parseAudio, videoLogoBox, parseFrames, clipScript, composeScript, footageTextPrompt, parseClipped, parseComposed, parseFootageText, referenceClipPath } from "./compose.ts";
@@ -504,14 +504,15 @@ async function jpegBlocks(admin: any, bucket: string, paths: string[]): Promise<
  * The client's kit (kit.ts), made once by the first job that needs it: the
  * style job right after it reads the style, or a video job that finds no kit.
  *   kit       claim the making on the client (video_style_claim_kit; the
- *             holder renews its claim each pass, each claim is a try), let the
+ *             holder renews its claim each pass), let the
  *             vision model pick up to KIT_MAX of the style's stills, then clean
  *             up to KIT_BATCH of them per pass with the image model in the
  *             background (hold): a still whose writing shows again is cleaned
  *             once more, then dropped. Each still's outcome is saved on the job
  *             as it comes. Once every picked still is done, the clean ones
  *             (kitPath) are listed on video_style.kit ([] with fewer than
- *             KIT_MIN). After MAX_KIT_TRIES claims the kit is stored as []:
+ *             KIT_MIN). After MAX_KIT_TRIES claims that finished no still
+ *             (kitClaim) the kit is stored as []:
  *             the client's videos take the posts route, and nothing fails;
  *   kit_wait  until the kit is stored. The style job then plans the video
  *             posts that waited for the style and ends; a video job goes on,
@@ -547,7 +548,10 @@ async function runKitStep(admin: any, job: VideoJob, after: "finish" | "video"):
   const { data: claimed, error: claimError } = await admin.rpc("video_style_claim_kit", { p_client: job.client_id, p_job: job.id, p_stale: `${KIT_MAKE_MS / 1000} seconds` });
   if (claimError) throw new Error(`Could not start the client's kit: ${claimError.message}`);
   if (!claimed) return "wait";
-  s.kit_tries = (s.kit_tries ?? 0) + 1;
+  // A try is a claim that finished no still since the claim before (kitClaim).
+  const claim = kitClaim({ tries: s.kit_tries, seen: s.kit_seen }, kitDoneCount(Array.isArray(s.kit_done) ? s.kit_done : []));
+  s.kit_tries = claim.tries;
+  s.kit_seen = claim.seen;
   job.step = "kit";
   // Saved before any model call, so an error from here on never runs the steps before the kit again.
   await saveJob(admin, job, { step: job.step });
@@ -591,7 +595,7 @@ async function makeKit(admin: any, job: VideoJob, videoStyle: any, brand: string
   const done: Array<string | null | undefined> = Array.isArray(s.kit_done) ? s.kit_done : (s.kit_done = []);
   const work = kitWork(picked.length, done, s.kit_tries);
   if (work.kind !== "clean") {
-    if (work.kind === "spent") console.warn(`[video-worker] kit ${job.client_id}: not finished after ${MAX_KIT_TRIES} tries; the client's videos take the posts route.`);
+    if (work.kind === "spent") console.warn(`[video-worker] kit ${job.client_id}: ${MAX_KIT_TRIES} tries finished no still; the client's videos take the posts route.`);
     await storeKit(admin, job.client_id, work.kind === "store" ? kitKept(picked.map((_, i) => done[i] ?? null)) : []);
     job.step = "kit_wait"; return "next";
   }

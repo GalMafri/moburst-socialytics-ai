@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { KIT_BATCH, KIT_MAKE_MS, KIT_MAX, MAX_KIT_TRIES, kitWork, KIT_MIN, kitChosen, kitCleanPrompt, kitKept, kitNext, kitPath, kitPaths, kitPickPrompt, kitState, parseKitPick, postsRouteInput, videoRouteFor } from "../../../functions/_shared/video/kit";
+import { KIT_BATCH, KIT_MAKE_MS, KIT_MAX, MAX_KIT_TRIES, kitClaim, kitDoneCount, kitWork, KIT_MIN, kitChosen, kitCleanPrompt, kitKept, kitNext, kitPath, kitPaths, kitPickPrompt, kitState, parseKitPick, postsRouteInput, videoRouteFor } from "../../../functions/_shared/video/kit";
 
 describe("kit limits and paths", () => {
   it("keeps at most six stills and needs at least two", () => {
@@ -185,9 +185,47 @@ describe("kitWork", () => {
     expect(kitWork(0, [], 1)).toEqual({ kind: "store" });
   });
 
-  it("gives up after three claims with stills still to clean", () => {
+  it("gives up after three tries with stills still to clean", () => {
     expect(MAX_KIT_TRIES).toBe(3);
-    expect(kitWork(6, ["a"], MAX_KIT_TRIES)).toEqual({ kind: "clean", todo: [1, 2, 3] });
-    expect(kitWork(6, ["a"], MAX_KIT_TRIES + 1)).toEqual({ kind: "spent" });
+    expect(kitWork(6, ["a"], MAX_KIT_TRIES - 1)).toEqual({ kind: "clean", todo: [1, 2, 3] });
+    expect(kitWork(6, ["a"], MAX_KIT_TRIES)).toEqual({ kind: "spent" });
+  });
+});
+
+describe("kit tries", () => {
+  // One claim: its tries from what was done before it, then what kitWork decides; `adds` is how many stills its hold finished.
+  function run(passes: number[]): Array<string> {
+    const done: Array<string | null | undefined> = [];
+    let prev: { tries?: number; seen?: number } = {};
+    const out: string[] = [];
+    for (const adds of passes) {
+      prev = kitClaim(prev, kitDoneCount(done));
+      const work = kitWork(6, done, prev.tries);
+      out.push(work.kind);
+      if (work.kind !== "clean") break;
+      for (const i of work.todo.slice(0, adds)) done[i] = `k${i}`;
+    }
+    return out;
+  }
+
+  it("spends no try on the three normal claims of six stills", () => {
+    expect(run([3, 3, 0])).toEqual(["clean", "clean", "store"]);
+  });
+
+  it("stores [] after three claims that each finish nothing", () => {
+    expect(run([0, 0, 0, 0])).toEqual(["clean", "clean", "clean", "spent"]);
+  });
+
+  it("counts only the claims that finished nothing", () => {
+    // progress, busy, progress, busy, progress: two tries, and the kit is stored.
+    expect(run([2, 0, 2, 0, 2, 0])).toEqual(["clean", "clean", "clean", "clean", "clean", "store"]);
+    // a dropped still counts as finished.
+    expect(kitDoneCount(["a", null, undefined])).toBe(2);
+  });
+
+  it("costs the first claim nothing and keeps the count across claims", () => {
+    expect(kitClaim({}, 0)).toEqual({ tries: 0, seen: 0 });
+    expect(kitClaim({ tries: 0, seen: 0 }, 0)).toEqual({ tries: 1, seen: 0 });
+    expect(kitClaim({ tries: 1, seen: 0 }, 3)).toEqual({ tries: 1, seen: 3 });
   });
 });
