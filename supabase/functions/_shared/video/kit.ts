@@ -130,9 +130,38 @@ export const KIT_BATCH = 3;
 /** Claims of the kit by one job that finished no still, before it is stored as [] (the client's videos then take the posts route). */
 export const MAX_KIT_TRIES = 3;
 
+/**
+ * Each picked still's outcome, by its index in the pick: its clean path, or
+ * dropped. A still not in it is pending. (An object, not an array: stills
+ * finish out of order, and an array's holes come back from the row as nulls.)
+ */
+export type KitDone = Record<string, { path: string } | { dropped: true }>;
+
+/** The outcomes as stored on the job; anything else is pending. */
+export function kitDoneOf(raw: unknown): KitDone {
+  const out: KitDone = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!/^\d+$/.test(k) || !v || typeof v !== "object") continue;
+    const o = v as { path?: unknown; dropped?: unknown };
+    if (typeof o.path === "string" && o.path) out[k] = { path: o.path };
+    else if (o.dropped === true) out[k] = { dropped: true };
+  }
+  return out;
+}
+
 /** How many picked stills are done (cleaned or dropped). */
-export function kitDoneCount(done: ReadonlyArray<string | null | undefined>): number {
-  return done.filter((d) => d !== undefined).length;
+export function kitDoneCount(done: KitDone): number {
+  return Object.keys(kitDoneOf(done)).length;
+}
+
+/** The kit from the outcomes of `count` picked stills: the clean ones in pick order, or none with fewer than KIT_MIN. */
+export function kitKeptFrom(count: number, done: KitDone): string[] {
+  const d = kitDoneOf(done);
+  return kitKept(Array.from({ length: count }, (_, i) => {
+    const o = d[String(i)];
+    return o && "path" in o ? o.path : null;
+  }));
 }
 
 /**
@@ -148,16 +177,30 @@ export function kitClaim(prev: { tries?: unknown; seen?: unknown }, doneNow: num
 }
 
 /**
- * What the kit's maker does next, from each picked still's outcome so far
- * (`done[i]`: its clean path, null when dropped, undefined while not done)
- * and its tries (kitClaim): store it once every still is done; give up
- * (store []) once MAX_KIT_TRIES claims finished nothing; else clean the next
- * KIT_BATCH stills not done yet.
+ * What the kit's maker does next, from the number of picked stills (null
+ * before the pick), their outcomes so far and its tries (kitClaim): store it
+ * once every still is done; give up (store []) once MAX_KIT_TRIES claims
+ * finished nothing, whether or not they reached the pick; pick when there is
+ * no pick yet; else clean the next KIT_BATCH stills not done yet.
  */
-export function kitWork(count: number, done: ReadonlyArray<string | null | undefined>, tries: number): { kind: "store" } | { kind: "spent" } | { kind: "clean"; todo: number[] } {
+export function kitWork(count: number | null, done: KitDone, tries: number): { kind: "store" } | { kind: "spent" } | { kind: "pick" } | { kind: "clean"; todo: number[] } {
+  const d = kitDoneOf(done);
   const todo: number[] = [];
-  for (let i = 0; i < count; i++) if (done[i] === undefined) todo.push(i);
-  if (!todo.length) return { kind: "store" };
+  for (let i = 0; i < (count ?? 0); i++) if (!d[String(i)]) todo.push(i);
+  if (count !== null && !todo.length) return { kind: "store" };
   if (tries >= MAX_KIT_TRIES) return { kind: "spent" };
+  if (count === null) return { kind: "pick" };
   return { kind: "clean", todo: todo.slice(0, KIT_BATCH) };
+}
+
+/**
+ * A kit in progress belongs to the style it was picked from (its made_at):
+ * when the style was learned again since, the pick and the outcomes start
+ * over (the tries stay). Returns the job state to use.
+ */
+export function kitForStyle<T extends Record<string, unknown>>(state: T, madeAt: unknown): T {
+  const of = typeof madeAt === "string" ? madeAt : null;
+  if (state.kit_of === of) return state;
+  const { kit_pick: _pick, kit_done: _done, kit_seen: _seen, ...rest } = state;
+  return { ...rest, kit_of: of } as unknown as T;
 }

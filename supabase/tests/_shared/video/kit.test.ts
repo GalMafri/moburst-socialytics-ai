@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { KIT_BATCH, KIT_MAKE_MS, KIT_MAX, MAX_KIT_TRIES, kitClaim, kitDoneCount, kitWork, KIT_MIN, kitChosen, kitCleanPrompt, kitKept, kitNext, kitPath, kitPaths, kitPickPrompt, kitState, parseKitPick, postsRouteInput, videoRouteFor } from "../../../functions/_shared/video/kit";
+import { KIT_BATCH, KIT_MAKE_MS, KIT_MAX, MAX_KIT_TRIES, type KitDone, kitClaim, kitDoneCount, kitDoneOf, kitForStyle, kitKeptFrom, kitWork, KIT_MIN, kitChosen, kitCleanPrompt, kitKept, kitNext, kitPath, kitPaths, kitPickPrompt, kitState, parseKitPick, postsRouteInput, videoRouteFor } from "../../../functions/_shared/video/kit";
 
 describe("kit limits and paths", () => {
   it("keeps at most six stills and needs at least two", () => {
@@ -171,39 +171,75 @@ describe("postsRouteInput", () => {
   });
 });
 
+describe("kitDoneOf", () => {
+  it("reads each finished still by its index, and nothing else", () => {
+    expect(kitDoneOf({ "0": { path: "p0" }, "2": { dropped: true }, "3": null, "4": { path: "" }, x: { path: "q" }, "5": "p5" })).toEqual({ "0": { path: "p0" }, "2": { dropped: true } });
+    expect(kitDoneOf(undefined)).toEqual({});
+    expect(kitDoneOf(["p0", null])).toEqual({});
+  });
+
+  it("keeps the stills not finished as pending after the state is saved and read back", () => {
+    const state = { kit_done: { "2": { path: "c/style/kit-2.jpg" } } as KitDone };
+    const back = JSON.parse(JSON.stringify(state));
+    const done = kitDoneOf(back.kit_done);
+    expect(kitDoneCount(done)).toBe(1);
+    expect(kitWork(3, done, 0)).toEqual({ kind: "clean", todo: [0, 1] });
+  });
+});
+
+describe("kitKeptFrom", () => {
+  it("lists the clean stills in pick order, or none with fewer than KIT_MIN", () => {
+    expect(kitKeptFrom(4, { "3": { path: "d" }, "0": { path: "a" }, "1": { dropped: true } })).toEqual(["a", "d"]);
+    expect(kitKeptFrom(3, { "0": { path: "a" }, "1": { dropped: true }, "2": { dropped: true } })).toEqual([]);
+  });
+});
+
 describe("kitWork", () => {
   it("cleans at most three stills not done yet, in pick order", () => {
     expect(KIT_BATCH).toBe(3);
-    expect(kitWork(6, [], 1)).toEqual({ kind: "clean", todo: [0, 1, 2] });
-    expect(kitWork(6, ["a", null, "c"], 2)).toEqual({ kind: "clean", todo: [3, 4, 5] });
-    expect(kitWork(6, ["a", undefined, "c", null], 2)).toEqual({ kind: "clean", todo: [1, 4, 5] });
+    expect(kitWork(6, {}, 1)).toEqual({ kind: "clean", todo: [0, 1, 2] });
+    expect(kitWork(6, { "0": { path: "a" }, "1": { dropped: true }, "2": { path: "c" } }, 2)).toEqual({ kind: "clean", todo: [3, 4, 5] });
+    expect(kitWork(6, { "0": { path: "a" }, "2": { path: "c" }, "3": { dropped: true } }, 2)).toEqual({ kind: "clean", todo: [1, 4, 5] });
   });
 
   it("stores the kit once every picked still is done, even on a late try", () => {
-    expect(kitWork(3, ["a", null, "c"], 1)).toEqual({ kind: "store" });
-    expect(kitWork(2, ["a", "b"], MAX_KIT_TRIES + 5)).toEqual({ kind: "store" });
-    expect(kitWork(0, [], 1)).toEqual({ kind: "store" });
+    expect(kitWork(3, { "0": { path: "a" }, "1": { dropped: true }, "2": { path: "c" } }, 1)).toEqual({ kind: "store" });
+    expect(kitWork(2, { "0": { path: "a" }, "1": { path: "b" } }, MAX_KIT_TRIES + 5)).toEqual({ kind: "store" });
+    expect(kitWork(0, {}, 1)).toEqual({ kind: "store" });
   });
 
   it("gives up after three tries with stills still to clean", () => {
     expect(MAX_KIT_TRIES).toBe(3);
-    expect(kitWork(6, ["a"], MAX_KIT_TRIES - 1)).toEqual({ kind: "clean", todo: [1, 2, 3] });
-    expect(kitWork(6, ["a"], MAX_KIT_TRIES)).toEqual({ kind: "spent" });
+    expect(kitWork(6, { "0": { path: "a" } }, MAX_KIT_TRIES - 1)).toEqual({ kind: "clean", todo: [1, 2, 3] });
+    expect(kitWork(6, { "0": { path: "a" } }, MAX_KIT_TRIES)).toEqual({ kind: "spent" });
+  });
+
+  it("asks for the pick when there is none yet, unless the tries are spent", () => {
+    expect(kitWork(null, {}, 0)).toEqual({ kind: "pick" });
+    expect(kitWork(null, {}, MAX_KIT_TRIES)).toEqual({ kind: "spent" });
   });
 });
 
 describe("kit tries", () => {
-  // One claim: its tries from what was done before it, then what kitWork decides; `adds` is how many stills its hold finished.
+  // One claim each: its tries from what was done before it, then what kitWork
+  // decides; `adds` is how many stills its hold finished, -1 for a claim that
+  // fails before its pick. The state goes through JSON between claims, as it does in the row.
   function run(passes: number[]): Array<string> {
-    const done: Array<string | null | undefined> = [];
-    let prev: { tries?: number; seen?: number } = {};
+    let state: { done: KitDone; picked: boolean; prev: { tries?: number; seen?: number } } = { done: {}, picked: false, prev: {} };
     const out: string[] = [];
     for (const adds of passes) {
-      prev = kitClaim(prev, kitDoneCount(done));
-      const work = kitWork(6, done, prev.tries);
+      state.prev = kitClaim(state.prev, kitDoneCount(state.done));
+      let work = kitWork(state.picked ? 6 : null, state.done, state.prev.tries ?? 0);
+      if (work.kind === "pick") {
+        if (adds < 0) { out.push("pick failed"); state = JSON.parse(JSON.stringify(state)); continue; }
+        state.picked = true;
+        work = kitWork(6, state.done, state.prev.tries ?? 0);
+      }
       out.push(work.kind);
       if (work.kind !== "clean") break;
-      for (const i of work.todo.slice(0, adds)) done[i] = `k${i}`;
+      // Out of order, as parallel stills finish: the last of the batch first.
+      for (const i of work.todo.slice(-Math.max(0, adds)).reverse()) if (adds > 0) state.done[String(i)] = { path: `k${i}` };
+      state = JSON.parse(JSON.stringify(state));
     }
     return out;
   }
@@ -216,16 +252,35 @@ describe("kit tries", () => {
     expect(run([0, 0, 0, 0])).toEqual(["clean", "clean", "clean", "spent"]);
   });
 
-  it("counts only the claims that finished nothing", () => {
+  it("stores [] after three claims that each fail before the pick", () => {
+    expect(run([-1, -1, -1, -1])).toEqual(["pick failed", "pick failed", "pick failed", "spent"]);
+  });
+
+  it("counts only the claims that finished nothing, and retries stills left pending", () => {
     // progress, busy, progress, busy, progress: two tries, and the kit is stored.
     expect(run([2, 0, 2, 0, 2, 0])).toEqual(["clean", "clean", "clean", "clean", "clean", "store"]);
-    // a dropped still counts as finished.
-    expect(kitDoneCount(["a", null, undefined])).toBe(2);
   });
 
   it("costs the first claim nothing and keeps the count across claims", () => {
     expect(kitClaim({}, 0)).toEqual({ tries: 0, seen: 0 });
     expect(kitClaim({ tries: 0, seen: 0 }, 0)).toEqual({ tries: 1, seen: 0 });
     expect(kitClaim({ tries: 1, seen: 0 }, 3)).toEqual({ tries: 1, seen: 3 });
+  });
+});
+
+describe("kitForStyle", () => {
+  it("keeps a kit in progress made from the same style", () => {
+    const s = { kit_of: "2026-11-10T10:00:00Z", kit_pick: ["f0"], kit_done: { "0": { path: "a" } }, kit_seen: 1, kit_tries: 1, other: 1 };
+    expect(kitForStyle(s, "2026-11-10T10:00:00Z")).toBe(s);
+  });
+
+  it("starts the pick again when the style was learned again", () => {
+    const s = { kit_of: "2026-11-10T10:00:00Z", kit_pick: ["f0"], kit_done: { "0": { path: "a" } }, kit_seen: 1, kit_tries: 1, other: 1 };
+    expect(kitForStyle(s, "2026-11-11T09:00:00Z")).toEqual({ kit_of: "2026-11-11T09:00:00Z", kit_tries: 1, other: 1 });
+  });
+
+  it("ties a first claim to the style it starts from", () => {
+    expect(kitForStyle({}, "2026-11-10T10:00:00Z")).toEqual({ kit_of: "2026-11-10T10:00:00Z" });
+    expect(kitForStyle({}, undefined)).toEqual({ kit_of: null });
   });
 });
