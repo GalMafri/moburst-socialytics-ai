@@ -62,6 +62,21 @@ begin
 end;
 $$;
 
+-- An order's time, or minus infinity when it cannot be read (a well-formed
+-- looking but impossible time, such as a 13th month, too).
+create or replace function public.video_clip_order_time(p_at text)
+returns timestamptz
+language plpgsql
+stable
+set search_path = public
+as $$
+begin
+  return p_at::timestamptz;
+exception when others then
+  return '-infinity'::timestamptz;
+end;
+$$;
+
 create or replace function public.video_clip_stop(p_job uuid, p_reason text)
 returns boolean
 language plpgsql
@@ -75,11 +90,14 @@ begin
      set status = 'failed', error = p_reason, lease_until = null, updated_at = now()
    where id = p_job
      and status in ('queued', 'running')
-     and (jsonb_typeof(clip_order) is distinct from 'object'
-          -- A lost order: no job id, and its pass stopped submitting long ago (an unreadable time counts as long ago).
-          or (not (clip_order ? 'job_id')
-              and (coalesce(clip_order ->> 'at', '') !~ '^\d{4}-\d{2}-\d{2}T'
-                   or (clip_order ->> 'at')::timestamptz < now() - interval '10 minutes')));
+     and case
+           when jsonb_typeof(clip_order) is distinct from 'object' then true
+           when clip_order ? 'job_id' then false
+           -- A lost order: no job id, and its pass stopped submitting long ago.
+           -- An unreadable time counts as long ago; CASE keeps it from ever being cast.
+           when coalesce(clip_order ->> 'at', '') !~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}' then true
+           else public.video_clip_order_time(clip_order ->> 'at') < now() - interval '10 minutes'
+         end;
   get diagnostics v_n = row_count;
   return v_n > 0;
 end;
@@ -89,5 +107,7 @@ revoke all on function public.video_clip_order(uuid, jsonb) from public, anon, a
 grant execute on function public.video_clip_order(uuid, jsonb) to service_role;
 revoke all on function public.video_clip_ordered(uuid, text, numeric) from public, anon, authenticated;
 grant execute on function public.video_clip_ordered(uuid, text, numeric) to service_role;
+revoke all on function public.video_clip_order_time(text) from public, anon, authenticated;
+grant execute on function public.video_clip_order_time(text) to service_role;
 revoke all on function public.video_clip_stop(uuid, text) from public, anon, authenticated;
 grant execute on function public.video_clip_stop(uuid, text) to service_role;

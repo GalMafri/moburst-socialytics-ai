@@ -106,6 +106,16 @@ describe("video_clip_stop", () => {
     await db.query("update public.canva_finish_jobs set clip_order = 'null'::jsonb where id = $1", [JOB]);
     expect(await call("video_clip_stop", JOB, "price")).toBe(true);
   });
+  it("takes an order whose time cannot be read as placed long ago, without raising", async () => {
+    for (const at of ["not a date", "2026-13-45T99:99:99Z", ""]) {
+      await reset("running", { price: 1, at });
+      expect(await call("video_clip_stop", JOB, "lost")).toBe(true);
+    }
+    await reset("running", { price: 1 });
+    expect(await call("video_clip_stop", JOB, "lost")).toBe(true);
+    await reset("running", { price: 1, at: "not a date", job_id: "hf-1" });
+    expect(await call("video_clip_stop", JOB, "lost")).toBe(false);
+  });
   it("leaves a job that is no longer active", async () => {
     await reset("done");
     expect(await call("video_clip_stop", JOB, "price")).toBe(false);

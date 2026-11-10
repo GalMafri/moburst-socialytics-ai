@@ -4,7 +4,7 @@
 // submitted, no pass runs on past it, and a second pass on the same job can
 // neither order again, nor fail it, nor erase its order.
 import { describe, it, expect } from "vitest";
-import { type ClipDeps, runClip } from "../../../functions/_shared/video/clipStep";
+import { type ClipDeps, ORDERED_TRIES, runClip } from "../../../functions/_shared/video/clipStep";
 import { type ClipOrder, ORDER_GRACE_MS, REASONS } from "../../../functions/_shared/video/clip";
 
 const T0 = Date.parse("2026-11-11T10:00:00.000Z");
@@ -65,6 +65,7 @@ function fakes(r: Row, over: Partial<ClipDeps> & { clock?: { t: number } } = {})
     renewLease: async () => { calls.push("renewLease"); },
     now: () => clock.t,
     pollMs: 30_000,
+    pause: async () => { calls.push("pause"); },
     ...over,
   };
   return { deps, calls, clock };
@@ -146,6 +147,51 @@ describe("runClip", () => {
     await expect(runClip(after.deps, job(r))).rejects.toThrow(`FINAL: ${REASONS.lostOrder}`);
     expect(after.calls).toEqual(["readOrder", "stopJob"]);
     expect(r).toMatchObject({ status: "failed", error: REASONS.lostOrder });
+  });
+
+  it("tries again to record a paid clip's job id after a passing error", async () => {
+    const r = row();
+    let tries = 0;
+    const base = fakes(r);
+    const { deps, calls } = fakes(r, {
+      saveOrdered: async (id, credits) => {
+        tries++;
+        if (tries < 3) throw new Error("connection reset");
+        return base.deps.saveOrdered(id, credits);
+      },
+    });
+    const j = job(r);
+    expect(await runClip(deps, j)).toBe("wait");
+    expect(tries).toBe(3);
+    expect(calls.filter((c) => c === "pause")).toHaveLength(2);
+    expect(r.clip_order).toMatchObject({ job_id: "hf-1", credits: 128 });
+    expect(j.step).toBe("clip_wait");
+  });
+
+  it("keeps a paid clip's job id in its error when it cannot be recorded, and never submits again", async () => {
+    const r = row();
+    const clock = { t: T0 };
+    let submits = 0;
+    const { deps } = fakes(r, {
+      clock,
+      submit: async () => { submits++; return { index: 0, job_id: "hf-1" }; },
+      saveOrdered: async () => { throw new Error("connection reset"); },
+    });
+    const j = job(r);
+    const err = await runClip(deps, j).catch((e) => e as Error);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toContain("hf-1");
+    expect(err.message).not.toMatch(/^FINAL:/);
+    expect(submits).toBe(1);
+    expect(r.clip_order).toEqual({ price: 128, at: new Date(T0).toISOString() });
+    workerSave(r, j, "wait");
+    // The next pass finds the order without a job id: it waits inside the grace and orders nothing.
+    clock.t = T0 + 60_000;
+    const next = fakes(r, { clock, submit: async () => { submits++; return { index: 0, job_id: "hf-2" }; } });
+    expect(await runClip(next.deps, job(r))).toBe("wait");
+    expect(next.calls).toEqual(["readOrder"]);
+    expect(submits).toBe(1);
+    expect(ORDERED_TRIES).toBe(3);
   });
 
   it("moves an order with its job id to clip_wait without pricing, importing or submitting", async () => {

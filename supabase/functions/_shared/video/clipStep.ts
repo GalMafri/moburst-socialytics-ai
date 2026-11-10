@@ -50,6 +50,30 @@ export interface ClipDeps {
   now(): number;
   /** How often an unreadable price is read again. */
   pollMs: number;
+  /** Waits between tries of recording a paid clip's job id (a timer when not given). */
+  pause?(ms: number): Promise<void>;
+}
+
+/** Tries of recording a paid clip's job id, and the pause between them. */
+export const ORDERED_TRIES = 3;
+export const ORDERED_PAUSE_MS = 1_000;
+
+/** The paid clip's job id recorded on its order, tried again on an error; the last error names the id, so the job's error keeps it. */
+async function recordOrdered(deps: ClipDeps, job: VideoJob, jobId: string, credits: number | null): Promise<void> {
+  const pause = deps.pause ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  let last: unknown;
+  for (let i = 1; i <= ORDERED_TRIES; i++) {
+    try {
+      // false: the id is already on the order, which is what this wants.
+      if (!(await deps.saveOrdered(jobId, credits))) console.warn(`[video-worker] job ${job.id}: the clip's job id was already recorded.`);
+      return;
+    } catch (e) {
+      last = e;
+      if (i < ORDERED_TRIES) await pause(ORDERED_PAUSE_MS);
+    }
+  }
+  const why = last instanceof Error ? last.message : String(last);
+  throw new Error(`The clip was ordered as Higgsfield job ${jobId}, but its job id could not be recorded: ${why}`);
 }
 
 /** The job ended with the reason, unless an order stands in the way: then the row is left to the pass that placed it. */
@@ -110,7 +134,7 @@ export async function runClip(deps: ClipDeps, job: VideoJob): Promise<VideoStepR
   // wait out ORDER_GRACE_MS and then end the video, never ordering again.
   const first = await deps.submit(clipRequest(prompt, s.frame_ref_id, s.kit_ref_ids));
   if (!first?.job_id) throw new Error("Higgsfield did not start the clip.");
-  if (!(await deps.saveOrdered(first.job_id, live))) console.warn(`[video-worker] job ${job.id}: the clip's job id was already recorded.`);
+  await recordOrdered(deps, job, first.job_id, live);
   job.clip_order = { ...order, job_id: first.job_id, credits: live };
   s.clip_started_at = deps.now();
   s.clip_checked_at = deps.now();
