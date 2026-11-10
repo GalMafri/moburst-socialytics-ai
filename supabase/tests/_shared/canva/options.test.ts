@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { MAX_CANDIDATES, VIDEO_CANDIDATES, candidatesFor, carouselPlannerPrompt, parseBriefs, plannerPrompt, requestProgress, videoPlannerPrompt, type JobState } from "../../../functions/_shared/canva/options";
+import { BRIEFS_PLANNED, MAX_CANDIDATES, OPTIONS_WANTED, VIDEO_CANDIDATES, candidatesFor, carouselPlannerPrompt, parseBriefs, plannerPrompt, requestProgress, type JobState, videoPlannerPrompt } from "../../../functions/_shared/canva/options";
 
 const done: JobState = { status: "done", step: "finished" };
 const failed: JobState = { status: "failed", step: "edit" };
@@ -18,27 +18,27 @@ describe("parseBriefs", () => {
 
 describe("requestProgress", () => {
   it("starts the first options while nothing is running", () => {
-    expect(requestProgress([])).toMatchObject({ status: "preparing", start_brief: 0 });
+    expect(requestProgress([], OPTIONS_WANTED, BRIEFS_PLANNED, MAX_CANDIDATES)).toMatchObject({ status: "preparing", start_brief: 0 });
   });
   it("is ready once its one design is done", () => {
-    expect(requestProgress([done])).toMatchObject({ status: "ready", stage: "ready", options_ready: 1, start_brief: null });
+    expect(requestProgress([done], OPTIONS_WANTED, BRIEFS_PLANNED, MAX_CANDIDATES)).toMatchObject({ status: "ready", stage: "ready", options_ready: 1, start_brief: null });
   });
   it("replaces a design that did not finish, from the next brief", () => {
-    expect(requestProgress([failed])).toMatchObject({ status: "preparing", start_brief: 1 });
-    expect(requestProgress([failed, finishing])).toMatchObject({ status: "preparing", stage: "finishing", start_brief: null });
+    expect(requestProgress([failed], OPTIONS_WANTED, BRIEFS_PLANNED, MAX_CANDIDATES)).toMatchObject({ status: "preparing", start_brief: 1 });
+    expect(requestProgress([failed, finishing], OPTIONS_WANTED, BRIEFS_PLANNED, MAX_CANDIDATES)).toMatchObject({ status: "preparing", stage: "finishing", start_brief: null });
   });
   it("reports designing while the design is still being drawn", () => {
-    expect(requestProgress([designing])).toMatchObject({ stage: "designing", start_brief: null });
+    expect(requestProgress([designing], OPTIONS_WANTED, BRIEFS_PLANNED, MAX_CANDIDATES)).toMatchObject({ stage: "designing", start_brief: null });
   });
   it("is ready when a replacement finished", () => {
     const jobs = [...Array(MAX_CANDIDATES - 1).fill(failed), done];
-    expect(requestProgress(jobs)).toMatchObject({ status: "ready", options_ready: 1 });
+    expect(requestProgress(jobs, OPTIONS_WANTED, BRIEFS_PLANNED, MAX_CANDIDATES)).toMatchObject({ status: "ready", options_ready: 1 });
   });
   it("still honors a request that asked for more than one", () => {
-    expect(requestProgress([done, failed, finishing], 3, 5)).toMatchObject({ status: "preparing", stage: "finishing", start_brief: null });
+    expect(requestProgress([done, failed, finishing], 3, 5, MAX_CANDIDATES)).toMatchObject({ status: "preparing", stage: "finishing", start_brief: null });
   });
   it("closes quietly when nothing finished, so a new request is made later", () => {
-    expect(requestProgress(Array(MAX_CANDIDATES).fill(failed))).toMatchObject({ status: "closed", options_ready: 0, start_brief: null });
+    expect(requestProgress(Array(MAX_CANDIDATES).fill(failed), OPTIONS_WANTED, BRIEFS_PLANNED, MAX_CANDIDATES)).toMatchObject({ status: "closed", options_ready: 0, start_brief: null });
   });
   it("never replaces a video that did not finish: its one option bought its one clip", () => {
     expect(candidatesFor("video")).toBe(VIDEO_CANDIDATES);
@@ -85,7 +85,7 @@ describe("optionStates", () => {
       { option_index: 1, slide_count: null, status: "canceled", step: "title" },
     ];
     expect(optionStates(jobs as never)).toEqual([{ status: "failed", step: "failed" }, { status: "failed", step: "failed" }]);
-    expect(requestProgress(optionStates(jobs as never), 1, 3)).toMatchObject({ status: "preparing", start_brief: 2 });
+    expect(requestProgress(optionStates(jobs as never), 1, 3, MAX_CANDIDATES)).toMatchObject({ status: "preparing", start_brief: 2 });
   });
   it("counts a video as designing until its clip is ordered, and finishing from then on", () => {
     const at = (step: string, footage_upload: string | null = null) => optionStates([{ option_index: 0, slide_count: null, status: "running", step, input: { kind: "video", footage_upload } }] as never)[0].step;

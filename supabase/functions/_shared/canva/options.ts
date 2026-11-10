@@ -202,7 +202,7 @@ export interface RequestProgress {
 }
 
 /** Where a request stands, and whether it needs a replacement option, from its jobs. */
-export function requestProgress(jobs: JobState[], wanted = OPTIONS_WANTED, briefCount = BRIEFS_PLANNED, maxCandidates = MAX_CANDIDATES): RequestProgress {
+export function requestProgress(jobs: JobState[], wanted: number, briefCount: number, maxCandidates: number): RequestProgress {
   const ready = jobs.filter((j) => j.status === "done").length;
   const active = jobs.filter((j) => j.status === "queued" || j.status === "running");
   const started = jobs.length;
