@@ -53,6 +53,11 @@ describe("parseKitPick", () => {
     expect(parseKitPick("Here you go: [1, 2, 3, 4] and [5]", 8, 3)).toEqual([1, 2, 3]);
   });
 
+  it("is null when the list has no usable number", () => {
+    expect(parseKitPick("[9, 10]", 8, 6)).toBeNull();
+    expect(parseKitPick("[]", 8, 6)).toBeNull();
+  });
+
   it("drops values that are not whole numbers", () => {
     expect(parseKitPick('[1, "2", 2.5, -1, 4]', 8, 6)).toEqual([1, 4]);
   });
@@ -62,10 +67,10 @@ describe("kitPickPrompt", () => {
   it("asks for 0-based indexes as a JSON array, at most max", () => {
     const p = kitPickPrompt("Pay The Pyper", 8, 6);
     expect(p).toContain("Pay The Pyper");
-    expect(p).toContain("8");
-    expect(p).toContain("6");
-    expect(p).toMatch(/JSON array/);
-    expect(p).toMatch(/0/);
+    expect(p).toContain("These 8 stills");
+    expect(p).toContain("numbered 0 to 7");
+    expect(p).toContain("Choose up to 6");
+    expect(p).toContain("JSON array of the chosen numbers only, at most 6 of them");
   });
 });
 

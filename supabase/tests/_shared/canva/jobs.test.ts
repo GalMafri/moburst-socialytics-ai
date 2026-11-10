@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
-import { type DesignRequest, type Settings, BUCKET, startOption } from "../../../functions/_shared/canva/jobs";
+import { type DesignRequest, type Settings, BUCKET, pngSize, startOption } from "../../../functions/_shared/canva/jobs";
 import { designPrompt, type GenerateInput } from "../../../functions/_shared/canva/brief";
 import { STORY_PAGE, storyLogoPlacement } from "../../../functions/_shared/design/story";
 
@@ -92,5 +92,18 @@ describe("startOption", () => {
     // A request whose price could not be read: the clip step waits for it.
     expect((await run(video())).input.approved_credits).toBeNull();
     expect((await run(video({ briefs: [{ headline: ["A"], picture: "the bench", refs: [] }] }))).input.video).toEqual({ prompt: "the bench" });
+  });
+});
+
+describe("pngSize", () => {
+  it("reads the size from the header and names the file when it is not a PNG", () => {
+    const png = new Uint8Array(24);
+    png.set([0x89, 0x50, 0x4e, 0x47]);
+    new DataView(png.buffer).setUint32(16, 1088);
+    new DataView(png.buffer).setUint32(20, 1360);
+    expect(pngSize(png)).toEqual([1088, 1360]);
+    const jpeg = new Uint8Array(24).fill(0xff);
+    expect(() => pngSize(jpeg)).toThrow("The logo must be a PNG file.");
+    expect(() => pngSize(jpeg, "The image model's answer")).toThrow("The image model's answer must be a PNG file.");
   });
 });

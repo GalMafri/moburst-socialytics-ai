@@ -36,7 +36,7 @@ export async function imageEdit(apiKey: string, images: { bytes: Uint8Array; nam
   const b64 = JSON.parse(text)?.data?.[0]?.b64_json;
   if (!b64) throw new Error("The image model returned no image.");
   const bytes = base64Decode(b64);
-  const [w, h] = pngSize(bytes);
+  const [w, h] = pngSize(bytes, "The image model's answer");
   if (w !== size[0] || h !== size[1]) throw new Error(`The image model answered at ${w}x${h}; ${size[0]}x${size[1]} was asked for.`);
   return bytes;
 }

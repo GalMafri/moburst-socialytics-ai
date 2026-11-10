@@ -45,10 +45,10 @@ export interface DesignRequest {
   approved_credits?: number | null;
 }
 
-/** A PNG's pixel size from its header. */
-export function pngSize(bytes: Uint8Array): [number, number] {
+/** A PNG's pixel size from its header; `source` names the file in the error when it is not a PNG. */
+export function pngSize(bytes: Uint8Array, source = "The logo"): [number, number] {
   const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  if (bytes.length < 24 || v.getUint32(0) !== 0x89504e47) throw new Error("The logo must be a PNG file.");
+  if (bytes.length < 24 || v.getUint32(0) !== 0x89504e47) throw new Error(`${source} must be a PNG file.`);
   return [v.getUint32(16), v.getUint32(20)];
 }
 

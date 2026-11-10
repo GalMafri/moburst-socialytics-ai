@@ -43,7 +43,7 @@ export function kitPickPrompt(brand: string, count: number, max: number): string
   ].join(" ");
 }
 
-/** The chosen still numbers: unique, in range, in the order given, at most `max`; null when no list can be read. */
+/** The chosen still numbers: unique, in range, in the order given, at most `max`; null when no list can be read or none of its numbers can be used. */
 export function parseKitPick(text: string, count: number, max: number): number[] | null {
   const m = /\[[^\[\]]*\]/.exec(text);
   if (!m) return null;
@@ -60,7 +60,7 @@ export function parseKitPick(text: string, count: number, max: number): number[]
     if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v >= count) continue;
     if (!out.includes(v)) out.push(v);
   }
-  return out;
+  return out.length ? out : null;
 }
 
 /** The image edit that cleans one kit still. */
