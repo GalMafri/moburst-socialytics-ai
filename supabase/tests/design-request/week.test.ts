@@ -147,9 +147,13 @@ describe("week_preview", () => {
     const db = world({
       design_week_runs: [{ id: "run-1", client_id: "c1", week_start: WEEK, status: "done", posts: [], requested_by: STAFF, created_at: "2026-11-03T08:00:00Z" }],
       design_requests: [{ id: "req-v", client_id: "c1", calendar_post_key: "v", status: "ready", batch_id: "run-1", created_at: "2026-11-03T08:00:00Z" }],
-      canva_finish_jobs: [{ design_request_id: "req-v", status: "done", input: { kind: "video" }, state: { credits: [{ what: "footage", job_id: "j", credits: 100, at: "x" }, { what: "clean", job_id: "k", credits: 45, at: "x" }] }, created_at: "2026-11-03T09:00:00Z" }],
+      canva_finish_jobs: [
+        { design_request_id: "req-v", status: "done", input: { kind: "video" }, state: {}, clip_order: { price: 128, at: "x", job_id: "hf-1", credits: 128 }, created_at: "2026-11-03T09:00:00Z" },
+        // A job from before 11 Nov kept its clips in state.
+        { design_request_id: "req-v", status: "done", input: { kind: "video" }, state: { credits: [{ what: "footage", job_id: "j", credits: 100, at: "x" }, { what: "clean", job_id: "k", credits: 45, at: "x" }] }, clip_order: null, created_at: "2026-11-03T09:00:00Z" },
+      ],
     });
-    expect((await weekPreview(deps(db), { client_id: "c1", week_start: WEEK })).body).toMatchObject({ run_id: "run-1", credits_used: 145 });
+    expect((await weekPreview(deps(db), { client_id: "c1", week_start: WEEK })).body).toMatchObject({ run_id: "run-1", credits_used: 273 });
   });
 });
 

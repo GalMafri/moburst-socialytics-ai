@@ -99,7 +99,7 @@ async function pass(admin: any): Promise<number> {
       .update({ lease_until: new Date(Date.now() + JOB_LEASE_MS).toISOString(), status: "running", updated_at: new Date().toISOString() })
       .eq("id", id).in("status", ["queued", "running"])
       .or(`lease_until.is.null,lease_until.lt.${new Date().toISOString()}`)
-      .select("id, client_id, step, state, input, attempts, design_request_id, option_index");
+      .select("id, client_id, step, state, input, attempts, design_request_id, option_index, clip_order");
     const job = rows?.[0] as (VideoJob & { attempts: number }) | undefined;
     if (!job) continue;
     job.state = job.state ?? {};

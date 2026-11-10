@@ -113,8 +113,8 @@ async function creditsOfRun(db: Db, runId: string): Promise<number> {
   const { data: requests } = await db.from("design_requests").select("id").eq("batch_id", runId);
   const ids = (requests ?? []).map((r: Row) => r.id);
   if (!ids.length) return 0;
-  const { data: jobs } = await db.from("canva_finish_jobs").select("state").in("design_request_id", ids);
-  return creditsUsed((jobs ?? []).map((j: Row) => j.state));
+  const { data: jobs } = await db.from("canva_finish_jobs").select("state, clip_order").in("design_request_id", ids);
+  return creditsUsed((jobs ?? []).map((j: Row) => ({ state: j.state, clip_order: j.clip_order })));
 }
 
 /** Run the work while holding the week's lease, waiting briefly for a pass that holds it; null when it stayed held. */

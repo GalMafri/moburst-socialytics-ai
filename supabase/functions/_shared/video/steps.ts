@@ -29,15 +29,16 @@
 //                reason: nothing orders a second clip.
 // A filmed clip (input.footage_upload) is the footage: transcribe,
 // transcribe_wait, title, title_check, assemble, assemble_wait.
-// The clip records the price it was ordered at (state.credits, credits.ts),
-// so staff see what a week of designs used.
+// The clip's order, with the credits it cost, is kept in its own column
+// (canva_finish_jobs.clip_order, credits.ts), never in state, so staff see
+// what a week of designs used and no save of state can erase it.
 
 import { Image } from "https://deno.land/x/imagescript@1.3.0/mod.ts";
 import { decode as base64Decode, encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { MCP_URL, accessTokenFor } from "../higgsfield/oauth.ts";
 import { McpClient } from "../higgsfield/mcp.ts";
 import { awaitJobs, creditBalance, importReferences, submitVideo } from "../higgsfield/generate.ts";
-import { OLD_STEPS, REASONS, clipOutcome, footageRules, framePrompt, quoteClip } from "./clip.ts";
+import { CLIP_LOST_MS, type ClipOrder, OLD_STEPS, REASONS, clipOrderOf, clipOutcome, footageRules, framePrompt, quoteClip } from "./clip.ts";
 import { runClip } from "./clipStep.ts";
 import { BUCKET } from "../canva/jobs.ts";
 import { canvasLogoRect } from "../canva/brief.ts";
@@ -63,7 +64,8 @@ const MAX_CLIPS = 3;
 /** Where filmed clips are kept, privately. */
 const FOOTAGE_BUCKET = "post-footage";
 const REFERENCES = "design-references";
-export type VideoJob = { id: string; client_id: string; step: string; state: any; input: any; design_request_id: string | null; option_index: number | null };
+/** clip_order: the job's one paid clip, from its own column (clip.ts ClipOrder); never saved with state, written only by clipStep.ts's fenced statements. */
+export type VideoJob = { id: string; client_id: string; step: string; state: any; input: any; design_request_id: string | null; option_index: number | null; clip_order?: ClipOrder | null };
 /** next: run the following step now; wait: ask again on a later pass; done: the MP4 is stored (state.final_path); held: work goes on in the background under its own lease (hold). */
 export type VideoStepResult = "next" | "wait" | "done" | "held";
 
@@ -293,6 +295,11 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       let mcp: McpClient | null = null;
       const hf = async () => mcp ??= await higgsfield(admin);
       return runClip({
+        readOrder: async (id) => {
+          const { data, error } = await admin.from("canva_finish_jobs").select("clip_order").eq("id", id).maybeSingle();
+          if (error) throw new Error(`Could not read the clip's order: ${error.message}`);
+          return clipOrderOf(data?.clip_order);
+        },
         quote: async () => quoteClip(await hf()),
         balance: async () => (await creditBalance(await hf()))?.credits ?? null,
         importImages: async (want) => {
@@ -311,6 +318,16 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
           if (error) throw new Error(`Could not save the clip's order: ${error.message}`);
           return data === true;
         },
+        saveOrdered: async (jobId, credits) => {
+          const { data, error } = await admin.rpc("video_clip_ordered", { p_job: job.id, p_job_id: jobId, p_credits: credits });
+          if (error) throw new Error(`Could not record the clip's job: ${error.message}`);
+          return data === true;
+        },
+        stopJob: async (reason) => {
+          const { data, error } = await admin.rpc("video_clip_stop", { p_job: job.id, p_reason: reason });
+          if (error) throw new Error(`Could not stop the video: ${error.message}`);
+          return data === true;
+        },
         saveJob: () => saveJob(admin, job, { step: job.step }),
         renewLease: async () => {
           const { error } = await admin.from("canva_finish_jobs").update({ lease_until: new Date(Date.now() + VIDEO_JOB_LEASE_MS).toISOString() }).eq("id", job.id).in("status", ACTIVE);
@@ -323,12 +340,17 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
     case "clip_wait": {
       // The clip is paid for: nothing here spends one of the job's tries.
       // Only the clip's own end, or CLIP_LOST_MS, ends the video.
+      const order = clipOrderOf(job.clip_order);
+      // No job id yet: the clip step decides (it waits out the order's grace, or ends the video).
+      if (!order?.job_id) { job.step = "clip"; return "wait"; }
+      const orderedAt = Date.parse(order.at);
+      const since = Number.isFinite(orderedAt) ? orderedAt : Date.now();
       if (recently(s.clip_checked_at)) return "wait";
       s.clip_checked_at = Date.now();
       try {
-        const res = await awaitJobs(await higgsfield(admin), [s.clip_job], { budgetMs: 0 });
+        const res = await awaitJobs(await higgsfield(admin), [{ index: 0, job_id: order.job_id }], { budgetMs: 0 });
         const o = res.outcomes[0];
-        const outcome = clipOutcome(o, typeof s.clip_started_at === "number" ? s.clip_started_at : Date.now(), Date.now());
+        const outcome = clipOutcome(o, since, Date.now());
         if (outcome === "running") return "wait";
         if (outcome === "failed") {
           console.error(`[video-worker] job ${job.id} clip ${o?.status}: ${o?.error ?? ""}`);
@@ -346,9 +368,11 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         if (msg.startsWith("FINAL:")) throw e;
-        // Asked again on a later pass, until the clip ends or is lost.
         console.error(`[video-worker] job ${job.id} clip_wait:`, msg);
         s.clip_wait_error = msg.slice(0, 300);
+        // A poll or a store that keeps failing still ends the video once the clip is lost.
+        if (Date.now() - since > CLIP_LOST_MS) throw new Error(`FINAL: ${REASONS.lost}`);
+        // Asked again on a later pass, until the clip ends or is lost.
         return "wait";
       }
     }

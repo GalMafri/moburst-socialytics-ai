@@ -42,11 +42,21 @@ export function needsClipPrice(kind: string | null | undefined, footagePath: str
   return kind === "video" && !footagePath && approvedCredits === undefined;
 }
 
-/** The order recorded on a post's job once its clip is submitted; job_id is missing until Higgsfield answers. */
+/**
+ * A video job's one paid clip, in its own column (canva_finish_jobs.clip_order,
+ * written only by the fenced statements of 20261111130300_video_clip_order.sql):
+ * placed before Higgsfield is called; job_id and credits once it answers.
+ */
 export interface ClipOrder {
   price: number | null;
   at: string;
   job_id?: string;
+  credits?: number | null;
+}
+
+/** The column's value as an order, or null when it holds none (SQL null, JSON null, anything not an object). */
+export function clipOrderOf(raw: unknown): ClipOrder | null {
+  return raw && typeof raw === "object" && !Array.isArray(raw) ? raw as ClipOrder : null;
 }
 
 export type ClipDecision = { action: "order" } | { action: "wait" } | { action: "stop"; reason: string };
@@ -84,13 +94,12 @@ export const ORDER_GRACE_MS = 10 * 60_000;
  * stops; so does a balance below the floor.
  */
 export function clipOrderDecision(
-  state: { clip_order?: ClipOrder | null },
+  order: ClipOrder | null,
   approved: number | null,
   live: number | null,
   balance: number | null,
   now: number,
 ): ClipDecision {
-  const order = state.clip_order;
   if (order) {
     if (order.job_id) return { action: "wait" };
     const at = Date.parse(order.at);

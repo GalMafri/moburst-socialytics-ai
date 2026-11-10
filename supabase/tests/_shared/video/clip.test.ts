@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-import { CLIP_LOST_MS, OLD_STEPS, ORDER_GRACE_MS, clipOutcome, clipRequest, clipOrderDecision, framePrompt, needsClipPrice, REASONS } from "../../../functions/_shared/video/clip";
+import { CLIP_LOST_MS, OLD_STEPS, ORDER_GRACE_MS, clipOrderOf, clipOutcome, clipRequest, clipOrderDecision, framePrompt, needsClipPrice, REASONS } from "../../../functions/_shared/video/clip";
 import { VIDEO_MODEL } from "../../../functions/_shared/higgsfield/generate";
 
 describe("clipRequest", () => {
@@ -16,23 +16,23 @@ const NOW = Date.parse("2026-11-11T12:00:00.000Z");
 
 describe("clipOrderDecision", () => {
   it("orders once, at or under the approved price", () => {
-    expect(clipOrderDecision({}, 128, 128, 1000, NOW)).toEqual({ action: "order" });
-    expect(clipOrderDecision({}, 128, 120, 1000, NOW)).toEqual({ action: "order" });
-    expect(clipOrderDecision({}, 128, 144, 1000, NOW)).toEqual({ action: "stop", reason: REASONS.price });
-    expect(clipOrderDecision({}, null, 128, 1000, NOW)).toEqual({ action: "stop", reason: REASONS.unquoted });
+    expect(clipOrderDecision(null, 128, 128, 1000, NOW)).toEqual({ action: "order" });
+    expect(clipOrderDecision(null, 128, 120, 1000, NOW)).toEqual({ action: "order" });
+    expect(clipOrderDecision(null, 128, 144, 1000, NOW)).toEqual({ action: "stop", reason: REASONS.price });
+    expect(clipOrderDecision(null, null, 128, 1000, NOW)).toEqual({ action: "stop", reason: REASONS.unquoted });
     // A video never priced stops at once, without waiting for a price to read.
-    expect(clipOrderDecision({}, null, null, 1000, NOW)).toEqual({ action: "stop", reason: REASONS.unquoted });
-    expect(clipOrderDecision({}, 128, null, 1000, NOW)).toEqual({ action: "wait" });
-    expect(clipOrderDecision({}, 128, 128, 100, NOW)).toEqual({ action: "stop", reason: REASONS.balance });
-    expect(clipOrderDecision({}, 128, 128, null, NOW)).toEqual({ action: "order" });
+    expect(clipOrderDecision(null, null, null, 1000, NOW)).toEqual({ action: "stop", reason: REASONS.unquoted });
+    expect(clipOrderDecision(null, 128, null, 1000, NOW)).toEqual({ action: "wait" });
+    expect(clipOrderDecision(null, 128, 128, 100, NOW)).toEqual({ action: "stop", reason: REASONS.balance });
+    expect(clipOrderDecision(null, 128, 128, null, NOW)).toEqual({ action: "order" });
   });
   it("never orders again once an order is recorded", () => {
-    expect(clipOrderDecision({ clip_order: { price: 128, at: "x", job_id: "j" } }, 128, 100, 1000, NOW)).toEqual({ action: "wait" });
+    expect(clipOrderDecision({ price: 128, at: "x", job_id: "j" }, 128, 100, 1000, NOW)).toEqual({ action: "wait" });
     // Without a job id, the order's pass may still be submitting: it is waited for, then taken as lost.
     const at = (ms: number) => new Date(NOW - ms).toISOString();
-    expect(clipOrderDecision({ clip_order: { price: 128, at: at(60_000) } }, 128, 100, 1000, NOW)).toEqual({ action: "wait" });
-    expect(clipOrderDecision({ clip_order: { price: 128, at: at(ORDER_GRACE_MS + 1) } }, 128, 100, 1000, NOW)).toEqual({ action: "stop", reason: REASONS.lostOrder });
-    expect(clipOrderDecision({ clip_order: { price: 128, at: "x" } }, 128, 100, 1000, NOW)).toEqual({ action: "stop", reason: REASONS.lostOrder });
+    expect(clipOrderDecision({ price: 128, at: at(60_000) }, 128, 100, 1000, NOW)).toEqual({ action: "wait" });
+    expect(clipOrderDecision({ price: 128, at: at(ORDER_GRACE_MS + 1) }, 128, 100, 1000, NOW)).toEqual({ action: "stop", reason: REASONS.lostOrder });
+    expect(clipOrderDecision({ price: 128, at: "x" }, 128, 100, 1000, NOW)).toEqual({ action: "stop", reason: REASONS.lostOrder });
     expect(ORDER_GRACE_MS).toBe(10 * 60_000);
   });
 });
@@ -50,6 +50,13 @@ describe("needsClipPrice", () => {
     expect(needsClipPrice("single", null, undefined)).toBe(false);
     expect(needsClipPrice("carousel", null, undefined)).toBe(false);
     expect(needsClipPrice("video", "c1/footage.mp4", undefined)).toBe(false);
+  });
+});
+
+describe("clipOrderOf", () => {
+  it("reads the column as an order only when it holds an object", () => {
+    expect(clipOrderOf({ price: 1, at: "x" })).toEqual({ price: 1, at: "x" });
+    for (const v of [null, undefined, "x", 3, []]) expect(clipOrderOf(v)).toBeNull();
   });
 });
 

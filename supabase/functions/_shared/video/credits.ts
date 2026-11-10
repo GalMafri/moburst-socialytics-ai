@@ -1,40 +1,27 @@
 // supabase/functions/_shared/video/credits.ts
 //
-// The Higgsfield credits a video post's clip cost, recorded on its job as the
-// clip is ordered (job state.credits), so staff see
-// what a week of designs used. The week's estimate and each video's approved
-// price are Higgsfield's live price for the clip (_shared/video/clip.ts
-// quoteClip), not these records. Free of Deno and network imports so it can
-// be tested.
+// The Higgsfield credits a week of video posts used, so staff see it. A
+// video's one clip records its price on its order (canva_finish_jobs.clip_order
+// credits, clipStep.ts); jobs from before 11 Nov kept a list in state.credits
+// (each clip and each cleaning), still counted. The week's estimate and each
+// video's approved price are Higgsfield's live price for the clip
+// (_shared/video/clip.ts quoteClip), not these records. Free of Deno and
+// network imports so it can be tested.
 
 /** Credits the account must hold before a clip is started (a 1080p clip with sound is about 100). */
 export const CLIP_CREDIT_FLOOR = 130;
 
-/** One submission to the video model: a video's one clip. (Jobs from before 11 Nov also hold cleanings, still counted by creditsUsed.) */
-export interface ClipCredits {
-  what: "footage";
-  /** The video model's job id. */
-  job_id: string;
-  /** What Higgsfield quoted for it (costOf); null when the quote could not be read. */
-  credits: number | null;
-  at: string;
-}
+const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 
-const list = (v: unknown): ClipCredits[] => (Array.isArray(v) ? v.filter((c) => c && typeof c === "object") as ClipCredits[] : []);
-
-/** The job's record with one more submission; a job id already recorded is kept once. */
-export function withCredits(recorded: unknown, entry: ClipCredits): ClipCredits[] {
-  const before = list(recorded);
-  return before.some((c) => c.job_id === entry.job_id) ? before : [...before, entry];
-}
-
-/** Every credit recorded on these jobs' clips, from their states. */
-export function creditsUsed(states: unknown[]): number {
+/** Every credit recorded on these jobs: each clip order's credits, and the legacy entries in their states. */
+export function creditsUsed(rows: Array<{ state?: unknown; clip_order?: unknown } | null | undefined>): number {
   let total = 0;
-  for (const s of states) {
-    for (const c of list((s as { credits?: unknown } | null)?.credits)) {
-      if (typeof c.credits === "number" && Number.isFinite(c.credits)) total += c.credits;
-    }
+  for (const r of rows) {
+    if (!r) continue;
+    const order = r.clip_order;
+    if (order && typeof order === "object" && !Array.isArray(order)) total += num((order as { credits?: unknown }).credits);
+    const legacy = (r.state as { credits?: unknown } | null | undefined)?.credits;
+    if (Array.isArray(legacy)) for (const c of legacy) if (c && typeof c === "object") total += num((c as { credits?: unknown }).credits);
   }
   return Math.round(total * 100) / 100;
 }
