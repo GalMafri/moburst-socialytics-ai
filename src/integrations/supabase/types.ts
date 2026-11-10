@@ -27,6 +27,7 @@ export type Database = {
           last_used_at: string | null
           name: string
           note: string | null
+          owner_user_id: string | null
           rate_limit_per_minute: number
           revoked_at: string | null
           scopes: string[]
@@ -43,6 +44,7 @@ export type Database = {
           last_used_at?: string | null
           name: string
           note?: string | null
+          owner_user_id?: string | null
           rate_limit_per_minute?: number
           revoked_at?: string | null
           scopes?: string[]
@@ -59,6 +61,7 @@ export type Database = {
           last_used_at?: string | null
           name?: string
           note?: string | null
+          owner_user_id?: string | null
           rate_limit_per_minute?: number
           revoked_at?: string | null
           scopes?: string[]
