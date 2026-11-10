@@ -1,6 +1,6 @@
 # Video posts: one paid clip per video
 
-Status: approved by Lital 10 Nov 2026 17:34 IST ("Approve it"). Decision 1 (one paid clip, then "not made" until a person presses again) is approved with it. Decision 2 (the quality check's credits) is asked again, explicitly, when the build reaches it; no credits are spent before that yes. Nothing is built yet.
+Status: built on branch `trends` on 10 Nov 2026 (plan docs/superpowers/plans/2026-11-10-video-one-clip.md, Tasks 1 to 5 reviewed and closed). Not released; the quality check and the release wait for Lital. "As built" at the end of this document lists where the build differs from the text above.
 
 ## Why
 
@@ -110,3 +110,13 @@ On one client whose videos carry text (Moburst), one brief, two clips: today's w
 
 1. One paid clip per video, and a video that fails after it is "not made" until a person presses again. Right?
 2. The quality check above (about 260 credits) before anything is released. OK to spend when the build reaches it?
+
+## As built (10 Nov 2026)
+
+- Steps: kit, kit_wait (once per client, shared by the style job), title, title_check, frame, frame_check, clip, clip_wait, assemble, assemble_wait; filmed footage keeps transcribe, transcribe_wait. Every step the video worker owns is listed in `_shared/video/stepNames.ts`, and the Canva worker also skips any job whose kind is video.
+- The approved price is stored on each video's queue entry at the press and on `design_requests.approved_credits`; a single post's request reads the live price at its own click. A week whose price cannot be read leaves its videos out ("no_price") and says so on the button.
+- The clip order is not in the job's state: it is the column `canva_finish_jobs.clip_order`, written only by three database functions fenced on that column (`video_clip_order` places it once, `video_clip_ordered` adds Higgsfield's job id and the credits, `video_clip_stop` fails a job only while no order protects it). The clip step reads the column fresh on every pass, renews the job's lease before ordering, imports the frame and the kit stills before the order, and returns "wait" after it. A pass that loses the race is held and submits nothing.
+- The kit: up to 6 stills picked by the vision model from the style's stored stills, cleaned 3 per hold with progress saved per still, at most 3 claims that make no progress, stored as JPEG at 1088x1936; fewer than 2 clean stills store `[]` and the client's videos take the posts route. The style's writes go through `video_style_merge` and `video_style_claim_kit` (atomic in SQL); a re-learned style clears its kit.
+- The opening frame is drawn at 1088x1936 (the title layer's size), not at the design worker's double size.
+- A clip with no sound, a clip with writing, a provider failure, a lost clip (3 hours), a price above the approved one, an unpriced queue entry, and a missing price for 30 minutes each end the video as not made, with the reasons in `_shared/video/clip.ts` `REASONS`.
+- Removed: reference cuts, the video cleanup edit, `creditsPerClip` and `CLIP_CREDITS`, the 30-minute re-order, the silent and writing re-orders, the brief's `seconds`.
