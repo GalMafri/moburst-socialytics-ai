@@ -42,6 +42,8 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
+    // Room for a waitFor's 4 seconds (src/test/setup.ts) under the full parallel suite.
+    testTimeout: 15_000,
     include: [
       "src/**/*.{test,spec}.{ts,tsx}",
       // Edge function tests sit beside, never inside, the deployed folders:

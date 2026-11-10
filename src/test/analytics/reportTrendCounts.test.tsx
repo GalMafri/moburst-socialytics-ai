@@ -53,8 +53,8 @@ afterEach(() => { cleanup(); qc?.clear(); });
 
 describe("Analytics: report trend counts", () => {
   it("reads the themes once, for the span of the reports' periods", async () => {
-    mount(); await settle();
-    expect(f.rpcs).toEqual([{ name: "trend_themes_in_range", p_client: "c1", p_from: "2026-09-01", p_to: "2026-10-31" }]);
+    mount();
+    await waitFor(() => expect(f.rpcs).toEqual([{ name: "trend_themes_in_range", p_client: "c1", p_from: "2026-09-01", p_to: "2026-10-31" }]));
   });
 
   it("counts each report's trend recommendations as its page lists them", async () => {

@@ -11,7 +11,7 @@
 // did not answer, every trend part stays loading and tries again quietly.
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import ReportView from "@/pages/ReportView";
@@ -103,7 +103,16 @@ function mount() {
     </QueryClientProvider>,
   );
 }
-async function settle() { await act(async () => { await new Promise((r) => setTimeout(r, 0)); }); await act(async () => { await new Promise((r) => setTimeout(r, 0)); }); }
+// The page has read what the test set up: the report always, and the themes
+// unless the test keeps that read hanging or failing. A fixed number of ticks
+// was not enough under the full parallel suite (9 Nov 2026).
+async function settle() {
+  await waitFor(() => {
+    const text = document.body.textContent ?? "";
+    expect(text).not.toMatch(/Loading report/);
+    if (!f.themesHang && !f.themesFail) expect(text).not.toMatch(/Loading (trends|recommendations)/);
+  });
+}
 async function tick(ms: number) { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); }
 // What the PDF export prints: the panel without anything marked data-print="hide" (src/lib/exportPdf.ts).
 function printed(el: HTMLElement) {
