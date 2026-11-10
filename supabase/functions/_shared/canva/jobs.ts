@@ -8,6 +8,7 @@
 import { type Brief, optionStates, requestProgress, type JobState } from "./options.ts";
 import type { EndReason } from "../design/requestRules.ts";
 import { STORY_PAGE, STORY_SURFACE, isStoryPost, storyLogoPlacement } from "../design/story.ts";
+import { videoRouteFor } from "../video/kit.ts";
 
 export const BUCKET = "generated-media";
 
@@ -113,8 +114,10 @@ async function startVideoOption(admin: any, req: DesignRequest, settings: Settin
   const filmed = req.footage_path ? (client?.video_style?.profile?.filmed ?? null) : null;
   const endSource = filmed?.end_card_video ? (Array.isArray(client?.video_references) ? client.video_references : [])[filmed.end_card_video - 1]?.path : null;
   const endCard = endSource ? { url: admin.storage.from("design-references").getPublicUrl(endSource).data.publicUrl, seconds: filmed.end_card_seconds } : null;
-  // A video made from the client's posts follows their posts, not their videos.
-  const style = req.video_route === "posts" ? undefined : client?.video_style?.profile as { logo?: string; logo_at?: string; logo_width?: number; people?: string; scene_words?: string[] } | undefined;
+  // A video made from the client's posts follows their posts, not their videos;
+  // so does one whose client's kit was made with too few clean stills.
+  const route = videoRouteFor(client?.video_style, req.video_route ?? null);
+  const style = route === "posts" ? undefined : client?.video_style?.profile as { logo?: string; logo_at?: string; logo_width?: number; people?: string; scene_words?: string[] } | undefined;
   const title = `${brandName} ${req.platform ?? ""} video ${optionIndex + 1}`.replace(/\s+/g, " ");
   const { error } = await admin.from("canva_finish_jobs").insert({
     client_id: req.client_id,
@@ -137,6 +140,7 @@ async function startVideoOption(admin: any, req: DesignRequest, settings: Settin
       // The clip's price approved on the request: the clip step orders only at this price or less.
       approved_credits: req.approved_credits ?? null,
       footage_upload: req.footage_path ?? null,
+      video_route: route,
       // Logo and people as the client's own videos have them; a filmed clip keeps the logo.
       show_logo: req.footage_path ? true : style ? style.logo !== "none" : true,
       // Where and when, as in the client's videos; a filmed clip keeps the spot its posts use.

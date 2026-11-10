@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { KIT_MAX, KIT_MIN, kitCleanPrompt, kitPath, kitPaths, kitPickPrompt, kitState, parseKitPick } from "../../../functions/_shared/video/kit";
+import { KIT_MAKE_MS, KIT_MAX, KIT_MIN, kitChosen, kitCleanPrompt, kitKept, kitNext, kitPath, kitPaths, kitPickPrompt, kitState, parseKitPick, postsRouteInput, videoRouteFor } from "../../../functions/_shared/video/kit";
 
 describe("kit limits and paths", () => {
   it("keeps at most six stills and needs at least two", () => {
@@ -89,5 +89,84 @@ describe("kitCleanPrompt", () => {
 
   it("has no em or en dashes", () => {
     for (const p of [kitCleanPrompt("B", ["X"]), kitCleanPrompt("B", []), kitPickPrompt("B", 4, 2)]) expect(p).not.toMatch(/[\u2013\u2014]/);
+  });
+});
+
+describe("videoRouteFor", () => {
+  it("takes the posts route when the kit was made with too few stills", () => {
+    expect(videoRouteFor({ kit: [] }, null)).toBe("posts");
+    expect(videoRouteFor({ kit: [] }, "posts")).toBe("posts");
+  });
+
+  it("keeps the requested route when the kit is ready", () => {
+    expect(videoRouteFor({ kit: ["a", "b"] }, null)).toBeNull();
+    expect(videoRouteFor({ kit: ["a", "b"] }, "posts")).toBe("posts");
+  });
+
+  it("does not route around a kit that is not made yet", () => {
+    expect(videoRouteFor(undefined, null)).toBeNull();
+    expect(videoRouteFor({ profile: {} }, null)).toBeNull();
+  });
+});
+
+describe("kitNext", () => {
+  const now = Date.parse("2026-11-10T12:00:00Z");
+  const ago = (ms: number) => new Date(now - ms).toISOString();
+
+  it("is ready or none once a kit is stored", () => {
+    expect(kitNext({ kit: ["a", "b"] }, now)).toBe("ready");
+    expect(kitNext({ kit: ["a"], kit_started_at: ago(60_000), kit_job: "j2" }, now, "j1")).toBe("none");
+  });
+
+  it("makes the kit when nobody has started it", () => {
+    expect(kitNext({ frames: ["f"] }, now, "j1")).toBe("make");
+    expect(kitNext(undefined, now, "j1")).toBe("make");
+    expect(kitNext({ kit_started_at: "not a time" }, now, "j1")).toBe("make");
+  });
+
+  it("waits while another job is making it", () => {
+    expect(kitNext({ kit_started_at: ago(60_000), kit_job: "j2" }, now, "j1")).toBe("wait");
+    expect(kitNext({ kit_started_at: ago(60_000), kit_job: "j2" }, now)).toBe("wait");
+  });
+
+  it("makes it again when the other job started more than 15 minutes ago", () => {
+    expect(KIT_MAKE_MS).toBe(15 * 60_000);
+    expect(kitNext({ kit_started_at: ago(KIT_MAKE_MS + 1), kit_job: "j2" }, now, "j1")).toBe("make");
+  });
+
+  it("goes on with its own start unless its own cleaning is still running", () => {
+    const vs = { kit_started_at: ago(60_000), kit_job: "j1" };
+    expect(kitNext(vs, now, "j1")).toBe("make");
+    expect(kitNext(vs, now, "j1", now - 60_000)).toBe("wait");
+    expect(kitNext(vs, now, "j1", now - KIT_MAKE_MS - 1)).toBe("make");
+  });
+});
+
+describe("kitChosen", () => {
+  it("uses the model's pick when it can be read", () => {
+    expect(kitChosen("[4, 1]", 9, 6)).toEqual([4, 1]);
+  });
+
+  it("falls back to the first stills, at most max", () => {
+    expect(kitChosen("sorry", 9, 6)).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(kitChosen("sorry", 3, 6)).toEqual([0, 1, 2]);
+    expect(kitChosen("sorry", 0, 6)).toEqual([]);
+  });
+});
+
+describe("kitKept", () => {
+  it("keeps the clean stills in pick order, or none with fewer than KIT_MIN", () => {
+    expect(kitKept(["a", null, "c"])).toEqual(["a", "c"]);
+    expect(kitKept(["a", null, null])).toEqual([]);
+    expect(kitKept([])).toEqual([]);
+  });
+});
+
+describe("postsRouteInput", () => {
+  it("drops everything taken from the client's filmed videos", () => {
+    const input = { kind: "video", copy: ["Hi"], video_route: null, show_logo: false, logo_at: "end", logo_width: 0.3, people: "fictional", scene_words: ["FC X"], footage_upload: null };
+    const out = postsRouteInput(input);
+    expect(out).toEqual({ kind: "video", copy: ["Hi"], video_route: "posts", show_logo: true, logo_at: null, logo_width: null, people: "none", scene_words: [], footage_upload: null });
+    expect(input.video_route).toBeNull();
   });
 });

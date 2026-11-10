@@ -76,3 +76,51 @@ export function kitCleanPrompt(brand: string, sceneWords: string[]): string {
     "Keep everything else exactly as it is: the framing, the light, the color, the subjects and any motion blur.",
   ].join(" ");
 }
+
+/**
+ * The route a new video takes: "posts" when the client's kit was made with
+ * too few stills, else the route asked for. A kit not made yet does not
+ * change the route: the video job makes the kit first (its "kit" step).
+ */
+export function videoRouteFor(videoStyle: unknown, requested: string | null): string | null {
+  return kitState(videoStyle) === "none" ? "posts" : requested;
+}
+
+/** A kit start older than this is taken to have died, and the kit is made again. */
+export const KIT_MAKE_MS = 15 * 60_000;
+
+/**
+ * What a job does about the client's kit: ready or none once it is stored;
+ * wait while another job made a start under KIT_MAKE_MS ago, or while this
+ * job's own cleaning (heldAt, a time in ms) is still running; else make it.
+ */
+export function kitNext(videoStyle: unknown, now: number, jobId?: string, heldAt?: unknown): "wait" | "make" | KitState {
+  const state = kitState(videoStyle);
+  if (state !== "missing") return state;
+  const vs = (videoStyle ?? {}) as { kit_started_at?: unknown; kit_job?: unknown };
+  const started = typeof vs.kit_started_at === "string" ? Date.parse(vs.kit_started_at) : NaN;
+  const fresh = (t: number) => Number.isFinite(t) && now - t < KIT_MAKE_MS;
+  if (fresh(started) && (jobId === undefined || vs.kit_job !== jobId)) return "wait";
+  if (typeof heldAt === "number" && fresh(heldAt)) return "wait";
+  return "make";
+}
+
+/** The stills to clean: the model's pick, or the first `max` when its answer cannot be used. */
+export function kitChosen(text: string, count: number, max: number): number[] {
+  return parseKitPick(text, count, max) ?? Array.from({ length: Math.min(count, max) }, (_, i) => i);
+}
+
+/** The kit from each picked still's clean path (null when it was dropped): the clean ones in order, or none with fewer than KIT_MIN. */
+export function kitKept(cleaned: Array<string | null>): string[] {
+  const kept = cleaned.filter((p): p is string => typeof p === "string" && p.length > 0);
+  return kept.length >= KIT_MIN ? kept : [];
+}
+
+/**
+ * A video job's input moved to the posts route: nothing taken from the
+ * client's filmed videos stays (the same as startVideoOption with no style):
+ * the logo shows at its spot in the posts, no people, no scene words.
+ */
+export function postsRouteInput<T extends Record<string, unknown>>(input: T): T {
+  return { ...input, video_route: "posts", show_logo: true, logo_at: null, logo_width: null, people: "none", scene_words: [] };
+}

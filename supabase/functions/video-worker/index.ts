@@ -12,7 +12,7 @@ import { createClient } from "../_shared/supabase.ts";
 import { secretEquals } from "../_shared/auth/secretEquals.ts";
 import { settleRequest } from "../_shared/canva/jobs.ts";
 import { wakeVideoWorker } from "../_shared/canva/worker.ts";
-import { type VideoJob, runVideoStep } from "../_shared/video/steps.ts";
+import { type VideoJob, recordVideoFailure, runVideoStep } from "../_shared/video/steps.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
@@ -24,7 +24,6 @@ const PASS_BUDGET_MS = 90_000;
 const JOB_LEASE_MS = 120_000;
 /** Between passes that found nothing to advance (footage still rendering). */
 const IDLE_PAUSE_MS = 15_000;
-const MAX_ATTEMPTS = 4;
 /** A job is only ever moved on while it is active: a job stopped meanwhile (its request closed or canceled) stays stopped. */
 const ACTIVE = ["queued", "running"];
 
@@ -108,20 +107,15 @@ async function pass(admin: any): Promise<number> {
     try {
       let result = await runVideoStep(admin, job);
       while (result === "next" && Date.now() - started < PASS_BUDGET_MS) result = await runVideoStep(admin, job);
+      // A held job is left as its hold saved it (state and lease); the hold moves it on when its work ends.
       if (result === "done") {
         await admin.from("canva_finish_jobs").update({ status: "done", step: job.step, state: job.state, output_path: job.state.final_path, error: null, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE);
-      } else {
+      } else if (result !== "held") {
         await admin.from("canva_finish_jobs").update({ step: job.step, state: job.state, error: null, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE);
       }
-      if (result === "done" || job.step !== before) advanced++;
+      if (result === "held" || result === "done" || job.step !== before) advanced++;
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      const attempts = (job.attempts ?? 0) + 1;
-      const final = attempts >= MAX_ATTEMPTS || msg.startsWith("FINAL:");
-      console.error(`[video-worker] job ${job.id} step ${job.step}:`, msg);
-      await admin.from("canva_finish_jobs").update({
-        attempts, state: job.state, error: msg.replace(/^FINAL:\s*/, ""), status: final ? "failed" : "running", lease_until: null, updated_at: new Date().toISOString(),
-      }).eq("id", job.id).in("status", ACTIVE);
+      await recordVideoFailure(admin, job, e);
     }
     if (job.design_request_id) requests.add(job.design_request_id);
   }
