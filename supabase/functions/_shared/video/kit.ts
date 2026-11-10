@@ -2,7 +2,8 @@
 //
 // The client's kit: up to KIT_MAX stills from their own videos, with no
 // person's face and cleaned of all lettering, that every clip is given as
-// its image references (a look reference: places, products, light, color). The rules here (where a still is stored, what the kit's state
+// its image references. A look reference: places, products, light and
+// color, each still at its own framing. The rules here (where a still is stored, what the kit's state
 // is, the two questions to the models and how their answers are read) are
 // free of Deno and network imports so they can be tested.
 
@@ -37,7 +38,7 @@ export function kitPaths(videoStyle: unknown): string[] {
 export function kitPickPrompt(brand: string, count: number, max: number): string {
   return [
     `These ${count} stills come from ${brand}'s own videos, numbered 0 to ${count - 1} in the order given.`,
-    `Choose up to ${max} that best show ${brand}'s look: its places, products, graphics, materials, light and color.`,
+    `Choose up to ${max} that best show ${brand}'s look: its scenes, places, products, materials, light and color.`,
     "Leave out every still that shows a person's face or a recognizable person: the kit is a look reference, and no real person may be carried into new footage.",
     "Prefer stills with the least text on screen, and choose stills that differ from each other.",
     `Answer with a JSON array of the chosen numbers only, at most ${max} of them, for example [0, 3]. Answer [] when no still qualifies.`,
@@ -46,11 +47,12 @@ export function kitPickPrompt(brand: string, count: number, max: number): string
 
 /** The chosen still numbers: unique, in range, in the order given, at most `max`; [] when the model chose none; null when no list can be read or none of its numbers can be used. */
 export function parseKitPick(text: string, count: number, max: number): number[] | null {
-  const m = /\[[^\[\]]*\]/.exec(text);
-  if (!m) return null;
+  // The last list in the answer: the model may name the stills it leaves out before it answers.
+  const lists = text.match(/\[[^\[\]]*\]/g);
+  if (!lists) return null;
   let list: unknown;
   try {
-    list = JSON.parse(m[0]);
+    list = JSON.parse(lists[lists.length - 1]);
   } catch {
     return null;
   }
@@ -68,16 +70,47 @@ export function parseKitPick(text: string, count: number, max: number): number[]
 
 /**
  * The image edit that cleans one kit still. A look reference, so no lettering
- * of any kind stays or is added: the client's scene words are not named here
- * (naming them made the image model paint every one of them into the still).
+ * of any kind stays or is added. Neither the client's scene words nor the
+ * brand's name are in it: naming words made the image model paint them.
  */
-export function kitCleanPrompt(brand: string): string {
+export function kitCleanPrompt(): string {
   return [
-    `This is a still from one of ${brand}'s videos, kept as a reference for the look of new footage.`,
+    "This is a still from a video, kept as a reference for the look of new footage.",
     "Remove all captions, subtitles, lettering, logos, watermarks and screens (phone, computer and TV screens), filling each area with what would naturally be behind it.",
     "No lettering of any kind stays anywhere in the picture, and nothing new is added: no words, signs, labels, buttons or graphics.",
     "Keep everything else exactly as it is: the framing, the light, the color, the subjects and any motion blur.",
   ].join(" ");
+}
+
+/** The longest side of a cleaned kit still. */
+export const KIT_EDIT_LONG = 1536;
+
+/**
+ * The size a still is edited at: its own aspect (so the model invents nothing
+ * outside the picture), the longest side KIT_EDIT_LONG, both sides multiples
+ * of 16 as the image model asks, never under 16.
+ */
+export function kitEditSize(width: number, height: number): [number, number] {
+  const w = Math.max(1, Math.floor(width)), h = Math.max(1, Math.floor(height));
+  const to16 = (n: number) => Math.max(16, Math.round(n / 16) * 16);
+  return w >= h ? [KIT_EDIT_LONG, to16(KIT_EDIT_LONG * h / w)] : [to16(KIT_EDIT_LONG * w / h), KIT_EDIT_LONG];
+}
+
+/** The question that reads one cleaned still back: writing left in it, and a person's face. */
+export function kitStillCheckPrompt(): string {
+  return "This is a still kept as a reference for the look of new footage. Two questions. " +
+    "1. Is there any writing anywhere in it: letters, words, numbers, labels, signs, captions, logos or watermarks, however small or garbled? " +
+    "2. Does it show a person's face or a recognizable person? " +
+    'Reply with JSON only: {"writing": true or false, "face": true or false, "where": "what you saw and where it is, or empty"}';
+}
+
+/** The read-back's answer; null when it cannot be read. */
+export function parseKitStillCheck(text: string): { writing: boolean; face: boolean; where: string } | null {
+  const w = /"writing"\s*:\s*"?(true|false)"?/i.exec(text);
+  const f = /"face"\s*:\s*"?(true|false)"?/i.exec(text);
+  if (!w || !f) return null;
+  const where = /"where"\s*:\s*"([\s\S]*?)"\s*}/.exec(text);
+  return { writing: w[1].toLowerCase() === "true", face: f[1].toLowerCase() === "true", where: where ? where[1] : "" };
 }
 
 /**

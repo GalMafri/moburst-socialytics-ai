@@ -45,7 +45,7 @@ import { canvasLogoRect } from "../canva/brief.ts";
 import { anthropicMessages } from "../anthropic.ts";
 import { openaiKey } from "../openai/key.ts";
 import { ModelBusy, OPENAI_IMAGE_MODEL, imageEdit } from "../media/imageEdit.ts";
-import { KIT_MAKE_MS, KIT_MAX, KIT_MIN, MAX_KIT_TRIES, parseKitPick, kitCleanPrompt, kitNext, kitPath, kitPaths, kitPickPrompt, type KitDone, kitClaim, kitDoneCount, kitDoneOf, kitForStyle, kitKeptFrom, kitState, kitWork, postsRouteInput } from "./kit.ts";
+import { KIT_MAKE_MS, KIT_MAX, KIT_MIN, MAX_KIT_TRIES, parseKitPick, kitCleanPrompt, kitEditSize, kitStillCheckPrompt, parseKitStillCheck, kitNext, kitPath, kitPaths, kitPickPrompt, type KitDone, kitClaim, kitDoneCount, kitDoneOf, kitForStyle, kitKeptFrom, kitState, kitWork, postsRouteInput } from "./kit.ts";
 import { copyMatches, marksPrompt, parseMarks, parseRead, readPrompt } from "../design/pipeline.ts";
 import { parseVideoStyle, videoStylePrompt } from "../canva/options.ts";
 import { CARD_SIZE, FOOTAGE_STILLS, STYLE_FRAMES, VIDEO_SIZE, audioScript, captionWeight, captionsAss, framesScript, hookPlacement, parseAudio, videoLogoBox, parseFrames, composeScript, footageTextPrompt, parseComposed, parseFootageText } from "./compose.ts";
@@ -521,8 +521,9 @@ async function jpegBlocks(admin: any, bucket: string, paths: string[]): Promise<
  *             a person's face; [] when none qualifies; an answer that cannot
  *             be read is a claim with no progress), then clean up to KIT_BATCH
  *             of them per pass with the image model in the background (hold),
- *             of all lettering: a still whose writing shows again is cleaned
- *             once more, then dropped. Each still's outcome is saved on the job
+ *             of all lettering, each at its own framing (kitEditSize): a still
+ *             whose writing shows again is cleaned once more, then dropped; one
+ *             that shows a person's face is dropped at once. Each still's outcome is saved on the job
  *             as it comes. Once every picked still is done, the clean ones
  *             (kitPath) are listed on video_style.kit ([] with fewer than
  *             KIT_MIN). After MAX_KIT_TRIES claims that finished no still
@@ -610,7 +611,7 @@ async function makeKit(admin: any, job: VideoJob, videoStyle: any, brand: string
     const result = await anthropicMessages({ apiKey, body: { model: "claude-opus-5-5", max_tokens: CHECK_TOKENS, messages: [{ role: "user", content }] } });
     const pick = parseKitPick(result.text, frames.length, KIT_MAX);
     // An answer that cannot be read is a claim with no progress: the next pass asks again, as a try of the kit.
-    if (pick === null) { keepKitError(s, "The kit's pick could not be read."); return "wait"; }
+    if (pick === null) { keepKitError(s, `The kit's pick could not be read: ${result.text.slice(0, 200)}`); return "wait"; }
     // [] is an answer too: no still qualifies, and the kit is stored as none (the posts route).
     s.kit_pick = pick.map((i) => frames[i]);
     work = kitWork(s.kit_pick.length, done, s.kit_tries);
@@ -630,13 +631,15 @@ async function makeKit(admin: any, job: VideoJob, videoStyle: any, brand: string
     try {
       // Inside the kit's own handling: a missing key is a claim with no progress, never a failed job.
       const apiKey = await openaiKey(admin);
-      const size: [number, number] = [CARD_SIZE.width, CARD_SIZE.height];
-      const prompt = kitCleanPrompt(brand);
+      const prompt = kitCleanPrompt();
       const outcomes = await Promise.allSettled(todo.map(async (i) => {
         const path = kitPath(job.client_id, i);
         const { data, error } = await admin.storage.from(REFERENCES).download(picked[i]);
         if (error || !data) throw new Error(`Could not read a still: ${error?.message ?? "missing"}`);
         let still = { bytes: new Uint8Array(await data.arrayBuffer()), name: "still.jpg" };
+        // Edited at the still's own framing and aspect (kitEditSize): the model has nothing to invent outside the picture.
+        const source = await Image.decode(still.bytes);
+        const size = kitEditSize(source.width, source.height);
         let clean: string | null = null;
         for (let n = 1; n <= 2 && !clean; n++) {
           let png: Uint8Array;
@@ -651,8 +654,12 @@ async function makeKit(admin: any, job: VideoJob, videoStyle: any, brand: string
           const jpeg = await (await Image.decode(png)).encodeJPEG(90);
           const { error: upError } = await admin.storage.from(REFERENCES).upload(path, jpeg, { contentType: "image/jpeg", upsert: true });
           if (upError) throw new Error(`Could not store a kit still: ${upError.message}`);
-          // A look reference: any writing left, the client's scene words included, is writing.
-          const seen = await footageWriting(admin, [path], [], REFERENCES);
+          // Read back as a look reference: writing left (the client's scene words included) is cleaned once more; a person's face drops the still at once.
+          const seen = await kitStillCheck(admin, path);
+          if (seen.face) {
+            console.warn(`[video-worker] kit ${job.client_id} still ${i}: a face after cleaning ${n} (${seen.where}).`);
+            break;
+          }
           if (!seen.writing) clean = path;
           else {
             console.warn(`[video-worker] kit ${job.client_id} still ${i}: writing after cleaning ${n} (${seen.where}).`);
@@ -678,6 +685,16 @@ async function makeKit(admin: any, job: VideoJob, videoStyle: any, brand: string
       delete s.kit_held_at;
     }
   });
+}
+
+/** One kit still read back by the vision model: the writing left in it, and whether it shows a person's face. */
+async function kitStillCheck(admin: any, path: string): Promise<{ writing: boolean; face: boolean; where: string }> {
+  const content: unknown[] = await jpegBlocks(admin, REFERENCES, [path]);
+  content.push({ type: "text", text: kitStillCheckPrompt() });
+  const result = await anthropicMessages({ apiKey: anthropicKey(), body: { model: "claude-opus-5-5", max_tokens: CHECK_TOKENS, messages: [{ role: "user", content }] } });
+  const seen = parseKitStillCheck(result.text);
+  if (!seen) throw new Error(`The kit still could not be read: ${result.text.slice(0, 200)}`);
+  return seen;
 }
 
 /** The job's state (and any other fields given) saved to its row while it is active. */

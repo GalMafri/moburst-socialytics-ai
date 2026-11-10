@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { KIT_BATCH, KIT_MAKE_MS, KIT_MAX, MAX_KIT_TRIES, type KitDone, kitClaim, kitDoneCount, kitDoneOf, kitForStyle, kitKeptFrom, kitWork, KIT_MIN, kitCleanPrompt, kitKept, kitNext, kitPath, kitPaths, kitPickPrompt, kitState, parseKitPick, postsRouteInput, videoRouteFor } from "../../../functions/_shared/video/kit";
+import { KIT_BATCH, KIT_EDIT_LONG, KIT_MAKE_MS, KIT_MAX, MAX_KIT_TRIES, kitEditSize, kitStillCheckPrompt, parseKitStillCheck, type KitDone, kitClaim, kitDoneCount, kitDoneOf, kitForStyle, kitKeptFrom, kitWork, KIT_MIN, kitCleanPrompt, kitKept, kitNext, kitPath, kitPaths, kitPickPrompt, kitState, parseKitPick, postsRouteInput, videoRouteFor } from "../../../functions/_shared/video/kit";
 
 describe("kit limits and paths", () => {
   it("keeps at most six stills and needs at least two", () => {
@@ -49,8 +49,9 @@ describe("parseKitPick", () => {
     expect(parseKitPick("no", 8, 6)).toBeNull();
   });
 
-  it("reads the first list among other words and caps it at max", () => {
-    expect(parseKitPick("Here you go: [1, 2, 3, 4] and [5]", 8, 3)).toEqual([1, 2, 3]);
+  it("reads the last list among other words and caps it at max", () => {
+    expect(parseKitPick("Stills [2, 5] show faces, so: [1, 2, 3, 4]", 8, 3)).toEqual([1, 2, 3]);
+    expect(parseKitPick("Faces in [2, 5]. Answer: []", 8, 6)).toEqual([]);
   });
 
   it("is null when the list has no usable number", () => {
@@ -81,23 +82,54 @@ describe("kitPickPrompt", () => {
     const p = kitPickPrompt("Pay The Pyper", 8, 6);
     expect(p).toMatch(/person's face/);
     expect(p).toContain("Answer [] when no still qualifies");
-    expect(p).not.toMatch(/its people/);
+    expect(p).not.toMatch(/its people|graphics/);
   });
 });
 
 describe("kitCleanPrompt", () => {
-  it("removes all text and marks and names no words to keep", () => {
-    const p = kitCleanPrompt("Pay The Pyper");
+  it("removes all text and marks and names no words, not even the brand", () => {
+    const p = kitCleanPrompt();
     for (const w of ["captions", "subtitles", "logos", "watermarks", "screens"]) expect(p).toContain(w);
     expect(p).toMatch(/No lettering of any kind stays/);
     expect(p).toMatch(/nothing new is added/);
-    // The kit never carries the client's scene words: naming them made the model paint them.
-    expect(p).not.toMatch(/stays is|spelled exactly|scene_words|only lettering/);
-    expect(kitCleanPrompt.length).toBe(1);
+    // The kit never carries the client's scene words or name: naming words made the model paint them.
+    expect(p).not.toMatch(/stays is|spelled exactly|scene_words|only lettering|\$\{/);
+    expect(kitCleanPrompt.length).toBe(0);
   });
 
   it("has no em or en dashes", () => {
-    for (const p of [kitCleanPrompt("B"), kitPickPrompt("B", 4, 2)]) expect(p).not.toMatch(/[\u2013\u2014]/);
+    for (const p of [kitCleanPrompt(), kitPickPrompt("B", 4, 2), kitStillCheckPrompt()]) expect(p).not.toMatch(/[\u2013\u2014]/);
+  });
+});
+
+describe("kitEditSize", () => {
+  it("keeps the still's own aspect with the longest side at 1536, both sides multiples of 16", () => {
+    expect(KIT_EDIT_LONG).toBe(1536);
+    expect(kitEditSize(540, 304)).toEqual([1536, 864]);
+    expect(kitEditSize(1080, 1920)).toEqual([864, 1536]);
+    expect(kitEditSize(1000, 1000)).toEqual([1536, 1536]);
+    expect(kitEditSize(1920, 1080)).toEqual([1536, 864]);
+  });
+
+  it("never asks for a side under 16", () => {
+    expect(kitEditSize(3000, 10)).toEqual([1536, 16]);
+    expect(kitEditSize(0, 0)).toEqual([1536, 1536]);
+  });
+});
+
+describe("kit still read-back", () => {
+  it("asks about writing and a person's face and wants JSON", () => {
+    const p = kitStillCheckPrompt();
+    expect(p).toMatch(/writing/i);
+    expect(p).toMatch(/person's face/);
+    expect(p).toContain('"face": true or false');
+  });
+
+  it("reads both answers and where, and is null when one is missing", () => {
+    expect(parseKitStillCheck('{"writing": false, "face": true, "where": "a man at a desk"}')).toEqual({ writing: false, face: true, where: "a man at a desk" });
+    expect(parseKitStillCheck('Sure. {"writing": "true", "face": "false", "where": ""}')).toEqual({ writing: true, face: false, where: "" });
+    expect(parseKitStillCheck('{"writing": false}')).toBeNull();
+    expect(parseKitStillCheck("no idea")).toBeNull();
   });
 });
 
