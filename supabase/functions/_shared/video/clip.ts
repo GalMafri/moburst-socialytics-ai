@@ -143,7 +143,7 @@ export function framePrompt(brief: string, rules: string): string {
   return [
     "Draw the opening frame of a vertical 9:16 social video: the very first moment of this video, as one photograph.",
     `The video: ${brief.trim()}`,
-    "When reference images are given, they are stills from the brand's own videos: match their people, places, products, light, color and grade, without copying any one of them.",
+    "When reference images are given, they are stills from the brand's own videos (no people in them): match their places, products, materials, light, color and grade, without copying any one of them.",
     "The frame is a whole scene that fills the picture edge to edge, with no border, band, panel or empty area.",
     rules.trim(),
   ].join(" ");

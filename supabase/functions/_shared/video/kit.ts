@@ -3,9 +3,10 @@
 // The client's kit: up to KIT_MAX stills from their own videos, with no
 // person's face and cleaned of all lettering, that every clip is given as
 // its image references. A look reference: places, products, light and
-// color, each still at its own framing. The rules here (where a still is stored, what the kit's state
-// is, the two questions to the models and how their answers are read) are
-// free of Deno and network imports so they can be tested.
+// color, each still at its own framing. The rules here (where a still is
+// stored, what the kit's state is, the questions to the models and how
+// their answers are read) are free of Deno and network imports so they can
+// be tested.
 
 /** The most stills a kit holds. */
 export const KIT_MAX = 6;
@@ -158,7 +159,7 @@ export function postsRouteInput<T extends Record<string, unknown>>(input: T): T 
 
 /** The most stills one background cleaning takes on; the rest wait for the next pass. */
 export const KIT_BATCH = 3;
-/** Claims of the kit by one job that finished no still, before it is stored as [] (the client's videos then take the posts route). */
+/** Claims of the kit by one job that finished no still, before it is stored with what is clean so far ([] with fewer than KIT_MIN: the posts route). */
 export const MAX_KIT_TRIES = 3;
 
 /**
@@ -210,9 +211,10 @@ export function kitClaim(prev: { tries?: unknown; seen?: unknown }, doneNow: num
 /**
  * What the kit's maker does next, from the number of picked stills (null
  * before the pick), their outcomes so far and its tries (kitClaim): store it
- * once every still is done; give up (store []) once MAX_KIT_TRIES claims
- * finished nothing, whether or not they reached the pick; pick when there is
- * no pick yet; else clean the next KIT_BATCH stills not done yet.
+ * once every still is done; give up (store what is clean so far, [] with
+ * fewer than KIT_MIN) once MAX_KIT_TRIES claims finished nothing, whether or
+ * not they reached the pick; pick when there is no pick yet; else clean the
+ * next KIT_BATCH stills not done yet.
  */
 export function kitWork(count: number | null, done: KitDone, tries: number): { kind: "store" } | { kind: "spent" } | { kind: "pick" } | { kind: "clean"; todo: number[] } {
   const d = kitDoneOf(done);

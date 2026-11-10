@@ -527,8 +527,10 @@ async function jpegBlocks(admin: any, bucket: string, paths: string[]): Promise<
  *             as it comes. Once every picked still is done, the clean ones
  *             (kitPath) are listed on video_style.kit ([] with fewer than
  *             KIT_MIN). After MAX_KIT_TRIES claims that finished no still
- *             (kitClaim) the kit is stored as []:
- *             the client's videos take the posts route, and nothing fails;
+ *             (kitClaim) the kit is stored with what is clean so far, so one
+ *             still that never comes out costs no clean ones; with fewer
+ *             than KIT_MIN the client's videos take the posts route, and
+ *             nothing fails;
  *   kit_wait  until the kit is stored. The style job then plans the video
  *             posts that waited for the style and ends; a video job goes on,
  *             on the posts route when the kit has too few stills.
@@ -618,8 +620,10 @@ async function makeKit(admin: any, job: VideoJob, videoStyle: any, brand: string
   }
   const picked: string[] = Array.isArray(s.kit_pick) ? s.kit_pick : [];
   if (work.kind !== "clean") {
-    if (work.kind === "spent") console.warn(`[video-worker] kit ${job.client_id}: ${MAX_KIT_TRIES} tries finished no still; the client's videos take the posts route.`);
-    await storeKit(admin, job.client_id, work.kind === "store" ? kitKeptFrom(picked.length, done) : []);
+    // Spent tries store what is clean so far: one still that never comes out costs no clean ones.
+    const kept = kitKeptFrom(picked.length, done);
+    if (work.kind === "spent") console.warn(`[video-worker] kit ${job.client_id}: ${MAX_KIT_TRIES} tries finished no still; stored with ${kept.length} clean.`);
+    await storeKit(admin, job.client_id, kept);
     job.step = "kit_wait"; return "next";
   }
   const todo = work.todo;
