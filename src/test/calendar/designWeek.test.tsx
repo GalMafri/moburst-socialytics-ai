@@ -19,6 +19,7 @@ const f = vi.hoisted(() => ({
   runs: [] as any[],
   requests: [] as any[],
   preview: null as any,
+  started: null as any,
   invokes: [] as any[],
 }));
 vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
@@ -29,7 +30,7 @@ vi.mock('@/integrations/supabase/client', () => ({ supabase: {
   functions: { invoke: async (name: string, opts: any) => {
     f.invokes.push({ name, ...opts.body });
     if (opts.body.action === 'week_preview') return { data: f.preview, error: null };
-    if (opts.body.action === 'week_start') return { data: { run: { id: 'run-new' }, added: ['a'] }, error: null };
+    if (opts.body.action === 'week_start') return { data: f.started ?? { run: { id: 'run-new' }, added: ['a'], left_out_no_price: 0 }, error: null };
     if (opts.body.action === 'week_stop') return { data: { run: { id: 'run-1', status: 'stopped' } }, error: null };
     return { data: null, error: null };
   } },
@@ -39,7 +40,7 @@ vi.mock('@/integrations/supabase/client', () => ({ supabase: {
     return q;
   },
 } }));
-afterEach(() => { cleanup(); f.staff = true; f.runs = []; f.requests = []; f.preview = null; f.invokes = []; });
+afterEach(() => { cleanup(); f.staff = true; f.runs = []; f.requests = []; f.preview = null; f.started = null; f.invokes = []; });
 
 const WEEK = '2026-11-02';
 const counts = (over: any = {}) => ({ single: 0, story: 0, carousel: 0, video: 0, copy_waits: 0, filming: 0, ...over });
@@ -104,7 +105,7 @@ describe('the band', () => {
     expect(screen.getByText("1 video is filmed, so it isn't included.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Design 9 posts' }));
     await waitFor(() => expect(f.invokes.find((i) => i.action === 'week_start')).toBeTruthy());
-    expect(f.invokes.find((i) => i.action === 'week_start')).toEqual({ name: 'design-request', action: 'week_start', client_id: 'c1', week_start: WEEK, estimate: { posts: 9, single: 6, story: 0, carousel: 2, video: 1, credits: 100, minutes: 45 } });
+    expect(f.invokes.find((i) => i.action === 'week_start')).toEqual({ name: 'design-request', action: 'week_start', client_id: 'c1', week_start: WEEK, estimate: { posts: 9, single: 6, story: 0, carousel: 2, video: 1, credits: 100, credits_per_clip: 100, minutes: 45 } });
   });
 
   it('counts the week\'s Stories in what a press designs', async () => {
@@ -113,7 +114,27 @@ describe('the band', () => {
     expect(await screen.findByText('4 posts this week have no design yet: 2 designs and 2 Stories. About 15 minutes.')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Design 4 posts' }));
     await waitFor(() => expect(f.invokes.find((i) => i.action === 'week_start')).toBeTruthy());
-    expect(f.invokes.find((i) => i.action === 'week_start').estimate).toEqual({ posts: 4, single: 2, story: 2, carousel: 0, video: 0, credits: 0, minutes: 15 });
+    expect(f.invokes.find((i) => i.action === 'week_start').estimate).toEqual({ posts: 4, single: 2, story: 2, carousel: 0, video: 0, credits: 0, credits_per_clip: 100, minutes: 15 });
+  });
+
+  it("says when video prices can't be read, presses for the other posts, and says the videos wait", async () => {
+    const { toast } = await import('sonner');
+    f.preview = { client_name: 'Pay The Pyper', week_start: WEEK, counts: counts({ single: 2, video: 1 }), credits: null, credits_per_clip: null, price_unavailable: true, run_id: null, credits_used: null };
+    f.started = { run: { id: 'run-new' }, added: ['a', 'b'], left_out_no_price: 1 };
+    band();
+    expect(await screen.findByText("Video prices can't be read right now. The videos wait for the next press; the other posts go ahead.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Design 3 posts' }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Designing this week's posts", { description: 'The videos wait for the next press; the other posts are being designed.' }));
+    expect(f.invokes.find((i) => i.action === 'week_start').estimate).toMatchObject({ video: 1, credits: 0, credits_per_clip: null });
+  });
+
+  it('says nothing about prices when they were read', async () => {
+    const { toast } = await import('sonner');
+    f.preview = { client_name: 'Pay The Pyper', week_start: WEEK, counts: counts({ single: 1, video: 1 }), credits: 128, credits_per_clip: 128, run_id: null, credits_used: null };
+    band();
+    fireEvent.click(await screen.findByRole('button', { name: 'Design 2 posts' }));
+    await waitFor(() => expect(toast.success).toHaveBeenLastCalledWith("Designing this week's posts", { description: 'Each post shows where it stands on its card.' }));
+    expect(screen.queryByText(/Video prices can't be read/)).toBeNull();
   });
 
   it('offers nothing when the week has nothing to design', async () => {

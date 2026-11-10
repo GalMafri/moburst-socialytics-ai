@@ -47,6 +47,7 @@ import { discoverVideoReferences } from "../_shared/brand-references/videos.ts";
 import { creditBalance } from "../_shared/higgsfield/generate.ts";
 import { McpClient } from "../_shared/higgsfield/mcp.ts";
 import { MCP_URL, accessTokenFor } from "../_shared/higgsfield/oauth.ts";
+import { quoteClip } from "../_shared/video/clip.ts";
 import { type WeekDeps, weekContinue, weekPreview, weekStart, weekStop } from "./week.ts";
 import { designStory } from "./story.ts";
 import { plannerLibrary } from "./library.ts";
@@ -88,7 +89,8 @@ Deno.serve(async (req) => {
       // ever made up. The answer says so plainly instead of starting anything.
       // Chosen in the Video tab instead of filming: a video in the look of the client's posts.
       const route = body.route === "posts" ? "posts" : null;
-      if (designKind(body.format, body.platform) === "video" && !route) {
+      const video = designKind(body.format, body.platform) === "video";
+      if (video && !route) {
         const filmed = await filmedReason(admin, clientId, copy, visual);
         if (filmed) {
           const request = await recordFilming(admin, { clientId, postKey, copy, reportId: body.report_id || null, platform: body.platform || null, format: body.format || null, requestedBy: userId, visual: visual || null }, filmed);
@@ -97,9 +99,11 @@ Deno.serve(async (req) => {
       }
       // A note left on Regenerate: every option follows it, and the design memory hears it.
       const note = cleanNote(body.note);
+      // A video is approved at Higgsfield's live price for its one clip, read now; a still has none.
+      const approvedCredits = video ? await clipPrice(admin) : null;
       const request = await startRequest(admin, settings as Settings, {
         clientId, postKey, copy, reportId: body.report_id || null, platform: body.platform || null, format: body.format || null, requestedBy: userId, visual: visual || null, route,
-        note: note || null, learnNote: true,
+        note: note || null, learnNote: true, approvedCredits,
       });
       return json({ request });
     }
@@ -508,9 +512,11 @@ async function ensureStyleJob(admin: any, clientId: string, brand: string): Prom
  * Start a design request for a post, or answer with the one already being
  * prepared. Planning runs in the background. Every request names the person
  * who asked (design_requests requires it since 2 Nov); a week's post names
- * whoever added it to the week, and carries the week's id.
+ * whoever added it to the week, and carries the week's id. A video carries
+ * the price approved for its one clip (approvedCredits), which its clip step
+ * holds to.
  */
-async function startRequest(admin: any, settings: Settings, p: { clientId: string; postKey: string; copy: string; reportId: string | null; platform: string | null; format: string | null; requestedBy: string; visual?: string | null; footagePath?: string | null; onCamera?: string | null; route?: string | null; batchId?: string | null; note?: string | null; learnNote?: boolean; noteLearned?: NoteLearned | null }): Promise<DesignRequest> {
+async function startRequest(admin: any, settings: Settings, p: { clientId: string; postKey: string; copy: string; reportId: string | null; platform: string | null; format: string | null; requestedBy: string; visual?: string | null; footagePath?: string | null; onCamera?: string | null; route?: string | null; batchId?: string | null; note?: string | null; learnNote?: boolean; noteLearned?: NoteLearned | null; approvedCredits?: number | null }): Promise<DesignRequest> {
   const { data: open } = await admin.from("design_requests").select("*").eq("client_id", p.clientId).eq("calendar_post_key", p.postKey).eq("status", "preparing").maybeSingle();
   if (open) return open;
 
@@ -518,7 +524,7 @@ async function startRequest(admin: any, settings: Settings, p: { clientId: strin
     client_id: p.clientId, report_id: p.reportId, calendar_post_key: p.postKey,
     platform: p.platform, format: p.format, post_copy: p.copy, requested_by: p.requestedBy, visual_direction: p.visual ?? null,
     footage_path: p.footagePath ?? null, on_camera: p.footagePath ? (p.onCamera ?? null) : null, video_route: p.route ?? null, batch_id: p.batchId ?? null,
-    note: p.note ?? null, note_learned: p.noteLearned ?? null,
+    note: p.note ?? null, note_learned: p.noteLearned ?? null, approved_credits: p.approvedCredits ?? null,
     // A LinkedIn document is a deck of slides: it is made like a carousel. A
     // Reel, short or any video post gets a video: footage in the client's own
     // video style with the hook and logo over it.
@@ -598,12 +604,14 @@ async function closeFilming(admin: any, now: Date): Promise<number> {
  * person on camera is filmed (while there is still a day to film it), and
  * one too close to film is made from the client's posts.
  */
-async function startWeekPost(admin: any, s: PassStart & { batchId: string; settings: Settings; post: any }): Promise<{ requestId: string | null; filming: boolean }> {
+async function startWeekPost(admin: any, s: PassStart & { batchId: string; settings: Settings; post: any; approvedCredits?: number | null }): Promise<{ requestId: string | null; filming: boolean }> {
   const now = new Date();
   const video = s.kind === "video";
   const p = {
     clientId: s.client_id, postKey: s.post_key, copy: s.copy, reportId: s.post.report_id ?? null, platform: s.post.platform ?? null, format: s.post.format ?? null,
     requestedBy: s.added_by, visual: s.post.visual_direction || null, route: video ? s.route : null, batchId: s.batchId,
+    // The clip's price approved at the press that added the post.
+    approvedCredits: video ? s.approvedCredits ?? null : null,
   };
   if (video && s.askFilming && filmingOutcome(s.postAt, now, false) === "keep") {
     const filmed = await filmedReason(admin, s.client_id, s.copy, s.post.visual_direction || "");
@@ -614,7 +622,21 @@ async function startWeekPost(admin: any, s: PassStart & { batchId: string; setti
   return { requestId: (await startRequest(admin, s.settings, p)).id, filming: false };
 }
 
-/** What the week's actions (week.ts) need from this function: the caller's checks, the start, and the Higgsfield balance. */
+/**
+ * Higgsfield's live price for a video's one clip (get_cost: a read, nothing
+ * is spent), or null when it could not be read. Failing to read it never
+ * stops a press or a request: the price is then unknown.
+ */
+async function clipPrice(admin: any): Promise<number | null> {
+  try {
+    const mcp = new McpClient({ url: MCP_URL, accessToken: await accessTokenFor(admin), timeoutMs: 30_000 });
+    return await quoteClip(mcp);
+  } catch {
+    return null;
+  }
+}
+
+/** What the week's actions (week.ts) need from this function: the caller's checks, the start, the Higgsfield balance and the clip's price. */
 function weekDeps(admin: any, req: Request): WeekDeps {
   let system: Promise<boolean> | null = null;
   const deps: WeekDeps = {
@@ -631,7 +653,8 @@ function weekDeps(admin: any, req: Request): WeekDeps {
         return null;
       }
     },
-    startPost: (s) => startWeekPost(admin, s as PassStart & { batchId: string; settings: Settings; post: any }),
+    quoteClip: () => clipPrice(admin),
+    startPost: (s) => startWeekPost(admin, s as PassStart & { batchId: string; settings: Settings; post: any; approvedCredits: number | null }),
     // A press starts the first posts at once, as the system would on its next pass.
     wake: () => background(weekContinue({ ...deps, isSystem: async () => true })),
   };

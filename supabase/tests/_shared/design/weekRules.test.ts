@@ -126,17 +126,17 @@ describe("mergeIntoRun", () => {
   const eligible = (key: string) => ({ post_key: key, kind: "single" as const, postAt: new Date("2026-11-05T09:00:00Z") });
 
   it("queues every eligible post on the first press, naming who pressed", () => {
-    const { posts, added } = mergeIntoRun([], [eligible("a"), eligible("b")], by, NOW);
+    const { posts, added } = mergeIntoRun([], [eligible("a"), eligible("b")], by, NOW, null);
     expect(added).toEqual(["a", "b"]);
     expect(posts.map((p) => [p.post_key, p.state, p.added_by])).toEqual([["a", "queued", by], ["b", "queued", by]]);
   });
 
   it("adds only newly eligible posts on a second press, by anyone", () => {
-    const first = mergeIntoRun([], [eligible("a")], by, NOW).posts;
-    const again = mergeIntoRun(first, [eligible("a")], "person-2", NOW);
+    const first = mergeIntoRun([], [eligible("a")], by, NOW, null).posts;
+    const again = mergeIntoRun(first, [eligible("a")], "person-2", NOW, null);
     expect(again.added).toEqual([]);
     expect(again.posts).toEqual(first);
-    const later = mergeIntoRun(first, [eligible("a"), eligible("new")], "person-2", NOW);
+    const later = mergeIntoRun(first, [eligible("a"), eligible("new")], "person-2", NOW, null);
     expect(later.added).toEqual(["new"]);
     expect(later.posts.find((p) => p.post_key === "new")?.added_by).toBe("person-2");
     expect(later.posts.find((p) => p.post_key === "a")?.added_by).toBe(by);
@@ -144,10 +144,32 @@ describe("mergeIntoRun", () => {
 
   it("queues again a post of the run that ended without a design and is eligible again", () => {
     const run = [queued("a", { state: "started", request_id: "r1" }), queued("b", { state: "left_out", why: "passed" })];
-    const { posts, added } = mergeIntoRun(run, [eligible("a")], "person-2", NOW);
+    const { posts, added } = mergeIntoRun(run, [eligible("a")], "person-2", NOW, null);
     expect(added).toEqual(["a"]);
     expect(posts.find((p) => p.post_key === "a")).toMatchObject({ state: "queued", added_by: "person-2", request_id: null });
     expect(posts.find((p) => p.post_key === "b")).toMatchObject({ state: "left_out" });
+  });
+
+  it("queues a video at the price read at the press, and leaves it out when that price could not be read", () => {
+    const video = (key: string) => ({ ...eligible(key), kind: "video" as const });
+    const priced = mergeIntoRun([], [eligible("a"), video("v")], by, NOW, 128);
+    expect(priced.added).toEqual(["a", "v"]);
+    expect(priced.noPrice).toEqual([]);
+    expect(priced.posts.find((p) => p.post_key === "v")).toMatchObject({ state: "queued", approved_credits: 128 });
+    expect(priced.posts.find((p) => p.post_key === "a")?.approved_credits).toBeUndefined();
+
+    const unread = mergeIntoRun([], [eligible("a"), video("v")], by, NOW, null);
+    expect(unread.added).toEqual(["a"]);
+    expect(unread.noPrice).toEqual(["v"]);
+    expect(unread.posts.find((p) => p.post_key === "v")).toMatchObject({ state: "left_out", why: "no_price", waits_for: null, approved_credits: null });
+
+    // Counted again at the next press, at the price read then; a queued video keeps the price it was approved at.
+    const next = mergeIntoRun(unread.posts, [eligible("a"), video("v")], "person-2", NOW, 140);
+    expect(next.added).toEqual(["v"]);
+    expect(next.posts.find((p) => p.post_key === "v")).toMatchObject({ state: "queued", why: null, approved_credits: 140, added_by: "person-2" });
+    const unreadAgain = mergeIntoRun(next.posts, [video("v")], by, NOW, null);
+    expect(unreadAgain.noPrice).toEqual([]);
+    expect(unreadAgain.posts.find((p) => p.post_key === "v")).toMatchObject({ state: "queued", approved_credits: 140 });
   });
 });
 

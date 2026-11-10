@@ -6,7 +6,6 @@
 // and replace any option that did not finish).
 
 import { type Brief, optionStates, requestProgress, type JobState } from "./options.ts";
-import { TIMING } from "../video/compose.ts";
 import type { EndReason } from "../design/requestRules.ts";
 import { STORY_PAGE, STORY_SURFACE, isStoryPost, storyLogoPlacement } from "../design/story.ts";
 
@@ -42,6 +41,8 @@ export interface DesignRequest {
   video_route?: string | null;
   /** The note the person left on Regenerate: its planner and every design job follow it. */
   note?: string | null;
+  /** A video's Higgsfield price for its one clip, approved at the press; null when it could not be read, or for a still. */
+  approved_credits?: number | null;
 }
 
 /** A PNG's pixel size from its header. */
@@ -100,10 +101,11 @@ export async function startOption(admin: any, req: DesignRequest, settings: Sett
 }
 
 /**
- * A video option: one job on the video worker. Its footage follows the
- * client's own published videos (clients.video_references), with sound; its
- * hook is drawn on a transparent layer and its words checked; the client's
- * logo file goes on at its habitual spot (_shared/video/steps.ts).
+ * A video option: one job on the video worker. Its footage is one clip with
+ * fixed settings (_shared/video/clip.ts), ordered only at the price approved
+ * on the request, with sound; its hook is drawn on a transparent layer and
+ * its words checked; the client's logo file goes on at its habitual spot
+ * (_shared/video/steps.ts).
  */
 async function startVideoOption(admin: any, req: DesignRequest, settings: Settings, brandName: string, brief: Brief, optionIndex: number, logo: [number, number]): Promise<void> {
   const { data: client } = await admin.from("clients").select("video_references, video_style").eq("id", req.client_id).maybeSingle();
@@ -113,9 +115,6 @@ async function startVideoOption(admin: any, req: DesignRequest, settings: Settin
   const endCard = endSource ? { url: admin.storage.from("design-references").getPublicUrl(endSource).data.publicUrl, seconds: filmed.end_card_seconds } : null;
   // A video made from the client's posts follows their posts, not their videos.
   const style = req.video_route === "posts" ? undefined : client?.video_style?.profile as { logo?: string; logo_at?: string; logo_width?: number; people?: string; scene_words?: string[] } | undefined;
-  // A video from the client's posts takes nothing from their filmed videos, so no real person can carry over.
-  const videoRefs = (req.video_route !== "posts" && Array.isArray(client?.video_references) ? client.video_references : [])
-    .map((r: { path?: unknown }) => String(r?.path ?? "")).filter(Boolean).slice(0, 3);
   const title = `${brandName} ${req.platform ?? ""} video ${optionIndex + 1}`.replace(/\s+/g, " ");
   const { error } = await admin.from("canva_finish_jobs").insert({
     client_id: req.client_id,
@@ -133,8 +132,10 @@ async function startVideoOption(admin: any, req: DesignRequest, settings: Settin
       logo_path: settings.logo_path,
       logo_size: logo,
       placement: settings.placement,
-      video_refs: videoRefs,
-      video: { prompt: brief.footage ?? brief.picture, seconds: brief.seconds ?? TIMING.footage },
+      // The one clip's prompt; its length and every other setting are fixed (_shared/video/clip.ts CLIP).
+      video: { prompt: brief.footage ?? brief.picture },
+      // The clip's price approved on the request: the clip step orders only at this price or less.
+      approved_credits: req.approved_credits ?? null,
       footage_upload: req.footage_path ?? null,
       // Logo and people as the client's own videos have them; a filmed clip keeps the logo.
       show_logo: req.footage_path ? true : style ? style.logo !== "none" : true,

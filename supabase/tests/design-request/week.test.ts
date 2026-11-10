@@ -50,6 +50,8 @@ function deps(db: FakeDb, over: Partial<WeekDeps> = {}): WeekDeps & { started: R
     requireStaff: async () => STAFF,
     isSystem: async () => true,
     balance: vi.fn(async () => 500),
+    // Higgsfield's live price for the one clip (get_cost is never called from tests).
+    quoteClip: vi.fn(async (): Promise<number | null> => 128),
     // The single post's path, as far as the week needs it: a request named for who added the post, carrying the week.
     startPost: vi.fn(async (s: Row) => {
       const id = `req-${s.post_key}`;
@@ -109,25 +111,33 @@ describe("week_preview", () => {
       ],
       design_requests: [{ id: "f", client_id: "c1", calendar_post_key: "filmed", status: "needs_filming", created_at: "2026-11-02T08:00:00Z" }],
       post_iterations: [{ client_id: "c1", calendar_post_key: "designed", variant_angle: "Design option 1", media_urls: ["https://x/d.png"], is_selected: true, created_at: "2026-11-02T08:00:00Z" }],
-      // Two clips recorded so far, 90 and 120 credits, behind many newer single designs.
-      canva_finish_jobs: [
-        { design_request_id: "old-1", status: "done", input: { kind: "video" }, state: { credits: [{ what: "footage", job_id: "j1", credits: 90, at: "x" }] }, created_at: "2026-10-30T08:00:00Z" },
-        { design_request_id: "old-2", status: "done", input: { kind: "video" }, state: { credits: [{ what: "footage", job_id: "j2", credits: 120, at: "x" }] }, created_at: "2026-10-31T08:00:00Z" },
-        ...Array.from({ length: 80 }, (_, i) => ({ design_request_id: `single-${i}`, status: "done", input: { generate: {} }, state: {}, created_at: `2026-11-01T08:${String(i % 60).padStart(2, "0")}:00Z` })),
-      ],
     });
     const d = deps(db);
     const r = await weekPreview(d, { client_id: "c1", week_start: WEEK });
-    expect(r.body).toMatchObject({ client_name: "Pay The Pyper", counts: { single: 1, carousel: 1, video: 1, copy_waits: 0, filming: 1 }, credits: 105, credits_per_clip: 105, run_id: null, credits_used: null });
+    expect(r.body).toMatchObject({ client_name: "Pay The Pyper", counts: { single: 1, carousel: 1, video: 1, copy_waits: 0, filming: 1 }, credits: 128, credits_per_clip: 128, run_id: null, credits_used: null });
+    // The clip's price is Higgsfield's own, read live; reading it spends nothing.
+    expect(d.quoteClip).toHaveBeenCalledTimes(1);
+    expect(r.body.price_unavailable).toBeUndefined();
     expect(d.balance).not.toHaveBeenCalled();
     expect(d.startPost).not.toHaveBeenCalled();
     expect(db.tables.design_week_runs).toEqual([]);
   });
 
+  it("says when the video price cannot be read, and prices nothing", async () => {
+    const db = world({ calendar_posts: [calendarPost("single"), calendarPost("video", { format: "Reel" })] });
+    const d = deps(db, { quoteClip: vi.fn(async () => null) });
+    const r = await weekPreview(d, { client_id: "c1", week_start: WEEK });
+    expect(r.body).toMatchObject({ counts: { single: 1, video: 1 }, credits: null, credits_per_clip: null, price_unavailable: true });
+  });
+
   it("counts the week's Stories on their own, as stills that need no credits", async () => {
     const db = world({ calendar_posts: [calendarPost("feed"), calendarPost("story", { format: "Story" }), calendarPost("fb-story", { format: "Story", platform: "Facebook" })] });
-    const r = await weekPreview(deps(db), { client_id: "c1", week_start: WEEK });
+    const still = deps(db, { quoteClip: vi.fn(async () => null) });
+    const r = await weekPreview(still, { client_id: "c1", week_start: WEEK });
     expect(r.body).toMatchObject({ counts: { single: 1, story: 2, carousel: 0, video: 0, story_platform: null }, credits: 0 });
+    // A week without videos asks no price, and an unread one does not matter to it.
+    expect(still.quoteClip).not.toHaveBeenCalled();
+    expect(r.body.price_unavailable).toBeUndefined();
     // Stories on one network are named for it.
     const ig = world({ calendar_posts: [calendarPost("feed"), calendarPost("story", { format: "Story" })] });
     expect((await weekPreview(deps(ig), { client_id: "c1", week_start: WEEK })).body).toMatchObject({ counts: { story: 1, story_platform: calendarPost("x").platform } });
@@ -177,9 +187,62 @@ describe("week_start", () => {
     expect(db.tables.design_week_runs[0].estimate).toEqual({ posts: 1, single: 0, story: 1, carousel: 0, video: 0, credits: 0, minutes: 10 });
   });
 
+  it("keeps the price shown per clip in the estimate", async () => {
+    const db = world({ calendar_posts: [calendarPost("v", { format: "Reel" })] });
+    await weekStart(deps(db), { client_id: "c1", week_start: WEEK, estimate: { posts: 1, single: 0, story: 0, carousel: 0, video: 1, credits: 128, credits_per_clip: 128, minutes: 20 } });
+    expect(db.tables.design_week_runs[0].estimate).toEqual({ posts: 1, single: 0, story: 0, carousel: 0, video: 1, credits: 128, credits_per_clip: 128, minutes: 20 });
+    // A price that could not be read is not kept as a price of nothing.
+    const unread = world({ calendar_posts: [calendarPost("a")] });
+    await weekStart(deps(unread), { client_id: "c1", week_start: WEEK, estimate: { posts: 1, single: 1, video: 0, credits: 0, credits_per_clip: null, minutes: 10 } });
+    expect(unread.tables.design_week_runs[0].estimate).toEqual({ posts: 1, single: 1, video: 0, credits: 0, minutes: 10 });
+  });
+
+  it("leaves the video posts out and says so when the price cannot be read; the next press counts them again", async () => {
+    const db = world({ calendar_posts: [calendarPost("still"), calendarPost("video", { format: "Reel", post_date: "2026-11-06" })] });
+    const d = deps(db, { quoteClip: vi.fn(async () => null) });
+    const r = await weekStart(d, { client_id: "c1", week_start: WEEK });
+    expect(d.quoteClip).toHaveBeenCalledTimes(1);
+    expect(r.body).toMatchObject({ added: ["still"], left_out_no_price: 1 });
+    const run = db.tables.design_week_runs[0];
+    expect(run.posts.map((p: Row) => [p.post_key, p.state, p.why ?? null])).toEqual([["still", "queued", null], ["video", "left_out", "no_price"]]);
+    // The still starts; the video never does.
+    const pass = deps(db);
+    await weekContinue(pass);
+    expect(pass.started.map((s) => s.post_key)).toEqual(["still"]);
+    // The price can be read again: the next press adds the video, at that price.
+    const again = await weekStart(deps(db, { quoteClip: vi.fn(async () => 140) }), { client_id: "c1", week_start: WEEK });
+    expect(again.body).toMatchObject({ added: ["video"], left_out_no_price: 0 });
+    expect(db.tables.design_week_runs[0].posts.find((p: Row) => p.post_key === "video")).toMatchObject({ state: "queued", why: null, approved_credits: 140 });
+  });
+
+  it("makes no run when the week's only posts are videos it cannot price", async () => {
+    const db = world({ calendar_posts: [calendarPost("video", { format: "Reel" })] });
+    const r = await weekStart(deps(db, { quoteClip: vi.fn(async () => null) }), { client_id: "c1", week_start: WEEK });
+    expect(r.body).toEqual({ run: null, added: [], left_out_no_price: 1 });
+    expect(db.tables.design_week_runs).toEqual([]);
+  });
+
+  it("passes the approved price to each video post it starts, and none to a still", async () => {
+    const db = world({ calendar_posts: [calendarPost("video", { format: "Reel", post_date: "2026-11-04" }), calendarPost("still", { post_date: "2026-11-06" })] });
+    const press = deps(db);
+    const r = await weekStart(press, { client_id: "c1", week_start: WEEK });
+    expect(r.body).toMatchObject({ added: ["video", "still"], left_out_no_price: 0 });
+    expect(press.quoteClip).toHaveBeenCalledTimes(1);
+    const d = deps(db);
+    await weekContinue(d);
+    expect(d.startPost).toHaveBeenCalledWith(expect.objectContaining({ post_key: "video", approvedCredits: 128 }));
+    // The pass reads no price of its own: the one approved at the press holds.
+    expect(d.quoteClip).not.toHaveBeenCalled();
+    db.tables.design_requests[0].stage = "designing";
+    await weekContinue(d);
+    expect(d.startPost).toHaveBeenLastCalledWith(expect.objectContaining({ post_key: "still", approvedCredits: null }));
+  });
+
   it("makes no run when nothing in the week needs a design", async () => {
     const db = world({ calendar_posts: [calendarPost("t", { format: "Text only" })] });
-    expect((await weekStart(deps(db), { client_id: "c1", week_start: WEEK })).body).toEqual({ run: null, added: [] });
+    const d = deps(db);
+    expect((await weekStart(d, { client_id: "c1", week_start: WEEK })).body).toEqual({ run: null, added: [], left_out_no_price: 0 });
+    expect(d.quoteClip).not.toHaveBeenCalled();
     expect(db.tables.design_week_runs).toEqual([]);
   });
 });

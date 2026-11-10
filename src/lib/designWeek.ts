@@ -16,13 +16,19 @@ import { designWaitingLine, type DesignWaitingFor } from "../../supabase/functio
 
 export type WeekKind = "single" | "carousel" | "video";
 
+/** Why a post of the week is not designed by the button (_shared/design/weekRules.ts LeftOut). */
+export type WeekLeftOut =
+  | "designed" | "preparing" | "filming" | "media_in_use" | "text_only" | "passed" | "removed" | "ended" | "stopped" | "not_set_up"
+  /** The video price could not be read at the press; the post is counted again at the next press. */
+  | "no_price";
+
 /** One post of a week run, as the server keeps it (_shared/design/weekRules.ts RunPost). */
 export interface WeekRunPost {
   post_key: string;
   kind: WeekKind;
   post_at: string | null;
   state: "queued" | "started" | "filming" | "left_out";
-  why?: string | null;
+  why?: WeekLeftOut | null;
   /** A queued post whose copy is not written yet. */
   waits_for?: "copy" | null;
   added_by: string;
@@ -60,9 +66,11 @@ export interface WeekPreview {
   waiting_for?: WeekWaitingFor;
   client_name: string | null;
   counts?: WeekCounts;
-  /** Higgsfield credits the week's videos would take, from the clips recorded so far. */
-  credits?: number;
-  credits_per_clip?: number;
+  /** Higgsfield credits the week's videos would take, at Higgsfield's live price for a clip; null when that price could not be read. */
+  credits?: number | null;
+  credits_per_clip?: number | null;
+  /** The week has videos and their price could not be read: a press designs the other posts, and the videos wait for the next press. */
+  price_unavailable?: boolean;
   /** The week's latest run, and the credits its clips used. */
   run_id?: string | null;
   credits_used?: number | null;
@@ -92,12 +100,17 @@ export async function previewWeek(clientId: string, week: string): Promise<WeekP
  * second press adds only what became eligible since, so asking twice is
  * safe. Null when it was not sent; the band then shows what the server has.
  */
-export async function designWeek(args: { clientId: string; week: string; estimate: Record<string, number> }): Promise<{ run: WeekRun | null; added: string[] } | null> {
+export async function designWeek(args: { clientId: string; week: string; estimate: Record<string, number | null> }): Promise<{ run: WeekRun | null; added: string[]; left_out_no_price?: number } | null> {
   const { data, error } = await sendQuietly(() => supabase.functions.invoke("design-request", {
     body: { action: "week_start", client_id: args.clientId, week_start: args.week, estimate: args.estimate },
   }), { again: (e) => invokeResendable(e, { idempotent: true }) });
   if (error || !data || data.error || data.code) return null;
-  return { run: (data.run as WeekRun | null) ?? null, added: Array.isArray(data.added) ? data.added : [] };
+  return {
+    run: (data.run as WeekRun | null) ?? null,
+    added: Array.isArray(data.added) ? data.added : [],
+    // Videos this press left out because their price could not be read; absent from a server from before it.
+    left_out_no_price: typeof data.left_out_no_price === "number" ? data.left_out_no_price : 0,
+  };
 }
 
 /** Leave the week's posts that have not started out; the ones being designed finish. */

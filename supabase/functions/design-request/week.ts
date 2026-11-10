@@ -6,7 +6,7 @@
 //
 //   week_preview {client_id, week_start}   staff with write access: what a
 //        press would design and roughly what it costs, spending nothing
-//        (database reads; credits from the clips recorded so far)
+//        (database reads, and Higgsfield's live price for one clip)
 //   week_start {client_id, week_start, estimate}   staff with write access:
 //        the week's eligible posts join its running run (made on the first
 //        press); a second press adds only posts that became eligible since
@@ -18,13 +18,13 @@
 // Every post starts through the same path a single post's "Create design"
 // takes (index.ts startRequest), naming the person who added it. Free of
 // Deno and network imports: index.ts hands in the database, the caller
-// checks, the start and the Higgsfield balance, so the actions run against a
-// fake database in tests.
+// checks, the start, the Higgsfield balance and the clip's price, so the
+// actions run against a fake database in tests.
 
 import { type PassRun, type PassStart, type PostFacts, type RunPost, WEEK_AT_ONCE, classifyPost, currentCopyOf, keepStarts, mediaOf, mergeIntoRun, planPass, weekCounts } from "../_shared/design/weekRules.ts";
 import { planningStalled } from "../_shared/design/requestRules.ts";
 import { DESIGN_SETUP_STEPS, designWaitingFor, type DesignStepRow, type DesignWaitingFor } from "../_shared/design/setup.ts";
-import { CLIP_CREDIT_FLOOR, creditsPerClip, creditsUsed } from "../_shared/video/credits.ts";
+import { CLIP_CREDIT_FLOOR, creditsUsed } from "../_shared/video/credits.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -41,8 +41,14 @@ export interface WeekDeps {
   isSystem(): Promise<boolean>;
   /** Higgsfield credits on the account, or null when unknown. A read: nothing is spent. */
   balance(): Promise<number | null>;
-  /** Start one post the way a single post's button does: its request's id, or filming when its video is filmed instead. */
-  startPost(start: PassStart & { batchId: string; settings: Row; post: Row }): Promise<{ requestId: string | null; filming: boolean }>;
+  /** Higgsfield's live price for a video's one clip (get_cost), or null when it could not be read. A read: nothing is spent. */
+  quoteClip(): Promise<number | null>;
+  /**
+   * Start one post the way a single post's button does: its request's id, or
+   * filming when its video is filmed instead. approvedCredits is the clip's
+   * price approved at the press that added a video; null for a still.
+   */
+  startPost(start: PassStart & { batchId: string; settings: Row; post: Row; approvedCredits: number | null }): Promise<{ requestId: string | null; filming: boolean }>;
   /** Start the week's next posts now, in the background (after a press). */
   wake(): void;
 }
@@ -53,8 +59,6 @@ export interface Answer { status?: number; body: Record<string, unknown> }
 const LEASE_TRIES = 20;
 const LEASE_PAUSE_MS = 1000;
 const LEASE_SECONDS = 120;
-/** Recent video jobs read for what a clip costs. */
-const CLIP_SAMPLE = 60;
 /** The run's columns screens and answers carry; the estimate stays in the database. */
 const RUN_COLUMNS = "id, client_id, week_start, status, posts, requested_by, stopped_by, created_at, updated_at, finished_at";
 
@@ -113,13 +117,6 @@ async function creditsOfRun(db: Db, runId: string): Promise<number> {
   return creditsUsed((jobs ?? []).map((j: Row) => j.state));
 }
 
-/** A clip's credits, as recorded on the most recent video jobs. */
-async function clipCredits(db: Db): Promise<number> {
-  const { data: jobs } = await db.from("canva_finish_jobs").select("state").eq("input->>kind", "video").not("design_request_id", "is", null)
-    .order("created_at", { ascending: false }).limit(CLIP_SAMPLE);
-  return creditsPerClip((jobs ?? []).map((j: Row) => j.state));
-}
-
 /** Run the work while holding the week's lease, waiting briefly for a pass that holds it; null when it stayed held. */
 async function withLease<T>(d: WeekDeps, runId: string, work: () => Promise<T>, tries = LEASE_TRIES): Promise<T | null> {
   const name = `week:${runId}`;
@@ -163,15 +160,18 @@ export async function weekPreview(d: WeekDeps, body: Row): Promise<Answer> {
   const queued = new Set(((running?.posts ?? []) as RunPost[]).filter((p) => p.state === "queued").map((p) => p.post_key));
   const posts = (await readWeek(d.db, client, week, d.now())).filter((p) => !queued.has(p.post.post_key));
   const counts = weekCounts(posts.map((p) => ({ post_key: p.post.post_key, copy: p.facts.copy, result: p.result, platform: p.post.platform })));
-  const perClip = await clipCredits(d.db);
+  // The price is Higgsfield's own, read only when the week has videos; unread, the screen says so and prices nothing.
+  const perClip = counts.video ? await d.quoteClip() : null;
+  const unpriced = counts.video > 0 && perClip === null;
   const { data: latest } = await d.db.from("design_week_runs").select("id").eq("client_id", clientId).eq("week_start", week).order("created_at", { ascending: false }).limit(1).maybeSingle();
   return {
     body: {
       client_name: client.name ?? null,
       week_start: week,
       counts,
-      credits: counts.video * perClip,
+      credits: unpriced ? null : counts.video * (perClip ?? 0),
       credits_per_clip: perClip,
+      ...(unpriced ? { price_unavailable: true } : {}),
       run_id: latest?.id ?? null,
       credits_used: latest ? await creditsOfRun(d.db, latest.id) : null,
     },
@@ -180,12 +180,14 @@ export async function weekPreview(d: WeekDeps, body: Row): Promise<Answer> {
 
 // ── week_start ──────────────────────────────────────────────────────────────
 
-/** The estimate staff were shown at the press, kept as numbers only. */
+/** The estimate staff were shown at the press, kept as numbers only; a price that could not be read is left out. */
 function estimateOf(raw: unknown): Record<string, number> | null {
   if (!raw || typeof raw !== "object") return null;
   const out: Record<string, number> = {};
-  for (const k of ["posts", "single", "story", "carousel", "video", "credits", "minutes"]) {
-    const n = Number((raw as Row)[k]);
+  for (const k of ["posts", "single", "story", "carousel", "video", "credits", "credits_per_clip", "minutes"]) {
+    const v = (raw as Row)[k];
+    if (v === null || v === undefined || v === "") continue;
+    const n = Number(v);
     if (Number.isFinite(n) && n >= 0) out[k] = Math.round(n * 100) / 100;
   }
   return Object.keys(out).length ? out : null;
@@ -204,16 +206,18 @@ export async function weekStart(d: WeekDeps, body: Row): Promise<Answer> {
   const now = d.now();
   const eligible = (await readWeek(d.db, client, week, now))
     .flatMap((p) => (p.result.in ? [{ post_key: p.post.post_key, kind: p.result.kind, postAt: p.result.postAt }] : []));
+  // Each video joins at Higgsfield's live price, read once for the press; unread, the videos wait for the next press.
+  const price = eligible.some((e) => e.kind === "video") ? await d.quoteClip() : null;
 
   const addTo = async (run: Row): Promise<Answer> => {
     const merged = await withLease(d, run.id, async () => {
       const current = await runningRun(d.db, clientId, week);
       if (!current) return null;
-      const { posts, added } = mergeIntoRun((current.posts ?? []) as RunPost[], eligible, userId, now);
-      if (!added.length) return { run: current, added };
+      const { posts, added, noPrice } = mergeIntoRun((current.posts ?? []) as RunPost[], eligible, userId, now, price);
+      if (!added.length && !noPrice.length) return { run: current, added, left_out_no_price: 0 };
       const { data: written } = await d.db.from("design_week_runs").update({ posts, updated_at: now.toISOString() })
         .eq("id", current.id).eq("status", "running").select(RUN_COLUMNS);
-      return { run: written?.[0] ?? { ...current, posts }, added };
+      return { run: written?.[0] ?? { ...current, posts }, added, left_out_no_price: noPrice.length };
     });
     // Held by a pass that outlasted the wait: the browser sends the press again quietly.
     if (merged === null) return { status: 503, body: { error: "The week is being updated." } };
@@ -223,9 +227,10 @@ export async function weekStart(d: WeekDeps, body: Row): Promise<Answer> {
 
   const running = await runningRun(d.db, clientId, week);
   if (running) return addTo(running);
-  if (!eligible.length) return { body: { run: null, added: [] } };
+  const { posts, added, noPrice } = mergeIntoRun([], eligible, userId, now, price);
+  // Nothing to design now (or only videos that could not be priced): no run is made.
+  if (!added.length) return { body: { run: null, added: [], left_out_no_price: noPrice.length } };
 
-  const { posts, added } = mergeIntoRun([], eligible, userId, now);
   const { data: created, error } = await d.db.from("design_week_runs").insert({
     client_id: clientId, week_start: week, status: "running", posts, estimate: estimateOf(body.estimate), requested_by: userId,
   }).select(RUN_COLUMNS).single();
@@ -236,7 +241,7 @@ export async function weekStart(d: WeekDeps, body: Row): Promise<Answer> {
     throw new Error(`Could not start designing the week: ${error.message}`);
   }
   d.wake();
-  return { body: { run: created, added } };
+  return { body: { run: created, added, left_out_no_price: noPrice.length } };
 }
 
 // ── week_stop ───────────────────────────────────────────────────────────────
@@ -336,7 +341,9 @@ export async function weekContinue(d: WeekDeps): Promise<Answer> {
       const posts = pass.runs.get(s.runId) ?? [];
       const entry = posts.find((p) => p.post_key === s.post_key);
       try {
-        const out = await d.startPost({ ...s, batchId: s.runId, settings: settings.get(s.client_id)!, post: rows.get(`${s.client_id}|${s.post_key}`)! });
+        // A video carries the price approved at the press that added it; the clip step orders at that price or less.
+        const approvedCredits = s.kind === "video" ? entry?.approved_credits ?? null : null;
+        const out = await d.startPost({ ...s, batchId: s.runId, settings: settings.get(s.client_id)!, post: rows.get(`${s.client_id}|${s.post_key}`)!, approvedCredits });
         if (entry) Object.assign(entry, { state: out.filming ? "filming" : "started", request_id: out.requestId, started_at: now.toISOString(), waits_for: null, why: null });
         started++;
       } catch (e) {

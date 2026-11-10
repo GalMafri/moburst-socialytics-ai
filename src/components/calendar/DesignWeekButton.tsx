@@ -59,10 +59,15 @@ export function DesignWeekBand({ clientId, clientName, week }: { clientId: strin
     setBusy(true);
     const started = await designWeek({
       clientId, week,
-      estimate: { posts: n, single: counts.single, story: counts.story ?? 0, carousel: counts.carousel, video: counts.video, credits, minutes },
+      estimate: { posts: n, single: counts.single, story: counts.story ?? 0, carousel: counts.carousel, video: counts.video, credits, credits_per_clip: preview?.credits_per_clip ?? null, minutes },
     });
     setBusy(false);
-    if (started?.run) toast.success("Designing this week's posts", { description: "Each post shows where it stands on its card." });
+    if (started?.run) {
+      const description = (started.left_out_no_price ?? 0) > 0
+        ? "The videos wait for the next press; the other posts are being designed."
+        : "Each post shows where it stands on its card.";
+      toast.success("Designing this week's posts", { description });
+    }
     refresh();
   };
   const stop = async () => {
@@ -84,6 +89,9 @@ export function DesignWeekBand({ clientId, clientName, week }: { clientId: strin
       {designed > 0 && <p className="t-secondary">{doneLine(designed, isMoburstStaff && run && preview?.run_id === run.id ? preview.credits_used : null)}</p>}
       {waiting && <p className="t-secondary">{waiting}</p>}
       {offered && <p className="t-secondary">{previewLine(counts!, credits, minutes)}</p>}
+      {offered && preview?.price_unavailable && (
+        <p className="t-secondary">Video prices can't be read right now. The videos wait for the next press; the other posts go ahead.</p>
+      )}
       {filming && <p className="t-secondary">{filming}</p>}
       {offered && (
         <Button size="sm" onClick={press} disabled={busy}>

@@ -2,8 +2,10 @@
 //
 // The Higgsfield credits a video post's clips cost, recorded on its job as
 // each clip and each cleaning is submitted (job state.credits), so staff see
-// what a week of designs used and the week's estimate follows what clips
-// really cost. Free of Deno and network imports so it can be tested.
+// what a week of designs used. The week's estimate and each video's approved
+// price are Higgsfield's live price for the clip (_shared/video/clip.ts
+// quoteClip), not these records. Free of Deno and network imports so it can
+// be tested.
 
 /** Credits the account must hold before a clip is started (a 1080p clip with sound is about 100). */
 export const CLIP_CREDIT_FLOOR = 130;

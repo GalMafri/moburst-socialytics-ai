@@ -61,7 +61,9 @@ export type LeftOut =
   /** Someone pressed "Stop designing the rest" before it started. */
   | "stopped"
   /** The client's design settings are gone, or the client was archived. */
-  | "not_set_up";
+  | "not_set_up"
+  /** The video price could not be read at the press; the post is counted again at the next press. */
+  | "no_price";
 
 /** What the rules read about one post of the week. */
 export interface PostFacts {
@@ -150,25 +152,37 @@ export interface RunPost {
   added_at: string;
   request_id?: string | null;
   started_at?: string | null;
+  /** A video's Higgsfield price for its one clip, read at the press that added it: the price its request is approved at. */
+  approved_credits?: number | null;
 }
 
 /**
  * A press: every eligible post that is not already queued joins the run,
  * named for whoever pressed. A second press, by anyone, adds only what has
  * become eligible since (a post added to the calendar, or one of the run's
- * that ended without a design).
+ * that ended without a design). A video joins at the Higgsfield price read
+ * at this press (videoPrice); when that price could not be read, the video
+ * is left out (no_price) and the next press counts it again. A queued video
+ * keeps the price it was approved at.
  */
-export function mergeIntoRun(posts: RunPost[], eligible: Array<{ post_key: string; kind: DesignKind; postAt: Date | null }>, by: string, now: Date): { posts: RunPost[]; added: string[] } {
+export function mergeIntoRun(posts: RunPost[], eligible: Array<{ post_key: string; kind: DesignKind; postAt: Date | null }>, by: string, now: Date, videoPrice: number | null): { posts: RunPost[]; added: string[]; noPrice: string[] } {
   const out = [...posts];
   const added: string[] = [];
+  const noPrice: string[] = [];
   for (const e of eligible) {
     const i = out.findIndex((p) => p.post_key === e.post_key);
     if (i >= 0 && out[i].state === "queued") continue;
-    const entry: RunPost = { post_key: e.post_key, kind: e.kind, post_at: e.postAt ? e.postAt.toISOString() : null, state: "queued", why: null, waits_for: null, added_by: by, added_at: now.toISOString(), request_id: null, started_at: null };
+    const unpriced = e.kind === "video" && videoPrice === null;
+    const entry: RunPost = {
+      post_key: e.post_key, kind: e.kind, post_at: e.postAt ? e.postAt.toISOString() : null,
+      state: unpriced ? "left_out" : "queued", why: unpriced ? "no_price" : null, waits_for: null,
+      added_by: by, added_at: now.toISOString(), request_id: null, started_at: null,
+      ...(e.kind === "video" ? { approved_credits: videoPrice } : {}),
+    };
     if (i >= 0) out[i] = entry; else out.push(entry);
-    added.push(e.post_key);
+    (unpriced ? noPrice : added).push(e.post_key);
   }
-  return { posts: out, added };
+  return { posts: out, added, noPrice };
 }
 
 /** A run is over once nothing is queued and none of the requests it started is still being prepared. */

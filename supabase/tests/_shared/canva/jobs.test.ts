@@ -73,4 +73,24 @@ describe("startOption", () => {
     expect(job.input.generate.surface).toBeUndefined();
     expect(job.input.placement).toEqual(settings.placement);
   });
+
+  it("hands a video's job the price approved on its request, its one clip's prompt and no reference videos", async () => {
+    const video = (over: Partial<DesignRequest> = {}) => request({
+      kind: "video", format: "Reel", briefs: [{ headline: ["Captains pay last"], picture: "a hockey bench at dawn", footage: "slow push in on the bench", seconds: 12, refs: [] }], ...over,
+    });
+    const run = async (req: DesignRequest) => {
+      const db = fakeDb({ canva_finish_jobs: [], clients: [{ id: "c1", video_references: [{ path: "c1/videos/a.mp4" }], video_style: null }] });
+      db.uploads.set(`${BUCKET}/${settings.logo_path}`, pngHeader(701, 251));
+      await startOption(db, req, settings, "Pay The Pyper", 0, 0);
+      return db.tables.canva_finish_jobs[0];
+    };
+    const job = await run(video({ approved_credits: 128 }));
+    expect(job.input.approved_credits).toBe(128);
+    // Every clip has the same fixed length: the brief no longer chooses one.
+    expect(job.input.video).toEqual({ prompt: "slow push in on the bench" });
+    expect("video_refs" in job.input).toBe(false);
+    // A request whose price could not be read: the clip step waits for it.
+    expect((await run(video())).input.approved_credits).toBeNull();
+    expect((await run(video({ briefs: [{ headline: ["A"], picture: "the bench", refs: [] }] }))).input.video).toEqual({ prompt: "the bench" });
+  });
 });
