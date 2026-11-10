@@ -53,6 +53,10 @@ Nothing else is needed: no shared secret, no gOS token, no allowlisting.
 
 A key also carries a **reach** and a **rate limit**, chosen by the admin at creation: `company_slugs` (gOS canonical slugs; the key sees those companies and their demo copies) or `client_ids`, or neither to see every client; and a per-minute limit, default 120, answered with `429` and `Retry-After` when exceeded. A gOS demo key normally has no reach restriction, so it can also read Moburst's own workspace for the connected half. Every request is recorded (key id, route, status, duration; never the body or the key).
 
+### Your own key
+
+A Moburst person who wants to call the API for their own scripts and tools makes a personal key on the "API keys" screen of Socialytics (`/api-keys`, in the sidebar for Moburst staff). It works like the key above, with these differences: `read` scope only, 120 requests a minute, 90 days, at most 10 active keys per person. It reaches what its owner can see in Socialytics, checked on every call: an admin's key reaches every client, a Moburst user's key every client except demos, and a key whose owner loses the role or the account stops working (`401`). Calls are recorded as the owner. gOS keeps using its tool key; nothing here applies to it.
+
 ## 4. How every call works
 
 **Authentication.** Send the key on every resource route:
@@ -302,6 +306,7 @@ End-to-end checklist:
 
 Every change since 13 October 2026, newest first. Apart from the issue kind noted on 2 November, each one only adds: no field was renamed, removed or given a new type, so a reader of the fields above keeps working as it is.
 
+- **10 November 2026: personal API keys.** Moburst people can make read-only keys of their own (`GET`, `POST` and `DELETE /v1/me/keys`, called with the person's Socialytics sign-in session; see "Your own key" in section 3). This only adds: nothing changes for a tool key, such as the gOS key, and `POST /v1/admin/keys` is unchanged. `GET /v1/admin/keys` gains two fields on each key, `owner_user_id` and `owner_email`, both `null` for a tool key.
 - **9 November 2026: portal roles.** Anyone with a `moburst.com` address who isn't an admin becomes a Socialytics Moburst user, who works on every client; before, a portal `user` with companies assigned became a client. Anyone else stays a client. No API route or field changed.
 - **9 November 2026: social reports read the weekly industry trends.** Reports made from this release on read the themes Socialytics' weekly trend collection stored for their period, in place of a monthly TikTok and Instagram search. On those reports: `trend_status` reads `stored`, `none` or `skipped` (older reports keep their earlier value); in the report's counts, `tiktok_trends` and `instagram_trends` count the stored example posts on each platform, and `industry_trend_themes` and `industry_trend_posts` are new; `trends` holds the stored example posts per platform with `patterns` null, or is null when no weeks are stored; `analysis.industry_trends_analysis` is new. A demo's report has no industry trends: `run_social` records a `connected_only` gap that says so.
 - **9 November 2026: `industry_trends` on `GET /reports/{id}`.** The themes the weekly trend collection stored for the weeks that start inside the report's period, newest week first: each with what is happening, why it matters, the angle for the brand, its platforms and example posts. `null` when there are none.

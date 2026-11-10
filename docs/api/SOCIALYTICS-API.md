@@ -22,7 +22,20 @@ Authorization: Bearer soc_...
 - **reach**: `company_slugs` (the gOS canonical slugs the key may see, matched against `clients.company_slug`) or `client_ids`; a key with neither sees every client. Anything outside a key's reach answers `404`.
 - **rate limit**: per minute, default 120. Over the limit the API answers `429` with `Retry-After`.
 
-Every request is recorded (key, route, status, duration; never the body or the key). No user session is accepted on resource routes; the only session path is `/v1/admin/keys` for a signed-in Socialytics admin.
+Every request is recorded (key, route, status, duration; never the body or the key). No user session is accepted on resource routes; the session paths are `/v1/admin/keys` for a signed-in Socialytics admin and `/v1/me/keys` for a signed-in Moburst person (see Personal keys).
+
+### Personal keys
+
+A Moburst person (a Socialytics admin or Moburst user; never a client) can make keys of their own for their own scripts and tools, on the "API keys" screen of Socialytics (`/api-keys`, in the sidebar for Moburst staff) or through the `/v1/me/keys` routes. A personal key is a `soc_` key like any other, with these differences:
+
+- **scopes**: `read` only (every GET route). No demo jobs, no key management.
+- **rate limit**: 120 requests a minute.
+- **expiry**: 90 days after it is made.
+- **count**: at most 10 active keys per person.
+- **reach**: what its owner can see in Socialytics, worked out on every call, not stored on the key. An admin's key reaches every client. A Moburst user's key reaches every client except demo clients. If the owner loses the admin and Moburst user roles, or the account is removed, the key stops working (`401`).
+- **record**: every call is recorded as the owner (`user_id` on the request row), so usage reads per person.
+
+Tool keys are unchanged.
 
 ## Shapes
 
@@ -113,7 +126,15 @@ The integration guide (`docs/api/SOCIALYTICS-INTEGRATION-GUIDE.md`, section 12) 
 
 ## Admin routes (scope `admin`, or a signed-in Socialytics admin)
 
-`GET /v1/admin/keys`, `POST /v1/admin/keys` (`{ name, scopes, company_slugs?, client_ids?, rate_limit_per_minute?, expires_at?, note? }`; the answer carries `key` once), `DELETE /v1/admin/keys/{id}` (revoke).
+`GET /v1/admin/keys`, `POST /v1/admin/keys` (`{ name, scopes, company_slugs?, client_ids?, rate_limit_per_minute?, expires_at?, note? }`; the answer carries `key` once), `DELETE /v1/admin/keys/{id}` (revoke). Each key in `GET /v1/admin/keys` carries `owner_user_id` and `owner_email`, both `null` for a tool key and set for a personal key.
+
+## Personal key routes (the person's own Socialytics sign-in session)
+
+These routes take the person's Socialytics session token (`Authorization: Bearer <session token>`), shown in the OpenAPI document as the `Session` security scheme. An API key, or the token of the Claude connector, answers `401`; a signed-in person without the admin or Moburst user role answers `403` ("Personal API keys are for Moburst staff.").
+
+- `GET /v1/me/keys`: the person's own keys (id, name, key prefix, scopes, created, expires, last used, revoked), newest first. Never the key itself.
+- `POST /v1/me/keys` with `{ "name": "..." }` (1 to 80 characters, at least one visible character, no line breaks, tabs or other control characters): `201`, and the answer carries `key` once. A person with 10 active keys gets `409` ("You have 10 active keys. Revoke one to make another.").
+- `DELETE /v1/me/keys/{id}`: revokes the key and answers `200` with `{ id, revoked_at }`. Another person's key, or one that does not exist, answers `404`.
 
 ## Claude connector (MCP)
 

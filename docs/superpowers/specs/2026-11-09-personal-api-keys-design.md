@@ -1,6 +1,6 @@
 # Personal API keys for Moburst people
 
-Status: design for Lital's review, 9 Nov 2026. Nothing is built.
+Status: built on branch `trends` (10 Nov 2026), not yet released.
 
 ## Why
 
@@ -26,7 +26,8 @@ What's missing is a key that belongs to a person, for their own scripts and tool
 
 - The API core (`_shared/api/`) is copied verbatim from AdVisor under one checksum, so it doesn't change. The key lookup Socialytics plugs into it (`api/index.ts` `touchKey`, the `api_key_touch` database function) does the work: for a personal key it returns the owner's reachable clients as the key's `client_ids`, worked out from the owner's access at that moment.
 - **Careful case:** the core reads a key with no `client_ids` and no `company_slugs` as "every client". A personal key whose owner can see no client must never fall into that: it answers as having no reach (an empty list of real ids is not enough; it gets a value no client has, or the call is refused).
-- `api_keys` gains `owner_user_id` (null for tool keys). A personal key is made by a database function the person calls as themselves (never through an OAuth token from the connector, like every other write); only the key's hash is stored, as for tool keys.
+- `api_keys` gains `owner_user_id` (null for tool keys). A personal key is made by the `/v1/me/keys` routes (`api/routes-me.ts`) with the core's own key generator (`generateKey`, `hashKey`), not by a database function. The routes check the person's Socialytics session themselves (`api/sessions.ts`: an OAuth token from the connector or an API key is refused, so it never makes a key, like every other write); only the key's hash is stored, as for tool keys. The database refuses a personal key with any scope but `read` or any rate but 120 (a check constraint).
+- The screen is `src/pages/ApiKeys.tsx` at `/api-keys`, in the sidebar for Moburst staff. The admin key list (`GET /v1/admin/keys`) shows each key's `owner_user_id` and `owner_email`.
 
 ## Decisions for Lital
 
