@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-import { clipRequest, clipOrderDecision, REASONS } from "../../../functions/_shared/video/clip";
+import { clipRequest, clipOrderDecision, needsClipPrice, REASONS } from "../../../functions/_shared/video/clip";
 import { VIDEO_MODEL } from "../../../functions/_shared/higgsfield/generate";
 
 describe("clipRequest", () => {
@@ -24,5 +24,21 @@ describe("clipOrderDecision", () => {
   it("never orders again once an order is recorded", () => {
     expect(clipOrderDecision({ clip_order: { price: 128, at: "x", job_id: "j" } }, 128, 100, 1000)).toEqual({ action: "wait" });
     expect(clipOrderDecision({ clip_order: { price: 128, at: "x" } }, 128, 100, 1000)).toEqual({ action: "stop", reason: REASONS.lostOrder });
+  });
+});
+
+describe("needsClipPrice", () => {
+  it("prices a generated video at its own click, unless a price was approved already", () => {
+    expect(needsClipPrice("video", null, undefined)).toBe(true);
+    expect(needsClipPrice("video", "", undefined)).toBe(true);
+    // The week's press approved it (or could not read it): no second read.
+    expect(needsClipPrice("video", null, 128)).toBe(false);
+    expect(needsClipPrice("video", null, null)).toBe(false);
+  });
+
+  it("reads no price for a still or for a filmed clip, which orders no paid clip", () => {
+    expect(needsClipPrice("single", null, undefined)).toBe(false);
+    expect(needsClipPrice("carousel", null, undefined)).toBe(false);
+    expect(needsClipPrice("video", "c1/footage.mp4", undefined)).toBe(false);
   });
 });

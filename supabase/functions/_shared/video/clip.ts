@@ -33,6 +33,15 @@ export function quoteClip(mcp: ToolCaller): Promise<number | null> {
   return quoteVideo(mcp, clipRequest(QUOTE_PROMPT, null, []));
 }
 
+/**
+ * Whether a request's price is read at its own click: a generated video
+ * (a filmed clip orders no paid clip) that was not handed a price already.
+ * A price handed in as null (the press could not read it) is not read again.
+ */
+export function needsClipPrice(kind: string | null | undefined, footagePath: string | null | undefined, approvedCredits: number | null | undefined): boolean {
+  return kind === "video" && !footagePath && approvedCredits === undefined;
+}
+
 /** The order recorded on a post's job once its clip is submitted; job_id is missing until Higgsfield answers. */
 export interface ClipOrder {
   price: number | null;

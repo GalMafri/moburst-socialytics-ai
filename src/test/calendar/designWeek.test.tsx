@@ -122,10 +122,21 @@ describe('the band', () => {
     f.preview = { client_name: 'Pay The Pyper', week_start: WEEK, counts: counts({ single: 2, video: 1 }), credits: null, credits_per_clip: null, price_unavailable: true, run_id: null, credits_used: null };
     f.started = { run: { id: 'run-new' }, added: ['a', 'b'], left_out_no_price: 1 };
     band();
-    expect(await screen.findByText("Video prices can't be read right now. The videos wait for the next press; the other posts go ahead.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Design 3 posts' }));
+    // The videos are not part of what this press designs: the count, the kinds and the minutes leave them out.
+    expect(await screen.findByText('2 posts this week have no design yet: 2 designs. About 10 minutes.')).toBeInTheDocument();
+    expect(screen.getByText("Video prices can't be read right now. The videos wait for the next press. The other posts go ahead.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Design 2 posts' }));
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Designing this week's posts", { description: 'The videos wait for the next press; the other posts are being designed.' }));
-    expect(f.invokes.find((i) => i.action === 'week_start').estimate).toMatchObject({ video: 1, credits: 0, credits_per_clip: null });
+    expect(f.invokes.find((i) => i.action === 'week_start').estimate).toEqual({ posts: 2, single: 2, story: 0, carousel: 0, video: 0, credits: 0, credits_per_clip: null, minutes: 10 });
+  });
+
+  it("hides the button when the week's only posts are videos it cannot price", async () => {
+    f.preview = { client_name: 'Pay The Pyper', week_start: WEEK, counts: counts({ video: 2 }), credits: null, credits_per_clip: null, price_unavailable: true, run_id: null, credits_used: null };
+    band();
+    expect(await screen.findByText("Video prices can't be read right now. The videos wait for the next press.")).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Design / })).toBeNull();
+    expect(screen.queryByText(/have no design yet|has no design yet/)).toBeNull();
+    expect(screen.queryByText(/The other posts go ahead/)).toBeNull();
   });
 
   it('says nothing about prices when they were read', async () => {

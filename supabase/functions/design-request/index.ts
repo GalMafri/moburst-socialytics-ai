@@ -47,7 +47,7 @@ import { discoverVideoReferences } from "../_shared/brand-references/videos.ts";
 import { creditBalance } from "../_shared/higgsfield/generate.ts";
 import { McpClient } from "../_shared/higgsfield/mcp.ts";
 import { MCP_URL, accessTokenFor } from "../_shared/higgsfield/oauth.ts";
-import { quoteClip } from "../_shared/video/clip.ts";
+import { needsClipPrice, quoteClip } from "../_shared/video/clip.ts";
 import { type WeekDeps, weekContinue, weekPreview, weekStart, weekStop } from "./week.ts";
 import { designStory } from "./story.ts";
 import { plannerLibrary } from "./library.ts";
@@ -89,8 +89,7 @@ Deno.serve(async (req) => {
       // ever made up. The answer says so plainly instead of starting anything.
       // Chosen in the Video tab instead of filming: a video in the look of the client's posts.
       const route = body.route === "posts" ? "posts" : null;
-      const video = designKind(body.format, body.platform) === "video";
-      if (video && !route) {
+      if (designKind(body.format, body.platform) === "video" && !route) {
         const filmed = await filmedReason(admin, clientId, copy, visual);
         if (filmed) {
           const request = await recordFilming(admin, { clientId, postKey, copy, reportId: body.report_id || null, platform: body.platform || null, format: body.format || null, requestedBy: userId, visual: visual || null }, filmed);
@@ -99,11 +98,9 @@ Deno.serve(async (req) => {
       }
       // A note left on Regenerate: every option follows it, and the design memory hears it.
       const note = cleanNote(body.note);
-      // A video is approved at Higgsfield's live price for its one clip, read now; a still has none.
-      const approvedCredits = video ? await clipPrice(admin) : null;
       const request = await startRequest(admin, settings as Settings, {
         clientId, postKey, copy, reportId: body.report_id || null, platform: body.platform || null, format: body.format || null, requestedBy: userId, visual: visual || null, route,
-        note: note || null, learnNote: true, approvedCredits,
+        note: note || null, learnNote: true,
       });
       return json({ request });
     }
@@ -512,23 +509,29 @@ async function ensureStyleJob(admin: any, clientId: string, brand: string): Prom
  * Start a design request for a post, or answer with the one already being
  * prepared. Planning runs in the background. Every request names the person
  * who asked (design_requests requires it since 2 Nov); a week's post names
- * whoever added it to the week, and carries the week's id. A video carries
- * the price approved for its one clip (approvedCredits), which its clip step
- * holds to.
+ * whoever added it to the week, and carries the week's id. A generated
+ * video carries the price approved for its one clip, which its clip step
+ * holds to: the week's press hands it in (approvedCredits); any other start
+ * reads Higgsfield's live price here, at its own click.
  */
 async function startRequest(admin: any, settings: Settings, p: { clientId: string; postKey: string; copy: string; reportId: string | null; platform: string | null; format: string | null; requestedBy: string; visual?: string | null; footagePath?: string | null; onCamera?: string | null; route?: string | null; batchId?: string | null; note?: string | null; learnNote?: boolean; noteLearned?: NoteLearned | null; approvedCredits?: number | null }): Promise<DesignRequest> {
   const { data: open } = await admin.from("design_requests").select("*").eq("client_id", p.clientId).eq("calendar_post_key", p.postKey).eq("status", "preparing").maybeSingle();
   if (open) return open;
 
+  // A generated video is approved at Higgsfield's live price for its one clip, read at its own click
+  // unless the week's press handed one in; a still and a filmed clip have none.
+  const kind = designKind(p.format, p.platform);
+  const approvedCredits = needsClipPrice(kind, p.footagePath, p.approvedCredits) ? await clipPrice(admin) : (kind === "video" && !p.footagePath ? p.approvedCredits ?? null : null);
+
   const { data: created, error } = await admin.from("design_requests").insert({
     client_id: p.clientId, report_id: p.reportId, calendar_post_key: p.postKey,
     platform: p.platform, format: p.format, post_copy: p.copy, requested_by: p.requestedBy, visual_direction: p.visual ?? null,
     footage_path: p.footagePath ?? null, on_camera: p.footagePath ? (p.onCamera ?? null) : null, video_route: p.route ?? null, batch_id: p.batchId ?? null,
-    note: p.note ?? null, note_learned: p.noteLearned ?? null, approved_credits: p.approvedCredits ?? null,
+    note: p.note ?? null, note_learned: p.noteLearned ?? null, approved_credits: approvedCredits,
     // A LinkedIn document is a deck of slides: it is made like a carousel. A
     // Reel, short or any video post gets a video: footage in the client's own
     // video style with the hook and logo over it.
-    kind: designKind(p.format, p.platform), options_wanted: OPTIONS_WANTED,
+    kind, options_wanted: OPTIONS_WANTED,
   }).select("*").single();
   if (error) {
     // Two starts at once: the unique index let one through; answer with it.

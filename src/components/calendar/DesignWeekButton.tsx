@@ -43,7 +43,10 @@ export function DesignWeekBand({ clientId, clientName, week }: { clientId: strin
     void qc.invalidateQueries({ queryKey: ["design-week-preview", clientId, week] });
   };
 
-  const counts = preview && !preview.code ? preview.counts : undefined;
+  const weekCounts = preview && !preview.code ? preview.counts : undefined;
+  // Videos whose price could not be read wait for the next press: what a press designs now leaves them out.
+  const unpriced = !!preview?.price_unavailable && (weekCounts?.video ?? 0) > 0;
+  const counts = weekCounts && unpriced ? { ...weekCounts, video: 0 } : weekCounts;
   const n = postsToDesign(counts);
   const minutes = counts ? weekMinutes(counts, requests) : 0;
   const credits = preview?.credits ?? 0;
@@ -53,6 +56,9 @@ export function DesignWeekBand({ clientId, clientName, week }: { clientId: strin
   const designed = !active && progress && progress.ready > 0 ? progress.ready : 0;
   const filming = offered ? filmingLine(counts!.filming) : null;
   const waiting = isMoburstStaff && preview?.code === "not_set_up" ? waitingLine(preview.waiting_for, preview.client_name ?? clientName) : null;
+  const priceLine = isMoburstStaff && unpriced
+    ? `Video prices can't be read right now. The videos wait for the next press.${n > 0 ? " The other posts go ahead." : ""}`
+    : null;
 
   const press = async () => {
     if (!counts) return;
@@ -77,7 +83,7 @@ export function DesignWeekBand({ clientId, clientName, week }: { clientId: strin
     refresh();
   };
 
-  if (!active && !designed && !waiting && !offered) return null;
+  if (!active && !designed && !waiting && !offered && !priceLine) return null;
 
   return (
     <div className="flex flex-wrap items-center gap-3">
@@ -89,9 +95,7 @@ export function DesignWeekBand({ clientId, clientName, week }: { clientId: strin
       {designed > 0 && <p className="t-secondary">{doneLine(designed, isMoburstStaff && run && preview?.run_id === run.id ? preview.credits_used : null)}</p>}
       {waiting && <p className="t-secondary">{waiting}</p>}
       {offered && <p className="t-secondary">{previewLine(counts!, credits, minutes)}</p>}
-      {offered && preview?.price_unavailable && (
-        <p className="t-secondary">Video prices can't be read right now. The videos wait for the next press; the other posts go ahead.</p>
-      )}
+      {priceLine && <p className="t-secondary">{priceLine}</p>}
       {filming && <p className="t-secondary">{filming}</p>}
       {offered && (
         <Button size="sm" onClick={press} disabled={busy}>

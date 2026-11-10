@@ -35,6 +35,8 @@ export interface WeekRunPost {
   added_at: string;
   request_id?: string | null;
   started_at?: string | null;
+  /** A video's Higgsfield price for its one clip, read at the press that added it. */
+  approved_credits?: number | null;
 }
 
 export interface WeekRun {
