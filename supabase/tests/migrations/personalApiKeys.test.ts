@@ -120,6 +120,23 @@ async function audit(keyId: string | null, userId?: string): Promise<string | nu
   }
 }
 
+/** Runs `sql` in a savepoint (each test is a transaction) and gives the Postgres error code it raised, or null. */
+async function errorCodeOf(sql: string): Promise<string | null> {
+  await db.exec("savepoint attempt");
+  try {
+    await db.exec(sql);
+    await db.exec("release savepoint attempt");
+    return null;
+  } catch (e) {
+    await db.exec("rollback to savepoint attempt");
+    return (e as { code?: string }).code ?? String(e);
+  }
+}
+const CHECK_VIOLATION = "23514";
+const personalKey = (hash: string, scopes: string, rate: number) => `
+  insert into public.api_keys (name, key_prefix, key_hash, scopes, rate_limit_per_minute, owner_user_id, created_by)
+  values ('Mine', 'sk_x', '${hash}', '${scopes}', ${rate}, '${STAFF}', '${STAFF}')`;
+
 async function bucketsOf(keyId: string): Promise<number> {
   const { rows } = await db.query<{ n: number }>("select count(*)::int as n from public.api_rate_buckets where key_id = $1", [keyId]);
   return rows[0].n;
@@ -258,6 +275,25 @@ describe("api_requests_owner: the audit row of a personal key carries its owner"
   });
 });
 
+describe("api_keys_personal_read_only: a personal key is read only at 120 a minute", () => {
+  it("refuses a personal key with admin or demo scopes, or another rate", async () => {
+    expect(await errorCodeOf(personalKey("h-p-admin", "{read,admin}", 120))).toBe(CHECK_VIOLATION);
+    expect(await errorCodeOf(personalKey("h-p-demo", "{demo}", 120))).toBe(CHECK_VIOLATION);
+    expect(await errorCodeOf(personalKey("h-p-rate", "{read}", 500))).toBe(CHECK_VIOLATION);
+    expect(await errorCodeOf(`update public.api_keys set scopes = '{read,admin}' where id = '${STAFF_KEY}'`)).toBe(CHECK_VIOLATION);
+  });
+
+  it("takes a personal key with {read} at 120", async () => {
+    expect(await errorCodeOf(personalKey("h-p-ok", "{read}", 120))).toBeNull();
+  });
+
+  it("leaves tool keys free to carry any scopes and rate", async () => {
+    expect(await errorCodeOf(`
+      insert into public.api_keys (name, key_prefix, key_hash, scopes, rate_limit_per_minute)
+      values ('Ops tool', 'sk_ops', 'h-ops', '{read,demo,admin}', 500)`)).toBeNull();
+  });
+});
+
 describe("the migration", () => {
   it("applies twice: one owner column with its foreign key and index, one audit trigger", async () => {
     const { rows: fks } = await db.query<{ n: number }>(`
@@ -272,6 +308,10 @@ describe("the migration", () => {
     const { rows: triggers } = await db.query<{ n: number }>(`
       select count(*)::int as n from pg_trigger where tgrelid = 'public.api_requests'::regclass and tgname = 'api_requests_owner' and not tgisinternal`);
     expect(triggers[0].n).toBe(1);
+    const { rows: checks } = await db.query<{ n: number }>(`
+      select count(*)::int as n from pg_constraint
+       where conrelid = 'public.api_keys'::regclass and contype = 'c' and conname = 'api_keys_personal_read_only'`);
+    expect(checks[0].n).toBe(1);
   });
 
   it("keeps api_key_touch's return columns and leaves it to the service role only", async () => {

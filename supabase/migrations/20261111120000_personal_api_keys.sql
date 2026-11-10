@@ -7,7 +7,8 @@
 --
 --   1. api_keys.owner_user_id: the person a key belongs to. Null for a tool
 --      key (made by an admin for a tool, such as the gOS key). The key goes
---      when the person's account goes.
+--      when the person's account goes. A personal key is read only at 120
+--      calls a minute, held by a check constraint.
 --   2. api_key_touch(p_key_hash), restated from 20261001100000_public_api.sql
 --      with the same return columns. A tool key answers exactly as before.
 --      For a personal key, reach comes from the owner's roles in user_roles
@@ -32,6 +33,14 @@
 
 alter table public.api_keys add column if not exists owner_user_id uuid references auth.users(id) on delete cascade;
 create index if not exists api_keys_owner on public.api_keys (owner_user_id);
+
+-- A personal key is read only, at the standard 120 calls a minute, whatever
+-- code writes the row. api_key_touch returns scopes as stored and the API core
+-- trusts them, so a personal key stored with admin or demo would pass the
+-- core's admin and demo checks. Tool keys (no owner) keep any scopes and rate.
+alter table public.api_keys drop constraint if exists api_keys_personal_read_only;
+alter table public.api_keys add constraint api_keys_personal_read_only
+  check (owner_user_id is null or (scopes = array['read']::text[] and rate_limit_per_minute = 120));
 
 -- ── 2. Live reach ───────────────────────────────────────────────────────────
 
