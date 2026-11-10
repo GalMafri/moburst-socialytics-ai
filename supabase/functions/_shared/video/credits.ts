@@ -7,8 +7,6 @@
 
 /** Credits the account must hold before a clip is started (a 1080p clip with sound is about 100). */
 export const CLIP_CREDIT_FLOOR = 130;
-/** A clip's credits until one is recorded: the 1080p clip with sound the floor above is set for. */
-export const CLIP_CREDITS = 100;
 
 /** One submission to the video model: new footage, or a cleaning of footage. */
 export interface ClipCredits {
@@ -37,12 +35,4 @@ export function creditsUsed(states: unknown[]): number {
     }
   }
   return Math.round(total * 100) / 100;
-}
-
-/** A clip's credits as recorded on these jobs (their average, rounded), or CLIP_CREDITS until one is. */
-export function creditsPerClip(states: unknown[]): number {
-  const clips = states.flatMap((s) => list((s as { credits?: unknown } | null)?.credits))
-    .filter((c) => c.what === "footage" && typeof c.credits === "number" && Number.isFinite(c.credits) && c.credits > 0)
-    .map((c) => c.credits as number);
-  return clips.length ? Math.round(clips.reduce((a, b) => a + b, 0) / clips.length) : CLIP_CREDITS;
 }
