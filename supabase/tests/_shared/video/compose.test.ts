@@ -143,7 +143,7 @@ describe("videos in the client's own video style", () => {
   });
   it("asks for the style from the stills, in order", () => {
     expect(videoStylePrompt("Moburst", 3, 8)).toContain("Video 2 is images 9 to 16");
-    expect(videoStylePrompt("Moburst", 3, 8)).toContain("leave out the brands and logos of other companies");
+    expect(videoStylePrompt("Moburst", 3, 8)).toContain('"on_screen_text"');
     expect(parseVideoStyle("nothing")).toBeNull();
   });
   it("takes stills spread across each video", () => {
@@ -201,25 +201,25 @@ describe("the logo where and when the client's own videos show it", () => {
   });
 });
 
-describe("the names in the client's own scenes", () => {
+describe("no words in the footage (the scene-word allow-list is gone, 11 Nov 2026)", () => {
   const style = parseVideoStyle(JSON.stringify({ format: "hype reels of made-up clubs", people: "fictional", on_screen_text: "none", logo: "none",
-    scene_words: ["EAGLE VISION MEDIA", " ZENTHAR  EAGLES ", "10", "", "x".repeat(60)] }))!;
-  it("reads them spelled as shown, dropping empty and runaway entries", () => {
-    expect(style.scene_words).toEqual(["EAGLE VISION MEDIA", "ZENTHAR EAGLES", "10"]);
-    expect(parseVideoStyle(JSON.stringify({ format: "talks" }))).not.toHaveProperty("scene_words");
+    scene_words: ["EAGLE VISION MEDIA", " ZENTHAR  EAGLES ", "10"] }))!;
+  it("reads no scene words from the style, even when the model offers them", () => {
+    expect(style).not.toHaveProperty("scene_words");
+    expect(videoStylePrompt("LegaBot", 2, 8)).not.toContain("scene_words");
   });
-  it("lets the planner put those names, and only those, on the things they are on in the client's videos", () => {
+  it("tells the planner the footage holds no lettering and names no words", () => {
     const p = videoPlannerPrompt({ brand: "LegaBot", platform: "Instagram", copy: "c", voice: null, count: 3, postCount: 16, recent: "", style });
-    expect(p).toContain('"EAGLE VISION MEDIA", "ZENTHAR EAGLES", "10"');
-    expect(p).toContain("no real brand appears");
-    expect(p).not.toContain("It holds no lettering");
-    expect(sceneLettering("Moburst", [])).toContain("It holds no lettering");
+    expect(p).toContain("It holds no lettering");
+    expect(p).not.toContain("EAGLE VISION MEDIA");
+    expect(p).not.toContain("names in the scenes");
+    expect(sceneLettering.length).toBe(0);
   });
-  it("counts only writing that is not one of those names", () => {
-    expect(footageTextPrompt(["CAIRO SUN"])).toContain('"CAIRO SUN"');
-    expect(footageTextPrompt(["CAIRO SUN"])).toContain("letters can be read and are wrong");
-    expect(footageTextPrompt(["CAIRO SUN"])).toContain("motion blur or distance");
-    expect(footageTextPrompt()).not.toContain("belong to the brand");
+  it("asks the writing check about every word, with no names to let through", () => {
+    const p = footageTextPrompt();
+    expect(p).toContain("however small or garbled");
+    expect(p).not.toContain("belong to the brand");
+    expect(footageTextPrompt.length).toBe(0);
   });
 });
 

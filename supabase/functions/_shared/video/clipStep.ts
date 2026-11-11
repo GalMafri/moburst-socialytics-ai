@@ -129,7 +129,7 @@ export async function runClip(deps: ClipDeps, job: VideoJob): Promise<VideoStepR
   if (!(await deps.saveOrder(order))) return "held";
   job.clip_order = order;
 
-  const prompt = `${input.video.prompt}${footageRules(input.people, input.scene_words ?? [])}`;
+  const prompt = `${input.video.prompt}${footageRules(input.people)}`;
   // A failure from here on leaves the order without a job id: later passes
   // wait out ORDER_GRACE_MS and then end the video, never ordering again.
   const first = await deps.submit(clipRequest(prompt, s.frame_ref_id, s.kit_ref_ids));

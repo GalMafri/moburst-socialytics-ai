@@ -117,7 +117,7 @@ async function startVideoOption(admin: any, req: DesignRequest, settings: Settin
   // A video made from the client's posts follows their posts, not their videos;
   // so does one whose client's kit was made with too few clean stills.
   const route = videoRouteFor(client?.video_style, req.video_route ?? null);
-  const style = route === "posts" ? undefined : client?.video_style?.profile as { logo?: string; logo_at?: string; logo_width?: number; people?: string; scene_words?: string[] } | undefined;
+  const style = route === "posts" ? undefined : client?.video_style?.profile as { logo?: string; logo_at?: string; logo_width?: number; people?: string } | undefined;
   const title = `${brandName} ${req.platform ?? ""} video ${optionIndex + 1}`.replace(/\s+/g, " ");
   const { error } = await admin.from("canva_finish_jobs").insert({
     client_id: req.client_id,
@@ -150,8 +150,6 @@ async function startVideoOption(admin: any, req: DesignRequest, settings: Settin
       people: style?.people ?? "none",
       filmed,
       end_card: endCard,
-      // Names the client's own scenes carry (made-up clubs, sponsors), kept when spelled exactly.
-      scene_words: req.footage_path ? [] : style?.scene_words ?? [],
     },
   });
   if (error) throw new Error(`Could not start the video: ${error.message}`);

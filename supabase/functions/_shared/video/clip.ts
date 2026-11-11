@@ -150,11 +150,9 @@ export function framePrompt(brief: string, rules: string): string {
 }
 
 /** What all footage keeps to, the opening frame and the clip alike; people as the client's own videos show them (made-up characters, or nobody). */
-export function footageRules(people: string | undefined, sceneWords: string[] = []): string {
-  const lettering = sceneWords.length
-    ? `Lettering only as these names, spelled exactly: ${sceneWords.map((w) => `"${w}"`).join(", ")}; no other text, captions, subtitles, signs, logos, watermarks or real brand marks anywhere in frame`
-    : "No text, letters, numbers, captions, subtitles, signs, logos or watermarks anywhere in frame";
-  return ` Vertical 9:16, every part in sharp focus. ${lettering}, and no screens, dashboards, charts, documents or interfaces. ` +
+export function footageRules(people: string | undefined): string {
+  // No allow-list of words: naming words in a prompt gets them painted (11 Nov 2026). The title layer is the only text.
+  return " Vertical 9:16, every part in sharp focus. No text, letters, numbers, captions, subtitles, signs, logos or watermarks anywhere in frame, and no screens, dashboards, charts, documents or interfaces. " +
     // Sportswear marks are what the video model adds most often, and the hardest to clean off moving feet.
     "Boots, shoes, socks and balls are plain, and no clothing carries a maker's mark: no swooshes, stripes or makers' logos. " +
     (people === "fictional" ? "Any people are made-up characters, never real or famous people." : "No real or identifiable people.");

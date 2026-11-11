@@ -193,9 +193,9 @@ describe("kitKept", () => {
 
 describe("postsRouteInput", () => {
   it("drops everything taken from the client's filmed videos", () => {
-    const input = { kind: "video", copy: ["Hi"], video_route: null, show_logo: false, logo_at: "end", logo_width: 0.3, people: "fictional", scene_words: ["FC X"], footage_upload: null };
+    const input = { kind: "video", copy: ["Hi"], video_route: null, show_logo: false, logo_at: "end", logo_width: 0.3, people: "fictional", footage_upload: null };
     const out = postsRouteInput(input);
-    expect(out).toEqual({ kind: "video", copy: ["Hi"], video_route: "posts", show_logo: true, logo_at: null, logo_width: null, people: "none", scene_words: [], footage_upload: null });
+    expect(out).toEqual({ kind: "video", copy: ["Hi"], video_route: "posts", show_logo: true, logo_at: null, logo_width: null, people: "none", footage_upload: null });
     expect(input.video_route).toBeNull();
   });
 });

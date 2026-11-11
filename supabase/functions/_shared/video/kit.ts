@@ -151,10 +151,10 @@ export function kitKept(cleaned: Array<string | null>): string[] {
 /**
  * A video job's input moved to the posts route: nothing taken from the
  * client's filmed videos stays (the same as startVideoOption with no style):
- * the logo shows at its spot in the posts, no people, no scene words.
+ * the logo shows at its spot in the posts, no people.
  */
 export function postsRouteInput<T extends Record<string, unknown>>(input: T): T {
-  return { ...input, video_route: "posts", show_logo: true, logo_at: null, logo_width: null, people: "none", scene_words: [] };
+  return { ...input, video_route: "posts", show_logo: true, logo_at: null, logo_width: null, people: "none" };
 }
 
 /** The most stills one background cleaning takes on; the rest wait for the next pass. */

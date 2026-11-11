@@ -20,7 +20,7 @@ function job(r: Row, approved: number | null = 128) {
     id: "job-1", client_id: "c1", step: r.step, design_request_id: null, option_index: 0,
     // Each pass reads its own copy, as the worker does.
     state: structuredClone(r.state), clip_order: r.clip_order ? { ...r.clip_order } : null,
-    input: { kind: "video", approved_credits: approved, video: { prompt: "A shrimp fries in a pan." }, people: "none", scene_words: [] },
+    input: { kind: "video", approved_credits: approved, video: { prompt: "A shrimp fries in a pan." }, people: "none" },
   };
 }
 

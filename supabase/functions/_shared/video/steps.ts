@@ -12,8 +12,8 @@
 //   frame        the image model draws the clip's opening frame from the
 //                brief, with the kit's stills as its references (on the posts
 //                route, from the brief alone), at most MAX_FRAMES times;
-//   frame_check  the frame must show no writing (other than the client's own
-//                scene words) and no other brand's marks, or it is drawn again;
+//   frame_check  the frame must show no writing at all and no other brand's
+//                marks, or it is drawn again;
 //   clip         at the price approved for the video, the one clip is
 //                ordered from Higgsfield (clipStep.ts): its order is
 //                recorded on the job, once and under a renewed lease, before
@@ -246,7 +246,7 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       s.frames = (s.frames ?? 0) + 1;
       if (s.frames > MAX_FRAMES) throw new Error(`FINAL: ${REASONS.frame}`);
       const n = s.frames;
-      const prompt = framePrompt(input.video.prompt, footageRules(input.people, input.scene_words ?? []));
+      const prompt = framePrompt(input.video.prompt, footageRules(input.people));
       const size: [number, number] = [CARD_SIZE.width, CARD_SIZE.height];
       return hold(admin, job, async () => {
         try {
@@ -274,8 +274,7 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
     }
     case "frame_check": {
       if (!s.frame_path) { job.step = "frame"; return "next"; }
-      const scene: string[] = input.scene_words ?? [];
-      const seen = await footageWriting(admin, [s.frame_path], scene, BUCKET);
+      const seen = await footageWriting(admin, [s.frame_path], BUCKET);
       const content = await jpegBlocks(admin, BUCKET, [s.frame_path]);
       content.push({ type: "text", text: marksPrompt(input.brand_name) });
       const result = await anthropicMessages({ apiKey: anthropicKey(), body: { model: "claude-opus-5-5", max_tokens: CHECK_TOKENS, messages: [{ role: "user", content }] } });
@@ -448,7 +447,7 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       // A video post is never silent, and its clip is ordered once: a silent clip ends the video.
       if (made.audio < 1) throw new Error(`FINAL: ${REASONS.silent}`);
       // The clip carries no writing of its own: the only words are the title's.
-      const seen = await footageWriting(admin, s.still_paths ?? [], input.scene_words ?? []);
+      const seen = await footageWriting(admin, s.still_paths ?? []);
       s.footage_writing = seen;
       if (seen.writing) {
         console.warn(`[video-worker] job ${job.id}: the clip has writing (${seen.where}).`);
@@ -489,10 +488,10 @@ async function generateImage(apiKey: string, prompt: string, size: [number, numb
 
 
 /** Whether the footage's stills show any writing, read by the vision model. */
-async function footageWriting(admin: any, paths: string[], allowed: string[] = [], bucket = BUCKET): Promise<{ writing: boolean; where: string }> {
+async function footageWriting(admin: any, paths: string[], bucket = BUCKET): Promise<{ writing: boolean; where: string }> {
   if (!paths.length) throw new Error("The footage's stills are missing.");
   const content: unknown[] = await jpegBlocks(admin, bucket, paths);
-  content.push({ type: "text", text: footageTextPrompt(allowed) });
+  content.push({ type: "text", text: footageTextPrompt() });
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
   const result = await anthropicMessages({ apiKey, body: { model: "claude-opus-5-5", max_tokens: CHECK_TOKENS, messages: [{ role: "user", content }] } });
@@ -658,7 +657,7 @@ async function makeKit(admin: any, job: VideoJob, videoStyle: any, brand: string
           const jpeg = await (await Image.decode(png)).encodeJPEG(90);
           const { error: upError } = await admin.storage.from(REFERENCES).upload(path, jpeg, { contentType: "image/jpeg", upsert: true });
           if (upError) throw new Error(`Could not store a kit still: ${upError.message}`);
-          // Read back as a look reference: writing left (the client's scene words included) is cleaned once more; a person's face drops the still at once.
+          // Read back as a look reference: any writing left is cleaned once more; a person's face drops the still at once.
           const seen = await kitStillCheck(admin, path);
           if (seen.face) {
             console.warn(`[video-worker] kit ${job.client_id} still ${i}: a face after cleaning ${n} (${seen.where}).`);
