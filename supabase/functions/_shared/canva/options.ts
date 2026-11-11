@@ -496,14 +496,13 @@ export function filmedNeed(style: Pick<VideoStyle, "generatable" | "needs"> | nu
   return `it needs ${style.needs?.trim() || "footage filmed for it"}`;
 }
 
-/** The rule for lettering in new footage: none, or only the names the client's own scenes carry. */
 /**
  * The footage carries no words at all: the title layer is the only text.
  * (Until 11 Nov 2026 the client's "scene words" were named here as the one
  * lettering allowed; every model painted whatever words it was given.)
  */
 export function sceneLettering(): string {
-  return "It holds no lettering, numbers, signs, logos or brand marks, and names no brand.";
+  return "It holds no lettering, numbers, signs, logos or brand marks, and names no brand. Nothing in it carries writing: no pills, buttons, tiles, labels, jerseys, scoreboards, banners, packaging text or signs, not even small or out of focus in the background; where the client's videos show such things, keep their materials, light and motion without them.";
 }
 
 /** The style in a few lines, for the planner. */

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-import { CLIP_LOST_MS, OLD_STEPS, ORDER_GRACE_MS, clipOrderOf, clipOutcome, clipRequest, clipOrderDecision, framePrompt, needsClipPrice, REASONS } from "../../../functions/_shared/video/clip";
+import { CLIP_LOST_MS, OLD_STEPS, ORDER_GRACE_MS, clipOrderOf, clipOutcome, clipRequest, clipOrderDecision, footageRules, framePrompt, needsClipPrice, REASONS } from "../../../functions/_shared/video/clip";
 import { VIDEO_MODEL } from "../../../functions/_shared/higgsfield/generate";
 
 describe("clipRequest", () => {
@@ -108,5 +108,20 @@ describe("REASONS", () => {
 describe("OLD_STEPS", () => {
   it("names every step from before the video update", () => {
     expect([...OLD_STEPS]).toEqual(["references", "references_wait", "footage", "footage_wait", "hook", "hook_check", "compose", "compose_wait", "clean", "clean_wait"]);
+  });
+});
+
+describe("footageRules", () => {
+  it("allows no text and nothing that carries writing, and names no words", () => {
+    for (const r of [footageRules("fictional"), footageRules("none"), footageRules(undefined)]) {
+      expect(r).toContain("No text, letters, numbers, captions, subtitles, signs, logos or watermarks anywhere in frame");
+      expect(r).toContain("nothing that carries writing (no pills, buttons, tiles, labels, jerseys, scoreboards, banners or packaging text");
+      expect(r).toContain("no screens, dashboards, charts, documents or interfaces");
+      expect(r).not.toMatch(/spelled exactly|Lettering only/);
+      expect(r).not.toMatch(/[\u2013\u2014]/);
+    }
+    expect(footageRules("fictional")).toContain("made-up characters");
+    expect(footageRules("none")).toContain("No real or identifiable people");
+    expect(footageRules.length).toBe(1);
   });
 });

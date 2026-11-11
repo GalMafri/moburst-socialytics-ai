@@ -1,5 +1,7 @@
 # Video Posts, One Paid Clip Per Video: Implementation Plan
 
+> Superseded in part on 11 Nov 2026: the scene-word allow-list this plan carries through the kit, the frame, the clip and the writing checks (`footageRules(input.people, input.scene_words)`, `footageTextPrompt(input.scene_words)`, the kit's keep-list) is gone. The footage holds no words at all; see the spec's "As built". The plan's other steps stand as built.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A video post buys exactly one clip from Higgsfield, at the price the person approved, from references that carry no text, with everything that can fail done before the clip is ordered.
