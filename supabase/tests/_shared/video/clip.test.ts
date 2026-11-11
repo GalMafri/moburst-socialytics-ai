@@ -114,8 +114,9 @@ describe("OLD_STEPS", () => {
 describe("footageRules", () => {
   it("allows no text and nothing that carries writing, and names no words", () => {
     for (const r of [footageRules("fictional"), footageRules("none"), footageRules(undefined)]) {
-      expect(r).toContain("No text, letters, numbers, captions, subtitles, signs, logos or watermarks anywhere in frame");
-      expect(r).toContain("nothing that carries writing (no pills, buttons, tiles, labels, jerseys, scoreboards, banners or packaging text");
+      expect(r).toContain("No text, letters, numbers, captions, subtitles, logos or watermarks anywhere in frame");
+      expect(r).toContain("nothing that carries writing (no signs, labels, scoreboards, banners, packaging text, pills or buttons");
+      expect(r).toContain("shirts, jerseys and kits are plain, with no numbers, names or crests");
       expect(r).toContain("no screens, dashboards, charts, documents or interfaces");
       expect(r).not.toMatch(/spelled exactly|Lettering only/);
       expect(r).not.toMatch(/[\u2013\u2014]/);

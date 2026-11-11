@@ -211,7 +211,8 @@ describe("no words in the footage (the scene-word allow-list is gone, 11 Nov 202
   it("tells the planner the footage holds no lettering and names no words", () => {
     const p = videoPlannerPrompt({ brand: "LegaBot", platform: "Instagram", copy: "c", voice: null, count: 3, postCount: 16, recent: "", style });
     expect(p).toContain("It holds no lettering");
-    expect(p).toContain("Nothing in it carries writing: no pills, buttons, tiles, labels, jerseys, scoreboards, banners");
+    expect(p).toContain("Nothing in it carries writing: no signs, labels, scoreboards, banners, packaging text, pills or buttons");
+    expect(p).toContain("shirts, jerseys and kits are plain, with no numbers, names or crests");
     expect(p).not.toContain("EAGLE VISION MEDIA");
     expect(p).not.toContain("names in the scenes");
     expect(sceneLettering.length).toBe(0);
@@ -220,6 +221,8 @@ describe("no words in the footage (the scene-word allow-list is gone, 11 Nov 202
     const p = footageTextPrompt();
     expect(p).toContain("however small or garbled");
     expect(p).not.toMatch(/belong to the brand|spelled exactly|do not count/);
+    // No allow-list parameter, optional or not: the check reads every word.
+    expect(footageTextPrompt.toString()).toMatch(/^function footageTextPrompt\(\)\s*\{/);
   });
 });
 

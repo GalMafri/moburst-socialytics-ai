@@ -502,7 +502,7 @@ export function filmedNeed(style: Pick<VideoStyle, "generatable" | "needs"> | nu
  * lettering allowed; every model painted whatever words it was given.)
  */
 export function sceneLettering(): string {
-  return "It holds no lettering, numbers, signs, logos or brand marks, and names no brand. Nothing in it carries writing: no pills, buttons, tiles, labels, jerseys, scoreboards, banners, packaging text or signs, not even small or out of focus in the background; where the client's videos show such things, keep their materials, light and motion without them.";
+  return "It holds no lettering, numbers, logos or brand marks, and names no brand. Nothing in it carries writing: no signs, labels, scoreboards, banners, packaging text, pills or buttons, however small or far in the background; shirts, jerseys and kits are plain, with no numbers, names or crests.";
 }
 
 /** The style in a few lines, for the planner. */
