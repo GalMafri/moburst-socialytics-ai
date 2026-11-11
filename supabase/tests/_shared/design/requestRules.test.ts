@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { filmingOutcome, planningStalled, postInstant, weekDecision } from "../../../functions/_shared/design/requestRules";
+import { REQUEST_MAX_MINUTES, filmingOutcome, planningStalled, postInstant, requestOverdue, weekDecision } from "../../../functions/_shared/design/requestRules";
 
 const NOW = new Date("2026-10-19T12:00:00Z");
 const h = (hours: number) => new Date(NOW.getTime() + hours * 3_600_000);
@@ -43,8 +43,32 @@ describe("planningStalled", () => {
   });
 });
 
+describe("requestOverdue", () => {
+  const started = (m: number) => new Date(NOW.getTime() - m * 60000).toISOString();
+  it("ends a request still being prepared 90 minutes after its preparation began, whatever stage it is in", () => {
+    expect(REQUEST_MAX_MINUTES).toBe(90);
+    for (const stage of ["planning", "designing", "finishing"]) {
+      expect(requestOverdue({ status: "preparing", stage, started_at: started(89), created_at: started(89) }, NOW)).toBe(false);
+      expect(requestOverdue({ status: "preparing", stage, started_at: started(90), created_at: started(90) }, NOW)).toBe(true);
+      expect(requestOverdue({ status: "preparing", stage, started_at: started(8270), created_at: started(8270) }, NOW)).toBe(true);
+    }
+  });
+  it("counts from when the current preparation began, so a request prepared again gets its own 90 minutes", () => {
+    expect(requestOverdue({ status: "preparing", stage: "designing", started_at: started(5), created_at: started(3000) }, NOW)).toBe(false);
+  });
+  it("leaves every other status alone, however old: a design made, a filming wait, a closed or canceled request", () => {
+    for (const status of ["ready", "needs_filming", "closed", "canceled"]) {
+      expect(requestOverdue({ status, stage: "ready", started_at: started(5000), created_at: started(5000) }, NOW)).toBe(false);
+    }
+  });
+  it("counts from the creation time when the start time is missing, and ignores a time that cannot be read", () => {
+    expect(requestOverdue({ status: "preparing", stage: "designing", started_at: null, created_at: started(120) }, NOW)).toBe(true);
+    expect(requestOverdue({ status: "preparing", stage: "designing", started_at: "not a time", created_at: "also not" }, NOW)).toBe(false);
+  });
+});
+
 describe("weekDecision", () => {
-  const created = (hoursAgo: number) => new Date(NOW.getTime() - hoursAgo * 3_600_000).toISOString();
+  const created =(hoursAgo: number) => new Date(NOW.getTime() - hoursAgo * 3_600_000).toISOString();
   it("starts a post never designed, asking first whether a video needs filming", () => {
     expect(weekDecision([])).toEqual({ start: true, route: null, askFilming: true });
   });

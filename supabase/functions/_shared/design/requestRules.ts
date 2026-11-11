@@ -18,6 +18,14 @@ export const NO_PROGRESS_MINUTES = 30;
 export const MAX_PLAN_ATTEMPTS = 3;
 /** A filmed post with no footage this close to its time gets a design instead. */
 export const FILMING_CLOSE_HOURS = 24;
+/**
+ * A request still being prepared this long after its preparation began ends,
+ * whatever stage it is in. The slowest request that made a design since 15 Oct
+ * took 23 minutes (a video), a single design 5; three options of three designs
+ * each, every one redone, fit well inside this. Without it a request whose
+ * worker kept dying stayed "preparing" for almost six days (10 Nov 2026).
+ */
+export const REQUEST_MAX_MINUTES = 90;
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -26,7 +34,7 @@ const HOUR = 60 * MINUTE;
 export type EndReason =
   /** Every option was tried and none finished: counted again by the week's design button. */
   | "no_design"
-  /** Planning stopped MAX_PLAN_ATTEMPTS times: counted again by the week's design button. */
+  /** Planning stopped MAX_PLAN_ATTEMPTS times, or the request was still being prepared after REQUEST_MAX_MINUTES: counted again by the week's design button. */
   | "no_progress"
   /** A filmed post with no footage a day before its time: a design is made from the same idea. */
   | "no_footage"
@@ -86,6 +94,18 @@ export function filmingOutcome(postAt: Date | null, now: Date, footageArrived: b
 /** Whether a request still planning has stopped moving. */
 export function planningStalled(r: { status: string; stage: string; updated_at: string }, now: Date): boolean {
   return r.status === "preparing" && r.stage === "planning" && now.getTime() - Date.parse(r.updated_at) >= NO_PROGRESS_MINUTES * MINUTE;
+}
+
+/**
+ * Whether a request has been prepared for longer than REQUEST_MAX_MINUTES,
+ * counted from when its current preparation began (started_at: a request can
+ * prepare again). Only a request being prepared can be overdue: one that made
+ * a design, waits for footage or already closed is left as it is.
+ */
+export function requestOverdue(r: { status: string; stage?: string; started_at?: string | null; created_at: string }, now: Date): boolean {
+  if (r.status !== "preparing") return false;
+  const began = Date.parse(r.started_at ?? r.created_at);
+  return Number.isFinite(began) && now.getTime() - began >= REQUEST_MAX_MINUTES * MINUTE;
 }
 
 export interface PostRequest {

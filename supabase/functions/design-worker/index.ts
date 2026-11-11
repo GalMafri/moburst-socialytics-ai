@@ -20,8 +20,8 @@ import { secretEquals } from "../_shared/auth/secretEquals.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
 import { ModelBusy, imageEdit } from "../_shared/media/imageEdit.ts";
 import { openaiKey } from "../_shared/openai/key.ts";
-import { endRequest, settleRequest, BUCKET } from "../_shared/canva/jobs.ts";
-import { MAX_PLAN_ATTEMPTS, NO_PROGRESS_MINUTES } from "../_shared/design/requestRules.ts";
+import { claimJob, endOverdueRequests, endRequest, settleRequest, BUCKET } from "../_shared/canva/jobs.ts";
+import { MAX_PLAN_ATTEMPTS, NO_PROGRESS_MINUTES, REQUEST_MAX_MINUTES } from "../_shared/design/requestRules.ts";
 import { type GenerateInput, canvasLogoRect, designPrompt, resampleRGBA } from "../_shared/canva/brief.ts";
 import { outputSize, pictureSize } from "../_shared/canva/finish.ts";
 import { copyMatches, logoCheckPrompt, marksPrompt, parseLogoCheck, parseMarks, parseRead, readPrompt, removePrompt } from "../_shared/design/pipeline.ts";
@@ -92,21 +92,22 @@ const JOB_COLUMNS = "id, client_id, step, status, attempts, input, state, design
 // ── The pass ────────────────────────────────────────────────────────────────
 
 async function runPass(admin: any) {
-  const { data: rows } = await admin.from("canva_finish_jobs").select("id, kind:input->>kind")
+  // A request prepared for longer than REQUEST_MAX_MINUTES ends first, before any more work is handed out for it.
+  await endOverdueRequests(admin).then((ended) => {
+    for (const id of ended) console.error(`[design-worker] request ${id} was still being prepared after ${REQUEST_MAX_MINUTES} minutes; closed.`);
+  }).catch((e) => console.error("[design-worker] overdue requests:", e instanceof Error ? e.message : e));
+  const { data: rows } = await admin.from("canva_finish_jobs").select("id, step, status, attempts, lease_until, kind:input->>kind")
     .in("status", ["queued", "running"])
     .or(`lease_until.is.null,lease_until.lt.${new Date().toISOString()}`)
     .order("created_at").limit(40);
   // Video jobs are the video worker's.
   const due = (rows ?? []).filter((r: { kind: string | null }) => r.kind !== "video").slice(0, 12);
   const leased: string[] = [];
-  for (const { id } of due) {
-    const now = new Date();
-    const { data: claimed } = await admin.from("canva_finish_jobs")
-      .update({ lease_until: new Date(now.getTime() + LEASE_MS).toISOString(), status: "running", updated_at: now.toISOString() })
-      .eq("id", id).in("status", ["queued", "running"])
-      .or(`lease_until.is.null,lease_until.lt.${now.toISOString()}`)
-      .select("id");
-    if (claimed?.[0]) leased.push(id);
+  for (const row of due) {
+    // A job whose last run died (its lease ran out with the job still going) uses a try; at MAX_ATTEMPTS it fails and its option is replaced.
+    const claim = await claimJob(admin, row, new Date(), LEASE_MS, MAX_ATTEMPTS);
+    if (claim === "claimed") leased.push(row.id);
+    if (claim === "failed") console.error(`[design-worker] job ${row.id} step ${row.step ?? "?"}: the run died ${MAX_ATTEMPTS} times; its option is over.`);
   }
   await Promise.all(leased.map((id) => handOut(admin, id)));
   // Requests whose jobs all ended earlier (a replacement still to start) are settled here.

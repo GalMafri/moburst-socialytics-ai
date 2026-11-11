@@ -6,7 +6,7 @@
 // and replace any option that did not finish).
 
 import { type Brief, candidatesFor, optionStates, requestProgress, type JobState } from "./options.ts";
-import type { EndReason } from "../design/requestRules.ts";
+import { REQUEST_MAX_MINUTES, requestOverdue, type EndReason } from "../design/requestRules.ts";
 import { STORY_PAGE, STORY_SURFACE, isStoryPost, storyLogoPlacement } from "../design/story.ts";
 import { videoRouteFor } from "../video/kit.ts";
 
@@ -294,4 +294,62 @@ export async function endRequest(admin: any, requestId: string, reason: EndReaso
   await admin.from("design_requests").update({
     status: "closed", end_reason: reason, ended_at: now, updated_at: now, ...(note ? { error: String(note).slice(0, 1000) } : {}),
   }).eq("id", requestId).in("status", ["preparing", "needs_filming"]);
+}
+
+/**
+ * End every request that has been prepared for longer than REQUEST_MAX_MINUTES
+ * (requestOverdue), the way a request whose planning stopped ends: quietly, as
+ * "no_progress", its jobs stopped, the post counted again by the week's design
+ * button. Run at the start of every worker pass, so a request is never handed
+ * more work after its time is up and no stuck step can keep it open. Returns
+ * the ids it ended.
+ */
+export async function endOverdueRequests(admin: any, now: Date = new Date()): Promise<string[]> {
+  const cutoff = new Date(now.getTime() - REQUEST_MAX_MINUTES * 60_000).toISOString();
+  const { data } = await admin.from("design_requests").select("id, status, stage, started_at, created_at")
+    .eq("status", "preparing").lt("started_at", cutoff).order("started_at").limit(50);
+  const ended: string[] = [];
+  for (const r of data ?? []) {
+    if (!requestOverdue(r, now)) continue;
+    await endRequest(admin, r.id, "no_progress", `No design after ${REQUEST_MAX_MINUTES} minutes.`);
+    ended.push(r.id);
+  }
+  return ended;
+}
+
+/** claimed: the job is this pass's for one lease; lost: another pass has it or it ended; failed: its last try was used up by runs that died. */
+export type Claim = "claimed" | "lost" | "failed";
+
+/**
+ * Take a due job for one lease. A job whose lease ran out while it was still
+ * queued or running was being worked on by a run that died (the edge runtime
+ * cuts a run off for time or memory without letting it write anything), so
+ * taking it counts a try; its other tries are counted where an error is
+ * caught (recordFailure). At maxAttempts the job fails and its option is
+ * replaced, instead of the same step dying every few minutes for days (10 Nov
+ * 2026: one job, five days). The claim holds only while the row is as the pass
+ * read it, so two passes never count one dead run twice.
+ */
+export async function claimJob(
+  admin: any,
+  job: { id: string; status: string; attempts: number | null; lease_until: string | null },
+  now: Date,
+  leaseMs: number,
+  maxAttempts: number,
+): Promise<Claim> {
+  if (job.status !== "queued" && job.status !== "running") return "lost";
+  const heldUntil = job.lease_until ? Date.parse(job.lease_until) : null;
+  if (heldUntil !== null && heldUntil > now.getTime()) return "lost";
+  const died = heldUntil !== null;
+  const before = job.attempts ?? 0;
+  const attempts = before + (died ? 1 : 0);
+  const over = died && attempts >= maxAttempts;
+  const at = now.toISOString();
+  const change = over
+    ? { status: "failed", attempts, error: `The design stopped before it finished, ${attempts} times in a row.`, lease_until: null, updated_at: at }
+    : { status: "running", attempts, lease_until: new Date(now.getTime() + leaseMs).toISOString(), updated_at: at };
+  const held = admin.from("canva_finish_jobs").update(change).eq("id", job.id).in("status", ["queued", "running"]).eq("attempts", before);
+  const { data } = await (job.lease_until ? held.eq("lease_until", job.lease_until) : held.is("lease_until", null)).select("id");
+  if (!data?.length) return "lost";
+  return over ? "failed" : "claimed";
 }

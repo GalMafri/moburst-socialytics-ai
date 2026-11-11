@@ -65,6 +65,37 @@ function ncc(img: Float32Array, iw: number, t: Float32Array, tw: number, th: num
 
 interface Candidate { x: number; y: number; width: number; height: number; score: number }
 
+/**
+ * The coarse search tries every spot in a window around the usual one, at
+ * about two dozen sizes, with a template this many pixels at most. It used
+ * to size the template by width alone (about 80 px wide), so a square or
+ * tall logo drawn small cost 12 times what a wide one does: Pay The Pyper's
+ * square logo took 4.3 s to find on a fast laptop against 0.2 to 0.5 s for
+ * the wide logos of the other clients, and the edge runtime cut the step off
+ * (10 Nov 2026). Chosen so that the wide logos of the clients that work are
+ * searched exactly as before.
+ */
+export const COARSE_TEMPLATE_AREA = 3200;
+
+/** How far the picture is shrunk for the coarse search, from the logo's usual size on it. */
+export function coarseFactor(width: number, height: number): number {
+  const byWidth = Math.max(1, Math.floor(width / 80));
+  const byArea = Math.max(1, Math.ceil(Math.sqrt((width * height) / COARSE_TEMPLATE_AREA)));
+  return Math.max(byWidth, byArea);
+}
+
+/**
+ * The size the logo file is brought down to once, before the search: twice
+ * the widest template the search can ask for, or null when the file is no
+ * wider than that. The search shrinks the logo again for every size it tries,
+ * and from a 2160 px file each of those passes read 4.7 million pixels.
+ */
+export function templateSize(lw: number, lh: number, widest: number): [number, number] | null {
+  const w = Math.max(1, Math.ceil(widest)) * 2;
+  if (lw <= w) return null;
+  return [w, Math.max(1, Math.round((lh * w) / lw))];
+}
+
 function bestAt(img: Float32Array, iw: number, ih: number, logo: Float32Array, lw: number, lh: number,
   widths: number[], cx: [number, number], cy: [number, number]): Candidate {
   let best: Candidate = { x: 0, y: 0, width: 0, height: 0, score: -2 };
@@ -101,10 +132,16 @@ export function findLogo(image: ArrayLike<number>, iw: number, ih: number, logo:
   const reach = opts.reach ?? 0.15;
   const [sMin, sMax] = opts.scales ?? [0.75, 1.3];
   const img = luminance(image, iw, ih);
-  const tpl = luminance(logo, lw, lh, background);
+  let tpl = luminance(logo, lw, lh, background);
+  // The widest template asked for is the usual width at the top of the sizes searched, with room for the finest level's steps.
+  const small = templateSize(lw, lh, expected.width * sMax * 1.05);
+  if (small) {
+    tpl = shrink(tpl, lw, lh, small[0], small[1]);
+    [lw, lh] = small;
+  }
 
-  // Coarse: the logo about 80 px wide.
-  const f = Math.max(1, Math.floor(expected.width / 80));
+  // Coarse: the logo about 80 px wide, and no more than COARSE_TEMPLATE_AREA pixels.
+  const f = coarseFactor(expected.width, expected.height);
   const cw = Math.floor(iw / f), ch = Math.floor(ih / f);
   const coarse = shrink(img, iw, ih, cw, ch);
   const ew = expected.width / f;
