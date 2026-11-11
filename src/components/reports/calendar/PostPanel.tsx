@@ -448,9 +448,7 @@ export function PostPanel({
                       ? "Click any video to preview at full size."
                       : !isMoburstStaff
                         ? "Your account team adds the video for this post."
-                        : clientContext?.design_style_synthesis?.reference_pipeline_version === 1
-                          ? "Create a 12-second film with three moving scenes, guided by this client’s real social references."
-                          : "Create short video drafts, then preview and choose a favorite."}
+                        : "Make one video for this post in the client's look, with the headline and logo over it."}
                   </p>
                 </div>
                 {isMoburstStaff && <CreatePostVideoButton

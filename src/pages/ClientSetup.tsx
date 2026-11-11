@@ -414,20 +414,6 @@ export default function ClientSetup() {
                   </Origin>
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="client-media-backend">Image &amp; video generation</Label>
-                  <Select value={form.media_backend} onValueChange={(value) => set("media_backend", value)}>
-                    <SelectTrigger id="client-media-backend" className="w-full">
-                      <SelectValue placeholder="Select a generator" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="gemini">Standard (Gemini + Veo)</SelectItem>
-                      <SelectItem value="higgsfield">Higgsfield (sharper type, team credits)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="t-label">Higgsfield renders headline type far more cleanly and uses the team's shared Higgsfield credits.</p>
-                </div>
-
             </Section>
                 {form.brand_identity && (
                   <Section
@@ -812,7 +798,7 @@ function ReportScheduleManager({ clientId, timeZone }: { clientId: string; timeZ
   const queryClient = useQueryClient();
   const KINDS = [
     { kind: "social", noun: "monthly" as const, label: "Monthly social report", description: "Sprout performance and trends for the previous calendar month. Its findings feed the weekly calendar plans." },
-    { kind: "competitive", noun: "competitive" as const, label: "Monthly competitive analysis", description: "The client and its three competitors in RivalIQ for the previous calendar month. It runs first, so the social report can use it." },
+    { kind: "competitive", noun: "competitive" as const, label: "Monthly competitive analysis", description: "The client and its tracked competitors for the previous calendar month. It runs first, so the social report can use it." },
   ] as const;
 
   const { data, isLoading } = useQuery({

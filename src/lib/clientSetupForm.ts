@@ -29,7 +29,6 @@ export interface SetupForm {
   brand_book_file_path: string;
   logo_url: string;
   timezone: string;
-  media_backend: string;
   design_references: string[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   brand_identity: Record<string, any> | null;
@@ -44,8 +43,6 @@ export const EMPTY_FORM: SetupForm = {
   primary_platforms: [], geo: [], language: [], brand_notes: "", brand_voice_preset: "", brand_book_text: "",
   brand_book_url: "", brand_book_file_path: "", logo_url: "",
   timezone: "",
-  // Every client runs on Higgsfield (the column's own default).
-  media_backend: "higgsfield",
   design_references: [], brand_identity: null, brief_text: "", competitor_seed_notes: "", posting_rhythm: {},
 };
 
@@ -81,7 +78,6 @@ export function formFromClient(client: Record<string, any>): SetupForm {
     brand_book_file_path: text(client.brand_book_file_path),
     logo_url: text(client.logo_url),
     timezone: text(client.timezone),
-    media_backend: text(client.media_backend) || "higgsfield",
     design_references: list(client.design_references),
     brand_identity: client.brand_identity && typeof client.brand_identity === "object" ? client.brand_identity : null,
     brief_text: text(client.brief_text),
@@ -107,7 +103,6 @@ export function columnsOf(form: SetupForm): Record<string, unknown> {
     brand_book_file_path: form.brand_book_file_path || null,
     logo_url: form.logo_url || null,
     timezone: form.timezone || null,
-    media_backend: form.media_backend || "higgsfield",
     design_references: form.design_references.length ? form.design_references : null,
     brand_identity: form.brand_identity,
     brief_text: form.brief_text,

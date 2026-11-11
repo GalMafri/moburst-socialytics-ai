@@ -10,7 +10,6 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Loader2, Paintbrush, Download, Copy, Check, Plus, Minus, Pencil, Ban } from "lucide-react";
 import { GenerationStages } from "@/components/reports/GenerationStages";
-import { useMediaBackend } from "@/hooks/useMediaBackend";
 import { tileAspectFor } from "@/lib/tileAspect";
 import { useToast } from "@/hooks/use-toast";
 import { toast as sonnerToast } from "sonner";
@@ -144,8 +143,6 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
   const attachedRef = useRef(false);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  // Only so the dialog can tell the truth about how long this will take.
-  const slowBackend = useMediaBackend(clientId || clientContext?.client_id) === "higgsfield";
   // Variant slot tracking — null=loading, string=URL, "FAILED"=error.
   // For carousels these are slide slots; for non-carousels they are variant slots.
   const [variantUrls, setVariantUrls] = useState<VariantSlot[]>([]);
@@ -1020,15 +1017,12 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                 stages={runStages}
                 current={stage}
                 startedAt={startedAt || Date.now()}
-                // A Higgsfield slide takes about 50 seconds, and a carousel
-                // slide can render twice when the layout check rejects the
-                // first, so the per-slide figures differ by backend.
+                // A slide takes about 50 seconds, and a carousel slide can
+                // render twice when the layout check rejects the first.
                 estimate={
                   isCarousel
-                    ? `${Math.max(1, Math.ceil((slideCount * variantCount * (slowBackend ? 35 : 20)) / 60))} to ${Math.max(2, Math.ceil((slideCount * variantCount * (slowBackend ? 55 : 30)) / 60))} minutes`
-                    : slowBackend
-                      ? usesSocialTemplate ? "1 to 3 minutes including review" : "2 to 8 minutes including review"
-                      : "2 to 3 minutes"
+                    ? `${Math.max(1, Math.ceil((slideCount * variantCount * 35) / 60))} to ${Math.max(2, Math.ceil((slideCount * variantCount * 55) / 60))} minutes`
+                    : usesSocialTemplate ? "1 to 3 minutes including review" : "2 to 8 minutes including review"
                 }
                 note={usesSocialTemplate ? "Each design is reviewed against the client’s social references. Keep this browser tab open until the complete draft is saved." : "Brand review may regenerate a variant up to twice. You can close this dialog while it runs; keep this browser tab open."}
                 done={usesSocialTemplate && isCarousel && loading ? (stage >= 3 ? variantUrls.length : Math.max(0, currentSlide - 1)) : variantUrls.filter((u) => typeof u === "string" && u !== "FAILED").length}
