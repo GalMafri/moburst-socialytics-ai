@@ -4806,6 +4806,7 @@ export type Database = {
         }
         Returns: undefined
       }
+      scheduled_jobs_close_exhausted: { Args: never; Returns: number }
       scheduled_jobs_lease: {
         Args: { p_lease_seconds?: number }
         Returns: {
