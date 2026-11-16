@@ -2349,6 +2349,7 @@ export type Database = {
           folder_id: string | null
           id: boolean
           last_used_at: string | null
+          pending_return_origin: string | null
           pending_started_at: string | null
           pending_state: string | null
           pending_verifier: string | null
@@ -2362,6 +2363,7 @@ export type Database = {
           folder_id?: string | null
           id?: boolean
           last_used_at?: string | null
+          pending_return_origin?: string | null
           pending_started_at?: string | null
           pending_state?: string | null
           pending_verifier?: string | null
@@ -2375,6 +2377,7 @@ export type Database = {
           folder_id?: string | null
           id?: boolean
           last_used_at?: string | null
+          pending_return_origin?: string | null
           pending_started_at?: string | null
           pending_state?: string | null
           pending_verifier?: string | null
@@ -2435,7 +2438,10 @@ export type Database = {
           account_email: string | null
           client_id: string | null
           expires_at: string | null
+          last_refresh_ok_at: string | null
+          last_refresh_refused_at: string | null
           linked_at: string | null
+          pending_return_origin: string | null
           pending_started_at: string | null
           pending_state: string | null
           pending_verifier: string | null
@@ -2449,7 +2455,10 @@ export type Database = {
           account_email?: string | null
           client_id?: string | null
           expires_at?: string | null
+          last_refresh_ok_at?: string | null
+          last_refresh_refused_at?: string | null
           linked_at?: string | null
+          pending_return_origin?: string | null
           pending_started_at?: string | null
           pending_state?: string | null
           pending_verifier?: string | null
@@ -2463,7 +2472,10 @@ export type Database = {
           account_email?: string | null
           client_id?: string | null
           expires_at?: string | null
+          last_refresh_ok_at?: string | null
+          last_refresh_refused_at?: string | null
           linked_at?: string | null
+          pending_return_origin?: string | null
           pending_started_at?: string | null
           pending_state?: string | null
           pending_verifier?: string | null
@@ -2701,6 +2713,24 @@ export type Database = {
           name?: string
           terms?: string[]
           updated_at?: string
+        }
+        Relationships: []
+      }
+      picture_calls: {
+        Row: {
+          claimed_at: string | null
+          id: string
+          opened_at: string
+        }
+        Insert: {
+          claimed_at?: string | null
+          id?: string
+          opened_at?: string
+        }
+        Update: {
+          claimed_at?: string | null
+          id?: string
+          opened_at?: string
         }
         Relationships: []
       }
@@ -3585,6 +3615,7 @@ export type Database = {
           client_id: string | null
           created_at: string | null
           created_by: string | null
+          failure_reason: string | null
           id: string
           media_url: string | null
           platform: string | null
@@ -3601,6 +3632,7 @@ export type Database = {
           client_id?: string | null
           created_at?: string | null
           created_by?: string | null
+          failure_reason?: string | null
           id?: string
           media_url?: string | null
           platform?: string | null
@@ -3617,6 +3649,7 @@ export type Database = {
           client_id?: string | null
           created_at?: string | null
           created_by?: string | null
+          failure_reason?: string | null
           id?: string
           media_url?: string | null
           platform?: string | null
@@ -3648,6 +3681,13 @@ export type Database = {
             columns: ["report_id"]
             isOneToOne: false
             referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scheduled_posts_supersedes_fkey"
+            columns: ["supersedes"]
+            isOneToOne: false
+            referencedRelation: "scheduled_posts"
             referencedColumns: ["id"]
           },
         ]
@@ -4307,6 +4347,7 @@ export type Database = {
           failing: number
         }[]
       }
+      calendar_delete_post: { Args: { p_post: string }; Returns: undefined }
       calendar_post_worked: {
         Args: {
           p_client: string
@@ -4426,6 +4467,7 @@ export type Database = {
       can_access_client: { Args: { _client_id: string }; Returns: boolean }
       can_manage_roster: { Args: never; Returns: boolean }
       can_write_client: { Args: { _client_id: string }; Returns: boolean }
+      claim_picture_call: { Args: { p_call: string }; Returns: boolean }
       claim_rate_slot: {
         Args: { p_key: string; p_limit: number; p_window_ms?: number }
         Returns: number
@@ -4434,6 +4476,17 @@ export type Database = {
       claim_worker_lease: {
         Args: { p_holder: string; p_name: string; p_seconds: number }
         Returns: boolean
+      }
+      client_counts: {
+        Args: { client_ids: string[] }
+        Returns: {
+          client_id: string
+          competitive_reports: number
+          last_report_id: string
+          posts: number
+          reports: number
+          schedules: number
+        }[]
       }
       client_notes_queue_read: {
         Args: { p_client: string }
@@ -4686,6 +4739,7 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      open_picture_call: { Args: never; Returns: string }
       purge_raw_events: {
         Args: { p_keep_months?: number }
         Returns: {
@@ -4958,10 +5012,6 @@ export type Database = {
       }
       video_style_claim_kit: {
         Args: { p_client: string; p_job: string; p_stale: string }
-        Returns: boolean
-      }
-      video_style_take_kit: {
-        Args: { p_client: string; p_ended: string; p_job: string }
         Returns: boolean
       }
       video_style_merge: {
