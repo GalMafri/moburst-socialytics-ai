@@ -4989,6 +4989,7 @@ export type Database = {
           user_id: string
         }[]
       }
+      use_design: { Args: { p_iteration: string }; Returns: boolean }
       verify_quarter: {
         Args: { p_quarter: string }
         Returns: {
@@ -5018,6 +5019,10 @@ export type Database = {
       video_style_merge: {
         Args: { p_client: string; p_patch: Json }
         Returns: undefined
+      }
+      video_style_take_kit: {
+        Args: { p_client: string; p_ended: string; p_job: string }
+        Returns: boolean
       }
     }
     Enums: {
