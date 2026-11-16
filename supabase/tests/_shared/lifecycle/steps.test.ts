@@ -630,7 +630,7 @@ describe("a plain-domain client is unchanged by the parent-page rule", () => {
     deps.listCustomerProfiles = async () => [{ id: "7", name: "Olo - Skip the Line", native_name: "olo", network_type: "linkedin_company", native_link: "", status: "active" }];
     const accounts = await STEPS.accounts.run(db, c, ctx({ rows }));
     expect(accounts).toMatchObject({ status: "done", result: { profiles: 1, matched: [{ id: "7", network: "linkedin_company", handle: "olo", by: ["site_link"] }], assigned: 1, platforms: ["LinkedIn"], written: ["primary_platforms"] } });
-    expect(Object.keys((accounts as { result: Record<string, unknown> }).result).sort()).toEqual(["assigned", "list", "matched", "platforms", "profiles", "written"]);
+    expect(Object.keys((accounts as { result: Record<string, unknown> }).result).sort()).toEqual(["assigned", "list", "matched", "platforms", "profiles", "site_profiles", "written"]);
 
     const { FollowFailure } = await import("../../../functions/_shared/competitive/rivaliqFollowFailure");
     let asked = 0;
@@ -1465,5 +1465,27 @@ describe("a client with profiles and no website (onboarding from social profiles
     deps.fetchSiteHtml = async () => ({ html: '<html lang="en"><body><main>Visit 1250 Broadway, New York, NY 10001</main></body></html>', via: "direct" as const });
     await STEPS.brand_read.run(db2, d, ctx());
     expect(d).toMatchObject({ timezone: "America/Denver", location: { source: "profile_address" }, logo_url: "https://x/mine.png" });
+  });
+});
+
+describe("accounts mends the public profiles' handle case without a paid read", () => {
+  it("a stored lower-cased channel id ends as the real id with a /channel/ link, from a free page fetch", async () => {
+    const ID = "UCtyXEjQ6RqDX7mNn1Zb3k9A";
+    const c = client({ name: "Uproar", website_url: "https://www.uproar.example/" });
+    const db = dbWith({
+      clients: [c], sprout_profiles: [], sprout_profile_removals: [],
+      client_public_profiles: [{ client_id: "c1", platform: "youtube", handle: ID.toLowerCase(), url: `https://www.youtube.com/@${ID.toLowerCase()}`, source: "website" }],
+    });
+    deps.listCustomerProfiles = async () => [];
+    let fetched = 0;
+    deps.fetchSiteHtml = async () => { fetched++; return { html: `<a href="https://www.youtube.com/channel/${ID}">YouTube</a>`, via: "direct" as const }; };
+    const rows = rowsOf(row("brand_read", { result: { site_profiles: [`youtube:${ID.toLowerCase()}`] } }));
+    const out = await STEPS.accounts.run(db, c, ctx({ rows }));
+    expect(fetched).toBe(1);
+    expect(db.tables.client_public_profiles.map((r) => [r.platform, r.handle, r.url, r.source])).toEqual([["youtube", ID, `https://www.youtube.com/channel/${ID}`, "website"]]);
+    // The strategy's own read of the profiles sees the same links, so it does not turn the handle back.
+    const { profileInputs, desiredProfiles } = await import("../../../functions/_shared/strategy/profiles");
+    const pi = await profileInputs(db, { id: "c1", name: "Uproar" }, { brand_read: rows.get("brand_read")!.result, accounts: (out as { result: Record<string, unknown> }).result });
+    expect(desiredProfiles(pi).map((r) => r.handle)).toEqual([ID]);
   });
 });

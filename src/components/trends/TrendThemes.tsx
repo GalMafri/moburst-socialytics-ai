@@ -61,7 +61,7 @@ function PostRow({ post, staff }: { post: TrendPost; staff: boolean }) {
   const meta = [platformName(post.platform), post.author, post.format ? FORMAT_LABELS[post.format] : "", post.posted_at ? formatDate(post.posted_at, { year: false }) : ""].filter(Boolean);
   // Staff read the weighted score the ranking uses. A client reads what was measured: likes, comments and shares.
   const measured = staff ? null : measuredEngagements(post);
-  const score = staff && post.engagement != null ? Number(post.engagement) : null;
+  const score = staff && post.engagement != null ? Math.round(Number(post.engagement)) : null;
   return (
     <li className="space-y-1.5">
       <p className="t-label">{meta.join(" · ")}</p>
@@ -76,7 +76,7 @@ function PostRow({ post, staff }: { post: TrendPost; staff: boolean }) {
         {score != null && <Badge data-print="hide" variant="outline" className="t-label">Score: {count(score)}</Badge>}
         {link && (
           <a href={link} target="_blank" rel="noopener noreferrer" className="ml-auto t-link flex items-center gap-1">
-            View <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+            View original <ExternalLink className="h-3.5 w-3.5" aria-hidden />
           </a>
         )}
       </div>
@@ -84,7 +84,7 @@ function PostRow({ post, staff }: { post: TrendPost; staff: boolean }) {
   );
 }
 
-/** One theme. `onDismiss` is given where staff may dismiss a theme (Analytics, Client setup), never on a report. */
+/** One theme. `onDismiss` is given only on Analytics, where staff may dismiss a theme; a report and a client never see it. */
 function ThemeCard({ theme, staff, onDismiss }: { theme: TrendTheme; staff: boolean; onDismiss?: () => void }) {
   const titleId = `trend-theme-${theme.id}`;
   return (

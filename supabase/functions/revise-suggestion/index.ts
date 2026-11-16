@@ -8,7 +8,7 @@
 //   -> { learned: [{kind, text}] }   one or two standing preferences for the
 //      client, saved to competitive_learnings, from what the edit changed.
 //
-// Staff with write access to the report's client only. Nothing is saved here:
+// Staff with write access to the report's client only, checked before any read. Nothing is saved here:
 // the page shows the rewrite in the edit dialog, and the person saves it (the
 // edit lives on competitive_insight_feedback, keyed by the original text).
 // The rewrite is written from the report's own figures, never invented ones.
@@ -39,6 +39,8 @@ const round = (n: unknown, digits = 1) => (typeof n === "number" && Number.isFin
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
+    // Who is asking comes first: a caller who is not staff learns nothing, not even whether a report exists.
+    await requireStaff(req);
     const body = await req.json().catch(() => ({}));
     const reportId = text(body?.report_id, 64);
     const feedback = text(body?.feedback, 1200);
@@ -48,6 +50,7 @@ Deno.serve(async (req) => {
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
     const { data: report } = await admin.from("competitive_reports").select("id, client_id, report_data, status").eq("id", reportId).maybeSingle();
     if (!report || report.status !== "complete") return json({ error: "That report is not available." }, 404);
+    // Then write access to this report's client (company-scoped staff stop here for other companies).
     const caller = await requireStaff(req, { writeClientId: report.client_id });
     const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
     if (!apiKey) return json({ error: "Rewriting is not set up yet." }, 503);

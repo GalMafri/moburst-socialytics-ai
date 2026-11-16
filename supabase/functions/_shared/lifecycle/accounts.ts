@@ -40,10 +40,17 @@ const NETWORK_DISPLAY: Record<string, string> = {
   linkedin_company: "LinkedIn", tiktok: "TikTok", youtube: "YouTube", pinterest: "Pinterest", threads: "Threads",
 };
 
+/** The handle without @ or a YouTube path prefix, in the case it was written. */
+const bareHandle = (handle: string) => String(handle || "").replace(/^@/, "").replace(/^(c\/|user\/|channel\/)/i, "").replace(/\/$/, "");
+
 /** One key per profile: platform and handle, lowercased, without @ or a YouTube path prefix. */
 export function profileKey(platform: string, handle: string): string {
-  const h = String(handle || "").toLowerCase().replace(/^@/, "").replace(/^(c\/|user\/|channel\/)/, "").replace(/\/$/, "");
-  return `${platform}:${h}`;
+  return `${platform}:${bareHandle(handle).toLowerCase()}`;
+}
+
+/** The same key with the handle in the case it was written: a YouTube channel id is only an id in its own case. */
+export function writtenProfileKey(platform: string, handle: string): string {
+  return `${platform}:${bareHandle(handle)}`;
 }
 
 /** A Sprout profile's key, as a site's profile links are keyed; null for a network a site cannot link (a personal LinkedIn profile). */
@@ -54,16 +61,27 @@ export function profileKeyOf(p: Pick<SproutProfile, "network_type" | "native_nam
 
 const HARVEST = /(?:https?:)?\/\/[^\s"'<>\\)]+|(?:^|[\s"'(>])((?:www\.)?(?:instagram|facebook|tiktok|linkedin|youtube|twitter|x)\.com\/[^\s"'<>\\)]+)/gi;
 
-/** Every social profile a page links to, as profile keys (every link, not only the best one per platform). */
+/**
+ * Every social profile a page links to, as profile keys (every link, not only
+ * the best one per platform), each once and in the case the link wrote it,
+ * which is what the client's public profile stores (a YouTube channel id is
+ * only an id in its own case). A profile is matched to these case-insensitively
+ * (siteLinks.ts), so no key is listed a second time lower-cased. A handle the
+ * page writes more than one way is listed in the way that has capitals.
+ */
 export function siteProfileLinks(html: string): string[] {
-  const out = new Set<string>();
+  const byKey = new Map<string, string>();
   for (const m of normalizeDocument(html).matchAll(HARVEST)) {
     const raw = (m[1] || m[0]).trim().replace(/[),.;]+$/, "");
     const url = raw.startsWith("//") ? `https:${raw}` : /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
     const hit = classifyUrl(url);
-    if (hit) out.add(profileKey(hit.platform, hit.handle));
+    if (!hit) continue;
+    const key = profileKey(hit.platform, hit.handle);
+    const written = writtenProfileKey(hit.platform, hit.handle);
+    const kept = byKey.get(key);
+    if (kept === undefined || (kept === key && written !== key)) byKey.set(key, written);
   }
-  return [...out].sort();
+  return [...byKey.values()].sort();
 }
 
 export interface MatchInput {
@@ -84,7 +102,7 @@ export interface ProfileMatch {
 
 /** The profiles to assign to the client now. */
 export function matchProfiles(i: MatchInput): ProfileMatch[] {
-  const links = new Set(i.siteLinks);
+  const links = new Set(i.siteLinks.map((k) => k.toLowerCase()));
   const out: ProfileMatch[] = [];
   for (const p of i.profiles) {
     if (String(p.status || "active").toLowerCase() !== "active") continue;

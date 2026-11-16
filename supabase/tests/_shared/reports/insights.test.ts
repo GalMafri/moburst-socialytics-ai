@@ -4,6 +4,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import type { Fact } from "../../../functions/_shared/reports/facts";
+import { checkCorrection } from "../../../functions/_shared/reports/reportText";
 import {
   checkInsights, inputHash, INSIGHTS_SYSTEM, insightsInput, insightsPrompt, orderByFacts, parseInsights, runReportInsights, templateInsights, writeInsights,
   type InsightFields, type InsightsInput,
@@ -54,6 +55,65 @@ describe("checkInsights", () => {
     const ranking = fact({ id: "F1", key: "ranking|all|followers|Acme AI", kind: "ranking", company: "Acme AI", leader: "Sprout Social Co", unit: "count", value: 14900, rank: 2, of: 3, leaderValue: 680000, median: 32000, numbers: [14900, 680000, 32000, 2, 3] });
     const named: InsightFields = { kind: "competitive", summary: [{ text: "Acme AI ranks 2nd of 3 on followers, behind Sprout Social Co with 680,000.", facts: ["F1"] }], gaps: [{ gap: "Acme AI trails on followers", platform: "all", why_it_matters: "Sprout Social Co has 680,000.", suggested_play: "Test a weekly series.", facts: ["F1"] }] };
     expect(checkInsights(named, [ranking])).toEqual([]);
+  });
+
+  it("refuses British spelling, so the text goes back for a rewrite, and leaves American words alone", () => {
+    expect(checkInsights(social({ insights: [{ text: "Impressions rose 26.5%, a change in audience behaviour.", facts: ["F1"] }] }), FACTS))
+      .toEqual(['Insight 1 spells "behaviour" the British way; use American English.']);
+    const british = ["colour", "optimise", "organisation", "centre", "analysed", "programme", "recognisable", "behavioural", "organisational", "analyse", "analysing", "personalised", "prioritising", "favourites", "colourful", "fuelled", "levelled", "channelled", "counselled", "totalled", "conceptualise", "galvanise", "publicise", "scrutinise", "humanise", "pretence", "cheque"];
+    for (const word of british) {
+      expect(checkInsights(social({ insights: [{ text: `Impressions rose 26.5% with a ${word} change.`, facts: ["F1"] }] }), FACTS), word).toHaveLength(1);
+    }
+    const american = ["behavior", "behavioral", "color", "optimize", "organization", "organizational", "recognizable", "center", "analyzed", "rise", "promise", "exercise", "premise", "advertise", "analysis", "analyses", "emphasis", "emphases", "paralysis", "surprise", "otherwise", "revise", "fueled", "leveled", "totaled", "modeling", "practice", "skeptical"];
+    for (const word of american) {
+      expect(checkInsights(social({ insights: [{ text: `Impressions rose 26.5% with a ${word} change.`, facts: ["F1"] }] }), FACTS), word).toEqual([]);
+    }
+    expect(checkInsights(social({ insights: [{ text: "The analyses show growth, up 26.5%.", facts: ["F1"] }] }), FACTS)).toEqual([]);
+  });
+
+  it("flags only the British form of each word that doubles an l: every root passes its American -ed, -ing and -er forms", () => {
+    const check = (word: string) => checkInsights(social({ insights: [{ text: `Impressions rose 26.5% with a ${word} change.`, facts: ["F1"] }] }), FACTS);
+    // Words whose American inflected form keeps a single l.
+    const roots = ["fuel", "level", "channel", "counsel", "total", "travel", "model", "label", "signal", "equal", "dial", "pencil", "marvel", "quarrel", "tunnel", "duel", "jewel"];
+    for (const root of roots) {
+      for (const ending of ["ed", "ing", "er"]) {
+        expect(check(`${root}${ending}`), `${root}${ending}`).toEqual([]);
+        expect(check(`${root}l${ending}`), `${root}l${ending}`).toHaveLength(1);
+      }
+    }
+    // American English doubles the l in these: only the bare British forms differ.
+    const american = ["install", "installed", "installing", "installer", "installs", "installment", "enroll", "enrolled", "enrolling", "enrollment", "fulfill", "fulfilled", "fulfilling", "fulfillment", "cancelled", "cancelling", "canceled", "controlled", "excelled", "propelled"];
+    for (const word of american) expect(check(word), word).toEqual([]);
+    for (const word of ["instal", "instals", "instalment", "enrol", "enrols", "enrolment", "enrolments", "fulfil", "fulfils", "fulfilment"]) expect(check(word), word).toHaveLength(1);
+    expect(checkInsights(social({ insights: [{ text: "The app was installed 4,000 times and impressions rose 26.5%.", facts: ["F1"] }] }), [fact({ numbers: [12400, 9800, 2600, 26.5, 4000] }), ...FACTS.slice(1)])).toEqual([]);
+  });
+
+  it("leaves out British words the insight's own input holds, as the analysis check does", () => {
+    const pillar = fact({ sentence: "Human Behaviour Insights posts rose 26.5% to 12,400." });
+    const echo = social({ insights: [{ text: "Human Behaviour Insights posts rose 26.5%.", facts: ["F1"] }] });
+    expect(checkInsights(echo, [pillar, ...FACTS.slice(1)])).toEqual([]);
+    expect(checkInsights(echo, FACTS)).toEqual(['Insight 1 spells "Behaviour" the British way; use American English.']);
+    const own = social({ insights: [{ text: "Audience behaviour shifted, up 26.5%.", facts: ["F1"] }] });
+    expect(checkInsights(own, [pillar, ...FACTS.slice(1)])).toEqual(['Insight 1 spells "behaviour" the British way; use American English.']);
+    // A sample post or a team preference is input too.
+    const style = social({ insights: [{ text: "Posts like Colour Your Week drove a 26.5% rise.", facts: ["F1"] }] });
+    expect(checkInsights(style, FACTS, { sources: ["Colour Your Week, our new series"] })).toEqual([]);
+    expect(checkInsights(style, FACTS)).toHaveLength(1);
+  });
+
+  it("leaves a company's own name and a quoted post alone", () => {
+    const named = social({ insights: [{ text: 'Impressions rose 26.5% as Colour Pop posted "Our colour range is here".', facts: ["F1"] }] });
+    expect(checkInsights(named, FACTS, { client: "Colour Pop" })).toEqual([]);
+    const single = social({ insights: [{ text: "Impressions rose 26.5% after the 'Colour Week' series, and the client's reach held.", facts: ["F1"] }] });
+    expect(checkInsights(single, FACTS)).toEqual([]);
+    const apostrophe = social({ insights: [{ text: "The client's colour posts won, up 26.5%, and the team's picks too.", facts: ["F1"] }] });
+    expect(checkInsights(apostrophe, FACTS)).toHaveLength(1);
+  });
+
+  it("a corrected sentence with a British spelling it did not have is refused", () => {
+    const stale = [{ id: "s1", sentence: "Reach grew 10%." }] as never;
+    expect(checkCorrection(stale, new Map([["s1", "Reach grew 10%, a good colour."]]), [])).toBe('s1 came back with the British spelling "colour".');
+    expect(checkCorrection(stale, new Map([["s1", "Reach grew 10%, a good color."]]), [])).toBeNull();
   });
 
   it("keeps the direction check to the sentence that quotes the change", () => {

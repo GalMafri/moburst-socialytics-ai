@@ -18,7 +18,7 @@ import { renderStill } from '../_shared/render/render.ts';
 import { imageToPng } from '../_shared/render/resvg.ts';
 import { Faces, renderLayers } from '../_shared/render/layers.ts';
 import { fontBytes } from '../_shared/render/fonts.ts';
-import { composeFrameV2, isLibraryV2, templateV2 } from '../_shared/design-system/v2.ts';
+import { composeFrameV2, isLibraryV2, templateV2, type LibraryV2 } from '../_shared/design-system/v2.ts';
 
 const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-socialytics-secret' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -31,7 +31,7 @@ async function logoHrefFor(db: any, system: DesignSystem): Promise<string> {
 }
 
 async function store(db: any, bucket: string, path: string, png: Uint8Array): Promise<string> {
-  const { error } = await db.storage.from(bucket).upload(path, new Blob([png], { type: 'image/png' }), { contentType: 'image/png', upsert: true });
+  const { error } = await db.storage.from(bucket).upload(path, new Blob([png as unknown as BlobPart], { type: 'image/png' }), { contentType: 'image/png', upsert: true });
   if (error) throw new Error(`The rendered design could not be stored: ${error.message}`);
   return db.storage.from(bucket).getPublicUrl(path).data.publicUrl;
 }
@@ -65,12 +65,14 @@ async function renderFrame(db: any, creative: any, index: number, heroUrl: strin
   const frame = plan.frames[index];
   if (!frame || !plan.design_system_id || !frame.template_id) throw new Error('This frame was not planned with a design system.');
   const loaded = await loadSystemById(db, creative.client_id, plan.design_system_id);
-  if (isLibraryV2(loaded.system)) {
+  // A stored system is a v1 design system or a v2 library read from the client's own posts.
+  const stored = loaded.system as DesignSystem | LibraryV2;
+  if (isLibraryV2(stored)) {
     // A template read from the client's own post: fill its slots, show the hero through its slot.
-    const t = templateV2(loaded.system, frame.template_id);
+    const t = templateV2(stored, frame.template_id);
     const families: Record<string, Record<number, Uint8Array>> = {};
-    for (const fam of [loaded.system.faces.primary, loaded.system.faces.secondary].filter(Boolean) as string[]) { families[fam] = {}; for (const w of [300, 400, 500, 600, 700]) { try { families[fam][w] = await fontBytes(db, fam, w); } catch { /* weight missing */ } } }
-    const faces = new Faces(loaded.system.faces.primary, families);
+    for (const fam of [stored.faces.primary, stored.faces.secondary].filter(Boolean) as string[]) { families[fam] = {}; for (const w of [300, 400, 500, 600, 700]) { try { families[fam][w] = await fontBytes(db, fam, w); } catch { /* weight missing */ } } }
+    const faces = new Faces(stored.faces.primary, families);
     const [heroHref, softHeroHref] = await Promise.all([urlToDataUrl(heroUrl), urlToDataUrl(softUrl)]);
     const png = await renderLayers(db, composeFrameV2(t, faces, frame, heroHref, softHeroHref), faces);
     const path = `${creative.client_id}/${Date.now()}-design-${creative.id}-${index}.png`;

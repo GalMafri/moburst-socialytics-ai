@@ -5,6 +5,7 @@
 // Google sends the browser back, and say whether it is connected. Nothing
 // here returns a token; the refresh token goes straight to Vault.
 
+import { returnOriginFor } from "../auth/appOrigin.ts";
 import { authorizeUrl, DECK_ACCOUNT, exchangeCode, makePkce, signedInEmail, type GoogleConfig } from "./oauth.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -29,14 +30,24 @@ export async function googleStatus(db: Db, config: GoogleConfig | null): Promise
   return { ready: !!config, connected, account_email: connected ? data.account_email ?? null : null, connected_at: connected ? data.connected_at : null };
 }
 
-/** A new sign-in: its state and verifier kept on the connection row, and the link to open. */
-export async function startSignIn(db: Db, config: GoogleConfig, redirectUri: string, now: Date): Promise<string> {
+/**
+ * A new sign-in: its state and verifier kept on the connection row, with the
+ * app address it was started from (appOrigin.ts) so the way back lands on the
+ * same address, and the link to open.
+ */
+export async function startSignIn(db: Db, config: GoogleConfig, redirectUri: string, now: Date, returnOrigin?: string): Promise<string> {
   const p = await makePkce();
   const { error } = await db.from("google_connection").upsert({
-    id: true, pending_state: p.state, pending_verifier: p.verifier, pending_started_at: now.toISOString(), updated_at: now.toISOString(),
+    id: true, pending_state: p.state, pending_verifier: p.verifier, pending_started_at: now.toISOString(), pending_return_origin: returnOrigin ?? null, updated_at: now.toISOString(),
   }, { onConflict: "id" });
   if (error) throw new Error(`Could not start the Google sign-in: ${error.message}`);
   return authorizeUrl({ clientId: config.clientId, redirectUri, state: p.state, challenge: p.challenge });
+}
+
+/** The app address the pending sign-in was started from; the default when none was kept or it is not the app's. */
+export async function pendingReturnOrigin(db: Db, env?: (key: string) => string | undefined): Promise<string> {
+  const { data } = await db.from("google_connection").select("pending_return_origin").eq("id", true).maybeSingle();
+  return returnOriginFor(data?.pending_return_origin, env);
 }
 
 export type SignInOutcome = "connected" | "refused" | "bad_state" | "expired" | "exchange_failed" | "no_refresh_token" | "wrong_account" | "not_saved";

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { addDays, canRemove, canRevise, canStop, mergePlan, mondayOf, nextPlannableWeek, weekBoard, weekLabel, type CalendarPlanRow, type CalendarPostRow } from "@/lib/calendarPosts";
+import { addDays, calendarPlatforms, canRemove, canRevise, canStop, mergePlan, mondayOf, nextPlannableWeek, weekBoard, weekCountLabel, weekLabel, type CalendarPlanRow, type CalendarPostRow } from "@/lib/calendarPosts";
+import { weekFromParam } from "@/lib/weekWindow";
 import { rateWords, sourceWords } from "@/lib/postingRhythm";
 
 const row = (over: Partial<CalendarPostRow>): CalendarPostRow => ({
@@ -16,8 +17,30 @@ describe("calendar weeks", () => {
     expect(addDays("2026-10-12", 7)).toBe("2026-10-19");
   });
   it("labels a week across a month end", () => {
-    expect(weekLabel("2026-10-12")).toBe("Oct 12 – 18, 2026");
-    expect(weekLabel("2026-09-28")).toBe("Sep 28 – Oct 4, 2026");
+    expect(weekLabel("2026-10-12")).toBe("Oct 12 to 18, 2026");
+    expect(weekLabel("2026-09-28")).toBe("Sep 28 to Oct 4, 2026");
+    expect(weekLabel("2026-11-09")).toBe("Nov 9 to 15, 2026");
+  });
+  it("reads the week from an address: a real date gives its Monday, anything else gives this week", () => {
+    const today = "2026-11-12";
+    expect(weekFromParam("2026-11-11", today)).toBe("2026-11-09");
+    expect(weekFromParam("abc", today)).toBe("2026-11-09");
+    expect(weekFromParam("2026-13-45", today)).toBe("2026-11-09");
+    expect(weekFromParam("2026-02-30", today)).toBe("2026-11-09");
+    expect(weekFromParam("", today)).toBe("2026-11-09");
+    expect(weekFromParam(null, today)).toBe("2026-11-09");
+  });
+  it("counts a week's posts with its Stories apart, in the words the day headers use", () => {
+    const feed = Array.from({ length: 13 }, () => ({ format: "Single image", platform: "LinkedIn" }));
+    const stories = Array.from({ length: 7 }, () => ({ format: "Story", platform: "Instagram" }));
+    expect(weekCountLabel([...feed, ...stories], true)).toBe("13 posts and 7 Stories this week");
+    expect(weekCountLabel([...feed.slice(0, 1), ...stories.slice(0, 1)], false)).toBe("1 post and 1 Story");
+    expect(weekCountLabel([], true)).toBe("No posts this week");
+  });
+  it("offers a client the networks of its own data, and the five defaults only when it has none", () => {
+    expect(calendarPlatforms({ primary: ["LinkedIn"], profiles: [], posted: ["LinkedIn"] })).toEqual(["LinkedIn"]);
+    expect(calendarPlatforms({ primary: ["Instagram"], profiles: ["fb_instagram_account", "linkedin_company"], posted: ["Linkedin", "TikTok"] })).toEqual(["Instagram", "LinkedIn", "TikTok"]);
+    expect(calendarPlatforms({ primary: null, profiles: [], posted: [] })).toEqual(["Instagram", "LinkedIn", "TikTok", "Facebook", "X"]);
   });
   it("puts each post on its day with its key and date", () => {
     const board = weekBoard([row({}), row({ id: "2", post_date: "2026-10-19", post_key: "key-2" })], "2026-10-12");

@@ -20,17 +20,17 @@ import { Loading } from "@/components/ui/loading";
 import { insightKey, partitionGaps, useInsightFeedback, type InsightFeedbackRow } from "@/hooks/useInsightFeedback";
 import { useReportInsights } from "@/hooks/useReportInsights";
 import { shownCompetitive, type ShownInsightsRow } from "../../../supabase/functions/_shared/reports/shownFields";
-import { firstRunSentence, formatDate, formatRange, platformName } from "@/lib/display";
+import { countOf, firstRunSentence, formatDate, formatRange, NO_DATA, platformName } from "@/lib/display";
 import { useNextRun } from "@/lib/nextRun";
 import { Prose } from "@/components/ui/prose";
 import { InsightGrid } from "@/components/ui/insight-card";
 import { Crosshair, ArrowRight, Lightbulb, ThumbsUp, Rss } from "lucide-react";
-import { competitiveReportQuality } from "../../../supabase/functions/_shared/competitive/reportEvidence";
+import { fetchNewestReadyCompetitive } from "@/lib/newestReadyCompetitive";
 import { landscapeLabel } from "@/lib/competitiveStatus";
 import { editedSuggestion } from "../../../supabase/functions/_shared/competitive/suggestionEdits";
 
-const pct = (n: number | null | undefined) => (n == null ? "–" : `${(n * 100).toFixed(2)}%`);
-const whole = (n: number | null | undefined) => (n == null || !Number.isFinite(n) ? "–" : Math.round(n).toLocaleString());
+const pct = (n: number | null | undefined) => (n == null ? NO_DATA : `${(n * 100).toFixed(2)}%`);
+const whole = (n: number | null | undefined) => (n == null || !Number.isFinite(n) ? NO_DATA : Math.round(n).toLocaleString());
 
 function Tile({ label, value, sub, accent = false }: { label: string; value: string; sub?: string; accent?: boolean }) {
   return <StatCard label={label} value={value} sub={sub} accent={accent} />;
@@ -55,15 +55,15 @@ export function CompetitiveSnapshot({
   const { data: latest, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["competitive-snapshot", clientId],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { row } = await fetchNewestReadyCompetitive((from, to) => supabase
         .from("competitive_reports")
         .select("id, status, created_at, report_data, date_range_start, date_range_end")
         .eq("client_id", clientId)
         .eq("status", "complete")
         .order("created_at", { ascending: false })
-        .limit(12);
-      if (error) throw error;
-      return (data || []).find((r) => competitiveReportQuality(r.report_data).ready) ?? null;
+        .order("id")
+        .range(from, to));
+      return row;
     },
     enabled: !!clientId,
   });
@@ -86,8 +86,8 @@ export function CompetitiveSnapshot({
   const companies: any[] = rd.aggregates?.companies || [];
   const me = companies.find((c) => c.is_client);
   // Two different questions, and they used to share one answer. How many
-  // competitors the analysis covers is every tracked company — the figure the
-  // full report puts in its header — while an average is only meaningful over
+  // competitors the analysis covers is every tracked company, the figure the
+  // full report puts in its header, while an average is only meaningful over
   // the ones that actually posted. Counting the active subset in both places
   // made the snapshot say "3 competitors" and the report it links to say "4".
   const rivals = companies.filter((c) => !c.is_client);
@@ -106,7 +106,7 @@ export function CompetitiveSnapshot({
           section's own band, with the links at the far edge. */}
       <div className="flex items-center gap-x-4 gap-y-2 flex-wrap">
         <p className="t-secondary">
-          {rivals.length} competitors
+          {countOf(rivals.length, "competitor")}
           {/* The tracking setup's name is for staff, and stays out of an exported PDF. */}
           {isMoburstStaff && rd.landscape?.name ? <span data-print="hide">{` · ${landscapeLabel(rd.landscape.name)}`}</span> : null}
           {period ? ` · ${period}` : ""} · analyzed {formatDate(latest.created_at)}
@@ -128,9 +128,9 @@ export function CompetitiveSnapshot({
       {me && (
         <div id="snapshot-numbers" className="scroll-mt-[156px]"><StatGrid>
           {/* Measured figures only, each against the competitors' average, as on the full report. */}
-          <Tile accent label="Avg engagement" value={me.post_count ? whole(me.engagement_avg) : "–"} sub={`competitor average ${whole(avg((c) => c.engagement_avg))}`} />
-          <Tile label="Share of voice" value={share == null ? "–" : `${share}%`} sub={`${me.post_count} of ${totalPosts} posts`} />
-          <Tile label="Cadence" value={`${me.cadence_per_week}/wk`} sub={`competitor average ${(rivals.length ? (rivals.reduce((sum, c) => sum + c.cadence_per_week, 0) / rivals.length).toFixed(1) : "–")}/wk`} />
+          <Tile accent label="Avg engagement" value={me.post_count ? whole(me.engagement_avg) : NO_DATA} sub={`competitor average ${whole(avg((c) => c.engagement_avg))}`} />
+          <Tile label="Share of voice" value={share == null ? NO_DATA : `${share}%`} sub={`${me.post_count} of ${countOf(totalPosts, "post")}`} />
+          <Tile label="Cadence" value={`${me.cadence_per_week}/wk`} sub={`competitor average ${rivals.length ? `${(rivals.reduce((sum, c) => sum + c.cadence_per_week, 0) / rivals.length).toFixed(1)}/wk` : NO_DATA}`} />
           {/* Engagements divided by impressions, the same definition for every company. No impressions figure, no tile. */}
           {me.engagement_rate_avg != null && <Tile label={COMPARED_RATE_LABEL} value={pct(me.engagement_rate_avg)} sub={avg((c) => c.engagement_rate_avg) == null ? "engagements per impression" : `competitor average ${pct(avg((c) => c.engagement_rate_avg))}`} />}
         </StatGrid></div>
@@ -159,16 +159,16 @@ export function CompetitiveSnapshot({
 
       {gaps.length > 0 && (
         <Card id="snapshot-gaps" className="scroll-mt-[156px]"><CardContent className="pt-5 space-y-3">
-          <p className="t-subhead flex items-center gap-1.5"><Lightbulb className="h-3.5 w-3.5" /> Gaps to fill</p>
+          <p className="t-subhead flex items-center gap-1.5"><Lightbulb className="h-3.5 w-3.5" /> Suggested tests</p>
           <div className="grid gap-inner grid-cols-[repeat(auto-fit,minmax(min(100%,240px),1fr))]">
             {gaps.map((g, i) => (
               <div key={i} className="glass-inner p-inner space-y-2">
                 <div className="flex gap-1.5 flex-wrap">
                   {g.platform && g.platform !== "all" && <Badge variant="outline">{platformName(g.platform)}</Badge>}
-                  {verdictFor(g.gap) === "up" && <Badge className="gap-1"><ThumbsUp className="h-3 w-3" /> in the calendar brief</Badge>}
+                  {verdictFor(g.gap) === "up" && <Badge className="gap-1"><ThumbsUp className="h-3 w-3" /> In the content plan</Badge>}
                 </div>
                 <p className="t-body font-medium">{editedSuggestion(g, editFor(g.gap)).gap}</p>
-                {editedSuggestion(g, editFor(g.gap)).suggested_play && <p className="t-body"><span className="text-[#b9e045] font-semibold">Play: </span>{editedSuggestion(g, editFor(g.gap)).suggested_play}</p>}
+                {editedSuggestion(g, editFor(g.gap)).suggested_play && <p className="t-body"><span className="text-[#b9e045] font-semibold">Proposed test: </span>{editedSuggestion(g, editFor(g.gap)).suggested_play}</p>}
               </div>
             ))}
           </div>

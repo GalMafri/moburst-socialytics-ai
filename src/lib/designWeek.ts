@@ -139,7 +139,7 @@ export function durationWords(minutes: number): string {
   return `${plural(h, "hour", "hours")}${m ? ` and ${plural(m, "minute", "minutes")}` : ""}`;
 }
 
-/** "9 posts this week have no design yet: 6 designs, 1 video and 2 Instagram Stories. About 100 Higgsfield credits and 45 minutes." */
+/** "9 posts this week have no design yet: 6 designs, 1 video and 2 Instagram Stories. About 100 video credits and 45 minutes." */
 export function previewLine(c: WeekCounts, credits: number, minutes: number): string {
   const n = postsToDesign(c);
   const feed = [
@@ -151,7 +151,7 @@ export function previewLine(c: WeekCounts, credits: number, minutes: number): st
   const network = c.story_platform === "Instagram" || c.story_platform === "Facebook" ? `${c.story_platform} ` : "";
   const stories = c.story ? `${c.story} ${network}${c.story === 1 ? "Story" : "Stories"}` : "";
   const kinds = [feed, stories].filter(Boolean).join(" and ");
-  const cost = c.video && credits > 0 ? `About ${Math.round(credits)} Higgsfield credits and ${durationWords(minutes)}.` : `About ${durationWords(minutes)}.`;
+  const cost = c.video && credits > 0 ? `About ${Math.round(credits)} video credits and ${durationWords(minutes)}.` : `About ${durationWords(minutes)}.`;
   return `${plural(n, "post", "posts")} this week ${n === 1 ? "has" : "have"} no design yet: ${kinds}. ${cost}`;
 }
 
@@ -168,10 +168,10 @@ export function progressLine(p: { total: number; ready: number }): string {
   return `Designing this week's posts: ${p.ready} of ${p.total} ready.`;
 }
 
-/** "9 posts designed." For staff, with the Higgsfield credits the week's clips used. */
+/** "9 posts designed." For staff, with the video credits the week's clips used. */
 export function doneLine(ready: number, creditsUsed: number | null | undefined): string {
   const base = `${plural(ready, "post", "posts")} designed.`;
-  return creditsUsed && creditsUsed > 0 ? `${base} ${Math.round(creditsUsed)} Higgsfield credits used.` : base;
+  return creditsUsed && creditsUsed > 0 ? `${base} ${Math.round(creditsUsed)} video credits used.` : base;
 }
 
 /**

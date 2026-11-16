@@ -3,7 +3,17 @@
 // Built once in ReportView (or wherever the client row is fetched) and passed
 // down through props.
 
-import type { BrandIdentity } from "@/components/reports/CreatePostDesignButton";
+export interface BrandIdentity {
+  primary_color?: string;
+  secondary_color?: string;
+  accent_color?: string;
+  font_family?: string;
+  visual_style?: string;
+  logo_description?: string;
+  tone_of_voice?: string;
+  design_elements?: string;
+  background_style?: string;
+}
 
 export interface ClientContext {
   client_id: string;
@@ -18,6 +28,8 @@ export interface ClientContext {
   geo: string[];                        // parsed from comma-separated
   languages: string[];                  // parsed from comma-separated
   timezone: string;
+  /** The networks the client is set up for (clients.primary_platforms). */
+  primary_platforms?: string[];
   design_style_synthesis: DesignStyleSynthesis | null;
 }
 
@@ -61,7 +73,7 @@ export function stripVoicePreset(brandNotes: string | null | undefined): string 
 }
 
 /** The columns a ClientContext is built from. */
-export const CLIENT_CONTEXT_COLUMNS = "id, name, brand_identity, design_references, brand_book_file_path, brand_book_url, content_pillars, brief_text, brand_notes, geo, language, timezone, design_style_synthesis";
+export const CLIENT_CONTEXT_COLUMNS = "id, name, brand_identity, design_references, brand_book_file_path, brand_book_url, content_pillars, brief_text, brand_notes, geo, language, timezone, primary_platforms, design_style_synthesis";
 
 /** A ClientContext from a clients row selected with CLIENT_CONTEXT_COLUMNS. */
 // deno-lint-ignore no-explicit-any
@@ -80,6 +92,7 @@ export function buildClientContext(row: Record<string, any> | null | undefined, 
     geo: parseCsv(r.geo),
     languages: parseCsv(r.language),
     timezone: r.timezone || "UTC",
+    primary_platforms: Array.isArray(r.primary_platforms) ? (r.primary_platforms as string[]) : [],
     design_style_synthesis: r.design_style_synthesis || null,
   };
 }

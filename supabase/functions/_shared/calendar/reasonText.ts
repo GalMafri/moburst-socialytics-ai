@@ -6,7 +6,11 @@
 // a seasonal post, and whether it is the week's test. The words are put
 // together here when the reason is shown, so a change to how reasons read
 // reaches every post without rewriting stored rows. The week planner and the
-// app both import this file, so it imports nothing.
+// app both import this file, so it holds only plain functions. It also holds
+// the two rules a post's own fields follow in both places: what kind a format
+// is (formatKind) and the one form a posting time is stored in (postingTimeOf).
+
+import { isStoryFormat } from "../design/story.ts";
 
 /** story: a Story the planner added with a feed post; its label says where the week's count of Stories came from. */
 export type ReasonType = "performance" | "competitor" | "trend" | "seasonal" | "test" | "story";
@@ -135,19 +139,34 @@ export interface ReasonParts {
   test?: boolean;
 }
 
-/** A reason in words: the evidence with its real numbers (or the moment), then why it fits. */
+/** The most a reason's words hold. */
+export const REASON_MAX = 400;
+
+/** Text kept whole: cut after the last sentence that ends within the limit, never in the middle of one. */
+function atSentenceEnd(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const head = text.slice(0, max);
+  const end = Math.max(head.lastIndexOf(". "), head.lastIndexOf("! "), head.lastIndexOf("? "));
+  if (end > 0) return head.slice(0, end + 1);
+  // One sentence longer than the limit: end it at a word.
+  return `${head.slice(0, Math.max(head.lastIndexOf(" "), 1)).replace(/[\s,;:.]+$/, "")}.`;
+}
+
+/**
+ * A reason in words: the evidence with its real numbers (or the moment), then
+ * why it fits. A test's reason does not say so: its chip does.
+ */
 export function reasonLabel(parts: ReasonParts): string {
   const evidence = parts.evidence ?? [];
   const first = evidence[0];
   const base = (first && evidenceSentence(first)) || parts.moment?.trim() || (parts.type === "seasonal" ? "A dated moment this week" : "Planned from your content pillars");
   const fit = clientFit(parts.fit);
-  return [
-    parts.test ? "Test: " : "",
+  return atSentenceEnd([
     base.replace(/[.\s]+$/, ""),
     ".",
     fit ? ` ${fit.replace(/[.\s]+$/, "")}.` : "",
     evidence.some((e) => e.thin) ? " Early signal." : "",
-  ].join("").slice(0, 400);
+  ].join(""), REASON_MAX);
 }
 
 /** A reason as stored on a calendar post, by the planner or by a person. */
@@ -171,4 +190,66 @@ export function wordReason(r: StoredReason | null | undefined): string {
   const evidence = Array.isArray(r.evidence) ? r.evidence : [];
   if (!evidence.length && typeof r.test !== "boolean") return String(r.label ?? "");
   return reasonLabel({ type: r.type, evidence, fit: r.fit, moment: r.moment, test: r.test ?? r.type === "test" });
+}
+
+// ── A post's format and time ────────────────────────────────────────────────
+
+/**
+ * The fixed kinds a post's format is one of. "short video" is a video shot
+ * tall (a Reel, a Short): it keeps the shape, because the design and video
+ * generators (design-prompts/aspect.ts) read a stored "short video" as 9:16
+ * and a plain "video" as the platform's own shape.
+ */
+export type FormatKind = "image" | "carousel" | "video" | "short video" | "text" | "document" | "story";
+
+export const FORMAT_KINDS: readonly FormatKind[] = ["image", "carousel", "video", "short video", "text", "document", "story"];
+
+/** How each kind reads on a card and in the panel. */
+export const FORMAT_LABELS: Record<FormatKind, string> = {
+  image: "Single image", carousel: "Carousel", video: "Video", "short video": "Reel or short video", text: "Text post", document: "Document", story: "Story",
+};
+
+/**
+ * What kind of post a format is. The planner's own words ("video (animated
+ * text on soft background)", "short_video", "Reel/video") and the words people
+ * type all land on one of the seven kinds. A format that names nothing is a
+ * still image, except that a post with no format on TikTok or YouTube is a
+ * video. null when there is no format and the platform does not decide it.
+ */
+export function formatKind(format: string | null | undefined, platform?: string | null): FormatKind | null {
+  const raw = String(format ?? "").trim();
+  if (!raw) return /tiktok|youtube/i.test(String(platform ?? "")) ? "video" : null;
+  if (isStoryFormat(raw)) return "story";
+  const f = raw.toLowerCase().replace(/[_/\-]+/g, " ");
+  if (/\b(carousel|album|slideshow)\b/.test(f)) return "carousel";
+  if (/\b(document|pdf|deck)\b/.test(f)) return "document";
+  if (/\b(reel|reels|short|shorts|vertical)\b/.test(f)) return "short video";
+  if (/\b(video|igtv|clip|tiktok)\b/.test(f)) return "video";
+  if (/^text( only)?$|\btext only\b|\bstatus\b/.test(f)) return "text";
+  return "image";
+}
+
+/** A format as a card shows it: its kind's label; "" when it has no kind. */
+export function formatLabel(format: string | null | undefined, platform?: string | null): string {
+  const kind = formatKind(format, platform);
+  return kind ? FORMAT_LABELS[kind] : "";
+}
+
+/**
+ * A posting time as HH:MM (24-hour), or null when the text names no time.
+ * Reads "6:45 PM", "6 PM", "6:45pm EST" and "18:45"; the zone words are not
+ * part of the stored time (the client's zone is shown beside it).
+ */
+export function postingTimeOf(text: string | null | undefined): string | null {
+  const value = String(text ?? "");
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const twelve = /\b(\d{1,2})(?::(\d{2}))?\s*([AP])\.?M\b/i.exec(value);
+  if (twelve) {
+    const h = Number(twelve[1]);
+    const min = Number(twelve[2] ?? "0");
+    if (h < 1 || h > 12 || min > 59) return null;
+    return `${pad((h % 12) + (twelve[3].toUpperCase() === "P" ? 12 : 0))}:${pad(min)}`;
+  }
+  const day = /\b([01]?\d|2[0-3]):([0-5]\d)\b/.exec(value);
+  return day ? `${pad(Number(day[1]))}:${day[2]}` : null;
 }

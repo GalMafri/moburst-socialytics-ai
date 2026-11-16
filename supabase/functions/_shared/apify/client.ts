@@ -18,7 +18,10 @@
 //
 // The token is APIFY_API_TOKEN (the same account as n8n's "Apify account 2").
 // While it is not set, every call throws ApifyTokenMissing, which a step
-// turns into a quiet wait and a line in its step log, never a failure.
+// turns into a quiet wait and a line in its step log, never a failure. A
+// token Apify refuses (401, or an account-level 402 or 403) is the same:
+// ApifyTokenRefused. A 403 for one actor stays an ordinary ApifyError, so only
+// that platform fails.
 
 export const APIFY_API = "https://api.apify.com/v2";
 export const APIFY_TOKEN_ENV = "APIFY_API_TOKEN";
@@ -53,6 +56,27 @@ export class ApifyError extends Error {
     this.status = status;
   }
 }
+
+/** Apify turned the account's token away (401 not accepted, or 402 out of usage and 403 not allowed for an account-level reason). Trying again cannot help until the account answers, so a step waits instead of failing. */
+export class ApifyTokenRefused extends ApifyError {
+  constructor(message: string, status: number) {
+    super(message, status);
+    this.name = "ApifyTokenRefused";
+  }
+}
+/** 401 always means the token was not accepted. 402 and 403 can also be about one actor (not rented, not allowed to this token), so they count only with an account-level error type in the answer. */
+const ACCOUNT_ERROR_TYPES: ReadonlySet<string> = new Set([
+  "token-not-provided", "invalid-token", "user-or-token-not-found", "user-not-found", "not-enough-usage-to-run-paid-actor",
+]);
+const errorTypeOf = (body: string): string => {
+  try {
+    const type = (JSON.parse(body) as { error?: { type?: unknown } } | null)?.error?.type;
+    return typeof type === "string" ? type : "";
+  } catch {
+    return "";
+  }
+};
+const tokenRefused = (status: number, body: string) => status === 401 || ((status === 402 || status === 403) && ACCOUNT_ERROR_TYPES.has(errorTypeOf(body)));
 
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -116,7 +140,9 @@ export function apifyClient(o: ApifyClientOptions): ApifyClient {
       }
       if (response.ok) return await response.json();
       const retryable = starting ? response.status === 429 || response.status === 503 : response.status === 429 || response.status >= 500;
-      const detail = redact(await response.text().catch(() => ""), token).slice(0, 300);
+      const answerText = await response.text().catch(() => "");
+      const detail = redact(answerText, token).slice(0, 300);
+      if (tokenRefused(response.status, answerText)) throw new ApifyTokenRefused(`Apify ${method} ${path} answered ${response.status}: ${detail}`, response.status);
       if (!retryable || attempt >= retries) throw new ApifyError(`Apify ${method} ${path} answered ${response.status}: ${detail}`, response.status);
       await sleep(apifyRetryWaitMs(attempt, response.headers.get("retry-after")));
     }

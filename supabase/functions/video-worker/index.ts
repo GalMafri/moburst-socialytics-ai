@@ -12,7 +12,8 @@ import { createClient } from "../_shared/supabase.ts";
 import { secretEquals } from "../_shared/auth/secretEquals.ts";
 import { settleRequest } from "../_shared/canva/jobs.ts";
 import { wakeVideoWorker } from "../_shared/canva/worker.ts";
-import { VIDEO_JOB_LEASE_MS, type VideoJob, recordVideoFailure, runVideoStep } from "../_shared/video/steps.ts";
+import { VIDEO_JOB_LEASE_MS, type VideoJob, runVideoStep } from "../_shared/video/steps.ts";
+import { advanceVideoJob } from "../_shared/video/advance.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
@@ -24,8 +25,6 @@ const PASS_BUDGET_MS = 90_000;
 const JOB_LEASE_MS = VIDEO_JOB_LEASE_MS;
 /** Between passes that found nothing to advance (footage still rendering). */
 const IDLE_PAUSE_MS = 15_000;
-/** A job is only ever moved on while it is active: a job stopped meanwhile (its request closed or canceled) stays stopped. */
-const ACTIVE = ["queued", "running"];
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -99,25 +98,11 @@ async function pass(admin: any): Promise<number> {
       .update({ lease_until: new Date(Date.now() + JOB_LEASE_MS).toISOString(), status: "running", updated_at: new Date().toISOString() })
       .eq("id", id).in("status", ["queued", "running"])
       .or(`lease_until.is.null,lease_until.lt.${new Date().toISOString()}`)
-      .select("id, client_id, step, state, input, attempts, design_request_id, option_index, clip_order");
+      .select("id, client_id, step, state, input, attempts, design_request_id, option_index, created_at, clip_order");
     const job = rows?.[0] as (VideoJob & { attempts: number }) | undefined;
     if (!job) continue;
-    job.state = job.state ?? {};
-    const before = job.step;
-    try {
-      let result = await runVideoStep(admin, job);
-      while (result === "next" && Date.now() - started < PASS_BUDGET_MS) result = await runVideoStep(admin, job);
-      // A held job is left as its hold saved it (state and lease); the hold moves it on when its work ends.
-      if (result === "done") {
-        await admin.from("canva_finish_jobs").update({ status: "done", step: job.step, state: job.state, output_path: job.state.final_path, error: null, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE);
-      } else if (result !== "held") {
-        await admin.from("canva_finish_jobs").update({ step: job.step, state: job.state, error: null, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE);
-      }
-      // A held job is not counted: a busy image model must not keep passes from their idle pause.
-      if (result !== "held" && (result === "done" || job.step !== before)) advanced++;
-    } catch (e) {
-      await recordVideoFailure(admin, job, e);
-    }
+    // Its steps until one waits or is held; its step and state are saved together, on an error too (advance.ts).
+    if (await advanceVideoJob(admin, job, (j) => runVideoStep(admin, j), () => Date.now() - started < PASS_BUDGET_MS)) advanced++;
     if (job.design_request_id) requests.add(job.design_request_id);
   }
   for (const id of requests) {

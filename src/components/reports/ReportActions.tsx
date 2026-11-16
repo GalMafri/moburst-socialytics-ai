@@ -21,7 +21,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { ExternalLink, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 
 interface ReportActionsProps {
@@ -39,6 +39,15 @@ interface ReportActionsProps {
    */
   kind?: "monthly" | "competitive";
   onDeleted?: () => void;
+}
+
+/** The one "Open presentation" link every report screen uses; the presentation opens without access back to this page. */
+export function OpenPresentationButton({ url, variant = "outline" }: { url: string; variant?: "outline" | "default" }) {
+  return (
+    <Button asChild size="sm" variant={variant}>
+      <a href={url} target="_blank" rel="noopener noreferrer"><ExternalLink /> Open presentation</a>
+    </Button>
+  );
 }
 
 export function ReportActions({ report, kind = "monthly", onDeleted }: ReportActionsProps) {
@@ -142,27 +151,27 @@ export function ReportActions({ report, kind = "monthly", onDeleted }: ReportAct
         <DialogContent onClick={(e) => e.stopPropagation()}>
           <DialogHeader>
             <DialogTitle>Edit report</DialogTitle>
-            <DialogDescription>Update report metadata.</DialogDescription>
+            <DialogDescription>Change the dates this report covers or the link to its presentation.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">
-              <Label>Date Range Start</Label>
-              <Input type="date" value={dateStart} onChange={(e) => setDateStart(e.target.value)} />
+              <Label htmlFor="report-start">Start date</Label>
+              <Input id="report-start" type="date" value={dateStart} onChange={(e) => setDateStart(e.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label>Date Range End</Label>
-              <Input type="date" value={dateEnd} onChange={(e) => setDateEnd(e.target.value)} />
+              <Label htmlFor="report-end">End date</Label>
+              <Input id="report-end" type="date" value={dateEnd} onChange={(e) => setDateEnd(e.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label>Presentation URL</Label>
-              <Input value={gammaUrl} onChange={(e) => setGammaUrl(e.target.value)} placeholder="https://..." />
+              <Label htmlFor="report-presentation">Presentation link</Label>
+              <Input id="report-presentation" value={gammaUrl} onChange={(e) => setGammaUrl(e.target.value)} placeholder="https://..." />
             </div>
           </div>
           {notSaved && <p role="status" className="t-secondary">Not saved yet. Your changes are kept here.</p>}
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
             <Button onClick={handleEdit} disabled={saving}>
-              {saving ? "Saving..." : "Save"}
+              {saving ? "Saving" : "Save"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -177,7 +186,7 @@ export function ReportActions({ report, kind = "monthly", onDeleted }: ReportAct
             <p>The report and its analysis go for good. This cannot be undone.</p>
             <p className="t-secondary">
               {kind === "competitive"
-                ? "The cached RivalIQ data and any feedback on its insights stay, no longer attached to a report."
+                ? "The collected data and any feedback on its insights stay, no longer attached to a report."
                 : "Designs and scheduled posts made from it stay, no longer attached to a report."}
             </p>
             {notDeleted && <p role="status" className="t-secondary">Not deleted yet. The report is still here.</p>}

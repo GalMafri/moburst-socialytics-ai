@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { linksTo, siteLinkSet } from "../../../functions/_shared/lifecycle/siteLinks";
 import { matchProfiles, platformsOf, profileKey, siteProfileLinks, type SproutProfile } from "../../../functions/_shared/lifecycle/accounts";
 import { normName, sameName, slugify, textHash } from "../../../functions/_shared/lifecycle/names";
 
@@ -50,5 +51,35 @@ describe("matchProfiles", () => {
   it("names the platforms the assigned profiles cover", () => {
     expect(platformsOf(["fb_instagram_account", "facebook", "linkedin_company", "instagram"])).toEqual(["Instagram", "Facebook", "LinkedIn"]);
     expect(platformsOf([])).toEqual([]);
+  });
+});
+
+describe("a homepage's profile links keep each handle's own case", () => {
+  const ID = "UCtyXEjQ6RqDX7mNn1Zb3k9A";
+  const SITE = `<a href="https://www.youtube.com/channel/${ID}">YouTube</a><a href="https://www.facebook.com/BaderLawLLC">Facebook</a>`;
+  it("lists each link once, as written, so a channel id stays a real id", () => {
+    const links = siteProfileLinks(SITE);
+    expect(links).toEqual([`facebook:BaderLawLLC`, `youtube:${ID}`]);
+  });
+  it("lists a handle once however many ways the page writes it, in the case that has capitals", () => {
+    const links = siteProfileLinks(`<a href="https://www.facebook.com/baderlawllc">a</a><a href="https://www.facebook.com/BaderLawLLC">b</a><a href="https://www.facebook.com/baderlawllc">c</a>`);
+    expect(links).toEqual(["facebook:BaderLawLLC"]);
+  });
+  it("still matches a Sprout profile whatever the case of the link or of its native name", () => {
+    const links = siteProfileLinks(SITE);
+    const m = matchProfiles({ client: { id: "c", name: "Someone" }, profiles: [p("1", "BL", "baderlawllc", "facebook"), p("2", "BL2", "BaderLawLLC", "facebook")], siteLinks: links, ...none });
+    expect(m.map((x) => x.profile.id)).toEqual(["1", "2"]);
+    const cased = matchProfiles({ client: { id: "c", name: "Someone" }, profiles: [p("1", "BL", "baderlawllc", "facebook")], siteLinks: ["facebook:BaderLawLLC"], ...none });
+    expect(cased.map((x) => x.profile.id)).toEqual(["1"]);
+  });
+});
+
+describe("comparing site links", () => {
+  it("is case-insensitive on both sides, and tolerates no list", () => {
+    const set = siteLinkSet(["facebook:BaderLawLLC", "instagram:moburst.agency"]);
+    expect(linksTo(set, "facebook:baderlawllc")).toBe(true);
+    expect(linksTo(set, "Instagram:Moburst.Agency")).toBe(true);
+    expect(linksTo(set, "facebook:other")).toBe(false);
+    expect(siteLinkSet(undefined).size).toBe(0);
   });
 });

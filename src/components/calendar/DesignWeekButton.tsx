@@ -12,6 +12,7 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
+import { NOT_YET, NotYet, useNotYet } from "@/components/ui/not-yet";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -36,6 +37,8 @@ export function DesignWeekBand({ clientId, clientName, week }: { clientId: strin
   });
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  // What the band says when a press got no answer (it was sent again quietly first).
+  const notYet = useNotYet();
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ["design-week-runs", clientId] });
@@ -44,7 +47,7 @@ export function DesignWeekBand({ clientId, clientName, week }: { clientId: strin
   };
 
   const weekCounts = preview && !preview.code ? preview.counts : undefined;
-  // Videos whose price could not be read wait for the next press: what a press designs now leaves them out.
+  // Videos whose price could not be read are left out of this run: what a press designs now leaves them out.
   const unpriced = !!preview?.price_unavailable && (weekCounts?.video ?? 0) > 0;
   const counts = weekCounts && unpriced ? { ...weekCounts, video: 0 } : weekCounts;
   const n = postsToDesign(counts);
@@ -57,20 +60,24 @@ export function DesignWeekBand({ clientId, clientName, week }: { clientId: strin
   const filming = offered ? filmingLine(counts!.filming) : null;
   const waiting = isMoburstStaff && preview?.code === "not_set_up" ? waitingLine(preview.waiting_for, preview.client_name ?? clientName) : null;
   const priceLine = isMoburstStaff && unpriced
-    ? `Video prices can't be read right now. The videos wait for the next press.${n > 0 ? " The other posts go ahead." : ""}`
+    ? (n > 0
+      ? "Video prices are unavailable right now, so this run leaves the videos out. The other posts go ahead."
+      : "Video prices are unavailable right now, so the videos are not designed yet.")
     : null;
 
   const press = async () => {
     if (!counts) return;
     setBusy(true);
+    notYet.clear();
     const started = await designWeek({
       clientId, week,
       estimate: { posts: n, single: counts.single, story: counts.story ?? 0, carousel: counts.carousel, video: counts.video, credits, credits_per_clip: preview?.credits_per_clip ?? null, minutes },
     });
     setBusy(false);
+    if (!started) notYet.say(NOT_YET.start);
     if (started?.run) {
       const description = (started.left_out_no_price ?? 0) > 0
-        ? "The videos wait for the next press; the other posts are being designed."
+        ? "The videos are left out of this run; the other posts are being designed."
         : "Each post shows where it stands on its card.";
       toast.success("Designing this week's posts", { description });
     }
@@ -78,12 +85,14 @@ export function DesignWeekBand({ clientId, clientName, week }: { clientId: strin
   };
   const stop = async () => {
     if (!run) return;
+    notYet.clear();
     const stopped = await stopWeek(run.id);
+    if (!stopped) notYet.say(NOT_YET.stop);
     if (stopped) toast.success("The rest of this week won't be designed", { description: "Posts already being designed finish." });
     refresh();
   };
 
-  if (!active && !designed && !waiting && !offered && !priceLine) return null;
+  if (!active && !designed && !waiting && !offered && !priceLine && !notYet.line) return null;
 
   return (
     <div className="flex flex-wrap items-center gap-3">
@@ -97,6 +106,7 @@ export function DesignWeekBand({ clientId, clientName, week }: { clientId: strin
       {offered && <p className="t-secondary">{previewLine(counts!, credits, minutes)}</p>}
       {priceLine && <p className="t-secondary">{priceLine}</p>}
       {filming && <p className="t-secondary">{filming}</p>}
+      {notYet.line && <NotYet>{notYet.line}</NotYet>}
       {offered && (
         <Button size="sm" onClick={press} disabled={busy}>
           {busy ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5 mr-1.5" />}

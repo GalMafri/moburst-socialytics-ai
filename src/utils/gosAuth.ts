@@ -37,3 +37,40 @@ export const getGosHandoffToken = (): string | null => {
   const token = new URLSearchParams(window.location.search).get("token");
   return token && token.trim() ? token : null;
 };
+
+// The legacy portal (tools.moburst.com), for people who sign in there.
+export const LEGACY_PORTAL_URL: string =
+  (import.meta.env.VITE_LEGACY_PORTAL_URL as string | undefined) || "https://tools.moburst.com";
+
+export type PortalSource = "hub" | "gos";
+
+const LAST_PORTAL_KEY = "socialytics.lastPortal";
+
+// Which portal a person last signed in from. Written at every successful
+// sign-in and at every load that resumes a session (from the session's own
+// auth_source), so a link back to "the portal" goes to the one they use. It is
+// kept in memory for the life of the page and in localStorage for the next
+// one. With both empty the moburst.ai portal is used.
+let portalInMemory: PortalSource | null = null;
+
+export const rememberPortal = (source: PortalSource): void => {
+  portalInMemory = source;
+  try {
+    window.localStorage.setItem(LAST_PORTAL_KEY, source);
+  } catch {
+    /* storage blocked: the page still knows it from memory */
+  }
+};
+
+export const lastPortal = (): PortalSource | null => {
+  if (portalInMemory) return portalInMemory;
+  try {
+    const value = window.localStorage.getItem(LAST_PORTAL_KEY);
+    return value === "hub" || value === "gos" ? value : null;
+  } catch {
+    return null;
+  }
+};
+
+// The one place a portal link comes from.
+export const portalUrl = (): string => (lastPortal() === "hub" ? LEGACY_PORTAL_URL : PORTAL_URL);

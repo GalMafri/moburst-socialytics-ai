@@ -65,15 +65,13 @@ interface GroupSpec {
   help?: string;
 }
 
-const COME_FIRST = "Your team's come first; the rest take turns.";
-
 const GROUPS: GroupSpec[] = [
-  { heading: "Topics", noun: "topic", kind: "topic", platform: null, help: `Searched every week on each platform except Instagram, up to 8 a week. ${COME_FIRST}` },
-  { heading: "Instagram hashtags", noun: "Instagram hashtag", kind: "hashtag", platform: "instagram", help: `Searched every week on Instagram, up to 8 a week. ${COME_FIRST}` },
+  { heading: "Topics", noun: "topic", kind: "topic", platform: null, help: "Searched every week on each platform except Instagram." },
+  { heading: "Instagram hashtags", noun: "Instagram hashtag", kind: "hashtag", platform: "instagram", help: "Searched every week on Instagram." },
   // TikTok's and LinkedIn's hashtags are not searched: the weekly calendar suggests them for its posts there.
-  { heading: "TikTok hashtags", noun: "TikTok hashtag", kind: "hashtag", platform: "tiktok", help: "Suggested for TikTok posts in the weekly calendar. Trends on TikTok are searched by topic." },
-  { heading: "LinkedIn hashtags", noun: "LinkedIn hashtag", kind: "hashtag", platform: "linkedin", help: "Suggested for LinkedIn posts in the weekly calendar. Trends on LinkedIn are searched by topic." },
-  { heading: "Exclusions", noun: "exclusion", kind: "exclusion", platform: null, help: "The filter never keeps posts about these." },
+  { heading: "TikTok hashtags", noun: "TikTok hashtag", kind: "hashtag", platform: "tiktok", help: "Suggested for TikTok posts in the weekly calendar." },
+  { heading: "LinkedIn hashtags", noun: "LinkedIn hashtag", kind: "hashtag", platform: "linkedin", help: "Suggested for LinkedIn posts in the weekly calendar." },
+  { heading: "Exclusions", noun: "exclusion", kind: "exclusion", platform: null, help: "Posts about these are left out." },
 ];
 
 /**
@@ -127,7 +125,7 @@ function RewrittenSearches({ rewrite, replaced, onRestore }: {
   };
   return (
     <div role="group" aria-label={`Searches on ${name}`} className="space-y-2 rounded-md bg-[rgba(255,255,255,0.03)] p-3.5">
-      <p className="t-secondary">Trends on {name} are searched with these terms this week, because the {replaced} found too little:</p>
+      <p className="t-secondary">Trends on {name} are searched with these terms this week:</p>
       <ul className="flex flex-wrap gap-1.5">
         {rewrite.searches.map((s) => (
           <li key={s}><Badge variant="outline" className="t-body py-1">{s}</Badge></li>
@@ -266,7 +264,7 @@ export function TrendsWeTrack({ clientId }: { clientId: string }) {
       layout="split"
       eyebrow="Trends"
       title="Trends we track"
-      description="What the weekly trends collection searches for and leaves out, and the hashtags suggested for the calendar. Your team's additions always come first."
+      description="What the weekly trends collection searches for and leaves out, and the hashtags suggested for the calendar."
     >
       {!data ? (
         // A list that did not answer says nothing about the client's trends: keep loading, quietly, and fill in when a try answers.
@@ -274,7 +272,7 @@ export function TrendsWeTrack({ clientId }: { clientId: string }) {
           ? <LoadRetry context="trends we track" error={error} label="Loading trends we track" onRetry={() => refetch()} />
           : <Loading label="Loading trends we track" />
       ) : !data.hasProfile && terms.length === 0 ? (
-        <EmptyState compact icon={TrendingUp} title="Suggestions appear here once the brand details are read." />
+        <EmptyState compact icon={TrendingUp} title="Suggested topics and hashtags appear here." />
       ) : (
         GROUPS.map((spec) => (
           <TermGroup

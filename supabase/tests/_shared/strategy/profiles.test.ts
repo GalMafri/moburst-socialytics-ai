@@ -5,6 +5,7 @@
 // back.
 import { describe, expect, it } from "vitest";
 import { desiredProfiles, profilesKey, syncProfiles, type ProfileRow } from "../../../functions/_shared/strategy/profiles";
+import { siteProfileLinks } from "../../../functions/_shared/lifecycle/accounts";
 import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
 
 describe("the client's public profiles", () => {
@@ -34,5 +35,20 @@ describe("the client's public profiles", () => {
     expect(db.tables.client_public_profiles.map((r) => [r.platform, r.handle, r.source])).toEqual([["instagram", "mine", "person"], ["tiktok", "paythepyper", "removed"], ["x", "paythepyper", "website"]]);
     // A removed profile is not in the key: removing one starts a rewrite without it.
     expect(profilesKey(desired)).toBe(profilesKey(desired.filter((r) => r.source !== "removed")));
+  });
+
+  it("keep a YouTube channel id's own case and link to the channel", () => {
+    const ID = "UCtyXEjQ6RqDX7mNn1Zb3k9A";
+    const site = siteProfileLinks(`<a href="https://www.youtube.com/channel/${ID}">YouTube</a><a href="https://www.facebook.com/BaderLawLLC">f</a>`);
+    const got = desiredProfiles({ rows: [], brand: "Bader Law", rivaliq: [], site });
+    expect(got).toEqual([
+      { platform: "facebook", handle: "BaderLawLLC", url: "https://www.facebook.com/BaderLawLLC", source: "website" },
+      { platform: "youtube", handle: ID, url: `https://www.youtube.com/channel/${ID}`, source: "website" },
+    ]);
+  });
+
+  it("read a lower-cased link kept from before as it is", () => {
+    const got = desiredProfiles({ rows: [], brand: "Moburst", rivaliq: [], site: ["linkedin:moburst"] });
+    expect(got.map((r) => [r.platform, r.handle])).toEqual([["linkedin", "moburst"]]);
   });
 });

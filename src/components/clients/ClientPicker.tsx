@@ -1,7 +1,8 @@
 import { Search, Check } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { ClientLogo } from "@/components/clients/ClientLogo";
 
-type ClientOption = { id: string; name: string; logo_url?: string | null };
+type ClientOption = { id: string; name: string; logo_url?: string | null; design_brand_settings?: { logo_path?: string | null; background?: string | null } | Array<{ logo_path?: string | null; background?: string | null }> | null };
 
 /** One explicit client context for the actions alongside this directory. */
 export function ClientPicker({ clients, selectedId, onSelect, search, onSearch }: {
@@ -16,9 +17,10 @@ export function ClientPicker({ clients, selectedId, onSelect, search, onSearch }
     </div>
     <div className="flex gap-2 overflow-x-auto lg:flex-col lg:max-h-[65vh] lg:overflow-y-auto" role="group" aria-label="Clients">
       {clients.map(client => <button key={client.id} type="button" aria-pressed={selectedId === client.id} onClick={() => onSelect(client.id)}
-        className={`flex shrink-0 items-center gap-3 px-3 py-2.5 text-left min-w-[180px] lg:min-w-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${selectedId === client.id ? 'glass-inner is-selected text-white' : 'rounded-[12px] border border-transparent hover:bg-white/5 text-[#d1d5db]'}`}>
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-white/10 t-badge text-white" aria-hidden="true">
-          {client.logo_url ? <img src={client.logo_url} alt="" className="h-full w-full rounded-[8px] object-contain" /> : client.name.slice(0,2).toUpperCase()}
+        className={`flex shrink-0 items-center gap-3 px-3 py-2.5 text-left min-w-[180px] lg:min-w-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${selectedId === client.id ? 'glass-inner is-selected text-white' : 'rounded-[12px] border border-transparent hover:bg-white/5 text-muted-foreground'}`}>
+        {/* A fixed-width slot, so every name starts at the same place and a wide wordmark keeps its shape. */}
+        <span className="flex w-14 shrink-0 items-center justify-start">
+          <ClientLogo client={client} className="max-w-14" />
         </span>
         <span className="flex-1 t-body font-medium break-words">{client.name}</span>
         {selectedId === client.id && <Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />}

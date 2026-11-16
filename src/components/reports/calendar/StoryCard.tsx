@@ -14,7 +14,8 @@ import { platformName } from "@/lib/display";
 import { postCopyOf } from "@/lib/postCopy";
 import { isPreparing } from "@/lib/designRequests";
 import { useAuth } from "@/hooks/useAuth";
-import { PostStatusChip, type PostStatus } from "./PostStatusChip";
+import { PostStatusChip } from "./PostStatusChip";
+import type { PostStatus } from "./postStatus";
 import { useDesignRequestForPost } from "./DesignRequestsContext";
 
 interface Props {
@@ -35,14 +36,17 @@ export function StoryCard({ post, iteration, status, onOpen, onToggleApproved }:
   return (
     <div className={follows ? "relative pl-5" : undefined} data-story-card>
       {/* The rail from the post above to this Story. */}
-      {follows && <span aria-hidden data-story-rail className="absolute left-2 -top-3 bottom-1/2 w-3 border-l border-b border-white/15 rounded-bl-[6px]" />}
-      <button
-        type="button"
-        onClick={onOpen}
-        aria-label={`Open ${name}: ${copy.slice(0, 60)}`}
-        className="glass-inner hover-lift w-full text-left p-2.5 flex items-start gap-3 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-      >
-        <div className="relative w-12 shrink-0 aspect-[9/16] rounded-[6px] overflow-hidden">
+      {follows && <span aria-hidden data-story-rail className="absolute left-2 -top-3 bottom-1/2 w-3 border-l border-b border-white/15 rounded-bl-[8px]" />}
+      {/* One button covers the card and opens the Story; the chip is a button of its own above it. */}
+      <div className="glass-inner hover-lift w-full text-left p-2.5 group relative">
+        <button
+          type="button"
+          onClick={onOpen}
+          aria-label={`Open ${name}: ${copy.slice(0, 60)}`}
+          className="absolute inset-0 z-0 rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        />
+        <div className="relative pointer-events-none flex items-start gap-3">
+        <div className="relative w-12 shrink-0 aspect-[9/16] rounded-[8px] overflow-hidden">
           {thumb ? (
             <img src={thumb} alt="" className="w-full h-full object-cover bg-black" />
           ) : (
@@ -62,7 +66,8 @@ export function StoryCard({ post, iteration, status, onOpen, onToggleApproved }:
           <p className="t-secondary line-clamp-2 print:line-clamp-none">{copy || "No message yet."}</p>
           <PostStatusChip status={status} onToggleApproved={onToggleApproved} />
         </div>
-      </button>
+        </div>
+      </div>
     </div>
   );
 }

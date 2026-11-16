@@ -63,8 +63,9 @@ it('keeps the logo, placement and background only: the posts designs follow refr
 });
 
 
-it('says a person set them, when they did', async () => {
+it('says a person set them, and what automatic updates do with them', async () => {
   f.settings = { client_id: 'c', source: 'person', logo_path: 'c/logo.png', background: '#000000', placement: { anchor: 'left', width: 0.2, top: 0.05, left: 0.05 }, reference_paths: ['c/a.jpg'], updated_at: '2026-10-12T09:00:00Z' };
   mount();
-  expect(await screen.findByText('Set by your team on Oct 12, 2026. The product keeps these as they are.')).toBeInTheDocument();
+  expect(await screen.findByText('Set by your team on Oct 12, 2026. Automatic updates leave these as they are.')).toBeInTheDocument();
+  expect(screen.queryByText(/The product keeps/)).toBeNull();
 });

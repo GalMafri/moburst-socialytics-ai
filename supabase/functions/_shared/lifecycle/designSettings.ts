@@ -130,6 +130,48 @@ export function inkColor(rgba: ArrayLike<number>): [number, number, number] | nu
   return w > 0 ? [Math.round(r / w), Math.round(g / w), Math.round(b / w)] : null;
 }
 
+/** The longest side a stored logo keeps, in pixels. */
+export const LOGO_MAX_SIDE = 1200;
+/** An alpha at or above this shows: fainter pixels are the soft edge of nothing. */
+const INK_ALPHA = 16;
+
+/**
+ * What a logo is stored as: the box its ink fills (a pixel with some alpha),
+ * and the size that box is stored at, its long side capped at LOGO_MAX_SIDE
+ * (never made larger). A logo drawn on a big canvas with wide empty padding
+ * is stored as its ink alone, so the width a design gives it is the width of
+ * the mark. null when no pixel shows (nothing to trim to).
+ */
+export function logoNormalization(rgba: ArrayLike<number>, width: number, height: number): { box: { x: number; y: number; width: number; height: number }; size: [number, number]; changed: boolean } | null {
+  let minX = width, minY = height, maxX = -1, maxY = -1;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (rgba[(y * width + x) * 4 + 3] < INK_ALPHA) continue;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  if (maxX < 0) return null;
+  const box = { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
+  const scale = Math.min(1, LOGO_MAX_SIDE / Math.max(box.width, box.height));
+  const size: [number, number] = [Math.max(1, Math.round(box.width * scale)), Math.max(1, Math.round(box.height * scale))];
+  return { box, size, changed: box.width !== width || box.height !== height || size[0] !== box.width || size[1] !== box.height };
+}
+
+/**
+ * What an uploaded logo is stored as, from its decoded pixels: kept as the
+ * file (null) when it is a PNG that is already its ink alone and small
+ * enough; otherwise redrawn as a PNG from the box of its ink (the whole image
+ * when no pixel shows) at the capped size.
+ */
+export function logoStorePlan(rgba: ArrayLike<number>, width: number, height: number, isPng: boolean): { box: { x: number; y: number; width: number; height: number }; size: [number, number] } | null {
+  const fit = logoNormalization(rgba, width, height);
+  if (isPng && (!fit || !fit.changed)) return null;
+  return fit ? { box: fit.box, size: fit.size } : { box: { x: 0, y: 0, width, height }, size: [width, height] };
+}
+
 /** A PNG's width and height from its header. */
 export function pngSize(bytes: Uint8Array): [number, number] | null {
   if (bytes.length < 24) return null;

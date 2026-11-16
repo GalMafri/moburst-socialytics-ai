@@ -5,13 +5,14 @@
 // competitors, connects tracking and works out the design settings, all on
 // its own. This page shows where each value came from and lets a person
 // change any of it. A save sends only the fields the person changed
-// (src/lib/clientSetupForm.ts), and the product never overwrites those.
+// (src/lib/clientSetupForm.ts), and Socialytics never overwrites those.
 // Nothing here starts paid work on opening, and nothing tells anyone to set
 // something up.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { LoadRetry } from "@/components/ui/load-error";
 import { Loader2, Play, Plus, RefreshCw, Save, X, CalendarClock, Users } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -35,7 +36,8 @@ import { changedColumns, EMPTY_FORM, formFromClient, keywordPhrases, rebaseForm,
 import { invokeResendable, sendQuietly, writeResendable } from "@/lib/quietSend";
 import { useLifecycleStep } from "@/hooks/useLifecycleStep";
 import { type ResolvedRhythmLine, type RhythmSourcesSummary } from "@/lib/postingRhythm";
-import { competitiveReportQuality } from "../../supabase/functions/_shared/competitive/reportEvidence";
+import { newestReadyReport } from "../../supabase/functions/_shared/competitive/reportEvidence";
+import { pickRunSelection, type SetRow } from "@/lib/competitiveFlow";
 import { PostingRhythmField } from "@/components/onboarding/PostingRhythmField";
 import { StrategyDocUpload } from "@/components/onboarding/StrategyDocUpload";
 import { BrandBookUpload } from "@/components/onboarding/BrandBookUpload";
@@ -66,7 +68,7 @@ const GEOS = [
   { value: "BR", label: "Brazil" },
   { value: "JP", label: "Japan" },
   { value: "KR", label: "South Korea" },
-  { value: "Global", label: "Global (All Regions)" },
+  { value: "Global", label: "Global (all regions)" },
 ];
 
 const LANGUAGES = [
@@ -192,7 +194,7 @@ export default function ClientSetup() {
     enabled: !!clientId,
   });
 
-  // What the product read from the client's website search and social profiles: the facts this page states (display.ts onboardingFacts).
+  // What Socialytics read from the client's website search and social profiles: the facts this page states (display.ts onboardingFacts).
   const { data: onboardingSteps } = useQuery({
     queryKey: ["onboarding-steps", clientId],
     queryFn: async () => {
@@ -201,6 +203,21 @@ export default function ClientSetup() {
         .eq("client_id", clientId).in("step", ["website", "social_read", "brief_pillars", "competitors", "tracking"]);
       if (error) throw error;
       return (Array.isArray(data) ? data : []) as OnboardingStep[];
+    },
+    enabled: !!clientId,
+  });
+
+  // The competitors reports use: the selected ones of the set a report would run on, in the order they were chosen.
+  const { data: chosenCompetitors, isError: chosenFailed, error: chosenError, refetch: refetchChosen } = useQuery({
+    queryKey: ["setup-chosen-competitors", clientId],
+    queryFn: async () => {
+      const { data: sets, error } = await supabase.from("competitor_sets").select("id, status, created_at, confirmed_at, confirmed_by").eq("client_id", clientId);
+      if (error) throw error;
+      const { runnable } = pickRunSelection((sets || []) as SetRow[]);
+      if (!runnable) return [] as string[];
+      const { data, error: rowsError } = await supabase.from("competitors").select("name, selected_rank").eq("set_id", runnable.id).eq("is_selected", true).order("selected_rank", { ascending: true });
+      if (rowsError) throw rowsError;
+      return (data || []).map((c) => String(c.name));
     },
     enabled: !!clientId,
   });
@@ -321,6 +338,7 @@ export default function ClientSetup() {
   const by = (field: string) => setByOf(fs, field);
   const location = (client?.location ?? null) as { source?: string | null; via?: string | null; locality?: string | null } | null;
   const facts = onboardingFacts(client, onboardingSteps);
+  const competitorNames = chosenCompetitors ?? [];
   const brandReadOn = formatDate(brandStep.row?.done_at);
   const pillarsOn = formatDate(client?.pillars_derived_at);
   const zones = form.timezone && !TIME_ZONES.includes(form.timezone) ? [form.timezone, ...TIME_ZONES] : TIME_ZONES;
@@ -344,7 +362,7 @@ export default function ClientSetup() {
         <>
           {!isNew && (
             <Button onClick={() => navigate(`/clients/${id}/analyze`)}>
-              <Play /> Run report
+              <Play /> Run monthly report
             </Button>
           )}
           <Button variant="outline" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !form.name.trim() || (!isNew && !dirty)}>
@@ -405,7 +423,7 @@ export default function ClientSetup() {
                   </Select>
                   <Origin>
                     {by("timezone") === "person"
-                      ? "Set by your team. The product keeps it as it is."
+                      ? "Set by your team. Socialytics keeps it as it is."
                       : facts.timezone
                         ? facts.timezone
                         : by("timezone") === "lifecycle" && locationOrigin(location)
@@ -422,7 +440,7 @@ export default function ClientSetup() {
                     title="Brand identity"
                     description={
                       by("brand_identity") === "person"
-                        ? "Set by your team. The product keeps it as it is."
+                        ? "Set by your team. Socialytics keeps it as it is."
                         : by("brand_identity") === "lifecycle"
                           ? `Read from the website${brandReadOn ? ` on ${brandReadOn}` : ""}. You can change any of it here.`
                           : "The colors, type and style the posts are written and designed in."
@@ -433,7 +451,7 @@ export default function ClientSetup() {
                         <div key={key} className="space-y-1">
                           <Label className="t-label">{label}</Label>
                           <div className="flex items-center gap-2">
-                            <div className="h-10 w-10 rounded-[8px] border border-white/10 shrink-0" style={{ backgroundColor: form.brand_identity?.[key] || "#ccc" }} />
+                            <div className="h-10 w-10 rounded-[8px] border border-white/10 shrink-0" style={{ backgroundColor: form.brand_identity?.[key] || "hsl(var(--muted))" }} />
                             <Input aria-label={label} value={form.brand_identity?.[key] || ""} onChange={(e) => set("brand_identity", { ...form.brand_identity, [key]: e.target.value })} placeholder="#000000" className="font-mono" />
                           </div>
                         </div>
@@ -535,7 +553,7 @@ export default function ClientSetup() {
                 layout="split"
                 eyebrow="Accounts"
                 title="Public profiles"
-                description="The client's own public profiles, which its strategy reads where Sprout has no account. Found from RivalIQ and the client's website; add or change any here, and a profile you remove stays removed."
+                description="The client's own public profiles, which its strategy reads where no social account is connected. They are found from competitor tracking and the client's website. Add or change any here, and a profile you remove stays removed."
               >
                 <PublicProfiles clientId={clientId} />
               </Section>
@@ -566,7 +584,7 @@ export default function ClientSetup() {
                       <Label>Content pillars</Label>
                       <Origin>
                         {by("content_pillars") === "person"
-                          ? "Set by your team. The product keeps them as they are."
+                          ? "Set by your team. Socialytics keeps them as they are."
                           : facts.brief.startsWith("Written once")
                             ? facts.brief
                           : by("content_pillars") === "lifecycle"
@@ -586,6 +604,7 @@ export default function ClientSetup() {
                           </Button>
                         </div>
                         <Textarea
+                          aria-label={`Description of ${pillar.name}`}
                           value={pillar.description}
                           onChange={(e) => set("content_pillars", form.content_pillars.map((p, i) => (i === index ? { ...p, description: e.target.value } : p)))}
                           placeholder={`What "${pillar.name}" content looks like: topics, tone, examples...`}
@@ -596,7 +615,7 @@ export default function ClientSetup() {
                     ))}
                   </div>
                   <div className="flex gap-2">
-                    <Input value={newPillarName} onChange={(e) => setNewPillarName(e.target.value)} placeholder="Add a content pillar" onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addPillar())} />
+                    <Input aria-label="Content pillar to add" value={newPillarName} onChange={(e) => setNewPillarName(e.target.value)} placeholder="Add a content pillar" onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addPillar())} />
                     <Button variant="outline" size="icon" onClick={addPillar} aria-label="Add content pillar">
                       <Plus aria-hidden="true" />
                     </Button>
@@ -621,7 +640,7 @@ export default function ClientSetup() {
                     ))}
                   </div>
                   <div className="flex gap-2">
-                    <Input value={newKeyword} onChange={(e) => setNewKeyword(e.target.value)} placeholder="Add keyword phrases (press Enter)" onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addKeyword())} />
+                    <Input aria-label="Keyword phrase to add" value={newKeyword} onChange={(e) => setNewKeyword(e.target.value)} placeholder="Add keyword phrases (press Enter)" onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addKeyword())} />
                     <Button variant="outline" size="icon" onClick={addKeyword} aria-label="Add keyword phrase">
                       <Plus aria-hidden="true" />
                     </Button>
@@ -645,7 +664,7 @@ export default function ClientSetup() {
               layout="split"
               eyebrow="Competitors"
               title="Competitive context"
-              description="The three closest competitors with a website are chosen automatically. Notes from the account team are weighed heavily when they are."
+              description="The three closest competitors with a website are chosen automatically. Notes from the account team are weighed heavily in that choice."
               action={clientId ? (
                 <Button variant="outline" size="sm" onClick={() => navigate(`/clients/${id}/competitive`)}>
                   Open competitors
@@ -660,10 +679,11 @@ export default function ClientSetup() {
                     onChange={(e) => set("competitor_seed_notes", e.target.value)}
                   />
                 </div>
-                {(facts.competitors.names.length > 0 || facts.competitors.tracking) && (
+                {chosenFailed && <LoadRetry context="chosen competitors" error={chosenError} label="Loading the competitors chosen" onRetry={() => refetchChosen()} />}
+                {!chosenFailed && (competitorNames.length > 0 || facts.competitors.tracking) && (
                   <div className="space-y-2">
                     <Label>Competitors chosen</Label>
-                    {facts.competitors.names.length > 0 && <p className="t-body">{facts.competitors.names.join(", ")}</p>}
+                    {competitorNames.length > 0 && <p className="t-body">{competitorNames.join(", ")}</p>}
                     {facts.competitors.tracking && <Origin>{facts.competitors.tracking}</Origin>}
                   </div>
                 )}
@@ -712,11 +732,11 @@ export default function ClientSetup() {
                   <Label htmlFor="brief-text">Brief text</Label>
                   <Origin>
                     {by("brief_text") === "lifecycle"
-                      ? `${facts.brief || `Written by the product from ${client?.strategy_doc_file_path ? "the strategy document" : "the website"}.`} You can rewrite it; the product never replaces your version.`
+                      ? `${facts.brief || `Written by Socialytics from ${client?.strategy_doc_file_path ? "the strategy document" : "the website"}.`} You can rewrite it; Socialytics never replaces your version.`
                       : by("brief_text") === "person" ? "" : facts.brief}
                   </Origin>
                   <Textarea id="brief-text" value={form.brief_text} onChange={(e) => set("brief_text", e.target.value)} rows={10}
-                    placeholder={`Brand Voice: Professional yet approachable\nTarget Audience: B2B SaaS decision-makers\nCampaign Objectives: Increase brand awareness and thought leadership\nContent Restrictions: No competitor mentions\nCompetitive Positioning: Market leader in AI-powered analytics`}
+                    placeholder={`Brand voice: Professional yet approachable\nTarget audience: B2B SaaS decision-makers\nCampaign objectives: Increase brand awareness and thought leadership\nContent restrictions: No competitor mentions\nCompetitive positioning: Market leader in AI-powered analytics`}
                   />
                 </div>
             </Section>
@@ -811,7 +831,7 @@ function ReportScheduleManager({ clientId, timeZone }: { clientId: string; timeZ
       ]);
       if (schedules.error) throw schedules.error;
       // The latest analysis that passed its checks: a held one is not the last report anyone got.
-      const ready = (competitive.data || []).find((r) => competitiveReportQuality(r.report_data).ready) ?? null;
+      const ready = newestReadyReport(competitive.data || []);
       return { schedules: (schedules.data || []) as Row[], latest: { social: social.data ?? null, competitive: ready } as Record<string, Row | null> };
     },
   });

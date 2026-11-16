@@ -97,7 +97,9 @@ export async function recordFeedback(admin: any, it: FeedbackRow, verdict: "reje
   if (upErr) throw new Error(upErr.message);
   if (verdict !== "rejected") return [];
 
-  const why = REASONS[String(reason)] || REASONS.other;
+  // The reason's wording and whether it names anything come from the same lookup: a reason that is not one offered reads as Something else.
+  const named = Object.prototype.hasOwnProperty.call(REASONS, String(reason)) && reason !== "other";
+  const why = named ? REASONS[String(reason)] : REASONS.other;
   let learnings = await ask(
     "You turn one design rejection into durable guidance for future designs for the same client. " +
       "Write 1 or 2 rules from the reason, general enough to apply beyond this one post. " +
@@ -109,7 +111,8 @@ export async function recordFeedback(admin: any, it: FeedbackRow, verdict: "reje
       (it.visual_direction ? ` The brief's visual direction was: "${String(it.visual_direction).slice(0, 300)}".` : "") +
       `\n\nReply with the JSON only.`,
   );
-  // With no model answer the reason itself is still worth remembering.
+  // With no model answer a named reason is still worth remembering. "Something else" names nothing: without a rule from the note, no rule is stored.
+  if (!learnings?.length && !named) return [];
   if (!learnings?.length) learnings = [{ pattern_type: "avoid", pattern_description: `Avoid designs where ${why}.` }];
   return await store(admin, learnings.map((l) => ({
     client_id: it.client_id,

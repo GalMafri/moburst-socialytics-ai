@@ -29,14 +29,11 @@ export function ExportPdfButton({
     setExporting(true);
     try {
       await exportReportToPdf({ contentRef, filename, title });
-      toast({
-        title: "PDF export ready",
-        description: "Save as PDF from the print dialog, then close the tab when done.",
-      });
-    } catch (err: any) {
-      // The print tab did not open (most often a blocked pop-up, which the
-      // browser itself points out). The button is ready again; the error's
-      // own text is for the team.
+      toast({ title: "Your PDF is ready to save from the print dialog." });
+    } catch (err: unknown) {
+      // Nothing fails visibly (rule 7): the print window did not open, most
+      // often a blocked pop-up, which the browser itself points out. The
+      // button is ready again; the error's own text is for the team.
       console.warn("[export pdf] not opened", err);
     } finally {
       setExporting(false);

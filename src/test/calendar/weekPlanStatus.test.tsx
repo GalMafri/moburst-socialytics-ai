@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { weekPlanView } from '@/lib/weekPlanStatus';
-import { WeekPlanBand } from '@/components/calendar/WeekPlanControls';
+import { PlanNextWeekButton, ReviseWeekButton, WeekPlanBand } from '@/components/calendar/WeekPlanControls';
 import ClientCalendar from '@/pages/ClientCalendar';
 import type { CalendarPlanRow } from '@/lib/calendarPosts';
 
@@ -22,16 +22,18 @@ const f = vi.hoisted(() => ({
   invokes: [] as any[],
   failPlans: false,
   stopAnswer: null as any,
+  // Requests the server turns down, by action.
+  refuse: [] as string[],
 }));
 vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }));
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ isMoburstStaff: f.staff, isClient: !f.staff }) }));
-vi.mock('@/hooks/useRealtimePostIterations', () => ({ useRealtimePostIterations: () => {} }));
 vi.mock('@/components/layout/AppLayout', () => ({ AppLayout: ({ children, actions }: any) => <main><div>{actions}</div>{children}</main> }));
 vi.mock('@/integrations/supabase/client', () => ({ supabase: {
   auth: { getSession: async () => ({ data: { session: { user: { id: 'me' } } } }), getUser: async () => ({ data: { user: { id: 'me' } } }) },
   functions: { invoke: async (name: string, opts: any) => {
     f.invokes.push({ name, ...opts.body });
+    if (name === 'calendar-posts' && f.refuse.includes(opts.body.action)) return { data: null, error: { message: 'Edge Function returned a non-2xx status code', context: { status: 409 } } };
     // Without an answer set, the server turns the request down (a week that is over, say).
     if (name === 'calendar-posts' && opts.body.action === 'stop_plan') return f.stopAnswer ?? { data: null, error: { message: 'Edge Function returned a non-2xx status code', context: { status: 409 } } };
     return { data: {}, error: null };
@@ -39,7 +41,7 @@ vi.mock('@/integrations/supabase/client', () => ({ supabase: {
   from: (table: string) => {
     const rows = () => (table === 'calendar_plans' ? f.plans : table === 'calendar_posts' ? f.posts : table === 'clients' ? [{ id: 'c1', name: 'Pay The Pyper' }] : []);
     const q: any = {
-      select: () => q, eq: () => q, neq: () => q, in: () => q, is: () => q, not: () => q, order: () => q, limit: () => q, gte: () => q, lte: () => q, gt: () => q,
+      select: () => q, eq: () => q, neq: () => q, in: () => q, is: () => q, not: () => q, order: () => q, limit: () => q, gte: () => q, lte: () => q, gt: () => q, range: () => q,
       maybeSingle: async () => ({ data: table === 'clients' ? { id: 'c1', name: 'Pay The Pyper', timezone: 'UTC', archived_at: null } : null, error: null }),
       then: (ok: any, fail: any) => Promise.resolve(table === 'calendar_plans' && f.failPlans ? { data: null, error: { message: 'offline' } } : { data: rows(), error: null }).then(ok, fail),
     };
@@ -55,12 +57,22 @@ const plan = (over: Partial<CalendarPlanRow> = {}): CalendarPlanRow => ({
 });
 
 beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-03T12:00:00Z')); });
-afterEach(() => { cleanup(); vi.useRealTimers(); f.staff = true; f.plans = []; f.posts = []; f.invokes = []; f.failPlans = false; f.stopAnswer = null; });
+afterEach(() => { cleanup(); vi.useRealTimers(); f.staff = true; f.plans = []; f.posts = []; f.invokes = []; f.failPlans = false; f.stopAnswer = null; f.refuse = []; });
 
 describe('what the week says about its plan', () => {
   it('says the week is being planned, and where it stands: waiting to start, then writing the posts', () => {
     expect(weekPlanView(plan(), TODAY)).toEqual({ kind: 'planning', line: 'Planning the week of Nov 9…', steps: [{ label: 'Waiting to start', state: 'current' }, { label: 'Writing the posts', state: 'next' }] });
     expect(weekPlanView(plan({ status: 'planning' }), TODAY)).toMatchObject({ kind: 'planning', steps: [{ label: 'Waiting to start', state: 'done' }, { label: 'Writing the posts', state: 'current' }] });
+  });
+
+  it('says a plan that already failed a try is taking longer than usual and keeps trying, never the raw error', () => {
+    const view = weekPlanView(plan({ error: 'Anthropic 529: overloaded' }), TODAY);
+    expect(view).toMatchObject({ kind: 'planning', line: 'Planning the week of Nov 9 is taking longer than usual. It keeps trying.' });
+    expect(JSON.stringify(view)).not.toMatch(/Anthropic|529|overloaded/);
+    expect((view as any).steps).toEqual([{ label: 'Waiting to start', state: 'current' }, { label: 'Writing the posts', state: 'next' }]);
+    expect(weekPlanView(plan({ status: 'planning', error: 'x' }), TODAY)?.line).toBe('Planning the week of Nov 9 is taking longer than usual. It keeps trying.');
+    // A plan with no failed try says what it always said.
+    expect(weekPlanView(plan({ error: null }), TODAY)?.line).toBe('Planning the week of Nov 9…');
   });
 
   it('says the week is being revised, with the note, and whether a run has it yet', () => {
@@ -140,6 +152,13 @@ describe('the week band', () => {
     expect(screen.queryByRole('button', { name: /Stop|Remove/ })).toBeNull();
   });
 
+  it('keeps Stop planning on a plan that is taking longer than usual', () => {
+    band(plan({ error: 'boom' }));
+    expect(screen.getByText('Planning the week of Nov 9 is taking longer than usual. It keeps trying.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Stop planning' })).toBeTruthy();
+    expect(screen.queryByText(/boom/)).toBeNull();
+  });
+
   it('shows the state with no buttons to someone who cannot change the calendar', () => {
     band(plan(), vi.fn(), false);
     expect(screen.getByText('Planning the week of Nov 9…')).toBeTruthy();
@@ -152,6 +171,45 @@ describe('the week band', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Stop planning' }).at(-1)!);
     await waitFor(() => expect(onChanged).toHaveBeenCalledWith(null));
     expect(screen.queryByText(/fail|error|try again/i)).toBeNull();
+    // The band says the true state in a status line, and keeps the button.
+    expect((await screen.findByText('Not stopped yet.')).closest('[role=status]')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Stop planning' })).toBeTruthy();
+  });
+
+  it("says the plan is not removed yet when the server turns the removal down", async () => {
+    band(plan({ status: 'ready', ready_at: '2026-11-03T09:10:00Z' }));
+    fireEvent.click(screen.getByRole('button', { name: "Remove this week's plan" }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove the plan' }));
+    expect(await screen.findByText('Not removed yet.')).toBeTruthy();
+  });
+});
+
+describe('the plan buttons when a press gets no answer', () => {
+  const mounted = (node: React.ReactNode) => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    return render(<QueryClientProvider client={qc}>{node}</QueryClientProvider>);
+  };
+
+  it('Plan the week says it is not started yet, and keeps its button', async () => {
+    f.refuse = ['plan_next_week'];
+    const onRequested = vi.fn();
+    mounted(<PlanNextWeekButton clientId="c1" week="2026-11-09" onRequested={onRequested} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Plan the week of Nov 9' }));
+    await waitFor(() => expect(onRequested).toHaveBeenCalledWith(null, null));
+    expect((await screen.findByText('Not started yet.')).closest('[role=status]')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Plan the week of Nov 9' })).toBeEnabled();
+  });
+
+  it('Revise the week keeps the dialog and the note, and says it is not sent yet', async () => {
+    f.refuse = ['revise_week'];
+    const onRequested = vi.fn();
+    mounted(<ReviseWeekButton plan={plan({ status: 'ready', ready_at: '2026-11-03T09:10:00Z' })} onRequested={onRequested} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Revise this week' }));
+    fireEvent.change(await screen.findByLabelText('What should change'), { target: { value: 'Less formal' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Revise the week' }));
+    expect(await screen.findByText('Not sent yet. Your note is kept here.')).toBeTruthy();
+    expect(screen.getByLabelText('What should change')).toHaveValue('Less formal');
+    expect(onRequested).not.toHaveBeenCalled();
   });
 });
 

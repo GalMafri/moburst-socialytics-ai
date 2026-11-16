@@ -38,18 +38,6 @@ verify_jwt = false
 [functions.design-request]
 verify_jwt = false
 
-[functions.firecrawl-scrape]
-verify_jwt = false
-
-[functions.firecrawl-search]
-verify_jwt = false
-
-[functions.firecrawl-map]
-verify_jwt = false
-
-[functions.firecrawl-crawl]
-verify_jwt = false
-
 [functions.extract-brand-from-file]
 verify_jwt = false
 
@@ -57,33 +45,6 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.schedule-sprout-post]
-verify_jwt = false
-
-[functions.generate-post-video]
-verify_jwt = false
-
-[functions.data-snapshot]
-verify_jwt = false
-
-# ── Functions added during the design pipeline v2 work. These exist on disk
-# and are invoked from the app, but were not previously registered here so
-# Lovable did not deploy them. Without propose-carousel-slides in particular,
-# carousel briefs fall back to a shared prompt across all slide calls and
-# Gemini composes contact-sheet layouts.
-
-[functions.propose-carousel-slides]
-verify_jwt = false
-
-[functions.propose-design-angles]
-verify_jwt = false
-
-[functions.synthesize-design-language]
-verify_jwt = false
-
-[functions.adapt-creative-prompt]
-verify_jwt = false
-
-[functions.validate-design-output]
 verify_jwt = false
 
 
@@ -99,8 +60,6 @@ verify_jwt = false
 [functions.hub-auth-bridge]
 verify_jwt = false
 
-[functions.proxy-media]
-verify_jwt = false
 # ── Competitive analysis functions. verify_jwt stays off for parity with the
 # rest of the project (the gateway would otherwise reject gOS-bridged calls
 # that carry a custom-signed JWT), and each function enforces staff access
@@ -136,22 +95,10 @@ verify_jwt = false
 [functions.refresh-competitor-feed]
 verify_jwt = false
 
-# Content pillars read from the client's strategy document, their own posts,
-# or the brief, instead of typed from nothing. Staff-gated inside the
-# function, like the rest of the project.
-[functions.derive-content-pillars]
-verify_jwt = false
-
 # Starts a report run, or starts a failed one again — monthly and competitive
 # both. One payload builder for every run in the app. Staff-gated inside the
 # function, like the rest of the project.
 [functions.run-report]
-verify_jwt = false
-
-# Asks Higgsfield which model routes this account can reach. Read-only,
-# spends no credits, staff-gated. The live API does not match the published
-# spec, so the app is configured from what this returns rather than guesses.
-[functions.higgsfield-probe]
 verify_jwt = false
 
 # Links the team's Higgsfield account once, then keeps the server signed in
@@ -163,15 +110,6 @@ verify_jwt = false
 
 # Google sends the browser back here with no JWT; the stored state is the proof.
 [functions.google-auth]
-verify_jwt = false
-
-[functions.media-job-status]
-verify_jwt = false
-
-[functions.setup-rivaliq-landscape]
-verify_jwt = false
-
-[functions.plan-social-creative]
 verify_jwt = false
 
 [functions.rivaliq-request]
@@ -204,15 +142,6 @@ verify_jwt = false
 # The public API: machine callers hold API keys, not sessions; the core
 # checks keys, scopes and rate limits itself.
 [functions.api]
-verify_jwt = false
-
-[functions.read-social-template]
-verify_jwt = false
-
-[functions.build-social-templates]
-verify_jwt = false
-
-[functions.preview-brand-design]
 verify_jwt = false
 
 [functions.calendar-posts]
@@ -251,3 +180,11 @@ site_url = "https://moburst-socialytics-ai.lovable.app"
 enabled = true
 authorization_url_path = "/oauth/consent"
 allow_dynamic_registration = true
+
+# The design worker: called by the picture queue with the operational secret.
+[functions.design-worker]
+verify_jwt = false
+
+# Staff reject or archive a generated design; the function checks staff access itself.
+[functions.record-design-feedback]
+verify_jwt = false

@@ -60,6 +60,11 @@
 // POST {"mode":"trends_now","client_id":"<id>"}
 //                              this week's industry trends for one client now
 //                              (trends_v1, app mode; paid: Apify and Claude).
+// POST {"mode":"trends_recollect"[,"client_id":"<id>"]}
+//                              this week's trends again for each client whose week the
+//                              code before this release saved partial with nothing back
+//                              (every watched platform failed, no kept post, no theme);
+//                              paid, never scheduled; remove after 16 Nov 2026.
 // POST {"mode":"replay_trends","run_id":"<id>"}
 //                              a trends run's week again from its kept source
 //                              answers (no Apify call; Claude is asked again).
@@ -89,11 +94,10 @@ import { createClient } from "../_shared/supabase.ts";
 import { secretEquals } from "../_shared/auth/secretEquals.ts";
 import { buildCompetitivePayload, buildSocialPayload } from "../_shared/reports/payloads.ts";
 import { closeAbandonedRuns } from "../_shared/reports/schedule.ts";
-import { refreshCompetitorFeed } from "../_shared/competitive/refreshFeed.ts";
 import { checkClientLandscape, landscapeClient, recordTrackingCheck, RIVALIQ_UNAVAILABLE, type LandscapeCheck } from "../_shared/competitive/landscapeCheck.ts";
 import { makePoster, runDispatch, type DispatchDeps } from "./dispatch.ts";
 import { alertTest, ISSUES_WEBHOOK_ENV, postIssue } from "../_shared/alerts/slack.ts";
-import { runFeedJob } from "./feed.ts";
+import { bindRefreshFeed, runFeedJob } from "./feed.ts";
 import { runVoiceProfile, runWeekPlan, runWeekRevise } from "../_shared/calendar/runWeek.ts";
 import { runMomentFeedback, runMomentsList, runWeekMoments } from "../_shared/calendar/runMoments.ts";
 import { runLifecycle, runLifecycleStep, type LifecycleJob } from "../_shared/lifecycle/run.ts";
@@ -110,15 +114,16 @@ import { compareResults, formatComparison } from "../_shared/pipelines/compare.t
 import { appRunView, expirePayloads, loadShadowPair, makePayloadStore, makeRunStore, makeStepLog, makeStepServices } from "../_shared/pipelines/store.ts";
 import { directKey, runClaudeDirect } from "../_shared/pipelines/claudeDirect.ts";
 import { makeDispatchStore, makeJobStore } from "./store.ts";
-import { filterCheckRequest, runTrendJob, startTrendReplay, startTrendWeek } from "./trends.ts";
+import { filterCheckRequest, recollectEmptyWeeks, runTrendJob, startTrendReplay, startTrendWeek } from "./trends.ts";
 import { liveOnboardingDeps, runSproutOnboardingJob, sproutOnboarding } from "./sproutOnboarding.ts";
 import { onboardingFieldsCheck } from "./fieldsCheck.ts";
 import type { ScheduledJob } from "../_shared/scheduled-jobs/types.ts";
 import { runReportText, sonnetCompletion } from "../_shared/reports/correctText.ts";
 import { runReportInsights } from "../_shared/reports/insights.ts";
+import { repairStoredReports } from "../_shared/reports/repairStored.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
 import { runNotesRead } from "../_shared/notes/run.ts";
-import { runStrategyDeck } from "../_shared/strategy/deckJob.ts";
+import { closeAbandonedAll, closeStalledDecks, runStrategyDeck } from "../_shared/strategy/deckJob.ts";
 import { googleConfig, keepAlive } from "../_shared/google/oauth.ts";
 
 const corsHeaders = {
@@ -196,11 +201,7 @@ Deno.serve(async (req) => {
       log: makeStepLog(db),
       services: makeStepServices(db, env),
     };
-    const refreshFeed = (clientId: string) => refreshCompetitorFeed(db, clientId, {
-      rivaliqKey,
-      anthropicKey: Deno.env.get("ANTHROPIC_API_KEY"),
-      secret,
-    });
+    const refreshFeed = bindRefreshFeed(db, { rivaliqKey, anthropicKey: Deno.env.get("ANTHROPIC_API_KEY"), secret });
 
     // One worker pass: lease and run due jobs (the per-minute tick, and the sweep's repair).
     const tick = (): Promise<TickResult> => workerTick({
@@ -247,7 +248,11 @@ Deno.serve(async (req) => {
         }
       },
       finish: (job, outcome) => jobs.finish(job, outcome),
-      closeAbandoned: () => closeAbandonedRuns(db, new Date(), false),
+      // Reports that stopped, and decks whose worker died (each kept from stopping the other).
+      closeAbandoned: () => closeAbandonedAll({
+        reports: () => closeAbandonedRuns(db, new Date(), false),
+        decks: () => closeStalledDecks(db, new Date()),
+      }),
       releaseReady: () => jobs.releaseReady(),
       pipelines: {
         lease: () => jobs.leasePipelines(LEASE_SECONDS, PIPELINE_CONCURRENCY),
@@ -335,6 +340,27 @@ Deno.serve(async (req) => {
       }
     }
 
+    // POST {"mode":"repair_stored_reports"[,"apply":true][,"reword":true][,"report_ids":["<id>"]][,"after":"<created_at>"][,"limit":40]}:
+    // stored social reports brought in line with REPORTS-20 (counts below zero
+    // floored from the report's own figures, with the changes that follow) and
+    // REPORTS-21 (American spelling by word map). Never runs on its own and
+    // calls no provider or model; without "apply": true nothing is written and
+    // every change is listed. One request checks at most "limit" reports and
+    // returns next_after: pass it as "after" to continue. "reword": true (with
+    // "apply") queues the report_text job, one Sonnet call, for each repaired
+    // report whose text quotes a changed figure, and says per report whether it
+    // was queued; a dry run lists those sentences first (_shared/reports/repairStored.ts).
+    if (mode === "repair_stored_reports") {
+      const reportIds = Array.isArray(body.report_ids) ? body.report_ids.map(String) : undefined;
+      const after = typeof body.after === "string" && body.after ? body.after : undefined;
+      const limit = typeof body.limit === "number" && body.limit > 0 ? body.limit : undefined;
+      try {
+        return json(await repairStoredReports(db, { apply: body.apply === true, reword: body.reword === true, reportIds, after, limit }));
+      } catch (e) {
+        return json({ error: e instanceof Error ? e.message : String(e) }, 422);
+      }
+    }
+
     if (mode === "shadow_now") {
       const reportId = typeof body.report_id === "string" ? body.report_id : "";
       const kind = body.kind === "competitive" || body.kind === "social" ? body.kind : null;
@@ -355,6 +381,13 @@ Deno.serve(async (req) => {
       const clientId = typeof body.client_id === "string" ? body.client_id : "";
       if (!clientId) return json({ error: "client_id is required" }, 400);
       return json(await startTrendWeek(db, clientId, new Date(), { suffix: `now-${Date.now()}` }));
+    }
+
+    // POST {"mode":"trends_recollect"[,"client_id":"<id>"]}: a week that brought
+    // nothing back, collected again (paid: Apify and Claude, once per client).
+    if (mode === "trends_recollect") {
+      const clientId = typeof body.client_id === "string" && body.client_id ? body.client_id : undefined;
+      return json({ weeks: await recollectEmptyWeeks(db, new Date(), clientId) });
     }
 
     // POST {"mode":"replay_trends","run_id":"<id>"}: the run's week again from

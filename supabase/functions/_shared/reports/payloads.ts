@@ -95,6 +95,8 @@ export function competitiveContext(
     analyzed_at: reportRow.created_at,
     landscape: rd.landscape?.name || null,
     period: rd.period || null,
+    // The zone the posting hours below are in; null for a report that names none (UTC).
+    time_zone: rd.aggregates?.time_zone ?? null,
     benchmark_score: ai.benchmark_scorecard?.client_score ?? null,
     benchmark_dimensions: (ai.benchmark_scorecard?.dimensions || []).map((d: any) => ({
       dimension: d.dimension,

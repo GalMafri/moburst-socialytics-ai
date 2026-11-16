@@ -3,9 +3,11 @@
 // weights set, a new copy filled with one batchUpdate, shared as editor with
 // the person who asked and no email, its link saved; a copy that did not fill
 // goes to the trash; Google not connected ends the export at once; the chart
-// images are removed after.
+// images are removed after; a client's logo of any usual kind reaches the cover
+// (an SVG as a PNG, no logo leaves its place empty), is read within a size cap;
+// a deck whose job ended or whose worker died on its last try is closed, by what the job says and never by the clock.
 import { describe, expect, it } from "vitest";
-import { runStrategyDeck, TEMPLATE_VERSION, type DeckJobDeps } from "../../../functions/_shared/strategy/deckJob";
+import { closeAbandonedAll, closeStalledDecks, fetchLogo, LOGO_MAX_BYTES, runStrategyDeck, TEMPLATE_VERSION, type DeckJobDeps } from "../../../functions/_shared/strategy/deckJob";
 import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
 import { GoogleNotConnected } from "../../../functions/_shared/google/oauth";
 import type { GoogleApi } from "../../../functions/_shared/google/api";
@@ -137,5 +139,158 @@ describe("a strategy deck job", () => {
     expect(db.tables.content_strategy_exports[0].status).toBe("making");
     await expect(runStrategyDeck(db, job({ attempts: 3 }), broken)).rejects.toThrow();
     expect(db.tables.content_strategy_exports[0].status).toBe("failed");
+  });
+});
+
+const SVG = '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="40" height="10"><rect width="40" height="10"/></svg>';
+type Req = { replaceAllShapesWithImage?: { imageUrl: string; containsText: { text: string } }; replaceAllText?: { replaceText: string; containsText: { text: string } } };
+const batch = (g: ReturnType<typeof google>) => (g.calls.find((c) => c.url.endsWith("copy1:batchUpdate"))!.body as { requests: Req[] }).requests;
+
+describe("the client's logo on the cover", () => {
+  it("turns an SVG logo into a stored PNG and puts it on the cover", async () => {
+    const db = fakeDb(tables());
+    const g = google();
+    const seen: string[] = [];
+    const { d, stored } = deps(g, {
+      logo: async () => ({ bytes: new TextEncoder().encode(SVG), type: "image/svg+xml" }),
+      png: async (_db, svg) => { seen.push(svg); return new Uint8Array([0x89, 0x50, 0x4e, 0x47]); },
+    });
+    const out = await runStrategyDeck(db, job(), d);
+    expect(out.status).toBe("done");
+    expect(seen).toContain(SVG);
+    expect(stored).toContain("charts/e1/logo.png");
+    const put = batch(g).find((r) => r.replaceAllShapesWithImage?.containsText?.text === "{{logo}}");
+    expect(put?.replaceAllShapesWithImage.imageUrl).toBe("https://signed/charts/e1/logo.png");
+  });
+
+  it("leaves the logo's place empty when there is no usable logo, since the cover title already names the client", async () => {
+    for (const logo of [async () => null, async () => ({ bytes: new TextEncoder().encode("<svg"), type: "image/svg+xml" }), async () => { throw new Error("down"); }]) {
+      const db = fakeDb(tables());
+      const g = google();
+      const { d, stored } = deps(g, { logo, png: async (_db, svg) => { if (svg === "<svg") throw new Error("not a drawing"); return new Uint8Array([1]); } });
+      const out = await runStrategyDeck(db, job(), d);
+      expect(out.status).toBe("done");
+      expect(stored.some((p) => p.includes("logo"))).toBe(false);
+      const name = batch(g).find((r) => r.replaceAllText?.containsText?.text === "{{logo}}");
+      expect(name?.replaceAllText.replaceText).toBe("");
+      expect(batch(g).filter((r) => r.replaceAllText?.replaceText === "Acme")).toHaveLength(0);
+    }
+  });
+});
+
+describe("a deck closed while its worker still runs", () => {
+  it("stays failed: the worker's last write only changes a deck that is still open", async () => {
+    const db = fakeDb(tables());
+    const { d } = deps(google(), { email: async () => { db.tables.content_strategy_exports[0].status = "failed"; return null; } });
+    await runStrategyDeck(db, job(), d);
+    expect(db.tables.content_strategy_exports[0].status).toBe("failed");
+    expect(db.tables.content_strategy_exports[0].url ?? null).toBeNull();
+  });
+});
+
+describe("reading a logo", () => {
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+  it("recognizes PNG, JPEG, GIF and SVG, and nothing else", async () => {
+    const answer = (bytes: Uint8Array) => (async () => new Response(bytes)) as unknown as typeof fetch;
+    expect((await fetchLogo("https://x.test/a", answer(PNG)))?.type).toBe("image/png");
+    expect((await fetchLogo("https://x.test/a", answer(new Uint8Array([0xff, 0xd8, 1])))) ?.type).toBe("image/jpeg");
+    expect((await fetchLogo("https://x.test/a", answer(new Uint8Array([0x47, 0x49, 0x46, 1]))))?.type).toBe("image/gif");
+    expect((await fetchLogo("https://x.test/a", answer(new TextEncoder().encode(SVG))))?.type).toBe("image/svg+xml");
+    expect(await fetchLogo("https://x.test/a", answer(new TextEncoder().encode("<html>nope</html>")))).toBeNull();
+    expect(await fetchLogo("http://x.test/a", answer(PNG))).toBeNull();
+    expect(await fetchLogo(null, answer(PNG))).toBeNull();
+  });
+
+  it("refuses a body that says it is far over the cap without reading it", async () => {
+    let pulled = 0;
+    const body = new ReadableStream<Uint8Array>({ pull(c) { pulled++; c.enqueue(new Uint8Array(1_000_000)); } });
+    const res = new Response(body, { headers: { "content-length": String(50_000_000) } });
+    expect(await fetchLogo("https://x.test/a", (async () => res) as unknown as typeof fetch)).toBeNull();
+    expect(pulled).toBeLessThanOrEqual(1);
+  });
+
+  it("stops reading a 50 MB body that does not say its size, once the cap is passed", async () => {
+    let pulled = 0;
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(c) { if (pulled >= 50) return c.close(); pulled++; c.enqueue(new Uint8Array(1_000_000)); },
+      cancel() { cancelled = true; },
+    });
+    expect(await fetchLogo("https://x.test/a", (async () => new Response(body)) as unknown as typeof fetch)).toBeNull();
+    expect(pulled * 1_000_000).toBeLessThan(LOGO_MAX_BYTES + 3_000_000);
+    expect(cancelled).toBe(true);
+  });
+});
+
+describe("a deck whose worker died", () => {
+  const MIN = 60_000;
+  const rows = () => ({
+    content_strategy_exports: [
+      { id: "job-failed", client_id: "c1", status: "making" },
+      { id: "job-skipped", client_id: "c2", status: "queued" },
+      { id: "job-gone", client_id: "c3", status: "queued" },
+      { id: "job-live", client_id: "c4", status: "making" },
+      { id: "job-waiting", client_id: "c5", status: "queued" },
+      { id: "export-done", client_id: "c6", status: "done" },
+    ],
+    scheduled_jobs: [
+      { id: "j1", kind: "strategy_deck", client_id: "c1", status: "failed", payload: { export_id: "job-failed" } },
+      { id: "j2", kind: "strategy_deck", client_id: "c2", status: "skipped", payload: { export_id: "job-skipped" } },
+      { id: "j4", kind: "strategy_deck", client_id: "c4", status: "running", payload: { export_id: "job-live" }, lease_until: new Date(NOW.getTime() + 2 * MIN).toISOString() },
+      { id: "j5", kind: "strategy_deck", client_id: "c5", status: "queued", payload: { export_id: "job-waiting" } },
+      { id: "j6", kind: "strategy_deck", client_id: "c6", status: "done", payload: { export_id: "export-done" } },
+    ],
+  });
+  const by = (db: ReturnType<typeof fakeDb>, id: string) => db.tables.content_strategy_exports.find((e) => e.id === id)!;
+
+  it("is closed as failed when its job has ended or is gone, and a deck with a live job is left alone however long it takes", async () => {
+    const db = fakeDb(rows());
+    const closed = await closeStalledDecks(db, NOW);
+    expect(closed.map((c) => c.id).sort()).toEqual(["job-failed", "job-gone", "job-skipped"]);
+    expect(by(db, "job-failed")).toMatchObject({ status: "failed", updated_at: NOW.toISOString() });
+    expect(by(db, "job-skipped").status).toBe("failed");
+    expect(by(db, "job-gone").status).toBe("failed");
+    expect(by(db, "job-live").status).toBe("making");
+    expect(by(db, "job-waiting").status).toBe("queued");
+    expect(by(db, "export-done").status).toBe("done");
+  });
+
+  it("closes the export and returns failed when the lease hands back a job past its last try", async () => {
+    const db = fakeDb(tables());
+    const g = google();
+    const out = await runStrategyDeck(db, job({ attempts: 4, max_attempts: 3 }), deps(g).d);
+    expect(out.status).toBe("failed");
+    expect(db.tables.content_strategy_exports[0].status).toBe("failed");
+    expect(g.calls).toEqual([]);
+  });
+
+  it("still works its last try when attempts equals max_attempts", async () => {
+    const db = fakeDb(tables());
+    const out = await runStrategyDeck(db, job({ attempts: 3, max_attempts: 3 }), deps(google()).d);
+    expect(out.status).toBe("done");
+  });
+
+  it("trashes the copy when the export was closed while it was being made", async () => {
+    const db = fakeDb(tables());
+    const g = google();
+    const out = await runStrategyDeck(db, job(), deps(g, {
+      email: async () => { db.tables.content_strategy_exports[0].status = "failed"; return "neria@moburst.com"; },
+    }).d);
+    expect(out.status).toBe("failed");
+    expect(g.calls.some((c) => c.method === "PATCH" && /copy1/.test(c.url) && JSON.stringify(c.body).includes("trashed"))).toBe(true);
+    expect(db.tables.content_strategy_exports[0].status).toBe("failed");
+  });
+
+  it("is checked by the worker's every-minute sweep, and a throwing deck sweep leaves the report sweep's rows", async () => {
+    const rows = await closeAbandonedAll({
+      reports: async () => [{ table: "report_runs", id: "r1" }],
+      decks: async () => { throw new Error("boom"); },
+    });
+    expect(rows).toEqual([{ table: "report_runs", id: "r1" }]);
+    const both = await closeAbandonedAll({
+      reports: async () => [{ table: "report_runs", id: "r1" }],
+      decks: async () => [{ table: "content_strategy_exports", id: "e1" }],
+    });
+    expect(both.map((r) => r.id)).toEqual(["r1", "e1"]);
   });
 });

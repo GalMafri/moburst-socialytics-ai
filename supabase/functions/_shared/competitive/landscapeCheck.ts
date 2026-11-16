@@ -27,7 +27,7 @@ export const LANDSCAPE_MISSING = "RIVALIQ_LANDSCAPE_MISSING";
 export const RIVALIQ_BUSY = "RIVALIQ_BUSY";
 export const RIVALIQ_UNAVAILABLE = "RIVALIQ_UNAVAILABLE";
 
-/** Landscapes created by setup-rivaliq-landscape carry this prefix in their name. */
+/** Landscapes created by the app's tracking setup (rivaliqSetupRun.ts) carry this prefix in their name. */
 export const APP_LANDSCAPE_PREFIX = "Socialytics - ";
 
 export interface LandscapeClient {

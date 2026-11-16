@@ -3,17 +3,19 @@
 // How sure a strategy can be about each platform (spec: docs/superpowers/
 // specs/2026-11-03-strategy-v2-design.md, section 3, "How confidence is
 // stated"), worked out in code from the data, never by the writer:
-//   measured  Sprout has the client's account there: impressions, reach;
+//   measured  Sprout has the client's account there and it has posts:
+//             impressions, reach;
 //   public    12 or more public posts in 90 days (about one a week);
 //   thin      1 to 11 public posts;
-//   none      no profile found, or no posts.
+//   none      no profile found, or no posts (a connected account that has not
+//             posted yet is not measured).
 // Only Sprout measures reach. A public rate is engagement per view, and only
 // where the platform shows views publicly (TikTok, YouTube); an estimated
 // reach is never a baseline or a target. LinkedIn's public read gives no
 // follower count. A goal on a thin or none platform may only use posts a week
 // or followers.
 
-import { GOAL_METRICS, type GoalMetric } from "./sections.ts";
+import { dayWords, GOAL_METRICS, type GoalMetric } from "./sections.ts";
 
 export type Basis = "measured" | "public" | "thin" | "none";
 export type RateKind = "impression" | "view";
@@ -25,7 +27,8 @@ export const PUBLIC_MIN_POSTS = 12;
 const PUBLIC_VIEWS = new Set(["TikTok", "YouTube"]);
 
 export function basisOf(i: { sprout: boolean; posts: number }): Basis {
-  if (i.sprout) return "measured";
+  if (i.sprout && i.posts >= 1) return "measured";
+  if (i.sprout) return "none";
   if (i.posts >= PUBLIC_MIN_POSTS) return "public";
   if (i.posts >= 1) return "thin";
   return "none";
@@ -71,28 +74,29 @@ export function baselineFor(f: PlatformFigures | undefined, metric: GoalMetric):
   return f.followers;
 }
 
-/** One platform's basis in words, for the page's data line and the writer. */
+/** One platform's basis in words, for the writer: where its numbers come from, never a vendor or a gap. */
 export function basisWords(f: Pick<PlatformFigures, "platform" | "basis" | "followers" | "posts">): string {
-  if (f.basis === "measured") return `${f.platform} from Sprout`;
-  if (f.basis === "none") return `${f.platform}: no public posts found`;
-  const thin = f.basis === "thin" ? `, ${f.posts} in 90 days` : "";
-  const followers = f.followers === null ? ", no follower count" : "";
-  return `${f.platform} public posts${thin}${followers}`;
+  if (f.basis === "measured") return `${f.platform} from your own account`;
+  if (f.basis === "none") return `${f.platform} not measured yet`;
+  return `${f.platform} from public posts`;
 }
 
-/** "Data: Instagram from Sprout | TikTok public posts | LinkedIn public posts, no follower count". */
+const andList = (names: string[]) => (names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0] ?? "");
+
+/** "Instagram from your own account; TikTok and LinkedIn from public posts; YouTube not measured yet": where each platform's numbers come from. */
 export function dataLine(figures: Array<Pick<PlatformFigures, "platform" | "basis" | "followers" | "posts">>): string {
-  return figures.length ? `Data: ${figures.map(basisWords).join(" | ")}` : "";
+  const names = (...bases: Basis[]) => figures.filter((f) => bases.includes(f.basis)).map((f) => f.platform);
+  const parts = [
+    [names("measured"), "from your own account"],
+    [names("public", "thin"), "from public posts"],
+    [names("none"), "not measured yet"],
+  ] as const;
+  return parts.filter(([who]) => who.length).map(([who, what]) => `${andList(who as string[])} ${what}`).join("; ");
 }
 
-/** "Based on public posts from 5 Aug to 2 Nov 2026", the deck's one factual line; "" when every platform is measured. */
+/** "Based on public posts from Aug 5 to Nov 3, 2026", the deck's one factual line; "" when every platform is measured. */
 export function publicWindowLine(figures: Array<Pick<PlatformFigures, "basis">>, window: { start: string; end: string } | null): string {
   if (!window || !figures.some((f) => f.basis === "public" || f.basis === "thin")) return "";
-  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  const words = (d: string, year: boolean) => {
-    const [y, m, day] = d.slice(0, 10).split("-").map(Number);
-    return `${day} ${months[m - 1]}${year ? ` ${y}` : ""}`;
-  };
   const sameYear = window.start.slice(0, 4) === window.end.slice(0, 4);
-  return `Based on public posts from ${words(window.start, !sameYear)} to ${words(window.end, true)}`;
+  return `Based on public posts from ${dayWords(window.start, { year: !sameYear })} to ${dayWords(window.end)}`;
 }

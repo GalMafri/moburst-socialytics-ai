@@ -7,7 +7,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { eventName } from "@/lib/display";
+import { NO_DATA, eventName } from "@/lib/display";
 
 /**
  * Presentation for the behavioural sections of the usage page. Kept apart from
@@ -25,23 +25,27 @@ export type FeatureRow = {
   median_ms: number | null;
 };
 
+/** The one way a card names the days it reads. */
+export const windowLabel = (days: number) => `Last ${days} days`;
+
 function fmt(n: number | null): string {
-  if (n === null || n === undefined || Number.isNaN(n)) return "—";
+  if (n === null || n === undefined || Number.isNaN(n)) return NO_DATA;
   return Number.isInteger(n) ? String(n) : n.toFixed(1);
 }
 
 /** Independent activity counts; shared-report readers are not an analysis cohort. */
-export function FunnelCard({ rows }: { rows: FunnelRow[] }) {
+export function FunnelCard({ rows, windowDays }: { rows: FunnelRow[]; windowDays: number }) {
   const top = Math.max(1, ...rows.map((r) => r.users));
   return (
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="t-h3">People by activity</CardTitle>
+        <p className="t-label">{windowLabel(windowDays)}</p>
         <p className="t-secondary">Each activity counts its own users. People can read reports created by others, so these are not conversion steps.</p>
       </CardHeader>
       <CardContent className="space-y-4">
         {rows.length === 0 && (
-          <p className="t-secondary">No events in this window yet.</p>
+          <p className="t-secondary">No activity in the last {windowDays} days yet.</p>
         )}
         {rows.map((r) => {
           return (
@@ -71,15 +75,18 @@ export function MetricsCard({
   title,
   note,
   rows,
+  windowDays,
 }: {
   title: string;
   note?: string;
   rows: MetricRow[];
+  windowDays: number;
 }) {
   return (
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="t-h3">{title}</CardTitle>
+        <p className="t-label">{windowLabel(windowDays)}</p>
       </CardHeader>
       <CardContent>
         {rows.length === 0 ? (
@@ -104,11 +111,11 @@ export function MetricsCard({
 }
 
 /** Every recorded action in the window, ranked by use: the same rows as the tiles and the chart (usage_actions). */
-export function FeatureTable({ rows }: { rows: FeatureRow[] }) {
+export function FeatureTable({ rows, windowDays }: { rows: FeatureRow[]; windowDays: number }) {
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="t-h3">Actions in the last 90 days</CardTitle>
+        <CardTitle className="t-h3">Actions in the last {windowDays} days</CardTitle>
       </CardHeader>
       <CardContent className="px-0 pb-0">
         <div className="overflow-x-auto">
@@ -137,13 +144,13 @@ export function FeatureTable({ rows }: { rows: FeatureRow[] }) {
                   <TableCell className="text-right tabular-nums">{r.uses}</TableCell>
                   <TableCell className="text-right tabular-nums">
                     {r.failures > 0 ? (
-                      <span className="text-rose-400">{r.failures}</span>
+                      <span className="text-destructive">{r.failures}</span>
                     ) : (
                       r.failures
                     )}
                   </TableCell>
                   <TableCell className="text-right tabular-nums text-muted-foreground">
-                    {r.median_ms == null ? "—" : `${(r.median_ms / 1000).toFixed(1)}s`}
+                    {r.median_ms == null ? NO_DATA : `${(r.median_ms / 1000).toFixed(1)}s`}
                   </TableCell>
                 </TableRow>
               ))}

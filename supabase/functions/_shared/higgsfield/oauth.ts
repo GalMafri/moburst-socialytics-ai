@@ -8,9 +8,15 @@
 // person signs in once and the refresh token that comes back keeps the
 // server going indefinitely.
 //
-// The credential lives in integration_tokens, which has RLS on and no
-// policies, so only the service role can read it. It must never move to
-// app_settings — that table is readable by every staff session.
+// The refresh and access tokens live in Vault, through higgsfield_tokens_save
+// and higgsfield_tokens_read (service role only), the way Google's do. What
+// is not secret stays on the integration_tokens row (RLS on, no policies):
+// the client id, the account, when the token expires, when a person linked
+// it, and when a server refresh last worked and last was refused. It must
+// never move to app_settings, which every staff session can read.
+
+import { AuthzError } from "../auth/authz.ts";
+import { returnOriginFor, settingsUrl } from "../auth/appOrigin.ts";
 
 export const CLERK_ISSUER = "https://clerk.higgsfield.ai";
 export const AUTHORIZE_URL = `${CLERK_ISSUER}/oauth/authorize`;
@@ -31,6 +37,13 @@ export interface StoredToken {
   access_token: string | null;
   expires_at: string | null;
 }
+
+// deno-lint-ignore no-explicit-any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- the service-role client, typed loosely as the other shared helpers do
+type Db = any;
+
+/** The provider no longer accepts the refresh token: only signing in again helps. */
+export class TokenRefused extends Error {}
 
 const b64url = (bytes: Uint8Array): string => {
   let s = "";
@@ -96,7 +109,11 @@ async function postToken(body: Record<string, string>, fetchImpl: typeof fetch):
     body: new URLSearchParams(body).toString(),
   });
   const text = await resp.text();
-  if (!resp.ok) throw new Error(`Token endpoint ${resp.status}: ${text.slice(0, 300)}`);
+  if (!resp.ok) {
+    const message = `Token endpoint ${resp.status}: ${text.slice(0, 300)}`;
+    // A refusal of the grant itself (400, 401, 403) is final; a busy or broken provider is not.
+    throw [400, 401, 403].includes(resp.status) ? new TokenRefused(message) : new Error(message);
+  }
   return JSON.parse(text) as TokenResponse;
 }
 
@@ -133,30 +150,334 @@ export function expiryFrom(expiresIn: number | undefined, now = Date.now()): str
   return new Date(now + seconds * 1000).toISOString();
 }
 
+/** The PostgREST answer for a function the database does not have (yet). */
+function missingFunction(error: { code?: string; message?: string }): boolean {
+  return error.code === "PGRST202" || error.code === "42883" || /could not find the function|function .* does not exist/i.test(error.message ?? "");
+}
+
+/**
+ * The tokens. A pair on the integration_tokens columns is the newer one (the
+ * code that ran before the Vault move keeps rotating it there, and a save
+ * through Vault empties the columns in the same transaction), so it is read
+ * first; otherwise Vault. This lets either half of the release ship first.
+ * Null when nothing was ever stored.
+ */
+export async function readTokens(db: Db): Promise<{ refresh_token: string | null; access_token: string | null } | null> {
+  const { data: legacy } = await db.from("integration_tokens").select("refresh_token, access_token").eq("provider", PROVIDER).maybeSingle();
+  if (legacy?.refresh_token) return { refresh_token: legacy.refresh_token, access_token: legacy.access_token ?? null };
+  const { data, error } = await db.rpc("higgsfield_tokens_read");
+  if (error) {
+    // Functions deployed before the migration: nothing is in Vault yet, so nothing is stored.
+    if (missingFunction(error)) return null;
+    throw new Error(`Could not read the Higgsfield tokens: ${error.message}`);
+  }
+  if (!data) return null;
+  return { refresh_token: data.refresh_token ?? null, access_token: data.access_token ?? null };
+}
+
+/**
+ * Both tokens to Vault in one call, so a rotated refresh token and its access
+ * token are never kept apart; the call empties the plain columns in the same
+ * transaction. Before the migration has run there is no Vault function, and
+ * the pair goes to the columns, which readTokens reads.
+ */
+export async function saveTokens(db: Db, tokens: { refresh_token: string; access_token: string }): Promise<void> {
+  const { error } = await db.rpc("higgsfield_tokens_save", { p_refresh: tokens.refresh_token, p_access: tokens.access_token });
+  if (!error) return;
+  if (!missingFunction(error)) throw new Error(`Could not keep the Higgsfield tokens: ${error.message}`);
+  const { error: columnsError } = await db.from("integration_tokens").update({ refresh_token: tokens.refresh_token, access_token: tokens.access_token }).eq("provider", PROVIDER);
+  if (columnsError) throw new Error(`Could not keep the Higgsfield tokens: ${columnsError.message}`);
+}
+
+/** How long one caller may hold the refresh, and how often a waiting caller looks again. */
+const LEASE_MS = 30_000;
+const WAIT_MS = 1_500;
+const WAIT_TRIES = 12;
+
+/**
+ * Claim the right to refresh, the way the Canva path does with
+ * refreshing_until: two simple claims (nobody holds it, or the hold ran out),
+ * each one atomic in the database.
+ */
+async function claimRefresh(supabase: Db, now: Date): Promise<boolean> {
+  const until = new Date(now.getTime() + LEASE_MS).toISOString();
+  const free = await supabase.from("integration_tokens").update({ refreshing_until: until }).eq("provider", PROVIDER).is("refreshing_until", null).select("provider");
+  if (free.data?.length) return true;
+  const expired = await supabase.from("integration_tokens").update({ refreshing_until: until }).eq("provider", PROVIDER).lt("refreshing_until", now.toISOString()).select("provider");
+  return !!expired.data?.length;
+}
+
 /**
  * A usable access token, refreshing when needed.
  *
- * Refresh tokens rotate: the new one is written back in the same update as
- * the access token, so a crash between the two cannot strand the session.
+ * Refresh tokens rotate, and the provider may revoke the whole family when an
+ * old one is spent, so one caller refreshes at a time: it claims
+ * refreshing_until, and any other caller waits for it and reads what it
+ * stored. The new refresh token is kept in Vault in the same call as the
+ * access token, so a crash between the two cannot strand the session. Each
+ * refresh leaves its result on the row (last_refresh_ok_at, or
+ * last_refresh_refused_at when the provider refused the token), which is what
+ * Settings reads to say whether the link still works.
  */
-export async function accessTokenFor(supabase: any, fetchImpl: typeof fetch = fetch): Promise<string> {
-  const { data: row } = await supabase
+export async function accessTokenFor(
+  supabase: Db,
+  fetchImpl: typeof fetch = fetch,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+): Promise<string> {
+  const read = async () => {
+    const { data: row } = await supabase
+      .from("integration_tokens")
+      .select("provider, account_email, client_id, expires_at")
+      .eq("provider", PROVIDER)
+      .maybeSingle();
+    return { row, tokens: await readTokens(supabase) };
+  };
+  for (let attempt = 0; attempt < WAIT_TRIES; attempt++) {
+    const { row, tokens } = await read();
+    if (!tokens?.refresh_token || !row?.client_id) {
+      throw new Error("Higgsfield is not connected. An admin needs to link the team account in Settings.");
+    }
+    if (!needsRefresh({ access_token: tokens.access_token, expires_at: row.expires_at })) return tokens.access_token as string;
+
+    if (!(await claimRefresh(supabase, new Date()))) {
+      await sleep(WAIT_MS);
+      continue;
+    }
+    const release = () => supabase.from("integration_tokens").update({ refreshing_until: null }).eq("provider", PROVIDER);
+    try {
+      // The holder before us may have finished between our read and our claim.
+      const latest = await read();
+      if (latest.tokens?.refresh_token && !needsRefresh({ access_token: latest.tokens.access_token, expires_at: latest.row?.expires_at })) {
+        return latest.tokens.access_token as string;
+      }
+      const current = latest.tokens?.refresh_token ? latest.tokens : tokens;
+      let grant: TokenResponse;
+      try {
+        grant = await refresh({ clientId: row.client_id, refreshToken: current.refresh_token as string }, fetchImpl);
+      } catch (e) {
+        if (e instanceof TokenRefused) {
+          // A caller outside this lease (an older deploy) may have rotated the token a moment ago, which makes ours the old one; that is not a refusal.
+          const again = await read();
+          if (again.tokens?.refresh_token && again.tokens.refresh_token !== current.refresh_token && !needsRefresh({ access_token: again.tokens.access_token, expires_at: again.row?.expires_at })) {
+            return again.tokens.access_token as string;
+          }
+          await supabase.from("integration_tokens").update({ last_refresh_refused_at: new Date().toISOString() }).eq("provider", PROVIDER);
+        }
+        throw e;
+      }
+      await saveTokens(supabase, { refresh_token: grant.refresh_token ?? (current.refresh_token as string), access_token: grant.access_token });
+      const now = new Date().toISOString();
+      await supabase.from("integration_tokens").update({ expires_at: expiryFrom(grant.expires_in), last_refresh_ok_at: now, updated_at: now }).eq("provider", PROVIDER);
+      return grant.access_token;
+    } finally {
+      await release();
+    }
+  }
+  throw new Error("The Higgsfield token refresh is held by another run; try again shortly.");
+}
+
+/** What Settings shows: linked and working, linked but refused by Higgsfield (needs a new sign-in), or not linked. */
+export interface LinkStatus {
+  linked: boolean;
+  needs_sign_in: boolean;
+  account_email: string | null;
+  linked_at: string | null;
+}
+
+const when = (v: unknown): number => (v ? Date.parse(String(v)) : NaN);
+
+/** True when the last refresh was refused and nothing has worked since. */
+export function refusedSinceLastWorked(row: { last_refresh_ok_at?: string | null; last_refresh_refused_at?: string | null } | null | undefined): boolean {
+  const refused = when(row?.last_refresh_refused_at);
+  if (!Number.isFinite(refused)) return false;
+  const ok = when(row?.last_refresh_ok_at);
+  return !Number.isFinite(ok) || refused > ok;
+}
+
+/**
+ * Whether the link works, found by trying the token (accessTokenFor refreshes
+ * only an expired one, and a refresh is free). A provider that is only busy
+ * leaves the record as it was.
+ */
+export async function linkStatus(db: Db, fetchImpl: typeof fetch = fetch): Promise<LinkStatus> {
+  const held = await readTokens(db);
+  if (!held?.refresh_token) return { linked: false, needs_sign_in: false, account_email: null, linked_at: null };
+  try {
+    await accessTokenFor(db, fetchImpl);
+  } catch (e) {
+    if (!(e instanceof TokenRefused)) console.warn("[higgsfield-auth] the token was not tried", e instanceof Error ? e.message : String(e));
+  }
+  const { data: row } = await db
     .from("integration_tokens")
-    .select("provider, account_email, client_id, refresh_token, access_token, expires_at")
+    .select("account_email, linked_at, last_refresh_ok_at, last_refresh_refused_at")
     .eq("provider", PROVIDER)
     .maybeSingle();
-  if (!row?.refresh_token || !row?.client_id) {
-    throw new Error("Higgsfield is not connected. An admin needs to link the team account in Settings.");
-  }
-  if (!needsRefresh(row)) return row.access_token as string;
+  const needsSignIn = refusedSinceLastWorked(row);
+  return { linked: !needsSignIn, needs_sign_in: needsSignIn, account_email: row?.account_email || null, linked_at: row?.linked_at || null };
+}
 
-  const grant = await refresh({ clientId: row.client_id, refreshToken: row.refresh_token }, fetchImpl);
-  const update: Record<string, unknown> = {
-    access_token: grant.access_token,
-    expires_at: expiryFrom(grant.expires_in),
-    updated_at: new Date().toISOString(),
-  };
-  if (grant.refresh_token) update.refresh_token = grant.refresh_token;
-  await supabase.from("integration_tokens").update(update).eq("provider", PROVIDER);
-  return grant.access_token;
+// ── The higgsfield-auth function's requests ────────────────────────────────
+//
+//   POST {action:"start"}   admin only. Returns the URL to open.
+//   GET  ?code=...&state=.. the redirect back from Clerk. No auth header (a
+//                           browser follows it), so `state` is the proof.
+//   POST {action:"status"}  staff. Whether it is linked and working, and to whom.
+//
+// Here rather than in the function's index.ts so a test can drive it with a
+// fake database and a fake provider.
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+/** An authorisation left half-finished should not be usable for ever. */
+export const PENDING_TTL_MS = 15 * 60 * 1000;
+
+/** The one sentence any unexpected failure answers with; the cause goes to the log. */
+export const UNEXPECTED_FAILURE = "The Higgsfield connection could not be read.";
+
+export interface AuthDeps {
+  db: Db;
+  /** Throws AuthzError unless the caller is Moburst staff. */
+  requireStaff: (req: Request) => Promise<{ isAdmin: () => Promise<boolean> }>;
+  env: (key: string) => string | undefined;
+  fetch?: typeof fetch;
+  now?: () => Date;
+}
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+}
+
+export async function handleAuthRequest(req: Request, deps: AuthDeps): Promise<Response> {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const { db, env } = deps;
+  const f = deps.fetch ?? fetch;
+  const now = () => (deps.now ? deps.now() : new Date());
+  const redirectUri = `${env("SUPABASE_URL")}/functions/v1/higgsfield-auth`;
+
+  try {
+    const url = new URL(req.url);
+
+    // ── The callback. A browser follows it, so there is no JWT; the state
+    //    we generated and stored is what proves this is our redirect. Every
+    //    exit is a redirect to the app, on the address the sign-in started from
+    //    (Supabase serves html from *.supabase.co as plain text, so the app
+    //    shows the outcome).
+    if (req.method === "GET" && (url.searchParams.get("code") || url.searchParams.get("error"))) {
+      const { data: row } = await db
+        .from("integration_tokens")
+        .select("client_id, pending_state, pending_verifier, pending_started_at, pending_return_origin")
+        .eq("provider", PROVIDER)
+        .maybeSingle();
+      const origin = returnOriginFor(row?.pending_return_origin, env);
+      const back = (status: "linked" | "failed", reason?: string) =>
+        new Response(null, { status: 302, headers: { ...corsHeaders, Location: settingsUrl(origin, { higgsfield: status, reason }, env) } });
+
+      if (url.searchParams.get("error")) return back("failed", "refused");
+      const code = url.searchParams.get("code")!;
+      const state = url.searchParams.get("state") || "";
+      if (!row?.pending_state || !row.pending_verifier || !state || state !== row.pending_state) return back("failed", "bad_state");
+      const startedAt = row.pending_started_at ? new Date(row.pending_started_at).getTime() : 0;
+      if (!startedAt || now().getTime() - startedAt > PENDING_TTL_MS) return back("failed", "expired");
+
+      let grant: TokenResponse & { id_token?: string };
+      try {
+        grant = await exchangeCode({ clientId: row.client_id, code, verifier: row.pending_verifier, redirectUri }, f);
+      } catch (e) {
+        console.error("[higgsfield-auth] token exchange failed:", e instanceof Error ? e.message : e);
+        return back("failed", "exchange_failed");
+      }
+      if (!grant.refresh_token) return back("failed", "no_refresh_token");
+
+      // Who this is, so the screen can say which account is linked. The id
+      // token is informational here; the refresh token is the credential.
+      let email: string | null = null;
+      try {
+        const claims = JSON.parse(atob(String(grant.id_token || "").split(".")[1] || "")) as { email?: string };
+        email = claims?.email || null;
+      } catch {
+        email = null;
+      }
+
+      try {
+        await saveTokens(db, { refresh_token: grant.refresh_token, access_token: grant.access_token });
+      } catch (e) {
+        console.error("[higgsfield-auth] could not store the grant:", e instanceof Error ? e.message : e);
+        return back("failed", "not_saved");
+      }
+      const at = now().toISOString();
+      const { error: saveErr } = await db
+        .from("integration_tokens")
+        .update({
+          expires_at: expiryFrom(grant.expires_in, now().getTime()),
+          account_email: email,
+          // Distinct from updated_at, which every token refresh bumps: the
+          // only column that records when a person actually signed in.
+          linked_at: at,
+          // A new sign-in works as of now, which settles any earlier refusal.
+          last_refresh_ok_at: at,
+          pending_state: null,
+          pending_verifier: null,
+          pending_started_at: null,
+          pending_return_origin: null,
+          updated_at: at,
+        })
+        .eq("provider", PROVIDER);
+      if (saveErr) {
+        console.error("[higgsfield-auth] could not store the grant:", saveErr.message);
+        return back("failed", "not_saved");
+      }
+      // The account is deliberately not put in the URL; the page asks for it.
+      return back("linked");
+    }
+
+    const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
+    const action = body?.action || "status";
+
+    if (action === "status") {
+      await deps.requireStaff(req);
+      return json(await linkStatus(db, f));
+    }
+
+    if (action === "start") {
+      const caller = await deps.requireStaff(req);
+      if (!(await caller.isAdmin())) return json({ error: "Linking the team's Higgsfield account is an admin action." }, 403);
+
+      // Reuse the registered client if we have one; Clerk issues a public
+      // client per redirect URI and there is no reason to make more.
+      const { data: existing } = await db.from("integration_tokens").select("client_id").eq("provider", PROVIDER).maybeSingle();
+      const clientId = existing?.client_id || (await registerClient(redirectUri, f));
+
+      const { verifier, challenge } = await makePkce();
+      const state = randomState();
+      const { error } = await db.from("integration_tokens").upsert(
+        {
+          provider: PROVIDER,
+          client_id: clientId,
+          pending_state: state,
+          pending_verifier: verifier,
+          pending_started_at: now().toISOString(),
+          // The address the person started from; the callback goes back to it.
+          pending_return_origin: returnOriginFor(req.headers.get("origin"), env),
+          updated_at: now().toISOString(),
+        },
+        { onConflict: "provider" },
+      );
+      if (error) throw new Error(`Could not start the Higgsfield sign-in: ${error.message}`);
+
+      return json({
+        authorize_url: authorizeUrl({ clientId, redirectUri, challenge, state }),
+        expires_in_minutes: PENDING_TTL_MS / 60000,
+        sign_in_as: "social-team@moburst.com",
+      });
+    }
+
+    return json({ error: `Unknown action '${action}'` }, 400);
+  } catch (err) {
+    if (err instanceof AuthzError) return json({ error: err.message }, err.status);
+    console.error("[higgsfield-auth]", err instanceof Error ? err.message : String(err));
+    return json({ error: UNEXPECTED_FAILURE }, 500);
+  }
 }

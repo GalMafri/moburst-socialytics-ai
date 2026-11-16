@@ -1,5 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PlatformBadge } from "@/lib/platform-config";
+import { countOf } from "@/lib/display";
 
 /** Map Sprout Social network identifiers to user-friendly platform names */
 const NETWORK_MAP: Record<string, string> = {
@@ -33,18 +34,18 @@ export function ConnectedProfiles({ profiles }: Props) {
     <Card>
       <CardHeader>
         <CardTitle className="t-h3">
-          Connected Profiles{" "}
-          <span className="font-normal text-muted-foreground t-body">({profiles.length} profiles)</span>
+          Connected profiles{" "}
+          <span className="font-normal text-muted-foreground t-body">({countOf(profiles.length, "profile")})</span>
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="flex flex-wrap gap-2">
-          {profiles.map((p, i) => {
-            const displayPlatform = getDisplayPlatform(p.network);
-            return (
-              <PlatformBadge key={i} platform={displayPlatform} />
-            );
-          })}
+        <div className="flex flex-wrap gap-x-4 gap-y-2">
+          {profiles.map((p, i) => (
+            <div key={i} className="flex items-center gap-2 min-w-0">
+              <PlatformBadge platform={getDisplayPlatform(p.network)} />
+              {p.name && <span className="t-body truncate">{p.name}</span>}
+            </div>
+          ))}
         </div>
       </CardContent>
     </Card>

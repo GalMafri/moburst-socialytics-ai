@@ -13,17 +13,19 @@ import { CheckCircle2, Loader2, LinkIcon, AlertTriangle } from "lucide-react";
 /** The one account the team links, so a person can check they signed in as the right one. */
 const EXPECTED_ACCOUNT = "social-team@moburst.com";
 
-type Status = { linked: boolean; account_email: string | null; linked_at: string | null };
+/** `needs_sign_in`: a token is stored but Higgsfield no longer accepts it. */
+type Status = { linked: boolean; needs_sign_in?: boolean; account_email: string | null; linked_at: string | null };
 
 /**
  * Links the team's Higgsfield account.
  *
  * Higgsfield's MCP has no machine credential, so a person signs in once and
  * the refresh token that comes back is what the server uses from then on.
- * That token can stop working without warning — a password change or a
- * revoked session ends it — and when it does, generation stops until someone
- * signs in again. This is that door: without it the only way back is a
- * developer with a console.
+ * That token can stop working without warning (a password change or a
+ * revoked session ends it), and when it does, generation stops until someone
+ * signs in again. The server tries the token when this card asks, so the card
+ * says whether the link works now. This is that door: without it the only way
+ * back is a developer with a console.
  */
 export function HiggsfieldConnection() {
   const [busy, setBusy] = useState(false);
@@ -63,7 +65,8 @@ export function HiggsfieldConnection() {
     else setNotStarted(true);
   };
 
-  const linked = !!data?.linked;
+  const needsSignIn = !!data?.needs_sign_in;
+  const linked = !!data?.linked && !needsSignIn;
   const wrongAccount = linked && !!data?.account_email && data.account_email !== EXPECTED_ACCOUNT;
 
   return (
@@ -75,7 +78,7 @@ export function HiggsfieldConnection() {
       action={
         <Button onClick={connect} disabled={busy} variant={linked ? "outline" : "default"} size="sm">
           {busy ? <Loader2 className="animate-spin" aria-hidden="true" /> : <LinkIcon aria-hidden="true" />}
-          {linked ? "Sign in again" : "Connect Higgsfield"}
+          {linked || needsSignIn ? "Sign in again" : "Connect Higgsfield"}
         </Button>
       }
     >
@@ -85,18 +88,25 @@ export function HiggsfieldConnection() {
           // Not the same thing as "not connected": saying so would send
           // someone to re-link an account that is fine. It keeps checking.
           <LoadRetry context="higgsfield connection" error={error} label="Checking the saved connection" onRetry={() => refetch()} />
+        ) : needsSignIn ? (
+          <div className="glass-inner p-inner space-y-1.5">
+            <p className="t-h4 flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-destructive" aria-hidden="true" />
+              Needs sign in
+            </p>
+            <p className="t-secondary">Higgsfield no longer accepts the saved sign-in, so generation is paused.</p>
+          </div>
         ) : linked ? (
           <div className="glass-inner p-inner space-y-1.5">
             <p className="t-h4 flex items-center gap-2">
               <CheckCircle2 className="h-4 w-4 text-[#b9e045]" aria-hidden="true" />
               Account linked as {data?.account_email ?? "an unnamed account"}
             </p>
-            <p className="t-secondary">This is the saved account link. If generation reports an expired session, sign in again.</p>
             {data?.linked_at && (
               <p className="t-label">Signed in on {formatDate(data.linked_at)}.</p>
             )}
             {wrongAccount && (
-              <p className="t-secondary flex items-start gap-2 !text-[rgb(248,113,113)]">
+              <p className="t-secondary flex items-start gap-2 !text-destructive">
                 <AlertTriangle className="h-4 w-4 mt-1 shrink-0" aria-hidden="true" />
                 Generation will be charged to this account rather than {EXPECTED_ACCOUNT}. Sign in again to change it.
               </p>
@@ -105,16 +115,12 @@ export function HiggsfieldConnection() {
         ) : (
           <div className="glass-inner p-inner">
             <p className="t-h4">Not connected</p>
-            <p className="t-secondary">Generation cannot run until someone signs in as {EXPECTED_ACCOUNT}.</p>
+            <p className="t-secondary">Generation cannot run until the team account is linked.</p>
           </div>
         )}
         {notStarted && <p role="status" className="t-secondary">The sign-in has not opened yet. The connection above is unchanged.</p>}
         {opened && !linked && <p role="status" className="t-secondary">Higgsfield's sign-in is open in a new tab. Sign in as {EXPECTED_ACCOUNT} there; this panel updates when you come back.</p>}
-        <p className="t-label">
-          Sign in to higgsfield.ai as {EXPECTED_ACCOUNT} first, in this browser, and leave every permission ticked. The
-          sign-in link is good for 15 minutes, and signing in again keeps the current connection working until the new
-          one succeeds.
-        </p>
+        <p className="t-label">Sign in as {EXPECTED_ACCOUNT}.</p>
     </Section>
   );
 }

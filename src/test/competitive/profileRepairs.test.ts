@@ -32,7 +32,7 @@ function briefDb(report_data: any) {
  const reads:string[]=[];
  return { reads, from(table:string) {
   reads.push(table);
-  const result=table==='competitive_reports' ? {created_at:'2026-09-29',report_data} : [];
+  const result=table==='competitive_reports' ? [{id:'r',created_at:'2026-09-29',report_data}] : [];
   const query:any={select:()=>query,eq:()=>query,order:()=>query,limit:()=>query,maybeSingle:()=>query,then:(resolve:any)=>Promise.resolve({data:result}).then(resolve)};
   return query;
  }};

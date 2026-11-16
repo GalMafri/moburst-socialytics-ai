@@ -67,3 +67,13 @@ describe("admin key routes", () => {
     expect((await call("GET", "/v1/admin/keys", { Authorization: "Bearer user-jwt" })).status).toBe(401);
   });
 });
+
+describe("the internal secret", () => {
+  it("accepts the right secret and refuses a wrong, empty or missing one", async () => {
+    const { call } = await app();
+    expect((await call("GET", "/v1/admin/keys", { "X-Cron-Secret": "cron-s" })).status).toBe(200);
+    expect((await call("GET", "/v1/admin/keys", { "X-Cron-Secret": "cron-x" })).status).toBe(401);
+    expect((await call("GET", "/v1/admin/keys", { "X-Cron-Secret": "" })).status).toBe(401);
+    expect((await call("GET", "/v1/admin/keys", {})).status).toBe(401);
+  });
+});

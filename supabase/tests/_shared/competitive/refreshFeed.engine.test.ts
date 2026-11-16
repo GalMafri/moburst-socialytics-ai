@@ -36,7 +36,7 @@ vi.mock("../../../functions/_shared/competitive/ownedSource", () => ({
 
 const { refreshCompetitorFeed, refreshCompetitorFeedOnDemand } = await import("../../../functions/_shared/competitive/refreshFeed");
 const { checkClientLandscape } = await import("../../../functions/_shared/competitive/landscapeCheck");
-const { runFeedJob, FEED_RETRY_MINUTES, LINKEDIN_NOT_COLLECTED } = await import("../../../functions/run-scheduled-jobs/feed");
+const { bindRefreshFeed, runFeedJob, FEED_RETRY_MINUTES, LINKEDIN_NOT_COLLECTED, TOPICS_NOT_DETECTED } = await import("../../../functions/run-scheduled-jobs/feed");
 import type { ScheduledJob } from "../../../functions/_shared/scheduled-jobs/types";
 
 const MOBURST = "d00ce604-2bcc-455a-9826-f80250db75cf";
@@ -328,5 +328,76 @@ describe("refreshCompetitorFeed and the LinkedIn source switch", () => {
     const db = admin([...DEFAULTS, { kind: "linkedin_source", client_id: "11111111-1111-1111-1111-111111111111", engine: "shadow" }]);
     await refreshCompetitorFeed(db, MOBURST, ENV);
     expect(db.rpcCalls).toEqual([]);
+  });
+});
+
+describe("the topic pass of a feed refresh", () => {
+  const KEY_ENV = { ...ENV, anthropicKey: "model-key" };
+  const topicReply = JSON.stringify({ topics: [{ key: "", topic: "Fall promo", summary: "Two companies ran a fall promotion.", companies: ["Peer", "Moburst"], platforms: ["instagram"], post_urls: ["https://instagram.com/p/1"], confidence: 0.8 }] });
+  /** The model: answers with the given status and text; nothing else is fetched. */
+  const model = (status: number, text = "") => vi.stubGlobal("fetch", vi.fn(async () => new Response(status === 200 ? JSON.stringify({ content: [{ type: "text", text }] }) : "model down", { status })));
+  const run = (db: ReturnType<typeof admin>, attempts: number, payload?: Record<string, unknown> | null) =>
+    runFeedJob({ ...feedJob(attempts), payload }, { now: () => T, refreshFeed: bindRefreshFeed(db, KEY_ENV) });
+
+  it("a model that answers 500 ends the job queued with the topics reason and the saved snapshot, and failed on its last attempt", async () => {
+    model(500);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const db = admin(DEFAULTS);
+    const first = await run(db, 1);
+    expect(first).toMatchObject({ status: "queued", reason: TOPICS_NOT_DETECTED, available_at: new Date(T.getTime() + FEED_RETRY_MINUTES * 60_000).toISOString() });
+    const snapshotId = db.tables.rivaliq_snapshots[0].id;
+    expect(first.payload).toEqual({ topics_snapshot_id: snapshotId });
+    expect((first.result as { snapshot_id: string }).snapshot_id).toBe(snapshotId);
+    expect(db.tables.competitive_alerts).toEqual([]);
+    const last = await run(db, 3);
+    expect(last).toMatchObject({ status: "failed", reason: TOPICS_NOT_DETECTED });
+  });
+
+  it("an unreadable model reply is the same: queued, not done", async () => {
+    model(200, "I could not find any topics.");
+    const db = admin(DEFAULTS);
+    expect(await run(db, 1)).toMatchObject({ status: "queued", reason: TOPICS_NOT_DETECTED });
+  });
+
+  it("a reply with no shared topic is done with none", async () => {
+    model(200, JSON.stringify({ topics: [] }));
+    const db = admin(DEFAULTS);
+    expect(await run(db, 1)).toMatchObject({ status: "done", result: { alerts: 0 } });
+  });
+
+  it("the retry runs the topic pass on the saved snapshot only: no new snapshot, no RivalIQ or LinkedIn collection, and the topics are saved", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    model(500);
+    const db = admin(DEFAULTS);
+    const first = await run(db, 1);
+    collect.mockClear();
+    model(200, topicReply);
+    const retry = await run(db, 2, first.payload);
+    expect(retry).toMatchObject({ status: "done", result: { alerts: 1, posts: 2 } });
+    expect(db.tables.rivaliq_snapshots).toHaveLength(1);
+    expect(collect).not.toHaveBeenCalled();
+    expect(db.tables.competitive_alerts).toHaveLength(1);
+    expect(db.tables.competitive_alerts[0]).toMatchObject({ client_id: MOBURST, topic: "Fall promo" });
+  });
+
+  it("a person's refresh whose topic pass failed answers with the saved feed and queues the feed job", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    model(500);
+    const db = admin(DEFAULTS);
+    db.tables.scheduled_jobs = [];
+    const answer = await refreshCompetitorFeedOnDemand(db, MOBURST, KEY_ENV);
+    expect(answer).toMatchObject({ posts: 2, topics_not_detected: true });
+    expect(db.tables.scheduled_jobs).toHaveLength(1);
+    expect(db.tables.scheduled_jobs[0]).toMatchObject({ kind: "feed_refresh", client_id: MOBURST });
+    // The queued job carries the saved snapshot, so running it collects nothing.
+    const snapshotId = db.tables.rivaliq_snapshots[0].id;
+    expect(db.tables.scheduled_jobs[0].payload).toEqual({ topics_snapshot_id: snapshotId });
+    collect.mockClear();
+    model(200, topicReply);
+    const queued = db.tables.scheduled_jobs[0];
+    const retry = await runFeedJob({ ...feedJob(2), payload: queued.payload }, { now: () => T, refreshFeed: bindRefreshFeed(db, KEY_ENV) });
+    expect(retry).toMatchObject({ status: "done" });
+    expect(collect).not.toHaveBeenCalled();
+    expect(db.tables.rivaliq_snapshots).toHaveLength(1);
   });
 });

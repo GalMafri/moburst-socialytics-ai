@@ -61,9 +61,9 @@ describe("Analytics: report trend counts", () => {
     mount();
     // September: its own 2 opportunities. October: its 2 themes' angles, not its own 3 opportunities.
     await waitFor(() => expect(tile("Recommendations")).toHaveTextContent("4"));
-    expect(screen.getByText("Industry trends · 1 report")).toBeInTheDocument();
-    expect(screen.getByText("TikTok · 1 report")).toBeInTheDocument();
-    expect(screen.getByText("Instagram · 1 report")).toBeInTheDocument();
+    expect(screen.getByText("Industry trends in 1 report")).toBeInTheDocument();
+    expect(screen.getByText("TikTok trends in 1 report")).toBeInTheDocument();
+    expect(screen.getByText("Instagram trends in 1 report")).toBeInTheDocument();
   });
 
   it("holds the figures the themes change until they are read", async () => {
@@ -72,5 +72,28 @@ describe("Analytics: report trend counts", () => {
     expect(tile("Recommendations")).not.toHaveTextContent(/\d/);
     expect(screen.queryByText(/TikTok ·|Instagram ·|Industry trends ·/)).not.toBeInTheDocument();
     expect(screen.getByText("Peak impressions")).toBeInTheDocument();
+  });
+});
+
+describe("Analytics: the figures' wording", () => {
+  it("writes numbers the way the tiles do, and spells out Average", async () => {
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <AIDeepInsights clientId="c1" reports={reports} chartData={[{ ...chartData[0], impressions: 8323 }, { ...chartData[1], impressions: 900 }]} />
+      </QueryClientProvider>,
+    );
+    await settle();
+    expect(screen.getAllByText("8.3K").length).toBeGreaterThan(0);
+    expect(screen.queryByText("8,323")).not.toBeInTheDocument();
+    expect(screen.getByText("Average reported engagement rate")).toBeInTheDocument();
+    expect(screen.queryByText("Avg reported engagement rate")).not.toBeInTheDocument();
+  });
+
+  it("words the trend chips as where trends appear", async () => {
+    mount();
+    await settle();
+    await waitFor(() => expect(screen.getByText("Industry trends in 1 report")).toBeInTheDocument());
+    expect(screen.queryByText(/Industry trends ·/)).not.toBeInTheDocument();
   });
 });

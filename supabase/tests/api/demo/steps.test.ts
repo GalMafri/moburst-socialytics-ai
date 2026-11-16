@@ -44,8 +44,6 @@ function harness(over: { input?: Record<string, unknown>; tables?: Partial<FakeT
   };
   const defaultCall = (name: string, body: Record<string, unknown>): CallResult => {
     if (name === "research-brand-identity") return ok({ brand_identity: BRAND });
-    if (name === "firecrawl-scrape") return ok({ success: true, data: { markdown: MARKDOWN, metadata: { title: "Brooklinen" } } });
-    if (name === "derive-content-pillars") return ok({ pillars: [{ name: "Sleep better", description: "d" }, { name: "Home comfort", description: "d" }], keywords: ["bedding", "sheets"], source: "brief", derived_at: clock.toISOString() });
     if (name === "identify-competitors") {
       const set = t.sets.find((s) => s.client_id === body.client_id && s.status === "draft") ?? (() => { const s = { id: "set-ai", client_id: body.client_id as string, status: "draft", notes: null, source: "ai", rivaliq_landscape_id: null, confirmed_at: null, created_at: clock.toISOString(), demo_job_id: null }; t.sets.push(s); return s; })();
       const names = ["Parachute", "Boll & Branch", "Casper", "Buffy", "NoSite"];
@@ -60,10 +58,6 @@ function harness(over: { input?: Record<string, unknown>; tables?: Partial<FakeT
       return ok({ results: [] });
     }
     if (name === "confirm-competitor-set") { const s = t.sets.find((x) => x.id === body.set_id)!; s.status = "confirmed"; s.confirmed_at = clock.toISOString(); return ok({ ok: true, set_id: body.set_id }); }
-    if (name === "setup-rivaliq-landscape") {
-      if (body.mode === "preview") return ok({ plan: {}, fingerprint: "fp", job: null });
-      const s = t.sets.find((x) => x.id === body.set_id)!; s.rivaliq_landscape_id = "L9"; return ok({ job: { phase: "complete" } });
-    }
     if (name === "run-report") {
       const id = body.kind === "competitive" ? "crep-new" : "rep-new";
       if (body.kind === "competitive") t.competitiveReports.push({ ...COMPETITIVE_REPORT, id, client_id: body.client_id as string, status: "running", report_data: {}, created_at: clock.toISOString(), demo_job_id: null });
@@ -74,7 +68,6 @@ function harness(over: { input?: Record<string, unknown>; tables?: Partial<FakeT
     if (name === "generate-post-image") return ok({ image_url: "data:image/png;base64,AAAA" });
     if (name === "upload-generated-media") return ok({ url: "https://x.supabase.co/storage/v1/object/public/generated-media/c/demo.png" });
     if (name === "sprout-analytics") return ok({ client: { id: body.client_id, name: "x" }, range: { start: body.start, end: body.end, days: 30 }, profiles: [{ id: "123", name: "p", network: "instagram" }], totals: { impressions: 5 }, previous_totals: {}, changes: {}, daily: [], by_profile: [], top_posts: [] });
-    if (name === "synthesize-design-language") { const c = t.clients.find((x) => x.id === body.client_id)!; c.harvested_design_references = [{ path: "a" }, { path: "b" }, { path: "c" }]; return ok({}); }
     if (name === "build-design-system") {
       if (body.action === "build") { const d = { ...DESIGN_SYSTEM, id: "ds-new", client_id: body.client_id as string, version: 1, status: "draft", approved_at: null }; t.designSystems.push(d); return ok({ system: { id: "ds-new", version: 1 } }); }
       const d = t.designSystems.find((x) => x.id === body.id)!; d.status = "approved"; d.approved_at = clock.toISOString(); return ok({ system: d });
@@ -272,7 +265,6 @@ describe("competitors and tracking", () => {
     const t = await runStep(h, "tracking");
     expect(t).toMatchObject({ status: "skipped", reason: "connected_only", gaps: [{ step: "tracking", code: "connected_only" }] });
     expect((t.gaps as Array<{ message: string }>)[0].message).toMatch(/connected showcase workspace/);
-    expect(h.calls.filter((c) => c.name === "setup-rivaliq-landscape")).toHaveLength(0);
     expect(h.t.sets[0].rivaliq_landscape_id).toBeNull();
     expect(await runStep(h, "run_competitive")).toMatchObject({ status: "skipped", reason: "connected_only" });
     expect(h.calls.filter((c) => c.name === "run-report")).toHaveLength(0);
@@ -298,7 +290,6 @@ describe("competitors and tracking", () => {
     expect(r).toMatchObject({ status: "skipped", reason: "set_exists", data: { set_id: "set-old" } });
     h.job.steps.find((s) => s.name === "competitors")!.data = r.data;
     expect(await runStep(h, "tracking")).toMatchObject({ status: "skipped", reason: "connected_only" });
-    expect(h.calls.filter((c) => c.name === "setup-rivaliq-landscape")).toHaveLength(0);
   });
 });
 

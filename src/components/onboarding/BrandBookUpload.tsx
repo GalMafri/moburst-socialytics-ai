@@ -7,9 +7,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { fileKey, useQuietUpload } from "@/hooks/useQuietUpload";
 import { invokeResendable, sendQuietly } from "@/lib/quietSend";
+import { BRAND_BOOK_MAX_BYTES, BRAND_BOOK_MAX_TEXT, BRAND_BOOK_TYPES } from "../../../supabase/functions/_shared/brand/brandBookLimits";
 
-const TYPES = ["application/pdf", "image/png", "image/jpeg", "image/jpg"];
-const MAX_BYTES = 10 * 1024 * 1024;
+// The reader (extract-brand-from-file) decides a file's type by its extension
+// and holds the same size limit, so the screen checks exactly what it checks.
+const NOT_A_BRAND_BOOK_TYPE = "is not a PDF, PNG or JPG file, the only types that are read.";
+const extensionOf = (name: string) => name.split(".").pop()?.toLowerCase() ?? "";
 
 interface BrandBookUploadProps {
   clientId?: string;
@@ -56,7 +59,8 @@ export function BrandBookUpload({
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-    if (!TYPES.includes(file.type) || file.size > MAX_BYTES) { setRefused(file.name); return; }
+    if (!(extensionOf(file.name) in BRAND_BOOK_TYPES)) { setRefused(`${file.name} ${NOT_A_BRAND_BOOK_TYPE}`); return; }
+    if (file.size > BRAND_BOOK_MAX_BYTES) { setRefused(`${file.name} is over ${BRAND_BOOK_MAX_TEXT}, the most that is read.`); return; }
     setRefused(null);
     void send(file);
   };
@@ -73,7 +77,10 @@ export function BrandBookUpload({
     setExtracting(false);
     const identity = fn === "extract-brand-from-file" ? data?.brand_identity : data?.brand_identity ?? data;
     if (error || data?.error || !identity || typeof identity !== "object") {
-      setNotRead(`The ${from} has not been read yet.`);
+      // The reader says when the file itself stopped it: its size or its type.
+      setNotRead(data?.not_read === "too_large" ? `The ${from} is over ${BRAND_BOOK_MAX_TEXT}, the most that is read. Choose a smaller file.`
+        : data?.not_read === "type" ? `The ${from} ${NOT_A_BRAND_BOOK_TYPE}`
+        : `The ${from} has not been read yet.`);
       return;
     }
     onBrandIdentityExtracted(identity);
@@ -82,10 +89,10 @@ export function BrandBookUpload({
 
   return (
     <div className="glass-inner p-inner space-y-4">
-        <Label className="t-body font-semibold">Brand Book / Style Guide</Label>
+        <Label className="t-body font-semibold">Brand book or style guide</Label>
 
         <div className="space-y-2">
-          <Label className="t-secondary">Upload file (PDF, PNG, JPG under 10 MB)</Label>
+          <Label className="t-secondary">{`Upload a file (PDF, PNG or JPG, up to ${BRAND_BOOK_MAX_TEXT})`}</Label>
           {uploadedFileName ? (
             <div className="glass-inner flex items-center gap-2 p-3">
               <FileText className="h-4 w-4 text-primary" />
@@ -95,19 +102,19 @@ export function BrandBookUpload({
               </Button>
               <Button size="sm" onClick={() => void read("extract-brand-from-file", { file_path: brandBookFilePath, bucket: "brand-books", client_name: clientName }, "brand book")} disabled={extracting}>
                 {extracting ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <CheckCircle2 className="h-3 w-3 mr-1" />}
-                Extract Brand
+                Read the brand book
               </Button>
             </div>
           ) : (
             <label className="block">
               <div className="flex items-center gap-2 p-3 border border-dashed border-white/15 rounded-[12px] cursor-pointer hover:border-primary/50 transition-colors">
                 {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4 text-muted-foreground" />}
-                <span className="t-secondary">{uploading ? "Uploading..." : "Click to upload brand book"}</span>
+                <span className="t-secondary">{uploading ? "Uploading..." : "Click to upload a brand book"}</span>
               </div>
               <input type="file" className="hidden" accept=".pdf,.png,.jpg,.jpeg" onChange={choose} disabled={uploading} />
             </label>
           )}
-          {refused && <p className="t-secondary" role="status">{refused} is not a PDF, PNG or JPG file under 10 MB.</p>}
+          {refused && <p className="t-secondary" role="status">{refused}</p>}
           {pending && !uploading && (
             <div className="flex items-center gap-2" role="status">
               <span className="t-secondary truncate">{pending.name} is not uploaded yet.</span>
@@ -117,11 +124,12 @@ export function BrandBookUpload({
         </div>
 
         <div className="space-y-2">
-          <Label className="t-secondary">Or enter Brand Book URL</Label>
+          <Label htmlFor="brand-book-url" className="t-secondary">Or enter a brand book URL</Label>
           <div className="flex gap-2">
             <div className="flex-1 relative">
               <Link className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
+                id="brand-book-url"
                 value={brandBookUrl}
                 onChange={(e) => onBrandBookUrlChange(e.target.value)}
                 placeholder="https://brand.example.com/guidelines"
@@ -130,7 +138,7 @@ export function BrandBookUpload({
             </div>
             <Button onClick={() => void read("research-brand-identity", { website_url: brandBookUrl.trim(), client_name: clientName }, "brand book page")} disabled={extracting || !brandBookUrl.trim()} size="sm">
               {extracting ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <CheckCircle2 className="h-3 w-3 mr-1" />}
-              Extract
+              Read the page
             </Button>
           </div>
         </div>

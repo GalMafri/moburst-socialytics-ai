@@ -2,8 +2,11 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
-import { Loader2 } from "lucide-react";
-import { eventName, timelineDetail, timelineKindName } from "@/lib/display";
+import { Users } from "lucide-react";
+import { Loading } from "@/components/ui/loading";
+import { LoadRetry } from "@/components/ui/load-error";
+import { EmptyState } from "@/components/ui/empty-state";
+import { compactNumber, eventName, formatDate, NO_DATA, timelineDetail, timelineKindName } from "@/lib/display";
 
 /**
  * One person's full story: their own numbers and a chronological log of
@@ -17,7 +20,15 @@ import { eventName, timelineDetail, timelineKindName } from "@/lib/display";
  * rather than starting when event tracking shipped.
  */
 
-type DetailRow = { metric: string; value: string; tone: string };
+/** kind says how a row reads: "date" is `at` (empty means never), "number" is `amount` (empty means no data), "text" is `value`. */
+type DetailRow = { metric: string; tone: string; kind: "text" | "date" | "number"; value: string | null; at: string | null; amount: number | null };
+
+/** What a row shows: dates in the viewer's time zone in the app's one date style, and numbers with the one shared rounding rule. */
+function shown(d: DetailRow): string {
+  if (d.kind === "date") return d.at ? formatDate(d.at) : "Never";
+  if (d.kind === "number") return d.amount == null ? NO_DATA : compactNumber(Number(d.amount));
+  return d.value ?? NO_DATA;
+}
 type TimelineRow = {
   at: string;
   kind: string;
@@ -29,26 +40,26 @@ type TimelineRow = {
 };
 
 const TONE: Record<string, string> = {
-  good: "text-emerald-400",
-  warn: "text-amber-400",
-  bad: "text-rose-400",
+  good: "text-success",
+  warn: "text-warning",
+  bad: "text-destructive",
   plain: "text-foreground",
 };
 
 const KIND_STYLE: Record<string, string> = {
-  run: "bg-sky-500/15 text-sky-400 border-sky-500/30",
-  test: "bg-violet-500/15 text-violet-400 border-violet-500/30",
-  strategic: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
-  post: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
-  publish: "bg-teal-500/15 text-teal-400 border-teal-500/30",
+  run: "bg-info/15 text-info border-info/30",
+  test: "bg-primary/15 text-primary border-primary/30",
+  strategic: "bg-success/15 text-success border-success/30",
+  post: "bg-success/15 text-success border-success/30",
+  publish: "bg-success/15 text-success border-success/30",
   setup: "bg-muted text-muted-foreground border-border",
-  event: "bg-amber-500/15 text-amber-400 border-amber-500/30",
+  event: "bg-warning/15 text-warning border-warning/30",
 };
 
 function when(iso: string) {
   const d = new Date(iso);
   return {
-    date: d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+    date: formatDate(iso),
     time: d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
   };
 }
@@ -98,10 +109,20 @@ export function UserDetail({
           </SheetTitle>
         </SheetHeader>
 
-        {(detail.isLoading || timeline.isLoading) && (
-          <div className="flex justify-center py-10">
-            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-          </div>
+        {/* One loading state for both reads. A read that did not answer keeps loading and tries again; it never claims the person did nothing. */}
+        {detail.isError || timeline.isError ? (
+          <LoadRetry
+            context="user detail"
+            error={detail.error ?? timeline.error}
+            label="Loading activity"
+            onRetry={() => {
+              if (detail.isError) void detail.refetch();
+              if (timeline.isError) void timeline.refetch();
+            }}
+            className="justify-center py-10"
+          />
+        ) : (
+          (detail.isLoading || timeline.isLoading) && <Loading label="Loading activity" className="justify-center py-10" />
         )}
 
         {detail.data && detail.data.length > 0 && (
@@ -112,7 +133,7 @@ export function UserDetail({
                   {d.metric}
                 </div>
                 <div className={`t-body font-medium tabular-nums ${TONE[d.tone] ?? TONE.plain}`}>
-                  {d.value}
+                  {shown(d)}
                 </div>
               </div>
             ))}
@@ -123,12 +144,7 @@ export function UserDetail({
           Activity{rows.length > 0 && <span className="ml-2 t-label font-normal text-muted-foreground">{rows.length} entries</span>}
         </h3>
 
-        {!timeline.isLoading && rows.length === 0 && (
-          <p className="py-6 t-secondary">
-            This person has never done anything in the product. They exist as an account and
-            nothing more.
-          </p>
-        )}
+        {timeline.isSuccess && rows.length === 0 && <EmptyState compact framed={false} icon={Users} title="No activity yet" />}
 
         <ol className="relative space-y-0 border-l border-border pl-4">
           {rows.map((r, i) => {
@@ -139,7 +155,7 @@ export function UserDetail({
               <li key={`${r.at}-${i}`} className="relative pb-4">
                 <span
                   className={`absolute -left-[21px] top-1.5 h-2 w-2 rounded-full ${
-                    r.status === "failed" ? "bg-rose-400" : "bg-primary"
+                    r.status === "failed" ? "bg-destructive" : "bg-primary"
                   }`}
                 />
                 {newDay && (
@@ -149,13 +165,13 @@ export function UserDetail({
                 )}
                 <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                   <span className="t-label tabular-nums text-muted-foreground">{t.time}</span>
-                  <Badge variant="outline" className={`${KIND_STYLE[r.kind] ?? ""} text-[12px]`}>
+                  <Badge variant="outline" className={`${KIND_STYLE[r.kind] ?? ""} text-[13px]`}>
                     {timelineKindName(r.kind)}
                   </Badge>
                   {/* Event rows carry the event's key as their label; it is named here. */}
                   <span className="t-body">{r.kind === "event" ? eventName(r.label) : r.label}</span>
                   {r.status === "failed" && (
-                    <span className="t-label font-medium text-rose-400">did not finish</span>
+                    <span className="t-label font-medium text-destructive">did not finish</span>
                   )}
                 </div>
                 {(r.client_name || timelineDetail(r.kind, r.detail)) && (

@@ -42,6 +42,8 @@ export interface RunConfig {
   started_at: string;
   suppressed_insights_json: string;
   attempt_started_at: string;
+  /** The client's time zone (clients.timezone): posting hours are counted in it. Empty counts in UTC. */
+  time_zone?: string;
 }
 
 /** Run Config: the request's fields, the last 30 days when it names no range. */
@@ -59,6 +61,7 @@ export function runConfig(body: Any, startedAt: Date): RunConfig {
     started_at: startedAt.toISOString(),
     suppressed_insights_json: JSON.stringify(b.suppressed_insights ?? []),
     attempt_started_at: b.attempt_started_at || "",
+    ...(b.time_zone ? { time_zone: String(b.time_zone) } : {}),
   };
 }
 

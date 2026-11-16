@@ -123,6 +123,22 @@ describe("week_preview", () => {
     expect(db.tables.design_week_runs).toEqual([]);
   });
 
+  it("counts a post whose only design was turned down with Not right, though its request is ready", async () => {
+    const db = world({
+      calendar_posts: [calendarPost("turned"), calendarPost("kept")],
+      design_requests: [
+        { id: "r1", client_id: "c1", calendar_post_key: "turned", status: "ready", created_at: "2026-11-02T08:00:00Z" },
+        { id: "r2", client_id: "c1", calendar_post_key: "kept", status: "ready", created_at: "2026-11-02T08:00:00Z" },
+      ],
+      post_iterations: [
+        { client_id: "c1", calendar_post_key: "turned", variant_angle: "Design option 1", media_urls: ["https://x/t.png"], is_selected: false, rejected_at: "2026-11-02T10:00:00Z", created_at: "2026-11-02T09:00:00Z" },
+        { client_id: "c1", calendar_post_key: "kept", variant_angle: "Design option 1", media_urls: ["https://x/k.png"], is_selected: true, created_at: "2026-11-02T09:00:00Z" },
+      ],
+    });
+    const r = await weekPreview(deps(db), { client_id: "c1", week_start: WEEK });
+    expect(r.body).toMatchObject({ counts: { single: 1, carousel: 0, video: 0 } });
+  });
+
   it("says when the video price cannot be read, and prices nothing", async () => {
     const db = world({ calendar_posts: [calendarPost("single"), calendarPost("video", { format: "Reel" })] });
     const d = deps(db, { quoteClip: vi.fn(async () => null) });

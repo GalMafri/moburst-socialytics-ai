@@ -41,6 +41,7 @@ function world(kinds: Array<"competitive" | "social"> = ["social"]) {
     async client(id) { return id === "client-1" ? { id, name: "Fixture", archived_at: null } : null; },
     async competitorSet() { return { id: "set-1", rivaliq_landscape_id: "ls-1" }; },
     async competitiveReport(id, clientId) { return tables.competitive.find((r) => r.id === id && r.client_id === clientId) ?? null; },
+    async recordRedo(id) { writes.push(`redo ${id}`); },
     async reportRun(table, id) { const r = rows(table).find((x) => x.id === id); return r ? { status: r.status, created_at: r.created_at ?? null, error: r.error ?? null, held: false } : null; },
     async pairedCompetitivePending() { return false; },
     async releaseHeldSocial(clientId) { writes.push(`release social ${clientId}`); },

@@ -24,7 +24,7 @@ const SAMPLE = { headline: 'The one idea this post exists to say, in a single li
 function publicUrl(db: any, path: string): string { return db.storage.from(BUCKET).getPublicUrl(path).data.publicUrl; }
 
 async function upload(db: any, path: string, bytes: Uint8Array, type: string) {
-  const { error } = await db.storage.from(BUCKET).upload(path, new Blob([bytes], { type }), { contentType: type, upsert: true });
+  const { error } = await db.storage.from(BUCKET).upload(path, new Blob([bytes as unknown as BlobPart], { type }), { contentType: type, upsert: true });
   if (error) throw new Error(`A brand asset could not be stored: ${error.message}`);
 }
 

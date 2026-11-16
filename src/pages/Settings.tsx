@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -8,7 +8,7 @@ import { Navigate, useSearchParams } from "react-router-dom";
 import { CheckCircle2 } from "lucide-react";
 import { HubCompanySync } from "@/components/HubCompanySync";
 import { HiggsfieldConnection } from "@/components/settings/HiggsfieldConnection";
-import { GoogleSlidesConnection } from "@/components/settings/GoogleSlidesConnection";
+import { GoogleSlidesConnection, type SignInResult } from "@/components/settings/GoogleSlidesConnection";
 import { ApiAccessCard } from "@/components/settings/ApiAccessCard";
 import { fetchActiveClients } from "@/lib/activeClients";
 
@@ -38,13 +38,20 @@ export default function Settings() {
     setSearchParams(next, { replace: true });
   }, [higgsfieldResult, queryClient, searchParams, setSearchParams, toast]);
 
-  // Google's sign-in for strategy decks lands back here the same way.
+  // Google's sign-in for strategy decks lands back here the same way. A
+  // connection is a toast; one that did not connect is said in words on the
+  // Google card, from the short reason the sign-in came back with.
   const googleResult = searchParams.get("google");
+  const [googleFailure, setGoogleFailure] = useState<SignInResult | null>(null);
   useEffect(() => {
     if (!googleResult) return;
     queryClient.invalidateQueries({ queryKey: ["google-status"] });
-    if (googleResult === "connected") toast({ title: "Google Slides connected" });
-    else console.warn("[google sign-in] not connected", searchParams.get("reason") || "no reason given");
+    if (googleResult === "connected") {
+      setGoogleFailure(null);
+      toast({ title: "Google Slides connected" });
+    } else {
+      setGoogleFailure({ reason: searchParams.get("reason") || "unknown" });
+    }
     const next = new URLSearchParams(searchParams);
     next.delete("google");
     next.delete("reason");
@@ -72,14 +79,14 @@ export default function Settings() {
 
       <HiggsfieldConnection />
 
-      <GoogleSlidesConnection />
+      <GoogleSlidesConnection signInResult={googleFailure} />
 
       <ApiAccessCard clientSlugs={clientSlugs} />
 
       <Section layout="split" eyebrow="Data" title="Sprout Social" description="Connected once for the whole workspace.">
         <div className="glass-inner p-inner flex items-start gap-3">
           <CheckCircle2 className="h-4 w-4 mt-1 shrink-0 text-[#b9e045]" aria-hidden />
-          <p className="t-secondary">Every client's figures come from Sprout Social. Its sign-in is stored securely on the server and renews on its own.</p>
+          <p className="t-secondary">Every client's figures come from Sprout Social. Connected.</p>
         </div>
       </Section>
     </AppLayout>

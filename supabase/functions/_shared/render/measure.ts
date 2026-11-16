@@ -1,5 +1,5 @@
 // Text measurement with the real font, so wrapping and fitting are exact.
-import opentype from 'https://esm.sh/opentype.js@1.3.4';
+import { opentype } from './opentype.ts';
 
 export interface Face { regular: any; bold: any }
 

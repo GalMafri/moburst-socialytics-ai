@@ -15,7 +15,7 @@ async function app(over: { analytics?: (id: string, start: string, end: string) 
     clients: [CLIENT, OTHER], sproutProfiles: [SPROUT_PROFILE], sets: [COMPETITOR_SET], competitors: [COMPETITOR], handles: [HANDLE],
     reports: [REPORT, { ...REPORT, id: "rep-calm", client_id: "c-calm", status: "running", created_at: "2026-09-20T00:00:00.000Z", report_data: {} }, ...(over.reports ?? [])],
     competitiveReports: [COMPETITIVE_REPORT], posts: [POST, { ...POST, id: "post-2", is_approved: false, source: "ad_hoc", created_at: "2026-09-03T10:00:00.000Z" }, { ...POST, id: "post-old", archived_at: "2026-09-04T10:00:00.000Z" }],
-    mediaJobs: [MEDIA_JOB], schedules: [SCHEDULE], scheduledPosts: [SCHEDULED_POST], alerts: [ALERT], designSystems: [DESIGN_SYSTEM],
+    mediaJobs: [MEDIA_JOB], schedules: [SCHEDULE], scheduledPosts: [SCHEDULED_POST, { ...SCHEDULED_POST, id: "sp-sending", status: "sending" }, { ...SCHEDULED_POST, id: "sp-failed", status: "failed" }, { ...SCHEDULED_POST, id: "sp-asked", status: "asked" }, { ...SCHEDULED_POST, id: "sp-unconfirmed", status: "unconfirmed" }], alerts: [ALERT], designSystems: [DESIGN_SYSTEM],
     designSettings: [DESIGN_SETTINGS], lifecycleSteps: [{ client_id: "c-calm", step: "design_settings", status: "waiting", result: { waiting_for: "logo_file" } }],
     trendWeeks: TREND_WEEKS, trendThemes: TREND_THEMES, trendPosts: TREND_POSTS,
   }));
@@ -127,6 +127,16 @@ describe("read routes", () => {
     expect((await get("/v1/scheduled-posts")).body.data[0].content).toBe("Know your rights.");
     expect((await get("/v1/alerts?status=new")).body.data[0].topic).toBe("Back to school safety");
     expect((await get("/v1/design-systems?client_id=c-bader")).body.data[0].templates[0].id).toBe("t-quote");
+  });
+  it("lists the posts that reached Sprout, and the rows that did not only when asked for by status", async () => {
+    const { get } = await app();
+    const ids = (await get("/v1/scheduled-posts")).body.data.map((p: { id: string }) => p.id);
+    expect(ids).toContain(SCHEDULED_POST.id);
+    expect(ids).toContain("sp-asked");
+    expect(ids).toContain("sp-unconfirmed");
+    expect(ids).not.toContain("sp-sending");
+    expect(ids).not.toContain("sp-failed");
+    expect((await get("/v1/scheduled-posts?status=failed")).body.data.map((p: { id: string }) => p.id)).toEqual(["sp-failed"]);
   });
   it("serves the full status to an unscoped key and only a company's own findings to a scoped one", async () => {
     const { get } = await app();

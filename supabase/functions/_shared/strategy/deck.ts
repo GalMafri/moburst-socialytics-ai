@@ -106,7 +106,7 @@ export function rows(measure: Measure, cards: Card[], cardH: number, max: number
 
 /** A section as the deck shows it: a person's version where there is one, else the product's. */
 function shownOf(input: DeckInput) {
-  const mine = new Map(input.edits.map((e) => [e.section_key, editShown(e)]));
+  const mine = new Map(input.edits.map((e) => [e.section_key, editShown(e.section_key, e, input.sections[e.section_key])]));
   return (key: string): unknown => {
     const v = mine.get(key);
     return v !== null && v !== undefined && v !== "" ? v : input.sections[key];

@@ -61,7 +61,7 @@ Tool keys are unchanged.
 | `GET /v1/posts?client_id=&report_id=&source=&approved=&include_archived=`, `GET /v1/posts/{id}` | Generated posts: platform, format, copy, hashtags, CTA, concept, visual direction, media URLs, variant, approval state, finishing. |
 | `GET /v1/media-jobs?client_id=&status=` | Media generation jobs: kind, provider, status, output, review. |
 | `GET /v1/schedules?client_id=` | Report schedules: kind, frequency, day of month, range mode, next and last run, last result. |
-| `GET /v1/scheduled-posts?client_id=&status=` | Posts scheduled to Sprout Social. |
+| `GET /v1/scheduled-posts?client_id=&status=` | Posts sent to Sprout Social. `status` reads `scheduled`, `sent_now`, `asked` (Sprout is being asked and the answer is not written down yet, so the post may be there), `unconfirmed` (the send ended without Sprout's answer, so the post may be there), `published` or `cancelled`. Sends still being made (`sending`) and sends that made no post or were closed and sent again (`failed`) are listed only when asked for with `status`. |
 | `GET /v1/alerts?client_id=&status=` | Competitive alerts: topic, summary, companies, platforms, post URLs, window. |
 | `GET /v1/design-systems?client_id=` | Design systems: version, status, templates, tokens (font family, colours), preview URLs. |
 | `GET /v1/status` | Health: reports running past 90 minutes, schedules whose last run failed, media failed in 24 hours, demo jobs stuck or failed, schema drift. A company-scoped key sees its own clients' findings only. |
@@ -123,6 +123,12 @@ The callback body is the job's `status`, `client_id`, `outputs`, `gaps`, `finish
 ## Changes
 
 The integration guide (`docs/api/SOCIALYTICS-INTEGRATION-GUIDE.md`, section 12) lists every change since 13 October 2026. Changes within `/v1` add routes, fields, issue kinds, gap codes and demo steps; the one exception so far is `design_system_missing`, replaced by `design_style_missing` on 2 November 2026.
+
+Changes of 12 November 2026 (the guide's section 12 takes the same lines). Each adds fields; the ordering of the top posts in `GET /clients/{id}/analytics` also changes, as its line says:
+
+- `GET /competitive-reports/{id}`: `aggregates.time_zone`, the zone the posting hours are in (`by_hour`, `by_weekday` and the advised schedule), or `null` for a report that names none, whose hours are UTC.
+- `GET /reports/{id}`: `performance.top_posts_by_platform_impressions`, the top 5 posts per network ranked by impressions, beside `top_posts_by_platform` (top 5 by engagement). A report made earlier has no such key.
+- `GET /clients/{id}/analytics`: each top post gains `reach`, `thumbnail_url` and `media_type`, and posts are now ranked per network by reach (views on YouTube) instead of impressions, so their order can differ from before. The answer gains `top_posts_failed_networks`, the networks whose top posts could not be read this time. The request accepts `compare: false`, and the previous-period fields then come back `null`.
 
 ## Admin routes (scope `admin`, or a signed-in Socialytics admin)
 

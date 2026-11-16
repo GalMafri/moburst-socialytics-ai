@@ -1,15 +1,20 @@
-import "https://deno.land/x/xhr@0.1.0/mod.ts";
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { createClient } from "../_shared/supabase.ts";
 import { staffGate } from "../_shared/auth/requireStaff.ts";
+import { BRAND_BOOK_MAX_BYTES, BRAND_BOOK_TYPES } from "../_shared/brand/brandBookLimits.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-serve(async (req) => {
+/** btoa() on a multi-megabyte string overflows the stack, so encode in chunks. */
+function base64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -33,60 +38,27 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const ext = file_path.split(".").pop()?.toLowerCase();
-    let mimeType = "image/png";
-    if (ext === "jpg" || ext === "jpeg") mimeType = "image/jpeg";
-    else if (ext === "pdf") mimeType = "application/pdf";
+    const ext = String(file_path).split(".").pop()?.toLowerCase() ?? "";
+    const mimeType = BRAND_BOOK_TYPES[ext];
+    // A file this function does not read is an answer about the file, not a failure.
+    const notRead = (reason: "type" | "too_large") =>
+      new Response(JSON.stringify({ brand_identity: null, not_read: reason }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    if (!mimeType) return notRead("type");
 
-    // Get a public URL instead of downloading the file into memory
-    // This avoids the memory limit issue with large files
-    const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(file_path);
-    const publicUrl = urlData?.publicUrl;
-
-    if (!publicUrl) {
-      throw new Error("Failed to get public URL for file");
+    // The bucket is private: every file is read by download with the service
+    // role, never by a public address.
+    const { data: fileData, error: downloadError } = await supabase.storage.from(bucket).download(file_path);
+    if (downloadError || !fileData) {
+      throw new Error("Failed to download file: " + downloadError?.message);
     }
+    const bytes = new Uint8Array(await fileData.arrayBuffer());
+    if (bytes.byteLength > BRAND_BOOK_MAX_BYTES) return notRead("too_large");
+    const dataUrl = `data:${mimeType};base64,${base64(bytes)}`;
 
-    // For images, use the URL directly with OpenAI Vision (no download needed)
-    // For PDFs, we need to download but use efficient base64 encoding
-    let imageContent: any;
-
-    if (mimeType === "application/pdf" || !publicUrl) {
-      // Download and convert to base64 using Deno's efficient encoder
-      const { data: fileData, error: downloadError } = await supabase.storage
-        .from(bucket)
-        .download(file_path);
-
-      if (downloadError || !fileData) {
-        throw new Error("Failed to download file: " + downloadError?.message);
-      }
-
-      // Check file size — reject files over 4MB to stay within compute limits
-      const arrayBuffer = await fileData.arrayBuffer();
-      if (arrayBuffer.byteLength > 4 * 1024 * 1024) {
-        throw new Error("File too large for processing. Please upload a file under 4MB, or use a PNG/JPG image instead of PDF.");
-      }
-
-      // Use Deno's native base64 encoder (much more memory-efficient)
-      const base64 = base64Encode(arrayBuffer);
-
-      imageContent = {
-        type: "image_url",
-        image_url: {
-          url: `data:${mimeType};base64,${base64}`,
-          detail: "low",
-        },
-      };
-    } else {
-      // For images, pass the public URL directly — OpenAI fetches it
-      imageContent = {
-        type: "image_url",
-        image_url: {
-          url: publicUrl,
-          detail: "high",
-        },
-      };
-    }
+    // A PDF goes in as a document; an image as an image.
+    const fileContent = mimeType === "application/pdf"
+      ? { type: "file", file: { filename: String(file_path).split("/").pop() || "brand-book.pdf", file_data: dataUrl } }
+      : { type: "image_url", image_url: { url: dataUrl, detail: "high" } };
 
     let openaiKey = Deno.env.get("OPENAI_API_KEY");
     if (!openaiKey) {
@@ -129,7 +101,7 @@ MANDATORY RULES:
         role: "user",
         content: [
           { type: "text", text: userMessage },
-          imageContent,
+          fileContent,
         ],
       },
     ];

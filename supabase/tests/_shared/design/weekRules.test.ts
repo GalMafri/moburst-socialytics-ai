@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { type PostFacts, type RunPost, WEEK_AT_ONCE, classifyPost, currentCopyOf, designKind, keepStarts, mergeIntoRun, planPass, runFinished, weekCounts } from "../../../functions/_shared/design/weekRules";
+import { type PostFacts, type RunPost, WEEK_AT_ONCE, classifyPost, currentCopyOf, designKind, keepStarts, mediaOf, mergeIntoRun, needsNoDesign, planPass, runFinished, weekCounts } from "../../../functions/_shared/design/weekRules";
 
 // Tuesday 3 Nov 2026, noon UTC; the week runs Monday 2 to Sunday 8 Nov.
 const NOW = new Date("2026-11-03T12:00:00Z");
@@ -24,6 +24,13 @@ describe("classifyPost", () => {
     expect(classifyPost(facts("c", { requests: [{ status: "canceled", created_at: "2026-11-02T08:00:00Z" }] }, { format: "Carousel" }), "UTC", NOW)).toMatchObject({ in: true, kind: "carousel" });
   });
 
+  it("takes a post whose newest request is ready but whose only design was turned down, made the way it was made", () => {
+    const rows = [{ variant_angle: "Design option 1", is_selected: false, rejected_at: "2026-11-02T10:00:00Z" }];
+    const ready = { status: "ready", created_at: "2026-11-02T08:00:00Z", video_route: "posts" };
+    expect(classifyPost(facts("a", { ...mediaOf(rows), requests: [ready] }), "UTC", NOW)).toMatchObject({ in: true, kind: "single", route: null, askFilming: false });
+    expect(classifyPost(facts("v", { ...mediaOf(rows), requests: [ready] }, { format: "Reel" }), "UTC", NOW)).toMatchObject({ in: true, kind: "video", route: "posts", askFilming: false });
+  });
+
   it("makes a filmed post whose footage did not come from the client's posts", () => {
     const closed = { status: "closed", end_reason: "no_footage", created_at: "2026-11-01T08:00:00Z" };
     expect(classifyPost(facts("v", { requests: [closed] }, { format: "Reel" }), "UTC", NOW)).toMatchObject({ in: true, route: "posts", askFilming: false });
@@ -35,7 +42,7 @@ describe("classifyPost", () => {
       return c.in ? null : c.why;
     };
     expect(why(facts("a", { hasDesign: true }))).toBe("designed");
-    expect(why(facts("a", { requests: [{ status: "ready", created_at: "2026-11-02T08:00:00Z" }] }))).toBe("designed");
+    expect(why(facts("a", { hasDesign: true, requests: [{ status: "ready", created_at: "2026-11-02T08:00:00Z" }] }))).toBe("designed");
     expect(why(facts("a", { requests: [{ status: "preparing", created_at: "2026-11-03T11:00:00Z" }] }))).toBe("preparing");
     expect(why(facts("a", { requests: [{ status: "needs_filming", created_at: "2026-11-02T08:00:00Z" }] }))).toBe("filming");
     expect(why(facts("a", { otherMedia: true }))).toBe("media_in_use");
@@ -268,5 +275,26 @@ describe("keepStarts", () => {
     const stopped = [queued("a", { state: "left_out", why: "stopped" }), queued("b", { state: "left_out", why: "stopped" })];
     const pass = [queued("a", { state: "started", request_id: "req-a", started_at: NOW.toISOString() }), queued("b", { state: "queued", waits_for: "copy" })];
     expect(keepStarts(stopped, pass).map((p) => [p.post_key, p.state, p.request_id ?? null])).toEqual([["a", "started", "req-a"], ["b", "left_out", null]]);
+  });
+});
+
+describe("mediaOf", () => {
+  it("does not count a design turned down with Not right or deleted as a design for the week", () => {
+    expect(mediaOf([{ variant_angle: "Design option 1", rejected_at: "2026-11-01" }]).hasDesign).toBe(false);
+    expect(mediaOf([{ variant_angle: "Design option 1", archived_at: "2026-11-01" }]).hasDesign).toBe(false);
+    expect(mediaOf([{ variant_angle: "Design option 1" }]).hasDesign).toBe(true);
+  });
+});
+
+describe("formats read through the shared format kind", () => {
+  it("knows a text post and a design's kind from the planner's own words", () => {
+    expect(needsNoDesign("text_only")).toBe(true);
+    expect(needsNoDesign("Text-only")).toBe(true);
+    expect(needsNoDesign("Single image")).toBe(false);
+    expect(designKind("short_video", "Instagram")).toBe("video");
+    expect(designKind("video (animated text on soft designed background)", "LinkedIn")).toBe("video");
+    expect(designKind("Reel/video", "Instagram")).toBe("video");
+    expect(designKind("Carousel", "LinkedIn")).toBe("carousel");
+    expect(designKind("pdf deck", "LinkedIn")).toBe("carousel");
   });
 });

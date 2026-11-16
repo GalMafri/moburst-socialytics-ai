@@ -1,5 +1,5 @@
 // @vitest-environment node
-// Every status a sent post is recorded with (send.ts) is one the
+// Every status a sent post (and one being sent, or failed) is recorded with (send.ts) is one the
 // scheduled_posts table takes, as the migrations leave its status rule.
 // Until 20261110190000_sent_now_status.sql the rule had no 'sent_now', so
 // each "send now" reached Sprout and its row was refused (8 Nov 2026).
@@ -7,7 +7,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { SENT_STATUSES } from "../../functions/schedule-sprout-post/send";
+import { SENT_STATUSES, WORKING_STATUSES } from "../../functions/schedule-sprout-post/send";
 
 const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "migrations");
 
@@ -26,6 +26,6 @@ describe("scheduled_posts status rule", () => {
   it("takes every status a sent post is recorded with", () => {
     const allowed = allowedStatuses();
     expect(allowed.length).toBeGreaterThan(0);
-    for (const status of Object.values(SENT_STATUSES)) expect(allowed).toContain(status);
+    for (const status of [...Object.values(SENT_STATUSES), ...Object.values(WORKING_STATUSES)]) expect(allowed).toContain(status);
   });
 });

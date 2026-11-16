@@ -8,6 +8,7 @@
 import { useEffect, useState } from "react";
 import { Check, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
+import { NOT_YET, NotYet, useNotYet } from "@/components/ui/not-yet";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { stepsFor, cancelDesign, elapsedLabel, progressPercent, stageIndex, typicalMinutes, type DesignRequest } from "@/lib/designRequests";
@@ -23,13 +24,12 @@ export function DesignProgressCard({ request, replacing = false, brand }: { requ
   const ctx = useDesignRequests();
   const history = ctx?.requests ?? [];
   const [confirming, setConfirming] = useState(false);
+  const notYet = useNotYet();
   const stop = async () => {
-    try {
-      await cancelDesign(request.id);
-      toast.success(`The ${request.kind === "carousel" ? "carousel" : request.kind === "video" ? "video" : "design"} was stopped`);
-    } catch {
-      // The card stays while it is still being prepared, so Cancel can simply be pressed again.
-    }
+    notYet.clear();
+    // Sent again quietly; when it still gets no answer the card says so and keeps Cancel.
+    if (await cancelDesign(request.id)) toast.success(`The ${request.kind === "carousel" ? "carousel" : request.kind === "video" ? "video" : "design"} was stopped`);
+    else notYet.say(NOT_YET.stop);
     ctx?.refresh();
   };
   const current = stageIndex(request);
@@ -81,6 +81,7 @@ export function DesignProgressCard({ request, replacing = false, brand }: { requ
           );
         })}
       </ol>
+      {notYet.line && <NotYet>{notYet.line}</NotYet>}
       <span className="sr-only">{pct}% done</span>
       <DesignNote request={request} brand={brand} />
     </div>

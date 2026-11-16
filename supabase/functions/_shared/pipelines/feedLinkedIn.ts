@@ -10,7 +10,9 @@
 //           checks the n8n answer passes. n8n is never called.
 //
 // On app, a run that stops throws, and so does an app with no pipeline to
-// run (the Apify token is not set, or the switch could not be read). The
+// run (the Apify token is not set, or the switch could not be read). A token
+// Apify refuses stops the run after its first look (inline.ts), so the
+// refresh does not spend its time waiting on it. The
 // refresh then saves the feed without LinkedIn posts and says so
 // (refreshFeed.ts), and the feed job runs it again in 10 minutes while its
 // attempts last (run-scheduled-jobs/feed.ts). Each try runs at most one

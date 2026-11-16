@@ -21,7 +21,9 @@
 //   filter         Claude (Sonnet) keeps or drops every candidate with a reason;
 //                  a bad answer is asked once more, then the week keeps nothing
 //   themes         Claude (Opus) groups the kept posts into 3 to 6 themes
-//   save           every post looked at, kept or dropped with its reason, the
+//   save           (a week in which every watched platform failed is not saved:
+//                  the run stops and the week is collected again)
+//                  every post looked at, kept or dropped with its reason, the
 //                  themes, each platform's status and the measured cost
 
 import { runActorStep, type ApifyFactory } from "../apifyStep.ts";
@@ -29,7 +31,7 @@ import { claudeBatchStep } from "../claude.ts";
 import { ANTHROPIC_API_KEY, APIFY_API_TOKEN } from "../secrets.ts";
 import { keptAnswer, replayOf } from "../social/replay.ts";
 import { SOURCE_KEEP_DAYS } from "../store.ts";
-import { StepRestart, type PipelineDefinition, type Step, type StepContext, type StepResult } from "../types.ts";
+import { StepRestart, StepStop, type PipelineDefinition, type PipelineRun, type Step, type StepContext, type StepResult } from "../types.ts";
 import { competitorSet } from "../../calendar/runWeek.ts";
 import { coverageShort, finishedWeeks, lastKept, parseRewrite, removedFor, removedSearches, rewriteRequest, TREND_REWRITE_MODEL, weeksAfter, withoutRemoved, type RewriteProfile } from "../../trends/coverage.ts";
 import { activeTerms } from "../../trends/profile.ts";
@@ -162,6 +164,26 @@ function withTokens(st: TrendState, model: string, usage: Any): TrendState {
   const was = st.claude?.[model] ?? { input_tokens: 0, output_tokens: 0 };
   return { ...st, claude: { ...(st.claude ?? {}), [model]: { input_tokens: was.input_tokens + (Number(usage.input_tokens) || 0), output_tokens: was.output_tokens + (Number(usage.output_tokens) || 0) } } };
 }
+
+/**
+ * When a trend week ends: the Monday after its week_start (YYYY-MM-DD, a
+ * Monday in Israel time) at midnight in Israel time. Null for a value that is
+ * not a date.
+ */
+export function trendWeekEnd(weekStart: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) return null;
+  const nextMonday = Date.parse(`${weekStart}T00:00:00Z`) + 7 * 86_400_000;
+  if (!Number.isFinite(nextMonday)) return null;
+  // Israel's offset from UTC at that moment (its clock change is at 02:00, never at midnight).
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Jerusalem", hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+  }).formatToParts(new Date(nextMonday)).map((x) => [x.type, x.value]));
+  const local = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute));
+  return new Date(nextMonday - (local - nextMonday));
+}
+
+/** A trends run is for its week: a wait for an account cannot pass the week's end. */
+const trendRunHorizon = (run: Pick<PipelineRun, "input">): Date | null => trendWeekEnd(String((run.input as { week_start?: unknown } | null)?.week_start ?? ""));
 
 export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
   const scrapeStep = (platform: TrendPlatform, next: string) => async (ctx: StepContext): Promise<StepResult> => {
@@ -310,6 +332,8 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
     modes: ["app"],
     appCapable: true,
     secrets: [APIFY_API_TOKEN, ANTHROPIC_API_KEY],
+    // A week that is over is closed by the weekly enqueue, never collected late.
+    waitHorizon: trendRunHorizon,
     first: "start",
     steps: {
       async start(ctx) {
@@ -500,6 +524,13 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
             // The week ran on searches the coverage rewrite gave it: the next week waits for a second week on them.
             ...(plan.rewritten?.[p] ? { rewritten: true } : {}),
           };
+        }
+        // A week in which every watched platform failed brought nothing back. It
+        // is not saved as a week: the run stops at once (saving again cannot
+        // help), the week stays running, and the stopped-run rule of the weekly
+        // enqueue collects it again.
+        if (plan.platforms.length && plan.platforms.every((p) => st.platforms?.[p]?.status === "failed")) {
+          throw new StepStop(`Every watched platform failed (${plan.platforms.join(", ")}), so the week is not saved.`);
         }
         const watchedOk = plan.platforms.every((p) => FINE.includes(st.platforms?.[p]?.status as PlatformStatus));
         const status = watchedOk && st.filter !== "failed" && st.themes !== "failed" ? "done" : "partial";

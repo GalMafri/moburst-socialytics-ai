@@ -10,7 +10,7 @@
 // them: published posts only, views as YouTube's impressions, the same
 // summing as ownedSource.ts. The client's post sample (weekday and hour
 // counts, hashtags, formats, top posts) is rebuilt from the same posts with
-// the code the workflow uses (postSample.ts). The previous period's posts
+// the code the workflow uses (postSample.ts), in the report's stored zone. The previous period's posts
 // are not in the snapshot: a platform whose post count changed loses its
 // previous count rather than keep one that counted ads.
 //
@@ -86,7 +86,8 @@ export function clientFiguresFromStoredPosts(reportData: Any, postsSnapshot: Any
   const ownedNow = { ...owned, by_network, published_posts_only: true, counted_from: "stored_posts" };
   // The sample the report shows for the client, from the same stored posts, ads left out.
   const counted = postsInPeriod(mine, period.start, period.end);
-  const sample = companyPostSample(counted, days);
+  // In the zone the report's competitors were counted in (aggregates.time_zone); a report with none stays in UTC.
+  const sample = companyPostSample(counted, days, reportData?.aggregates?.time_zone ?? null);
   // The rows the stored totals counted that are not posts.
   const removed = sprout.filter((p) => !isPublishedReportPost(p)).length;
   const nextClient = {

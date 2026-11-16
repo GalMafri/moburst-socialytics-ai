@@ -8,7 +8,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useActiveClients } from "@/lib/activeClients";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { addDays, weekLabel } from "@/lib/calendarPosts";
+import { addDays, weekCountLabel, weekLabel } from "@/lib/calendarPosts";
 
 export const ALL_CLIENTS = "all";
 
@@ -28,12 +28,12 @@ export function ClientPicker({ value, week }: { value: string; week: string }) {
 }
 
 /**
- * The week band: previous and next, the week, how many posts it holds, and
+ * The week band: previous and next, the week, how many posts it holds (its Stories counted apart, as the day headers do), and
  * whatever belongs to this week (its plan's status, "Revise this week") at
  * the end of the same band. The count used to sit alone at the far right of
  * a bare row, with the week's own actions on a second row under it.
  */
-export function WeekNav({ week, thisWeek, count, onGo, children }: { week: string; thisWeek: string; count: number; onGo: (monday: string) => void; children?: React.ReactNode }) {
+export function WeekNav({ week, thisWeek, posts, onGo, children }: { week: string; thisWeek: string; posts: Array<{ format?: string | null; platform?: string | null }>; onGo: (monday: string) => void; children?: React.ReactNode }) {
   return (
     <nav className="glass px-card py-3 flex items-center gap-x-3 gap-y-2 flex-wrap" aria-label="Weeks">
       <div className="flex items-center gap-2">
@@ -45,7 +45,7 @@ export function WeekNav({ week, thisWeek, count, onGo, children }: { week: strin
         </Button>
       </div>
       <h2 className="t-h3 px-1" aria-live="polite">{weekLabel(week)}</h2>
-      <span className="t-label rounded-full bg-[rgba(255,255,255,0.06)] px-2.5 py-0.5">{count} post{count === 1 ? "" : "s"}{week === thisWeek ? " this week" : ""}</span>
+      <span className="t-label rounded-full bg-[rgba(255,255,255,0.06)] px-2.5 py-0.5">{weekCountLabel(posts, week === thisWeek)}</span>
       {week !== thisWeek && <Button variant="ghost" size="sm" onClick={() => onGo(thisWeek)}>This week</Button>}
       {children && <div className="flex flex-wrap items-center gap-3 sm:ml-auto">{children}</div>}
     </nav>

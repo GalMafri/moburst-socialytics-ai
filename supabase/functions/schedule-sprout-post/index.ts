@@ -7,23 +7,21 @@
 // _shared/sprout/publishing.ts). Sprout's API makes draft posts only: the
 // post lands on Sprout's Publishing Calendar as a draft for its time. What
 // the screen shows is the post's state: the scheduled_posts row this
-// records, matched by the calendar post's key.
+// writes before Sprout is asked and finishes after, matched by the calendar post's key.
 
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "../_shared/supabase.ts";
 import { defaultSproutCustomerId } from "../_shared/sprout/customer.ts";
 import { staffGate, requireStaff, AuthzError } from "../_shared/auth/requireStaff.ts";
-import { sendToSprout, type SentStore } from "./send.ts";
+import { sendToSprout } from "./send.ts";
+import { sentStore } from "./store.ts";
 import { storedStoryProblem } from "./story.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
-
-const WAITS_MS = [1_000, 3_000];
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -33,7 +31,7 @@ serve(async (req) => {
   if (denied) return denied;
 
   try {
-    const { client_id, report_id, sprout_profile_id, platform, scheduled_time, send_now, post_content, media_url, media_urls, calendar_post_key } = await req.json();
+    const { client_id, report_id, sprout_profile_id, platform, scheduled_time, send_now, supersede, post_content, media_url, media_urls, calendar_post_key } = await req.json();
     const allMediaUrls: string[] = media_urls?.length > 0 ? media_urls : media_url ? [media_url] : [];
     const sendNow = send_now === true;
     if (!client_id || !sprout_profile_id || (!post_content && !allMediaUrls.length)) {
@@ -60,29 +58,8 @@ serve(async (req) => {
     const story = await storedStoryProblem(supabase, client_id, calendar_post_key);
     if (story) return json({ error: story, code: "not_publishable", problems: [story] }, 422);
 
-    // The rows every screen reads: a post already sent is found, a sent post is written with retries.
-    const store: SentStore = {
-      async alreadySent({ clientId, calendarPostKey, status, at, since }) {
-        let q = supabase.from("scheduled_posts").select("scheduled_time")
-          .eq("client_id", clientId).eq("calendar_post_key", calendarPostKey).eq("status", status);
-        if (at) q = q.eq("scheduled_time", at);
-        if (since) q = q.gte("created_at", since);
-        const { data } = await q.limit(1);
-        return data?.[0]?.scheduled_time ? new Date(data[0].scheduled_time).toISOString().replace(".000Z", "Z") : null;
-      },
-      async record(row) {
-        let insertError: { message: string; code?: string } | null = null;
-        for (let attempt = 0; attempt <= WAITS_MS.length; attempt++) {
-          ({ error: insertError } = await supabase.from("scheduled_posts").insert(row));
-          // Before 20261019230000_setup_view.sql the column does not exist; the row is still written.
-          if (insertError?.code === "42703" && "calendar_post_key" in row) { delete row.calendar_post_key; continue; }
-          if (!insertError) break;
-          if (attempt < WAITS_MS.length) await wait(WAITS_MS[attempt]);
-        }
-        if (insertError) console.error("The sent post could not be recorded:", insertError.message);
-        return !insertError;
-      },
-    };
+    // The rows every screen reads: a post already sent is found, a send is written before Sprout is asked and written again when it is done.
+    const store = sentStore(supabase);
 
     const reply = await sendToSprout({
       clientId: client_id,
@@ -96,6 +73,7 @@ serve(async (req) => {
       sendNow,
       customerId: String(client.sprout_customer_id || defaultSproutCustomerId()),
       createdBy: caller.userId ?? null,
+      supersede: typeof supersede === "string" ? supersede : null,
     }, store);
     return json(reply.body, reply.status);
   } catch (error: unknown) {

@@ -9,6 +9,7 @@ import { StaffOnlyRoute } from "@/components/StaffOnlyRoute";
 import { AdminOnlyRoute } from "@/components/AdminOnlyRoute";
 import { Telemetry } from "@/components/Telemetry";
 import { ReturnTo } from "@/components/ReturnTo";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import AuthHandoff from "./pages/AuthHandoff";
@@ -33,7 +34,6 @@ import Settings from "./pages/Settings";
 import Usage from "./pages/Usage";
 import ApiKeys from "./pages/ApiKeys";
 import NotFound from "./pages/NotFound";
-import DevCalendarPreview from "./pages/DevCalendarPreview";
 import StrategyIndex from "./pages/StrategyIndex";
 import ClientStrategy from "./pages/ClientStrategy";
 
@@ -46,9 +46,10 @@ const App = () => (
         <Toaster />
         <Sonner />
         <BrowserRouter>
+          <ErrorBoundary>
           <AuthProvider>
             <Telemetry />
-          <ReturnTo />
+            <ReturnTo />
             <Routes>
               <Route path="/auth" element={<Auth />} />
               {/* gOS (moburst.ai) integration endpoints */}
@@ -85,13 +86,10 @@ const App = () => (
               <Route path="/clients/:id/reports" element={<ReportHistory />} />
               <Route path="/clients/:id/analytics" element={<Analytics />} />
               <Route path="/clients/:id/calendar" element={<ClientCalendar />} />
-              {/* Dev-only — see src/pages/DevCalendarPreview.tsx. Remove after launch. */}
-              {import.meta.env.DEV && (
-                <Route path="/dev/calendar" element={<DevCalendarPreview />} />
-              )}
               <Route path="*" element={<NotFound />} />
             </Routes>
           </AuthProvider>
+          </ErrorBoundary>
         </BrowserRouter>
       </TooltipProvider>
     </QueryClientProvider>

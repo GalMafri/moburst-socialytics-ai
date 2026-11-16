@@ -10,7 +10,8 @@
 import { useState, type ReactNode } from "react";
 import { Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { sendQuietly, writeResendable } from "@/lib/quietSend";
 import { Button } from "@/components/ui/button";
@@ -20,17 +21,18 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { mondayOf } from "@/lib/calendarPosts";
-import { canBeStory } from "@/lib/platform";
+import { FORMAT_LABELS, canBeStory } from "@/lib/platform";
+import { commonPostingTime, timeInputOf } from "@/lib/calendarDate";
 import { FormatChoices } from "./FormatChoices";
 
 const weekOf = (date: string) => mondayOf(date);
 
 const FORMATS = [
   { value: "auto", label: "Best fit for the idea" },
-  { value: "Image", label: "Single image" },
-  { value: "Carousel", label: "Carousel" },
-  { value: "Reel", label: "Reel or short video" },
-  { value: "Story", label: "Story" },
+  { value: "Image", label: FORMAT_LABELS.image },
+  { value: "Carousel", label: FORMAT_LABELS.carousel },
+  { value: "Reel", label: FORMAT_LABELS["short video"] },
+  { value: "Story", label: FORMAT_LABELS.story },
 ];
 
 /** The formats a new post can take for a client with these platforms: Story whenever it has Instagram or Facebook. */
@@ -66,17 +68,37 @@ export function NewPostDialog({ clientId, platforms, defaultDate, onCreated, ini
   trigger?: ReactNode;
 }) {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [date, setDate] = useState(defaultDate);
   const [platform, setPlatform] = useState("");
   const [format, setFormat] = useState("auto");
   const [idea, setIdea] = useState(initialIdea ?? "");
+  /** The time as typed; null until someone types one, so the suggestion shows. */
+  const [typedTime, setTypedTime] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   /** A post that has not reached the calendar yet; the date, platform and idea stay as they are. */
   const [notAdded, setNotAdded] = useState(false);
+  // The time this client's planned posts on the platform use most, newest first; else the time all its posts use.
+  const { data: suggestedTime = "" } = useQuery({
+    queryKey: ["new-post-time", clientId, platform],
+    enabled: open && !!platform,
+    queryFn: async () => {
+      const read = async (onPlatform: boolean) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let q = (supabase.from("calendar_posts" as never) as any).select("posting_time").eq("client_id", clientId).not("posting_time", "is", null);
+        if (onPlatform) q = q.ilike("platform", platform);
+        const { data, error } = await q.order("post_date", { ascending: false }).limit(200);
+        if (error) throw error;
+        return commonPostingTime(((data ?? []) as Array<{ posting_time: string | null }>).map((r) => r.posting_time));
+      };
+      return (await read(true)) ?? (await read(false)) ?? "";
+    },
+  });
+  const time = typedTime ?? suggestedTime;
   const ready = !!date && !!platform && !!idea.trim();
 
-  const reset = () => { setDate(defaultDate); setPlatform(""); setFormat("auto"); setIdea(initialIdea ?? ""); setNotAdded(false); };
+  const reset = () => { setDate(defaultDate); setPlatform(""); setFormat("auto"); setIdea(initialIdea ?? ""); setNotAdded(false); setTypedTime(null); };
 
   const create = async () => {
     // The button waits for a date, a platform and the idea.
@@ -101,6 +123,7 @@ export function NewPostDialog({ clientId, platforms, defaultDate, onCreated, ini
         id,
         client_id: clientId,
         post_date: date,
+        posting_time: timeInputOf(time) || null,
         platform: p.platform || platform,
         format: p.format || (format === "auto" ? null : format),
         pillar: p.pillar || null,
@@ -117,7 +140,7 @@ export function NewPostDialog({ clientId, platforms, defaultDate, onCreated, ini
       }), { again: writeResendable });
       if (insertError && (insertError as { code?: string }).code !== "23505") throw insertError;
       await qc.invalidateQueries({ queryKey: ["calendar-posts", clientId] });
-      toast.success("Post added to the calendar", { action: { label: "Open", onClick: () => window.location.assign(`/clients/${clientId}/calendar?week=${weekOf(date)}`) } });
+      toast.success("Post added to the calendar", { action: { label: "Open", onClick: () => navigate(`/clients/${clientId}/calendar?week=${weekOf(date)}`) } });
       setOpen(false);
       reset();
       onCreated?.(date);
@@ -155,6 +178,10 @@ export function NewPostDialog({ clientId, platforms, defaultDate, onCreated, ini
                 </SelectContent>
               </Select>
             </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="new-post-time">Time</Label>
+            <Input id="new-post-time" type="time" value={time} onChange={(e) => setTypedTime(e.target.value)} />
           </div>
           <div className="space-y-1.5">
             <Label>Format</Label>

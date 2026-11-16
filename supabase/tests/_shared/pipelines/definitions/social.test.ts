@@ -33,6 +33,12 @@ import { socialPipeline, type SocialDeps } from "../../../../functions/_shared/p
 type Any = any;
 
 const REPORT = MOBURST.stored_report;
+/**
+ * The one named difference from the report n8n stored: n8n compared September
+ * with 2 to 31 August (the same length, 30 days); the app compares it with all
+ * of August (nodes.ts previousPeriod). Every other word and figure is the same.
+ */
+const PREVIOUS_MONTH_EDIT = [{ path: "report_period.previous_month.start", real: "2026-08-02", shadow: "2026-08-01", same: false }];
 /** The figures a screen shows for the stored report, by key (reportText.ts socialFigures). */
 const SHOWN_FIGURES = new Set(socialFigures(REPORT.report_data).map((f) => f.key)).size;
 const CLIENT = REPORT.client_id;
@@ -69,7 +75,10 @@ function claude(answers: { brief: unknown; synthesis: unknown }, requests: Any[]
     if (url.endsWith("/results")) {
       const brief = String(req.custom_id).endsWith("source_brief");
       if (brief && o.failBrief) return new Response(JSON.stringify({ custom_id: req.custom_id, result: { type: "errored", error: { type: "overloaded_error" } } }) + "\n");
-      const text = JSON.stringify(brief ? answers.brief : answers.synthesis);
+      // A list of analyses is answered in turn: the first synthesis gets the first, the repair the second.
+      const turn = requests.filter((r) => !String(r.custom_id).endsWith("source_brief")).indexOf(req);
+      const synthesis = Array.isArray(answers.synthesis) ? answers.synthesis[Math.min(turn, answers.synthesis.length - 1)] : answers.synthesis;
+      const text = JSON.stringify(brief ? answers.brief : synthesis);
       return new Response(JSON.stringify({ custom_id: req.custom_id, result: { type: "succeeded", message: { content: [{ type: "text", text }], stop_reason: "end_turn" } } }) + "\n");
     }
     return new Response(JSON.stringify({ processing_status: "ended", results_url: `https://api.anthropic.com/v1/messages/batches/batch-${n}/results` }));
@@ -236,8 +245,11 @@ describe("social_v1, live, on what the providers answered n8n for fd501cba", () 
     expect(c.figures.compared).toBe(SHOWN_FIGURES);
     expect(c.figures).toMatchObject({ differences: [], onlyReal: [], onlyShadow: [] });
     expect(c.comparison.numbers.differences).toEqual([]);
-    expect(c.comparison.text.filter((t) => !t.same)).toEqual([]);
-    expect(c.comparison).toMatchObject({ typeMismatches: [], otherDifferences: [], onlyReal: [], onlyShadow: [] });
+    expect(c.comparison.text.filter((t) => !t.same)).toEqual(PREVIOUS_MONTH_EDIT);
+    // The stored report (n8n's) kept no post pictures; the app's keeps each one Sprout gave (social.thumbnails.test.ts), and that and the per-network lists by impressions (nodes.ts header) are the only differences.
+    expect(c.comparison).toMatchObject({ typeMismatches: [], otherDifferences: [], onlyReal: [] });
+    expect(c.comparison.onlyShadow.length).toBeGreaterThan(0);
+    expect(c.comparison.onlyShadow.every((k: string) => /\.(thumbnail_url|media_type)$|^sprout_performance\.top_posts_by_platform_impressions\b/.test(k))).toBe(true);
     // The providers were asked what n8n asked them.
     expect(calls.sprout).toEqual(["current", "posts", "previous", "previous_posts"]);
     expect(calls.gamma.filter((c) => c.startsWith("create"))).toHaveLength(1);
@@ -409,6 +421,18 @@ describe("social_v1 on stored trends (Trends plan, Task 16)", () => {
     expect(text).toContain("SLIDE 7: ACTION ITEMS & NEXT STEPS");
   });
 
+  it("an analysis the client would read in British spelling goes back for a rewrite, and the rewrite is what the report stores", async () => {
+    const british = { ...WITH_TRENDS, sprout_performance_analysis: { ...WITH_TRENDS.sprout_performance_analysis, key_insights: ["Audience behaviour held steady: reels carried the month."] } };
+    const american = { ...WITH_TRENDS, sprout_performance_analysis: { ...WITH_TRENDS.sprout_performance_analysis, key_insights: ["Audience behavior held steady: reels carried the month."] } };
+    const requests: Any[] = [];
+    const { db, driven, steps } = await run({ mode: "app", reportStatus: "running", request: todaysRequest(), tables: TREND_TABLES(), deps: deps({ requests, synthesis: [british, american] as never }) });
+    expect(driven.outcome.status).toBe("done");
+    expect(steps).toContain("repair");
+    const repair = requests.find((r) => String(r.params.messages[0].content).startsWith("Instructions:"));
+    expect(JSON.stringify(repair.params.messages)).toContain("spells \\\"behaviour\\\" the British way");
+    expect(db.tables.reports[0].report_data.ai_analysis.sprout_performance_analysis.key_insights).toEqual(["Audience behavior held steady: reels carried the month."]);
+  });
+
   it("a stored request that asked for no trends reads none, as the run it replays did", async () => {
     const { db, store } = await run({ mode: "shadow", request: { ...todaysRequest(), skip_trends: true }, tables: TREND_TABLES(), deps: deps({ synthesis: WITH_TRENDS }) });
     const rd = db.tables.shadow_social_reports[0].report_data;
@@ -490,7 +514,7 @@ describe("the September replay: fd501cba from the answers a run kept", () => {
     expect(compared!.figures).toMatchObject({ differences: [], onlyReal: [], onlyShadow: [] });
     expect(compared!.figures.compared).toBe(SHOWN_FIGURES);
     expect(compared!.comparison.numbers.differences).toEqual([]);
-    expect(compared!.comparison.text.filter((t) => !t.same)).toEqual([]);
+    expect(compared!.comparison.text.filter((t) => !t.same)).toEqual(PREVIOUS_MONTH_EDIT);
     expect(compared!.text).toContain("Figures a screen shows:");
   });
 

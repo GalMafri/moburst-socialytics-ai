@@ -110,7 +110,6 @@ describe("undo_note", () => {
 
 describe("design-request and the note", () => {
   const index = readFileSync(join(codeDir(import.meta.url), "index.ts"), "utf8");
-  const action = (name: string) => index.slice(index.indexOf(`if (body?.action === "${name}")`), index.indexOf("if (body?.action", index.indexOf(`if (body?.action === "${name}")`) + 10));
 
   it("stores the note on every request it starts, with what was learned when Not right learned it", () => {
     const start = index.slice(index.indexOf("async function startRequest("), index.indexOf("const work = plan(", index.indexOf("async function startRequest(")));
@@ -118,8 +117,10 @@ describe("design-request and the note", () => {
   });
 
   it("create takes the note and learns from it; Not right's new design carries its note and what it taught", () => {
-    expect(action("create")).toMatch(/note: note \|\| null, learnNote: true/);
-    expect(action("feedback")).toMatch(/note: note \|\| null, noteLearned: note \? noteLearnedOf\(learnings\) : null/);
+    const create = readFileSync(join(codeDir(import.meta.url), "create.ts"), "utf8");
+    const feedback = readFileSync(join(codeDir(import.meta.url), "feedback.ts"), "utf8");
+    expect(create).toMatch(/note: note \|\| null,\s*learnNote: true/);
+    expect(feedback).toMatch(/note: note \|\| null, noteLearned: note \? noteLearnedOf\(learnings\) : null/);
   });
 
   it("hands the note to every planner", () => {

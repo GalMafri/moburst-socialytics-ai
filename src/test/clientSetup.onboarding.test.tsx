@@ -11,7 +11,7 @@ import ClientSetup from '@/pages/ClientSetup';
 // with a date or a count (onboarding from social profiles, section 6).
 
 const NOW = '2026-11-03T10:00:00.000Z';
-const f = vi.hoisted(() => ({ client: null as any, steps: [] as any[], rpcs: [] as any[] }));
+const f = vi.hoisted(() => ({ client: null as any, steps: [] as any[], rpcs: [] as any[], sets: [] as any[], competitors: [] as any[], setsDown: false }));
 vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ canManageClients: true }) }));
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }));
@@ -29,6 +29,8 @@ vi.mock('@/integrations/supabase/client', () => ({ supabase: {
         if (Array.isArray(filters.step)) return { data: f.steps.filter((s) => (filters.step as string[]).includes(s.step)), error: null };
         return { data: single ? f.steps.find((s) => s.step === filters.step) ?? null : [], error: null };
       }
+      if (table === 'competitor_sets') return f.setsDown ? { data: null, error: { message: 'down' } } : { data: f.sets, error: null };
+      if (table === 'competitors') return { data: f.competitors.filter((c) => c.set_id === filters.set_id && c.is_selected === filters.is_selected).sort((a, b) => a.selected_rank - b.selected_rank), error: null };
       return { data: single ? null : [], error: null };
     };
     const q: any = {
@@ -51,6 +53,11 @@ function mount(tab = 'info') {
 
 beforeEach(() => {
   f.rpcs = [];
+  f.sets = [{ id: 'set-new', status: 'draft', created_at: '2026-11-05T00:00:00Z', confirmed_at: null, confirmed_by: null }, { id: 'set-1', status: 'complete', created_at: '2026-11-01T00:00:00Z', confirmed_at: '2026-11-01T00:00:00Z', confirmed_by: null }];
+  f.competitors = [
+    { set_id: 'set-1', is_selected: true, selected_rank: 2, name: 'ChowNow' }, { set_id: 'set-1', is_selected: true, selected_rank: 1, name: 'Toast' }, { set_id: 'set-1', is_selected: true, selected_rank: 3, name: 'Square' },
+    { set_id: 'set-1', is_selected: false, selected_rank: null, name: 'Not chosen' }, { set_id: 'set-new', is_selected: true, selected_rank: 1, name: 'Open draft only' },
+  ];
   f.client = {
     id: 'c1', name: 'Olo', website_url: null, timezone: 'America/Chicago', geo: 'US,GB', language: 'en,es', logo_url: 'https://x/logo-profile-linkedin.png',
     primary_platforms: ['Instagram', 'LinkedIn'], content_pillars: [{ name: 'Order ahead', description: 'd' }], social_keywords: [], brief_text: "Drafted from the client's posts on 2026-11-03:\n\nOlo sells online ordering.",
@@ -64,7 +71,7 @@ beforeEach(() => {
     { step: 'website', status: 'waiting', done_at: null, result: { posts: 214, months: 12, searched_at: NOW, waiting_for: 'website' } },
     { step: 'social_read', status: 'done', done_at: NOW, result: { checked_at: NOW, follower_countries: [{ country: 'US', followers: 70, share: 0.7 }, { country: 'GB', followers: 30, share: 0.3 }], languages: [{ language: 'en', posts: 9 }, { language: 'es', posts: 3 }], language_posts: 12 } },
     { step: 'brief_pillars', status: 'done', done_at: NOW, result: { brief: 'from_posts' } },
-    { step: 'competitors', status: 'done', done_at: NOW, result: { selected: ['Toast', 'ChowNow', 'Square'], chosen_from: 'posts' } },
+    { step: 'competitors', status: 'done', done_at: NOW, result: { source: 'existing' } },
     { step: 'tracking', status: 'waiting', done_at: null, result: { waiting_for: 'client_website' } },
   ];
 });
@@ -82,7 +89,7 @@ it('states what the product read from the profiles as facts with dates and count
 it('says where the logo and the brief came from', async () => {
   mount('brief');
   expect(await screen.findByText("From the client's LinkedIn profile picture, Nov 3, 2026. The website's logo replaces it once the website is found; a logo you upload is kept.")).toBeInTheDocument();
-  expect(screen.getByText("Drafted from the client's posts on Nov 3, 2026. You can rewrite it; the product never replaces your version.")).toBeInTheDocument();
+  expect(screen.getByText("Drafted from the client's posts on Nov 3, 2026. You can rewrite it; Socialytics never replaces your version.")).toBeInTheDocument();
 });
 
 it('says a logo and a time zone from the LinkedIn page came from the page, never from the website', async () => {
@@ -105,10 +112,9 @@ it('says a time zone from the agency is the one most of the agency\'s clients us
   expect(await screen.findByText("Worked out from the time zone most of the agency's clients use, until the client's own location is found. You can change it here.")).toBeInTheDocument();
 });
 
-it('names the three competitors chosen, and why tracking waits, as a plain fact', async () => {
+it('says why tracking waits as a plain fact', async () => {
   mount('competitors');
-  expect(await screen.findByText('Toast, ChowNow, Square')).toBeInTheDocument();
-  expect(screen.getByText("RivalIQ follows companies by their website, so tracking starts once the client's website is found.")).toBeInTheDocument();
+  expect(await screen.findByText("RivalIQ follows companies by their website, so tracking starts once the client's website is found.")).toBeInTheDocument();
 });
 
 it('says how many posts with text the brief waits for, and when the time zone is not known yet', async () => {
@@ -129,4 +135,31 @@ it('uses no developer words, no em dashes and American spelling in any line it a
   expect(text).not.toMatch(/social_read|brief_pillars|client_website|rivaliq_full|waiting_for|profile_picture|undefined|NaN/);
   expect(text).not.toMatch(/—/);
   expect(text).not.toMatch(/colour|organis|recognis|licence/);
+});
+
+it('shows the competitors the set reports use, in their chosen order, once the step finished with an existing set', async () => {
+  mount('competitors');
+  expect(await screen.findByText('Competitors chosen')).toBeInTheDocument();
+  expect(await screen.findByText('Toast, ChowNow, Square')).toBeInTheDocument();
+  expect(screen.queryByText(/Not chosen|Open draft only/)).toBeNull();
+});
+
+it('shows no chosen competitors while no set can run yet', async () => {
+  f.sets = [f.sets[0]];
+  mount('competitors');
+  expect(await screen.findByText('Competitor notes')).toBeInTheDocument();
+  expect(screen.queryByText('Competitors chosen')).toBeNull();
+});
+
+it('keeps loading the chosen competitors when the read does not answer, with no failure on screen', async () => {
+  f.setsDown = true;
+  try {
+    mount('competitors');
+    expect(await screen.findByText('Competitor notes')).toBeInTheDocument();
+    expect(await screen.findByText(/Loading the competitors chosen/)).toBeInTheDocument();
+    expect(screen.queryByText('Competitors chosen')).toBeNull();
+    expect(document.body.textContent ?? '').not.toMatch(/could not|failed|try again|something went wrong|did not load/i);
+  } finally {
+    f.setsDown = false;
+  }
 });

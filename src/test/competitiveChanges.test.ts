@@ -121,3 +121,17 @@ describe('feed source coverage', () => {
     expect(pickComparableFeed(current,[current,{...previous,landscape_id:'other'},previous])).toBe(previous);
   });
 });
+
+describe("diffCompanies company names", () => {
+  it("builds the headline from the readable name of a company stored as a domain, and still matches it by the stored name", () => {
+    const prev = [base({ name: "reyeslaw.com", post_count: 4, cadence_per_week: 1 })];
+    const curr = [base({ name: "reyeslaw.com", post_count: 8, cadence_per_week: 2 })];
+    const [change] = diffCompanies(prev, curr, 5);
+    expect(change.headline.startsWith("Reyes Law posts")).toBe(true);
+    expect(change.company).toBe("Reyes Law");
+  });
+  it("leaves a real name as it is", () => {
+    const [change] = diffCompanies([base({ name: "Reyes Law Group", cadence_per_week: 1, post_count: 4 })], [base({ name: "Reyes Law Group", cadence_per_week: 2, post_count: 8 })], 5);
+    expect(change.company).toBe("Reyes Law Group");
+  });
+});

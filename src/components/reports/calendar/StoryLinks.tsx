@@ -103,7 +103,7 @@ export function StoryLinks({ post, clientId }: Props) {
         {adding ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Smartphone className="h-3.5 w-3.5 mr-1.5" />}
         Add a Story
       </Button>
-      {notAdded && <span role="status" className="t-secondary">The Story isn't added yet.</span>}
+      {notAdded && <span role="status" className="t-secondary">The story isn't added yet.</span>}
     </span>
   );
 }

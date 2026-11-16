@@ -19,6 +19,7 @@ vi.mock('@tanstack/react-query',async importOriginal=>({...(await importOriginal
 function Location(){return <output data-testid="location">{useLocation().pathname}{useLocation().search}</output>}
 function mount(Page:any,path='/') {return render(<QueryClientProvider client={new QueryClient()}><MemoryRouter initialEntries={[path]}><Page/><Location/></MemoryRouter></QueryClientProvider>)}
 afterEach(()=>{cleanup();state.canRun=true});
+const runName='Run competitive analysis';
 for(const [name,Page] of [['competitive',CompetitiveIndex],['dashboard',AdminDashboard]] as const){
  it(`${name}: selecting another client scopes edit and report actions`,()=>{
   mount(Page);fireEvent.click(screen.getByRole('button',{name:'Beta',pressed:false}));
@@ -32,7 +33,7 @@ for(const [name,Page] of [['competitive',CompetitiveIndex],['dashboard',AdminDas
   expect(screen.getByRole('button',{name:'Beta',pressed:true})).toBeInTheDocument();
   fireEvent.change(screen.getByRole('searchbox'),{target:{value:' Alpha '}});
   expect(screen.queryByRole('button',{name:'Beta'})).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button',{name:'Run competitive report'}));
+  fireEvent.click(screen.getByRole('button',{name:runName}));
   expect(screen.getByTestId('location')).toHaveTextContent('/clients/alpha/competitive/run');
  });
  it(`${name}: unmatched search offers no action for the previously selected client`,()=>{
@@ -43,15 +44,15 @@ for(const [name,Page] of [['competitive',CompetitiveIndex],['dashboard',AdminDas
 }
 it('dashboard: archived directory cannot launch reports and permissions still apply',()=>{
  mount(AdminDashboard);fireEvent.click(screen.getByRole('button',{name:"Show archived"}));
- expect(screen.queryByRole('button',{name:'Run competitive report'})).not.toBeInTheDocument();
+ expect(screen.queryByRole('button',{name:'Run competitive analysis'})).not.toBeInTheDocument();
  cleanup();state.canRun=false;mount(AdminDashboard);
- expect(screen.queryByRole('button',{name:'Run competitive report'})).not.toBeInTheDocument();
+ expect(screen.queryByRole('button',{name:'Run competitive analysis'})).not.toBeInTheDocument();
 });
 
 it('dashboard: a client an API demo created carries a Demo badge, the others do not',()=>{
   mount(AdminDashboard);
   expect(screen.queryByText('Demo')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button',{name:'Demo Brand',pressed:false}));
-  expect(screen.getByRole('button',{name:'Open Demo Brand setup'})).toBeInTheDocument();
-  expect(screen.getByText('Demo')).toHaveAttribute('title',expect.stringContaining('API demo'));
+  expect(screen.getByRole('button',{name:'Open Demo Brand client setup'})).toBeInTheDocument();
+  expect(screen.getByText('Demo')).toHaveAttribute('title','Made for a product demo');
 });

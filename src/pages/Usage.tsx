@@ -61,6 +61,14 @@ import {
  */
 
 const WINDOW_DAYS = 90;
+/**
+ * The rule behind the "habit" state in the user_analytics view
+ * (20261019210000_shared_layers.sql): a person last active within this many
+ * days with at least this many finished reports. A test reads the view and
+ * keeps these equal to it.
+ */
+export const HABIT_MIN_REPORTS = 3;
+export const LAPSED_AFTER_DAYS = 60;
 
 type UserRow = {
   email: string;
@@ -85,10 +93,10 @@ type UserRow = {
 type TrendRow = { day: string; actions: number; active_users: number; failures: number };
 
 const STATE_STYLE: Record<string, string> = {
-  habit: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
-  active: "bg-sky-500/15 text-sky-400 border-sky-500/30",
-  lapsed: "bg-amber-500/15 text-amber-400 border-amber-500/30",
-  "logged in, no output": "bg-rose-500/15 text-rose-400 border-rose-500/30",
+  habit: "bg-success/15 text-success border-success/30",
+  active: "bg-info/15 text-info border-info/30",
+  lapsed: "bg-warning/15 text-warning border-warning/30",
+  "logged in, no output": "bg-destructive/15 text-destructive border-destructive/30",
   "never logged in": "bg-muted text-muted-foreground border-border",
 };
 
@@ -99,7 +107,7 @@ function Tile({ label, value, hint, icon: Icon, tone }: { label: string; value: 
     <StatCard
       label={label}
       icon={<Icon className="h-3.5 w-3.5" />}
-      value={tone === "warn" ? <span className="!text-[#f87171]">{value}</span> : value}
+      value={tone === "warn" ? <span className="!text-destructive">{value}</span> : value}
       sub={hint}
     />
   );
@@ -179,31 +187,13 @@ export default function Usage() {
     );
   }
 
-  // A caller with no Supabase session is `anon`, which has no execute grant on
-  // the reporting functions, so PostgREST returns 42501. That is not a fault to
-  // report as one: it means the person is not signed in. It happens on the
-  // branded URL before the portal handoff, and in local dev where useAuth shows
-  // a placeholder user without ever creating a Supabase session.
-  const notSignedIn =
-    users.error != null &&
-    /permission denied|42501|JWT|not authenticated/i.test(String((users.error as Error).message));
-
-  if (notSignedIn) {
-    return (
-      <AppLayout title="User analytics" description="Who uses Socialytics and how: per person, over time, by behavior and by feature.">
-        <EmptyState
-          icon={Users}
-          title="Sign in to view usage"
-          description="Open this tool from the Moburst portal so it can sign you in, then come back to this page. If you opened it directly, that sign-in has not happened yet."
-        />
-      </AppLayout>
-    );
-  }
-
+  // AdminOnlyRoute owns sign-in: by the time this page renders, useAuth says
+  // the person is a signed-in admin. A read that does not answer, including a
+  // refusal, keeps loading and retries quietly like every other read.
   if (users.error) {
     return (
       <AppLayout title="User analytics" description="Who uses Socialytics and how: per person, over time, by behavior and by feature.">
-        <LoadRetry context="usage" onRetry={() => void users.refetch()} />
+        <LoadRetry context="usage" error={users.error} onRetry={() => void users.refetch()} />
       </AppLayout>
     );
   }
@@ -221,12 +211,12 @@ export default function Usage() {
   return (
     <AppLayout title="User analytics" description="Who uses Socialytics and how: per person, over time, by behavior and by feature, with each person's full history.">
         <StatGrid>
-          <Tile label="Provisioned" value={summary.total} hint={`${summary.producing} have done work in the product`} icon={Users} />
-          <Tile label="Regular users" value={summary.habit} hint="3 or more finished reports" icon={Zap} />
+          <Tile label="Provisioned" value={summary.total} hint={`${summary.producing} have done work in the product, all time`} icon={Users} />
+          <Tile label="Regular users" value={summary.habit} hint={`${HABIT_MIN_REPORTS} or more finished reports, active in the last ${LAPSED_AFTER_DAYS} days`} icon={Zap} />
           <Tile
             label="Idle seats"
             value={summary.idle}
-            hint={`${idlePct}% of everyone provisioned`}
+            hint={`${idlePct}% of everyone provisioned, as of now`}
             icon={MoonStar}
             tone={summary.idle > summary.producing ? "warn" : undefined}
           />
@@ -293,7 +283,7 @@ export default function Usage() {
                     </ResponsiveContainer>
                   </div>
                 ) : (
-                  <EmptyState framed={false} icon={Users} title="No activity recorded yet" />
+                  <EmptyState framed={false} icon={Users} title="No activity yet" />
                 )}
               </CardContent>
             </Card>
@@ -326,27 +316,30 @@ export default function Usage() {
 
           <TabsContent value="behaviour" className="space-y-section">
             <div className="grid gap-section lg:grid-cols-2">
-              <FunnelCard rows={(funnel.data ?? []) as FunnelRow[]} />
+              <FunnelCard rows={(funnel.data ?? []) as FunnelRow[]} windowDays={WINDOW_DAYS} />
               <MetricsCard
                 title="Draft quality and trust"
-                note="Edit distance is how much of the generated draft the user rewrote. 0% means it shipped verbatim, above 50% means they effectively started over. Rising regenerations per draft is the earliest signal the model has stopped being useful."
+                note="Edit distance is how much of the generated draft the user rewrote. 0% means it shipped verbatim, above 50% means they effectively started over. Rising regenerations per draft is the earliest signal that drafts have stopped being useful."
                 rows={(ai.data ?? []) as MetricRow[]}
+                windowDays={WINDOW_DAYS}
               />
               <MetricsCard
                 title="Is the output read?"
-                note="Read rate compares distinct calendars opened against calendars that completed in the same window. A low number means you are generating content nobody reviews."
+                note="Read rate compares distinct calendars opened against calendars that completed in the same days. A low number means you are generating content nobody reviews."
                 rows={(reading.data ?? []) as MetricRow[]}
+                windowDays={WINDOW_DAYS}
               />
               <MetricsCard
                 title="Session quality"
                 note="A dead-end session is one where somebody looked around and did nothing. High numbers point at navigation or discovery problems rather than broken features."
                 rows={(sessions.data ?? []) as MetricRow[]}
+                windowDays={WINDOW_DAYS}
               />
             </div>
           </TabsContent>
 
           <TabsContent value="features" className="space-y-section">
-            <FeatureTable rows={(features.data ?? []) as FeatureRow[]} />
+            <FeatureTable rows={(features.data ?? []) as FeatureRow[]} windowDays={WINDOW_DAYS} />
           </TabsContent>
 
           <TabsContent value="people" className="space-y-section">
@@ -377,7 +370,12 @@ export default function Usage() {
                       className="cursor-pointer"
                     >
                         <TableCell>
-                          <div className="t-h4">{u.name || u.email}</div>
+                          <button
+                            type="button"
+                            className="t-h4 rounded-sm text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          >
+                            {u.name || u.email}
+                          </button>
                           <div className="t-label">
                             {u.email}
                             {u.company ? ` · ${u.company}` : ""}

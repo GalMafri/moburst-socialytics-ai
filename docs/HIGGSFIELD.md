@@ -21,7 +21,6 @@ Set in the Supabase dashboard under Edge Functions → Secrets. Never in
 | --- | --- | --- |
 | `HIGGSFIELD_API_KEY_ID` | yes | REST key id |
 | `HIGGSFIELD_API_KEY_SECRET` | yes | REST key secret |
-| `HIGGSFIELD_WEBHOOK_SECRET` | yes for video | Shared secret in the webhook URL (`?t=`). Generate a long random string |
 | `HIGGSFIELD_IMAGE_MODEL_PATH` | no | Defaults to `/higgsfield-ai/soul/v2/standard` |
 | `HIGGSFIELD_VIDEO_MODEL_PATH` | no | Defaults to `/higgsfield-ai/dop/v2/standard`. Confirm against the models enabled on the account |
 | `HIGGSFIELD_VIDEO_PARAMS` | no | JSON object merged into every video submission (duration/quality knobs, which are model-specific) |
@@ -40,27 +39,23 @@ version, including the carousel contact-sheet validation and retry.
 **Videos** (`generate-post-video`) chain two async jobs (brand-aligned seed
 image → image-to-video), so they use a job row:
 
-1. The function records a `media_jobs` row and registers
-   `higgsfield-webhook?t=<secret>` on the submission.
-2. If the video finishes inside the inline budget (~3 min), the response is the
-   classic `{video_url, seed_image_url, seed_used}` and the frontend persists
-   it via `upload-generated-media`, as it always did.
-3. If not, the response is `202 {job_id, status: "processing"}`. The webhook
-   copies the finished media into the `generated-media` bucket (Higgsfield CDN
-   URLs expire after ~7 days) and stamps the row; the frontend
-   (`src/lib/mediaJobs.ts`) watches the row over realtime + polling.
-
-Webhook deliveries can arrive more than once; the webhook only transitions
-rows that are not already terminal, so duplicates are no-ops.
+1. The function submits the video through the hosted MCP tools, which take no
+   callback URL, and records a `media_jobs` row. There is no webhook: the
+   `higgsfield-webhook` function and its `HIGGSFIELD_WEBHOOK_SECRET` secret
+   were removed in November 2026 with the other functions that had no caller.
+2. The function returns the row's id while the video renders.
+3. The browser asks `media-job-status` until the row is terminal. That function
+   collects the finished clip and copies it into the `generated-media` bucket
+   (Higgsfield CDN URLs expire after ~7 days).
 
 **Client context** still shapes every generation. Design references and a
 PNG/JPG brand book are passed as short-lived signed URLs
 (`reference_image_urls`). A **PDF brand book cannot be sent** — Higgsfield
 accepts image inputs only — so its influence must come through
-`design_style_synthesis` in the prompt. Any client with a PDF-only brand book
-needs `synthesize-design-language` run once from Client Setup, or their
-generations lose brand grounding (the functions log a warning when this
-happens).
+`design_style_synthesis` in the prompt. The client lifecycle's weekly design
+references step (`_shared/brand-references/learnStyle.ts`) writes that
+synthesis from the client's own posts and uploads, so a client with a PDF-only
+brand book is covered without anyone running a function by hand.
 
 ## Rate limits
 
@@ -85,7 +80,7 @@ generate through the MCP touches Socialytics data unless you upload it.
 
 ## What this account's REST key can actually reach (probed 2026-09-10)
 
-Run `higgsfield-probe` (staff-only, spends nothing) to re-check. A 422 means
+The `higgsfield-probe` function that produced this table was removed in November 2026 (nothing called it). To re-check, send the same empty-body requests from a terminal with the REST key. A 422 means
 the route exists and rejected an empty body; 404 means it does not exist;
 503 `model_disabled` means it exists but is off for this key.
 

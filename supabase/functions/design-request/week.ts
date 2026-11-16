@@ -71,7 +71,7 @@ const isMonday = (day: string) => /^\d{4}-\d{2}-\d{2}$/.test(day) && new Date(`$
 async function factsOf(db: Db, clientId: string, post: Row): Promise<PostFacts> {
   const [{ data: requests }, { data: iterations }] = await Promise.all([
     db.from("design_requests").select("status, end_reason, ended_at, created_at, video_route").eq("client_id", clientId).eq("calendar_post_key", post.post_key),
-    db.from("post_iterations").select("post_copy, media_urls, created_at, variant_angle, is_selected, archived_at")
+    db.from("post_iterations").select("post_copy, media_urls, created_at, variant_angle, is_selected, archived_at, rejected_at")
       .eq("client_id", clientId).eq("calendar_post_key", post.post_key).order("created_at", { ascending: false }).limit(50),
   ]);
   return {

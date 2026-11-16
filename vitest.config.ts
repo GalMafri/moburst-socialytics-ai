@@ -52,6 +52,8 @@ export default defineConfig({
       // Except the API core's own tests, synced verbatim from AdVisor.
       "supabase/functions/_shared/api/*.test.ts",
       "api/**/*.{test,spec}.{ts,tsx}",
+      // The picture service (server/) is a Node project of its own.
+      "server/**/*.{test,spec}.ts",
     ],
   },
   resolve: {

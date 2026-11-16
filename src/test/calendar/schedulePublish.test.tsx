@@ -234,7 +234,10 @@ describe("Sending to Sprout now, as a draft", () => {
     expect(await screen.findByRole("radio", { name: "Send to Sprout now" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Send to Sprout for a set time" })).toBeChecked();
     expect(screen.getByText("It arrives in Sprout as a draft. Approve it there to post it.")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Send to Sprout Social" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Send to Sprout" })).toBeInTheDocument();
+    // Sentence case, in the shared words: Sprout profile, Attached media.
+    expect(screen.getByText("Sprout profile")).toBeInTheDocument();
+    expect(dialog.textContent).not.toMatch(/Sprout Profile|Attached Media|Sprout Social/);
     expect(dialog.textContent).not.toMatch(/publish|schedule post/i);
   });
 

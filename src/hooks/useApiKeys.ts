@@ -47,7 +47,10 @@ async function request<T>(url: string, init: RequestInit): Promise<T> {
   const res = await fetch(url, { ...init, headers: { ...(await authHeaders()), ...(init.headers ?? {}) } });
   if (res.status === 204) return undefined as T;
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body?.error?.message ?? `The request failed (${res.status}).`);
+  if (!res.ok) {
+    // The status rides on the error the way supabase-js puts it, so a caller can tell a refusal from a busy server.
+    throw Object.assign(new Error(body?.error?.message ?? `The request did not go through (${res.status}).`), { context: { status: res.status } });
+  }
   return body as T;
 }
 

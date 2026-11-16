@@ -33,46 +33,47 @@
 // (canva_finish_jobs.clip_order, credits.ts), never in state, so staff see
 // what a week of designs used and no save of state can erase it.
 
-import { Image } from "https://deno.land/x/imagescript@1.3.0/mod.ts";
 import { decode as base64Decode, encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { MCP_URL, accessTokenFor } from "../higgsfield/oauth.ts";
 import { McpClient } from "../higgsfield/mcp.ts";
 import { awaitJobs, creditBalance, importReferences, submitVideo } from "../higgsfield/generate.ts";
 import { CLIP_LOST_MS, type ClipOrder, OLD_STEPS, REASONS, clipOrderOf, clipOutcome, footageRules, framePrompt, quoteClip } from "./clip.ts";
 import { runClip } from "./clipStep.ts";
-import { BUCKET } from "../canva/jobs.ts";
+import { BUCKET, renewJobLease, saveJobProgress } from "../canva/jobs.ts";
 import { canvasLogoRect } from "../canva/brief.ts";
 import { anthropicMessages } from "../anthropic.ts";
 import { openaiKey } from "../openai/key.ts";
 import { ModelBusy, OPENAI_IMAGE_MODEL, imageEdit } from "../media/imageEdit.ts";
-import { KIT_MAKE_MS, KIT_MAX, KIT_MIN, MAX_KIT_TRIES, parseKitPick, kitCleanPrompt, kitEditSize, kitStillCheckPrompt, parseKitStillCheck, kitNext, kitPath, kitPaths, kitPickPrompt, type KitDone, kitClaim, kitDoneCount, kitDoneOf, kitForStyle, kitKeptFrom, kitState, kitWork, postsRouteInput } from "./kit.ts";
-import { copyMatches, marksPrompt, parseMarks, parseRead, readPrompt } from "../design/pipeline.ts";
+import { KIT_MAKE_MS, KIT_MAX, KIT_MIN, MAX_KIT_TRIES, parseKitPick, kitCleanPrompt, kitStillCheckPrompt, parseKitStillCheck, kitNext, kitPaths, kitPickPrompt, type KitDone, kitClaimed, kitDoneOf, kitHolderOf, kitKeptFrom, kitState, kitTakenOver, kitWork, postsRouteInput } from "./kit.ts";
+import { cleanKitStills, keepKitError } from "./kitStep.ts";
+import { marksPrompt, parseMarks, parseRead, readPrompt } from "../design/pipeline.ts";
 import { parseVideoStyle, videoStylePrompt } from "../canva/options.ts";
 import { CARD_SIZE, FOOTAGE_STILLS, STYLE_FRAMES, VIDEO_SIZE, audioScript, captionWeight, captionsAss, framesScript, hookPlacement, parseAudio, videoLogoBox, parseFrames, composeScript, footageTextPrompt, parseComposed, parseFootageText } from "./compose.ts";
 import { hookPrompt } from "./hook.ts";
+import { callPicture, notePicture, signedRead, signedWrite } from "../picture/client.ts";
+import { heldWork } from "../canva/hold.ts";
+import { VIDEO_LIMITS } from "./advance.ts";
+import { type TitleDeps, runTitle, runTitleCheck } from "./titleStep.ts";
+import { runFrame } from "./frame.ts";
+import { FRAME_JPEG_QUALITY, KIT_JPEG_QUALITY } from "../picture/contract.ts";
 import { checkScript, endScript, startScript } from "./sandbox.ts";
 
 /** Room for each check's answer (the model may think first, and that counts against it). */
 const CHECK_TOKENS = 2000;
 /** How often a running clip or join is asked about. */
 export const VIDEO_POLL_MS = 30_000;
-const MAX_HOOKS = 3;
-/** Opening frames drawn for one video before it ends with REASONS.frame. */
-const MAX_FRAMES = 3;
 const MAX_COMPOSE = 3;
 const MAX_CLIPS = 3;
 /** Where filmed clips are kept, privately. */
 const FOOTAGE_BUCKET = "post-footage";
 const REFERENCES = "design-references";
 /** clip_order: the job's one paid clip, from its own column (clip.ts ClipOrder); never saved with state, written only by clipStep.ts's fenced statements. */
-export type VideoJob = { id: string; client_id: string; step: string; state: any; input: any; design_request_id: string | null; option_index: number | null; clip_order?: ClipOrder | null };
+export type VideoJob = { id: string; client_id: string; step: string; state: any; input: any; design_request_id: string | null; option_index: number | null; created_at?: string; clip_order?: ClipOrder | null };
 /** next: run the following step now; wait: ask again on a later pass; done: the MP4 is stored (state.final_path); held: work goes on in the background under its own lease (hold). */
 export type VideoStepResult = "next" | "wait" | "done" | "held";
 
 /** A job is only ever moved on while it is active: a job stopped meanwhile stays stopped. */
 const ACTIVE = ["queued", "running"];
-/** Tries of one step before its job fails. */
-export const MAX_VIDEO_ATTEMPTS = 4;
 /** A job is held this long while a pass works on it (video-worker), and again right before its clip is ordered. */
 export const VIDEO_JOB_LEASE_MS = 120_000;
 /** A job held for model work keeps its lease this long (as the design worker's). */
@@ -80,38 +81,15 @@ const MODEL_LEASE_MS = 420_000;
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
-/** A step's error kept on its job: tried again on a later pass, or the job fails (a FINAL: reason, or its last try). */
-export async function recordVideoFailure(admin: any, job: VideoJob & { attempts?: number }, e: unknown): Promise<void> {
-  const msg = e instanceof Error ? e.message : String(e);
-  const attempts = (job.attempts ?? 0) + 1;
-  const final = attempts >= MAX_VIDEO_ATTEMPTS || msg.startsWith("FINAL:");
-  console.error(`[video-worker] job ${job.id} step ${job.step}:`, msg);
-  await admin.from("canva_finish_jobs").update({
-    attempts, state: job.state, error: msg.replace(/^FINAL:\s*/, ""), status: final ? "failed" : "running", lease_until: null, updated_at: new Date().toISOString(),
-  }).eq("id", job.id).in("status", ACTIVE);
-}
-
 /**
- * Model work that runs past the worker's pass (the shape of the design
- * worker's): the job is held under a longer lease with its step and state saved, and
- * moves on (its step, state, no error) when the work ends. The image model at
- * its rate limit is waited out without using a try.
+ * Model work that runs past the worker's pass (canva/hold.ts, the design
+ * worker's too): the job is held under a longer lease with its step and
+ * state saved, and moves on when the work ends. The image model at its rate
+ * limit, or the picture service unavailable, is waited out without using a
+ * try (canva/stepError.ts).
  */
 function hold(admin: any, job: VideoJob, work: () => Promise<void>): VideoStepResult {
-  const run = (async () => {
-    // The step is saved too: the steps run before the hold in this pass (style_read, say) are not run again.
-    await admin.from("canva_finish_jobs").update({ step: job.step, lease_until: new Date(Date.now() + MODEL_LEASE_MS).toISOString(), state: job.state, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE);
-    try {
-      await work();
-      await admin.from("canva_finish_jobs").update({ step: job.step, state: job.state, error: null, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE);
-    } catch (e) {
-      if (e instanceof ModelBusy) {
-        await admin.from("canva_finish_jobs").update({ state: job.state, error: e.message, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE);
-      } else {
-        await recordVideoFailure(admin, job, e);
-      }
-    }
-  })();
+  const run = heldWork(admin, job, work, { ...VIDEO_LIMITS, leaseMs: MODEL_LEASE_MS });
   if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) EdgeRuntime.waitUntil(run);
   return "held";
 }
@@ -176,80 +154,22 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       s.sentence_starts = said.sentenceStarts;
       job.step = input.filmed.title === "none" ? "assemble" : "title"; return "next";
     }
-    case "title": {
-      // A client whose videos carry no text over the footage gets no title; a title already checked is kept.
-      if (!input.copy?.length || s.title_ok) { job.step = afterTitle; return "next"; }
-      s.hooks = (s.hooks ?? 0) + 1;
-      if (s.hooks > MAX_HOOKS) throw new Error("FINAL: The video's title could not be drawn with the exact words.");
-      let png: Uint8Array;
-      try {
-        png = await generateImage(await openaiKey(admin), hookPrompt(input.brand_name, input.copy, input.text_style), [CARD_SIZE.width, CARD_SIZE.height], true);
-      } catch (e) {
-        if (e instanceof ModelBusy) { s.hooks -= 1; return "wait"; }
-        throw e;
-      }
-      const path = `${base}/hook-${s.hooks}.png`;
-      const { error } = await admin.storage.from(BUCKET).upload(path, png, { contentType: "image/png", upsert: true });
-      if (error) throw new Error(`Could not store the title: ${error.message}`);
-      s.hook_path = path;
-      job.step = "title_check"; return "next";
-    }
-    case "title_check": {
-      // Read over a mid-grey ground so light and dark lettering both show.
-      const { data, error } = await admin.storage.from(BUCKET).download(s.hook_path);
-      if (error || !data) throw new Error(`Could not read the title: ${error?.message ?? "missing"}`);
-      const hook = await Image.decode(new Uint8Array(await data.arrayBuffer()));
-      // Where the lettering is on its layer (its visible pixels), so it can be placed exactly.
-      let x0 = hook.width, y0 = hook.height, x1 = -1, y1 = -1;
-      for (let y = 0; y < hook.height; y++) {
-        for (let x = 0; x < hook.width; x++) {
-          if (hook.bitmap[(y * hook.width + x) * 4 + 3] > 16) {
-            if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
-          }
-        }
-      }
-      if (x1 < 0) throw new Error("The title came back empty.");
-      s.hook_box = { x: x0, y: y0, width: x1 - x0 + 1, height: y1 - y0 + 1 };
-      s.hook_layer = { width: hook.width, height: hook.height };
-      const ground = new Image(hook.width, hook.height).fill(Image.rgbaToColor(70, 70, 76, 255));
-      ground.composite(hook, 0, 0);
-      const jpeg = await ground.resize(Math.round(hook.width / 2), Math.round(hook.height / 2)).encodeJPEG(92);
-      const result = await anthropicMessages({
-        apiKey: anthropicKey(),
-        body: {
-          model: "claude-opus-5-5", max_tokens: CHECK_TOKENS,
-          messages: [{ role: "user", content: [
-            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64Encode(jpeg as unknown as ArrayBuffer) } },
-            { type: "text", text: readPrompt(input.brand_name) },
-          ] }],
-        },
-      });
-      const lines = parseRead(result.text);
-      if (!lines) throw new Error("The title's words could not be read.");
-      s.hook_read = lines;
-      if (!copyMatches(lines, input.copy)) {
-        console.warn(`[video-worker] job ${job.id}: title read ${JSON.stringify(lines)}, wanted ${JSON.stringify(input.copy)}`);
-        delete s.hook_path;
-        job.step = "title"; return "next";
-      }
-      s.title_ok = true;
-      job.step = afterTitle; return "next";
-    }
+    case "title": return runTitle(titleDeps(admin, job), job, afterTitle);
+    case "title_check": return runTitleCheck(titleDeps(admin, job), job, afterTitle);
     case "frame": {
       // The kit's stills, unless the video takes the posts route; a kit learned again since the check is made first.
       let stills: string[] = [];
       if (input.video_route !== "posts") {
         const { data: client } = await admin.from("clients").select("video_style").eq("id", job.client_id).maybeSingle();
-        if (kitState(client?.video_style) !== "ready") { delete s.kit_checked; job.step = "kit"; return "next"; }
+        // A frame kept from before the kit was learned again is drawn again from the new kit.
+        if (kitState(client?.video_style) !== "ready") { delete s.kit_checked; delete s.frame_png; job.step = "kit"; return "next"; }
         stills = kitPaths(client.video_style);
       }
-      s.frames = (s.frames ?? 0) + 1;
-      if (s.frames > MAX_FRAMES) throw new Error(`FINAL: ${REASONS.frame}`);
-      const n = s.frames;
+      // Drawn, or taken up again from the PNG already paid for, and made a JPEG (frame.ts).
       const prompt = framePrompt(input.video.prompt, footageRules(input.people));
       const size: [number, number] = [CARD_SIZE.width, CARD_SIZE.height];
-      return hold(admin, job, async () => {
-        try {
+      return runFrame({
+        draw: async () => {
           const apiKey = await openaiKey(admin);
           const images = [];
           for (const p of stills) {
@@ -257,20 +177,22 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
             if (error || !data) throw new Error(`Could not read a kit still: ${error?.message ?? "missing"}`);
             images.push({ bytes: new Uint8Array(await data.arrayBuffer()), name: "still.jpg" });
           }
-          const png = images.length ? await imageEdit(apiKey, images, prompt, size) : await generateImage(apiKey, prompt, size, false);
-          // Kept as a JPEG, as the kit's stills are: the checks read it and the video service starts from it.
-          const jpeg = await (await Image.decode(png)).encodeJPEG(92);
-          const path = `${base}/frame-${n}.jpg`;
-          const { error } = await admin.storage.from(BUCKET).upload(path, jpeg, { contentType: "image/jpeg", upsert: true });
+          return images.length ? imageEdit(apiKey, images, prompt, size) : generateImage(apiKey, prompt, size, false);
+        },
+        store: async (path, png) => {
+          const { error } = await admin.storage.from(BUCKET).upload(path, png, { contentType: "image/png", upsert: true });
           if (error) throw new Error(`Could not store the opening frame: ${error.message}`);
-          s.frame_path = path;
-          job.step = "frame_check";
-        } catch (e) {
-          // The image model at its rate limit uses no frame.
-          if (e instanceof ModelBusy) s.frames = n - 1;
-          throw e;
-        }
-      });
+        },
+        transcode: async (pngPath, jpegPath) => (await callPicture(admin, "transcode", {
+          job: job.id,
+          step: "frame",
+          picture: await signedRead(admin, BUCKET, pngPath),
+          quality: FRAME_JPEG_QUALITY,
+          out: await signedWrite(admin, BUCKET, jpegPath),
+        })).ms,
+        save: () => saveJobProgress(admin, job),
+        renewLease: () => renewJobLease(admin, job.id, new Date(), MODEL_LEASE_MS),
+      }, job, (work) => hold(admin, job, work));
     }
     case "frame_check": {
       if (!s.frame_path) { job.step = "frame"; return "next"; }
@@ -327,7 +249,7 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
           if (error) throw new Error(`Could not stop the video: ${error.message}`);
           return data === true;
         },
-        saveJob: () => saveJob(admin, job, { step: job.step }),
+        saveJob: () => saveJobProgress(admin, job),
         renewLease: async () => {
           const { error } = await admin.from("canva_finish_jobs").update({ lease_until: new Date(Date.now() + VIDEO_JOB_LEASE_MS).toISOString() }).eq("id", job.id).in("status", ACTIVE);
           if (error) throw new Error(`Could not hold the video for its order: ${error.message}`);
@@ -461,6 +383,39 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
   throw new Error(`FINAL: Unknown video step '${job.step}'`);
 }
 
+/** The title steps' services (titleStep.ts): the image model, storage, the picture service and the vision model. */
+function titleDeps(admin: any, job: VideoJob): TitleDeps {
+  const input = job.input;
+  return {
+    draw: async () => generateImage(await openaiKey(admin), hookPrompt(input.brand_name, input.copy, input.text_style), [CARD_SIZE.width, CARD_SIZE.height], true),
+    store: async (path, png) => {
+      const { error } = await admin.storage.from(BUCKET).upload(path, png, { contentType: "image/png", upsert: true });
+      if (error) throw new Error(`Could not store the title: ${error.message}`);
+    },
+    renewLease: () => renewJobLease(admin, job.id, new Date(), MODEL_LEASE_MS),
+    save: () => saveJobProgress(admin, job),
+    locate: async (layerPath, readPath) => callPicture(admin, "title-read", {
+      job: job.id,
+      step: "title_check",
+      layer: await signedRead(admin, BUCKET, layerPath),
+      out: await signedWrite(admin, BUCKET, readPath),
+    }),
+    read: async (readPath) => {
+      const result = await anthropicMessages({
+        apiKey: anthropicKey(),
+        body: {
+          model: "claude-opus-5-5", max_tokens: CHECK_TOKENS,
+          messages: [{ role: "user", content: [
+            ...(await jpegBlocks(admin, BUCKET, [readPath])),
+            { type: "text", text: readPrompt(input.brand_name) },
+          ] }],
+        },
+      });
+      return parseRead(result.text);
+    },
+  };
+}
+
 function anthropicKey(): string {
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
@@ -500,6 +455,13 @@ async function footageWriting(admin: any, paths: string[], bucket = BUCKET): Pro
   return seen;
 }
 
+/** A stored file's bytes. */
+async function downloadFrom(admin: any, bucket: string, path: string): Promise<Uint8Array> {
+  const { data, error } = await admin.storage.from(bucket).download(path);
+  if (error || !data) throw new Error(`Could not read a still: ${error?.message ?? "missing"}`);
+  return new Uint8Array(await data.arrayBuffer());
+}
+
 /** JPEG stills in storage as image blocks for the vision model. */
 async function jpegBlocks(admin: any, bucket: string, paths: string[]): Promise<unknown[]> {
   const out: unknown[] = [];
@@ -529,21 +491,27 @@ async function jpegBlocks(admin: any, bucket: string, paths: string[]): Promise<
  *             (kitClaim) the kit is stored with what is clean so far, so one
  *             still that never comes out costs no clean ones; with fewer
  *             than KIT_MIN the client's videos take the posts route, and
- *             nothing fails;
+ *             nothing fails. Only errors about the stills are tries of the
+ *             kit: a wait (the picture service unavailable, the image model
+ *             busy) is waited out, and a call the picture service refused
+ *             spends a try of the job, which fails with the service's
+ *             reason after its tries (kitStep.ts);
  *   kit_wait  until the kit is stored. The style job then plans the video
  *             posts that waited for the style and ends; a video job goes on,
  *             on the posts route when the kit has too few stills.
  * after: what the job does once the kit is in ("finish" for the style job).
  */
-async function runKitStep(admin: any, job: VideoJob, after: "finish" | "video"): Promise<VideoStepResult> {
+export async function runKitStep(admin: any, job: VideoJob, after: "finish" | "video"): Promise<VideoStepResult> {
   const s = job.state ?? (job.state = {});
   const { data: client } = await admin.from("clients").select("name, video_style").eq("id", job.client_id).maybeSingle();
   const videoStyle = client?.video_style ?? null;
   const next = kitNext(videoStyle, Date.now(), job.id, s.kit_held_at);
+  // A claim held by a job that has ended is free now, not when it lapses (endedHolder).
+  const ended = next === "wait" ? await endedHolder(admin, videoStyle, job.id) : null;
   if (job.step === "kit_wait" || next === "ready" || next === "none") {
-    if (next === "wait") return "wait";
+    if (next === "wait" && !ended) return "wait";
     // The last maker stopped without storing a kit: it is made again.
-    if (next === "make") { job.step = "kit"; return "next"; }
+    if (next === "make" || ended) { job.step = "kit"; return "next"; }
     if (after === "finish") {
       // Planned now, so planning sees the kit as it is.
       await planWaitingVideos(admin, job.client_id);
@@ -553,7 +521,7 @@ async function runKitStep(admin: any, job: VideoJob, after: "finish" | "video"):
     if (next === "none") await toPostsRoute(admin, job);
     job.step = "title"; return "next";
   }
-  if (next === "wait") return "wait";
+  if (next === "wait" && !ended) return "wait";
   if (!videoStyle) {
     // No style at all (the client has no videos to learn from): nothing to make a kit from.
     if (after === "finish") throw new Error("FINAL: The client's video style is missing.");
@@ -561,34 +529,47 @@ async function runKitStep(admin: any, job: VideoJob, after: "finish" | "video"):
     job.step = "title"; return "next";
   }
   // The claim: only when no other job holds a fresh start (decided in the database, so two jobs never both make it).
-  const { data: claimed, error: claimError } = await admin.rpc("video_style_claim_kit", { p_client: job.client_id, p_job: job.id, p_stale: `${KIT_MAKE_MS / 1000} seconds` });
+  // From an ended holder it is taken over only while that job still holds it (compare-and-set on it), so a claim another live job made since is never taken.
+  const { data: claimed, error: claimError } = ended
+    ? await admin.rpc("video_style_take_kit", { p_client: job.client_id, p_job: job.id, p_ended: ended.id })
+    : await admin.rpc("video_style_claim_kit", { p_client: job.client_id, p_job: job.id, p_stale: `${KIT_MAKE_MS / 1000} seconds` });
   if (claimError) throw new Error(`Could not start the client's kit: ${claimError.message}`);
   if (!claimed) return "wait";
   // A kit in progress belongs to the style it was picked from; one learned again since starts the pick over.
-  job.state = kitForStyle(s, videoStyle.made_at);
-  const st = job.state;
-  // A try is a claim that finished no still since the claim before (kitClaim).
-  const claim = kitClaim({ tries: st.kit_tries, seen: st.kit_seen }, kitDoneCount(kitDoneOf(st.kit_done)));
-  st.kit_tries = claim.tries;
-  st.kit_seen = claim.seen;
+  // A try is a claim that finished no still since the claim before, unless it ended for a reason outside its stills: a wait or a refused picture call (kitClaimed).
+  job.state = kitClaimed(s, videoStyle.made_at);
+  // From a holder that ended: its pick, outcomes and paid edits go on, so the next job pays for nothing twice.
+  if (ended) job.state = kitTakenOver(job.state, ended.state, videoStyle.made_at);
   job.step = "kit";
   // Saved before any model call, so an error from here on never runs the steps before the kit again.
-  await saveJob(admin, job, { step: job.step });
+  await saveJobProgress(admin, job);
   try {
     return await makeKit(admin, job, videoStyle, job.input?.brand_name ?? client?.name ?? "the brand");
   } catch (e) {
-    // A kit never fails its job: the error is kept, the next pass claims again
-    // as another try, and spent tries store the kit as [] (the posts route).
+    // An error before the cleaning never fails the job: it is kept, the next
+    // pass claims again as another try, and spent tries store the kit as []
+    // (the posts route). The cleaning runs in the hold and keeps its own
+    // errors about the stills the same way (kitStep.ts).
     keepKitError(job.state, e);
     return "wait";
   }
 }
 
-/** A kit error kept on the job (the last three). */
-function keepKitError(s: any, e: unknown): void {
-  const msg = e instanceof Error ? e.message : String(e);
-  console.error(`[video-worker] kit:`, msg);
-  s.kit_errors = [...(Array.isArray(s.kit_errors) ? s.kit_errors : []), msg.slice(0, 300)].slice(-3);
+/**
+ * The row of the job that holds a fresh claim on the client's kit when that
+ * job has ended (failed, canceled, or finished without storing the kit), or
+ * null when no other job holds one or it is still at work. The claim then
+ * belongs to nobody: waiting for it to lapse (KIT_MAKE_MS) only made the next
+ * job wait out a dead claim, and pay again for edits the dead job had kept.
+ */
+async function endedHolder(admin: any, videoStyle: unknown, jobId: string): Promise<{ id: string; state: unknown } | null> {
+  const holder = kitHolderOf(videoStyle, Date.now(), jobId);
+  if (!holder) return null;
+  const { data, error } = await admin.from("canva_finish_jobs").select("status, state").eq("id", holder).maybeSingle();
+  // A read that did not answer is not an ended job: the claim is waited for as before.
+  if (error) return null;
+  if (data && ACTIVE.includes(data.status)) return null;
+  return { id: holder, state: data?.state ?? null };
 }
 
 /** The kit's work after a claim: the pick, then the next batch of cleaning, or the kit stored. */
@@ -627,67 +608,29 @@ async function makeKit(admin: any, job: VideoJob, videoStyle: any, brand: string
   }
   const todo = work.todo;
   s.kit_held_at = Date.now();
-  return hold(admin, job, async () => {
-    // One save at a time, in order, so an older snapshot of the state never lands after a newer one.
-    let saves: Promise<void> = Promise.resolve();
-    const save = () => (saves = saves.then(() => saveJob(admin, job, {})).catch((e) => keepKitError(s, e)));
-    try {
-      // Inside the kit's own handling: a missing key is a claim with no progress, never a failed job.
+  // Cleaned in the background (kitStep.ts): a wait or a refused picture call is thrown to the hold and costs no try of the kit; the wait costs no try of the job either.
+  return hold(admin, job, () => cleanKitStills({
+    still: (path) => downloadFrom(admin, REFERENCES, path),
+    editor: async () => {
       const apiKey = await openaiKey(admin);
       const prompt = kitCleanPrompt();
-      const outcomes = await Promise.allSettled(todo.map(async (i) => {
-        const path = kitPath(job.client_id, i);
-        const { data, error } = await admin.storage.from(REFERENCES).download(picked[i]);
-        if (error || !data) throw new Error(`Could not read a still: ${error?.message ?? "missing"}`);
-        let still = { bytes: new Uint8Array(await data.arrayBuffer()), name: "still.jpg" };
-        // Edited at the still's own framing and aspect (kitEditSize): the model has nothing to invent outside the picture.
-        const source = await Image.decode(still.bytes);
-        const size = kitEditSize(source.width, source.height);
-        let clean: string | null = null;
-        for (let n = 1; n <= 2 && !clean; n++) {
-          let png: Uint8Array;
-          try {
-            png = await imageEdit(apiKey, [still], prompt, size);
-          } catch (e) {
-            if (e instanceof ModelBusy) throw e;
-            // The image model would not clean this still: it is dropped.
-            console.warn(`[video-worker] kit ${job.client_id} still ${i}:`, e instanceof Error ? e.message : e);
-            break;
-          }
-          const jpeg = await (await Image.decode(png)).encodeJPEG(90);
-          const { error: upError } = await admin.storage.from(REFERENCES).upload(path, jpeg, { contentType: "image/jpeg", upsert: true });
-          if (upError) throw new Error(`Could not store a kit still: ${upError.message}`);
-          // Read back as a look reference: any writing left is cleaned once more; a person's face drops the still at once.
-          const seen = await kitStillCheck(admin, path);
-          if (seen.face) {
-            console.warn(`[video-worker] kit ${job.client_id} still ${i}: a face after cleaning ${n} (${seen.where}).`);
-            break;
-          }
-          if (!seen.writing) clean = path;
-          else {
-            console.warn(`[video-worker] kit ${job.client_id} still ${i}: writing after cleaning ${n} (${seen.where}).`);
-            still = { bytes: jpeg, name: "still.jpg" };
-          }
-        }
-        if (!clean) await admin.storage.from(REFERENCES).remove([path]);
-        done[String(i)] = clean ? { path: clean } : { dropped: true };
-        // Kept on the job at once: a hold that dies loses no still it paid for.
-        await save();
-      }));
-      const failed = outcomes.filter((o): o is PromiseRejectedResult => o.status === "rejected").map((o) => o.reason);
-      // Any other error is kept and tried again on the next pass, as a try of the kit, never of the job.
-      for (const e of failed) if (!(e instanceof ModelBusy)) keepKitError(s, e);
-      const busy = failed.find((e) => e instanceof ModelBusy);
-      if (busy) throw busy;
-      // The next pass claims again and goes on with the stills still to clean, or stores the kit.
-    } catch (e) {
-      if (e instanceof ModelBusy) throw e;
-      keepKitError(s, e);
-    } finally {
-      await saves;
-      delete s.kit_held_at;
-    }
-  });
+      return (still, size) => imageEdit(apiKey, [{ bytes: still, name: "still.jpg" }], prompt, size);
+    },
+    storeEdit: async (path, png) => {
+      const { error } = await admin.storage.from(REFERENCES).upload(path, png, { contentType: "image/png", upsert: true });
+      if (error) throw new Error(`Could not store a kit still: ${error.message}`);
+    },
+    transcode: async (editPath, jpegPath) => (await callPicture(admin, "transcode", {
+      job: job.id,
+      step: "kit",
+      picture: await signedRead(admin, REFERENCES, editPath),
+      quality: KIT_JPEG_QUALITY,
+      out: await signedWrite(admin, REFERENCES, jpegPath),
+    })).ms,
+    check: (path) => kitStillCheck(admin, path),
+    remove: async (path) => { await admin.storage.from(REFERENCES).remove([path]); },
+    save: () => saveJobProgress(admin, job),
+  }, job, picked, todo));
 }
 
 /** One kit still read back by the vision model: the writing left in it, and whether it shows a person's face. */
@@ -698,12 +641,6 @@ async function kitStillCheck(admin: any, path: string): Promise<{ writing: boole
   const seen = parseKitStillCheck(result.text);
   if (!seen) throw new Error(`The kit still could not be read: ${result.text.slice(0, 200)}`);
   return seen;
-}
-
-/** The job's state (and any other fields given) saved to its row while it is active. */
-async function saveJob(admin: any, job: VideoJob, fields: Record<string, unknown>): Promise<void> {
-  const { error } = await admin.from("canva_finish_jobs").update({ ...fields, state: job.state, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE);
-  if (error) throw new Error(`Could not save the video's progress: ${error.message}`);
 }
 
 /** A video job moved to the posts route: its input is saved on its row, since the worker saves only step and state. */

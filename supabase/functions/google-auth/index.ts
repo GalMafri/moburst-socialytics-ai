@@ -17,7 +17,8 @@
 import { createClient } from "../_shared/supabase.ts";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { googleConfig } from "../_shared/google/oauth.ts";
-import { finishSignIn, googleStatus, startSignIn } from "../_shared/google/connect.ts";
+import { finishSignIn, googleStatus, pendingReturnOrigin, startSignIn } from "../_shared/google/connect.ts";
+import { returnOriginFor, settingsUrl } from "../_shared/auth/appOrigin.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -26,8 +27,8 @@ const corsHeaders = {
 
 /** Where Google sends the browser back: this function itself. */
 const redirectUri = () => `${Deno.env.get("SUPABASE_URL")}/functions/v1/google-auth`;
-/** Supabase serves html from *.supabase.co as plain text, so the outcome is shown by the app. */
-const APP_ORIGIN = Deno.env.get("APP_ORIGIN") || "https://socialytics.moburst.com";
+/** Supabase serves html from *.supabase.co as plain text, so the outcome is shown by the app, on the address the sign-in was started from (appOrigin.ts). */
+const env = (k: string) => Deno.env.get(k);
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -37,14 +38,15 @@ Deno.serve(async (req) => {
     const url = new URL(req.url);
     if (req.method === "GET" && (url.searchParams.has("code") || url.searchParams.has("error"))) {
       // A browser is following a redirect: every exit is a redirect back to the app.
-      if (!config) return back("refused");
+      const origin = await pendingReturnOrigin(admin, env).catch(() => returnOriginFor(null, env));
+      if (!config) return back("refused", origin);
       const outcome = await finishSignIn(admin, config, {
         code: url.searchParams.get("code"), state: url.searchParams.get("state"), error: url.searchParams.get("error"), redirectUri: redirectUri(),
       }, new Date()).catch((e) => {
         console.warn("[google-auth] the sign-in did not finish", e instanceof Error ? e.message : String(e));
         return "not_saved" as const;
       });
-      return back(outcome);
+      return back(outcome, origin);
     }
 
     const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
@@ -58,7 +60,7 @@ Deno.serve(async (req) => {
       const { data: isAdmin } = await asCaller.rpc("is_admin");
       if (!isAdmin) return json({ error: "Connecting Google is an admin action." }, 403);
       if (!config) return json({ ready: false });
-      return json({ ready: true, authorize_url: await startSignIn(admin, config, redirectUri(), new Date()) });
+      return json({ ready: true, authorize_url: await startSignIn(admin, config, redirectUri(), new Date(), returnOriginFor(req.headers.get("origin"), env)) });
     }
     return json({ error: `Unknown action '${action}'` }, 400);
   } catch (err) {
@@ -72,9 +74,7 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
 
-function back(outcome: string): Response {
-  const to = new URL("/settings", APP_ORIGIN);
-  to.searchParams.set("google", outcome === "connected" ? "connected" : "not_connected");
-  if (outcome !== "connected") to.searchParams.set("reason", outcome);
-  return new Response(null, { status: 302, headers: { ...corsHeaders, Location: to.toString() } });
+function back(outcome: string, origin: string): Response {
+  const to = settingsUrl(origin, { google: outcome === "connected" ? "connected" : "not_connected", reason: outcome === "connected" ? undefined : outcome }, env);
+  return new Response(null, { status: 302, headers: { ...corsHeaders, Location: to } });
 }

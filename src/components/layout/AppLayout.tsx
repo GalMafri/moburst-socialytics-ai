@@ -1,12 +1,11 @@
 import { ReactNode, useEffect, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { RedirectToSignIn, SigningIn } from "@/components/RedirectToSignIn";
 import { useAuth } from "@/hooks/useAuth";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { AppSidebar } from "./AppSidebar";
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import { PageHeader } from "@/components/ui/page-header";
-import { Loading } from "@/components/ui/loading";
 
 function greeting(now = new Date()): string {
   const h = now.getHours();
@@ -47,17 +46,9 @@ export function AppLayout({
     setSidebarOpen(wide);
   }, [wide]);
 
-  if (isLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[#0b0c10]">
-        {/* loading.tsx exists for exactly this and sets role="status"
-            aria-live="polite"; this was the one place still rolling its own. */}
-        <Loading variant="page" label="Signing you in" />
-      </div>
-    );
-  }
+  if (isLoading) return <SigningIn />;
 
-  if (!isAuthenticated) return <Navigate to="/auth" replace />;
+  if (!isAuthenticated) return <RedirectToSignIn />;
 
   return (
     <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen} style={{ "--sidebar-width-icon": "3.5rem" } as React.CSSProperties}>

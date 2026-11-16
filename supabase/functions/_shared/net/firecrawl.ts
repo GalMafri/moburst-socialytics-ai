@@ -1,8 +1,7 @@
 // supabase/functions/_shared/net/firecrawl.ts
 //
 // A page's main text as markdown through Firecrawl (one credit), for the
-// client lifecycle's site brief. The firecrawl-scrape function is the same
-// request for the setup page.
+// client lifecycle's site brief.
 
 export async function scrapeMarkdown(url: string, opts: { apiKey?: string | null; fetchImpl?: typeof fetch } = {}): Promise<{ markdown: string; title: string | null } | null> {
   const env = (globalThis as { Deno?: { env: { get(k: string): string | undefined } } }).Deno?.env;

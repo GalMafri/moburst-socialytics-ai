@@ -6,13 +6,20 @@
 //
 // While APIFY_API_TOKEN is not set the step waits quietly and looks again
 // every TOKEN_WAIT_SECONDS, and its step log says what it is waiting for.
+// A token Apify refuses (401, or 402 and 403 for an account-level reason) waits
+// the same way, and keeps the run it already started. Both waits are marked
+// waitingFor, which the runner treats as a state of the run up to the
+// pipeline's waitHorizon (a trends run's week end, else the run's own hours):
+// no try, no poll limit, no run hours, and the started run's id stays. Past
+// the horizon the runner stops the run with that reason. An inline run (the
+// feed refresh's LinkedIn source) cannot wait, so it stops after that one look.
 // A run that ends without succeeding (failed, timed out, aborted) fails the
 // try with StepRestart: the runner's quiet retry (after 2, 4, 8, 16 minutes)
 // starts a new run, so a pipeline run starts at most as many actor runs as a
 // step has tries (MAX_STEP_ATTEMPTS). A timed-out run may hold part of the
 // period, so it never counts as complete coverage.
 
-import { apifyClient, ApifyTokenMissing, APIFY_TOKEN_ENV, isFinalRunStatus, type ApifyClient, type ApifyClientOptions } from "../apify/client.ts";
+import { apifyClient, ApifyTokenMissing, ApifyTokenRefused, APIFY_TOKEN_ENV, isFinalRunStatus, type ApifyClient, type ApifyClientOptions } from "../apify/client.ts";
 import { StepRestart, type StepContext, type StepResult } from "./types.ts";
 
 /** How long a step waits before it looks for the token again. */
@@ -42,11 +49,18 @@ export interface ActorRequest {
 const secondsLeft = (ctx: StepContext) => Math.floor((ctx.deadline.getTime() - ctx.now().getTime()) / 1000);
 
 export async function runActorStep(ctx: StepContext, r: ActorRequest): Promise<ActorStep> {
-  const waitForToken = (): ActorStep => ({
+  // A run already started stays in the handle through a token wait, so the
+  // step looks at that run once the token works and never starts a second,
+  // paid one.
+  const startedRun = typeof ctx.poll?.handle?.apify_run_id === "string" ? ctx.poll.handle.apify_run_id : null;
+  const waitForToken = (refused = false): ActorStep => ({
     type: "wait",
     result: {
-      type: "poll", waitSeconds: TOKEN_WAIT_SECONDS, handle: { waiting_for: APIFY_TOKEN_ENV },
-      detail: { waiting_for: APIFY_TOKEN_ENV, note: `${APIFY_TOKEN_ENV} is not set yet; the step looks again in ${TOKEN_WAIT_SECONDS / 60} minutes.` },
+      // waitingFor marks this as a state of the run: the runner spends no try on
+      // it and no limit of the run advances while it lasts, up to its horizon.
+      // An inline run stops on it at once.
+      type: "poll", waitSeconds: TOKEN_WAIT_SECONDS, waitingFor: APIFY_TOKEN_ENV, handle: { waiting_for: APIFY_TOKEN_ENV, ...(startedRun ? { apify_run_id: startedRun } : {}) },
+      detail: { waiting_for: APIFY_TOKEN_ENV, note: `${APIFY_TOKEN_ENV} ${refused ? "was refused by Apify" : "is not set yet"}; the step looks again in ${TOKEN_WAIT_SECONDS / 60} minutes.` },
     },
   });
   const token = ctx.env(APIFY_TOKEN_ENV);
@@ -62,7 +76,7 @@ export async function runActorStep(ctx: StepContext, r: ActorRequest): Promise<A
   };
 
   try {
-    const runId = typeof ctx.poll?.handle?.apify_run_id === "string" ? ctx.poll.handle.apify_run_id : null;
+    const runId = startedRun;
     if (!runId) return await start();
     const run = await client.getRun(runId, { waitSecs: Math.max(0, Math.min(60, secondsLeft(ctx) - DATASET_RESERVE_SECONDS)) });
     if (!isFinalRunStatus(run.status)) {
@@ -73,8 +87,10 @@ export async function runActorStep(ctx: StepContext, r: ActorRequest): Promise<A
     await ctx.payloads.put(r.datasetKey, rows, r.keepDays ? { keepDays: r.keepDays } : undefined);
     return { type: "rows", rows, runId, usageUsd: run.usageTotalUsd ?? null };
   } catch (e) {
-    // The token went away between the check above and a call.
+    // The token went away between the check above, or Apify refused it: the
+    // step waits for the account to answer again and spends no try.
     if (e instanceof ApifyTokenMissing) return waitForToken();
+    if (e instanceof ApifyTokenRefused) return waitForToken(true);
     throw e;
   }
 }

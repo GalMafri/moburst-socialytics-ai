@@ -10,7 +10,7 @@ import { Image } from "https://deno.land/x/imagescript@1.3.0/mod.ts";
 import { svgToPng } from "../render/resvg.ts";
 import { cutLogo } from "../design-system/logoAsset.ts";
 import { anthropicMessages } from "../anthropic.ts";
-import { generatedMediaPath, inkColor, logoSpotPrompt, parseLogoSpot, pngSize, type LogoSpot } from "./designSettings.ts";
+import { generatedMediaPath, inkColor, logoNormalization, logoSpotPrompt, parseLogoSpot, pngSize, type LogoSpot } from "./designSettings.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -43,9 +43,32 @@ async function readUrl(url: string): Promise<{ bytes: Uint8Array; type: string }
 }
 
 /**
- * The logo as a PNG in generated-media. A PNG already there is used as it
- * is; an SVG is drawn at 1200 pixels wide; a JPEG or GIF has the backdrop
- * around the mark made transparent. Null when the file is a kind the design
+ * A logo PNG as its ink alone: trimmed to where it shows, its long side at
+ * most 1,200 pixels. The decoded image is handed back for the ink color, so
+ * the file is read once; unchanged is true when the file is already so.
+ */
+async function normalized(png: Uint8Array): Promise<{ png: Uint8Array; image: Image | null; unchanged: boolean }> {
+  let image: Image;
+  try {
+    image = await Image.decode(png);
+  } catch {
+    // A logo whose pixels cannot be read is stored as it is.
+    return { png, image: null, unchanged: true };
+  }
+  const n = logoNormalization(image.bitmap, image.width, image.height);
+  if (!n || !n.changed) return { png, image, unchanged: true };
+  image.crop(n.box.x, n.box.y, n.box.width, n.box.height);
+  if (n.size[0] !== n.box.width || n.size[1] !== n.box.height) image.resize(n.size[0], n.size[1]);
+  return { png: await image.encode(), image, unchanged: false };
+}
+
+/**
+ * The logo as a PNG in generated-media, trimmed to its ink with its long side
+ * at most 1,200 pixels (a mark drawn on a 2,160 pixel canvas with wide padding
+ * would otherwise be placed at the canvas's width). A PNG already there that
+ * needs neither is used as it is; one that does is stored beside it, and the
+ * original stays. An SVG is drawn at 1200 pixels wide; a JPEG or GIF has the
+ * backdrop around the mark made transparent. Null when the file is a kind the design
  * path cannot use (the step then waits for another logo).
  */
 export async function logoPng(db: Db, clientId: string, logoUrl: string): Promise<LogoFile | null> {
@@ -80,21 +103,49 @@ export async function logoPng(db: Db, clientId: string, logoUrl: string): Promis
   } else {
     return null;
   }
+  if (!pngSize(png)) return null;
+  const fit = await normalized(png);
+  png = fit.png;
   const size = pngSize(png);
   if (!size) return null;
-  const path = own && isPng ? own : `${clientId}/design-settings/logo-site-${await sha(png)}.png`;
-  if (!(own && isPng)) {
+  const kept = !!own && isPng && fit.unchanged;
+  const path = kept && own ? own : `${clientId}/design-settings/logo-site-${await sha(png)}.png`;
+  if (!kept) {
     const { error } = await db.storage.from(BUCKET).upload(path, png, { contentType: "image/png", upsert: true });
     if (error) throw new Error(`The logo file could not be stored: ${error.message}`);
   }
   // A logo whose pixels cannot be read still places; the background then follows the darkest brand color.
   let ink: [number, number, number] | null = null;
   try {
-    ink = inkColor((await Image.decode(png)).bitmap);
+    ink = inkColor((fit.unchanged && fit.image ? fit.image : await Image.decode(png)).bitmap);
   } catch {
     ink = null;
   }
   return { path, width: size[0], height: size[1], ink, converted };
+}
+
+/**
+ * A logo already stored for a client, run through the same trimming as a new
+ * one: when it is not yet its ink alone, or is larger than 1,200 pixels on
+ * its long side, the normalized file is stored beside it (the original stays,
+ * a design in progress may hold it) and its path is returned. null when the
+ * file is already as it should be or is not a PNG. A file that cannot be read
+ * from storage throws (it is not known to be fine). No model is called;
+ * placement is not touched.
+ */
+export async function refitStoredLogo(db: Db, clientId: string, path: string): Promise<{ path: string; width: number; height: number } | null> {
+  const { data, error } = await db.storage.from(BUCKET).download(path);
+  if (error || !data) throw new Error(`The logo file could not be read: ${error?.message ?? "missing"}`);
+  const bytes = new Uint8Array(await data.arrayBuffer());
+  if (!pngSize(bytes)) return null;
+  const fit = await normalized(bytes);
+  if (fit.unchanged) return null;
+  const size = pngSize(fit.png);
+  if (!size) return null;
+  const to = `${clientId}/design-settings/logo-site-${await sha(fit.png)}.png`;
+  const { error: upError } = await db.storage.from(BUCKET).upload(to, fit.png, { contentType: "image/png", upsert: true });
+  if (upError) throw new Error(`The logo file could not be stored: ${upError.message}`);
+  return { path: to, width: size[0], height: size[1] };
 }
 
 function base64(bytes: Uint8Array): string {

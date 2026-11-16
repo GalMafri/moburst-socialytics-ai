@@ -91,6 +91,11 @@ describe("judging the registrable domain (the 2 Nov dry run: app.olo.com 7 times
     const named = reader({}, { "app.example.com": `<meta property="og:site_name" content="Uproar">` });
     expect(await searchWebsite(uproar, [post("https://app.example.com/x")], named)).toMatchObject({ website: "https://www.app.example.com", confirmed_by: "site_name" });
   });
+  it("confirms a site by a profile link whatever the case the link wrote the handle in", async () => {
+    const uproar = groupBrands([p("21", "Uproar", "uproar", "linkedin_company")])[0];
+    const mixed = reader({}, { "uproar.moburst.com": `<a href="https://www.linkedin.com/company/UPROAR/">in</a>`, "moburst.com": "<p>Moburst</p>" });
+    expect(await searchWebsite(uproar, [post("https://uproar.moburst.com/x")], mixed)).toMatchObject({ confirmed_by: "profile_link" });
+  });
   describe("a subdomain that confirms, and its registrable domain (final review, Important 2)", () => {
     const IG = `<footer><a href="https://www.instagram.com/olo.hq/">ig</a></footer>`;
     it("takes the registrable domain when its homepage links to the brand's own profiles too (today's main-domain find)", async () => {

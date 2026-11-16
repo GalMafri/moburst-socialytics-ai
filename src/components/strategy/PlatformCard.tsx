@@ -1,6 +1,6 @@
 /**
- * 05 Platforms: a card per platform posting now or new, its role, its cadence
- * and today's numbers, what we post, the posts that worked (real posts, with
+ * 05 Platforms: a card per platform posting now or new, its role, the posts
+ * a week planned for it, what we post, the posts that worked (real posts, with
  * their multiple of the usual), and behind disclosures the first 30 days (new
  * platforms) and the checks at 30 and 90 days. Not now is one line each.
  */
@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { PlatformBadge } from "@/lib/platform-config";
 import { formatDate } from "@/lib/display";
-import { basisChip, cadenceWords, figure, stateWords, textLines, type PagePlatform } from "@/lib/strategyView";
+import { basisChip, plannedPerWeek, stateWords, usualPace, textLines, type PagePlatform } from "@/lib/strategyView";
 import type { NotNowValue, PlatformValue } from "../../../supabase/functions/_shared/strategy/sections";
 import { EditButton, EditedChip, useSectionEdit, type SectionProps } from "./StrategySection";
 import { EditSheet } from "./EditSheet";
@@ -24,7 +24,8 @@ export function PlatformCard({ p, ...props }: SectionProps & { p: PagePlatform }
   const text = typeof e.shown === "string" ? textLines(e.shown) : null;
   const v = (e.shown ?? {}) as Partial<PlatformValue>;
   const f = figuresOf(p);
-  const cadence = cadenceWords(p.cadence);
+  const planned = plannedPerWeek(p.cadence);
+  const usual = usualPace(p.cadence);
   return (
     <article className="glass p-card space-y-4 min-w-0 break-inside-avoid" data-testid={`strategy-platform-${p.key}`}>
       <div className="flex items-start justify-between gap-3">
@@ -38,11 +39,13 @@ export function PlatformCard({ p, ...props }: SectionProps & { p: PagePlatform }
       {text ? <ul className="space-y-2">{text.map((l, i) => <li key={i} className="t-read">{l}</li>)}</ul> : (
         <>
           {v.role && <h3 className="t-h3">{v.role}</h3>}
-          <StatGrid min={120}>
-            <StatCard size="compact" label="Cadence" value={cadence || "None yet"} />
-            <StatCard size="compact" label="Engagement" value={f && f.basis !== "thin" ? figure(f.median_engagement) : "None yet"} sub="median per post" />
-            <StatCard size="compact" label="Followers" value={figure(f?.followers ?? null)} />
-          </StatGrid>
+          {/* Today's followers and engagement are in Where we start; this card carries only the plan. */}
+          {(planned || usual) && (
+            <StatGrid min={120}>
+              {planned && <StatCard size="compact" label="Planned a week" value={planned} sub="posts" />}
+              {usual && <StatCard size="compact" label="Usual pace in this category" value={usual} sub="posts a week" />}
+            </StatGrid>
+          )}
           {!!v.post?.length && (
             <div className="space-y-2">
               <p className="t-label">What we post</p>

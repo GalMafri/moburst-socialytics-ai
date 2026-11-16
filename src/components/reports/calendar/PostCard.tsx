@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { isStoryPost, isTextOnlyFormat } from "@/lib/platform";
+import { formatLabel, isStoryPost, isTextOnlyFormat } from "@/lib/platform";
 import { Badge } from "@/components/ui/badge";
 import { PlatformBadge } from "@/lib/platform-config";
-import { Clock, ImagePlus, Loader2, Sparkles, Video as VideoIcon } from "lucide-react";
-import { PostStatusChip, type PostStatus } from "./PostStatusChip";
-import { useGenerationForPost } from "./GenerationContext";
+import { Clock, ImagePlus, Loader2 } from "lucide-react";
+import { PostStatusChip } from "./PostStatusChip";
+import type { PostStatus } from "./postStatus";
+import type { SendState } from "@/components/reports/SchedulePostModal";
 import { postCopyOf } from "@/lib/postCopy";
 import { useAuth } from "@/hooks/useAuth";
 import { useDesignRequestForPost, useWeekStateForPost } from "./DesignRequestsContext";
@@ -35,6 +36,8 @@ interface Props {
   };
   iteration: Iteration | null;
   status: PostStatus;
+  /** For a sent post: where its send stands (sendStateOf on the row that holds it). */
+  sendState?: SendState;
   onOpen: () => void;
   onToggleApproved?: () => void;
 }
@@ -55,15 +58,11 @@ export function PostCard(props: Props) {
   return isStoryPost(props.post) ? <StoryCard {...props} /> : <FeedPostCard {...props} />;
 }
 
-function FeedPostCard({ post, iteration, status, onOpen, onToggleApproved }: Props) {
+function FeedPostCard({ post, iteration, status, sendState, onOpen, onToggleApproved }: Props) {
   const copy = postCopyOf(post);
   const reasons = Array.isArray((post as { _reasons?: unknown })._reasons) ? ((post as { _reasons: Array<{ type: string; label: string }> })._reasons) : [];
   const thumb = iteration?.media_urls?.[0] || null;
   const isVideo = !!thumb && /\.(mp4|webm|mov)/.test(thumb);
-
-  // Active generation for this post — drives the in-card loading overlay and
-  // the generating badge. Survives modal close because it lives in context.
-  const activeGen = useGenerationForPost(post);
 
   // The grid keeps captions to three lines. Folded AI copy has to say so, or a
   // reader takes the card at face value and never opens the full post; the cue
@@ -82,26 +81,28 @@ function FeedPostCard({ post, iteration, status, onOpen, onToggleApproved }: Pro
 
   const { isMoburstStaff } = useAuth();
   const designRequest = useDesignRequestForPost(post as { _calendarPostKey?: string });
-  const designing = isPreparing(designRequest, isMoburstStaff) && !activeGen;
+  const designing = isPreparing(designRequest, isMoburstStaff);
   // Waiting its turn in a week being designed (the week's design button).
   const weekState = useWeekStateForPost(post as { _calendarPostKey?: string });
-  const isGenerating = activeGen?.status === "running";
-  const genJustCompleted =
-    activeGen?.status === "completed" &&
-    activeGen?.completedAt &&
-    Date.now() - activeGen.completedAt < 30_000;
 
+  // The card is a container with one button that covers it and opens the post.
+  // The status chip is a button of its own beside it, lifted above the cover, so
+  // no button sits inside another.
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      aria-label={`Open post: ${copy.slice(0, 60) || post.platform}`}
-      className="glass-inner hover-lift w-full text-left p-inner space-y-3 group flex flex-col relative
-                 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-    >
+    <div className="glass-inner hover-lift w-full text-left p-inner group relative">
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-label={`Open post: ${copy.slice(0, 60) || post.platform}`}
+        className="absolute inset-0 z-0 rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      />
+      {/* What the card shows lies over the button and lets clicks through; only a chip that is a button takes them
+          (PostStatusChip). The reason pills keep their title for screen readers; their hover tooltip goes, since a
+          pill that took the hover would also take the click that opens the post. */}
+      <div className="relative pointer-events-none flex flex-col space-y-3">
       {/* Thumbnail / empty state / generating overlay — 16:10. */}
-      <div className={`relative w-full rounded-[8px] overflow-hidden ${thumb && !isGenerating ? "aspect-[16/10]" : "h-16"}`}>
-        {thumb && !isGenerating ? (
+      <div className={`relative w-full rounded-[8px] overflow-hidden ${thumb ? "aspect-[16/10]" : "h-16"}`}>
+        {thumb ? (
           <div className="w-full h-full bg-black">
             {/* The whole design, fitted inside the card (smaller when its shape differs), never cropped. */}
             {isVideo ? (
@@ -132,19 +133,6 @@ function FeedPostCard({ post, iteration, status, onOpen, onToggleApproved }: Pro
           </div>
         )}
 
-        {/* Active generation overlay — appears regardless of thumbnail state */}
-        {isGenerating && (
-          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm flex flex-col items-center justify-center gap-2 text-white">
-            <Loader2 className="h-6 w-6 animate-spin text-[#b9e045]" />
-            <span className="t-h4">
-              {activeGen.type === "design" ? "Generating designs" : "Generating videos"}
-            </span>
-            <span className="t-label tracking-[-0.2px]">
-              {activeGen.completed}/{activeGen.total} complete
-            </span>
-          </div>
-        )}
-
         {/* A design being prepared on the server. When the post already has
             one (a regeneration), it stays visible with a corner pill. */}
         {designing && designRequest && !thumb && (
@@ -159,18 +147,6 @@ function FeedPostCard({ post, iteration, status, onOpen, onToggleApproved }: Pro
             New version
           </span>
         )}
-
-        {/* Just-completed pulse — quick visual cue */}
-        {genJustCompleted && (
-          <div className="absolute top-2 right-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#10b981] text-white t-badge tracking-[-0.2px] animate-pulse">
-            {activeGen.type === "design" ? (
-              <Sparkles className="h-3 w-3" />
-            ) : (
-              <VideoIcon className="h-3 w-3" />
-            )}
-            Ready
-          </div>
-        )}
       </div>
 
       {/* Badges row */}
@@ -181,7 +157,7 @@ function FeedPostCard({ post, iteration, status, onOpen, onToggleApproved }: Pro
             variant="outline"
             className="t-badge tracking-[-0.2px] py-0.5 px-2 border-white/15 rounded-full"
           >
-            {post.format}
+            {formatLabel(post.format, post.platform)}
           </Badge>
         )}
         {/* The post has a Story; the card opens the post, whose header opens the Story. */}
@@ -240,20 +216,18 @@ function FeedPostCard({ post, iteration, status, onOpen, onToggleApproved }: Pro
 
       {/* Status (or in-flight pill) */}
       <div className="pt-3 border-t border-white/[0.06]">
-        {isGenerating ? (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[rgba(185,224,69,0.10)] text-[#b9e045] t-badge tracking-[-0.2px]">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            Generating {activeGen.completed}/{activeGen.total}
-          </span>
-        ) : designing && designRequest ? (
+        <div className="inline-flex">
+        {designing && designRequest ? (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[rgba(185,224,69,0.10)] text-[#b9e045] t-badge tracking-[-0.2px]">
             <Loader2 className="h-3 w-3 animate-spin" />
             {stageLine(designRequest, isMoburstStaff)}
           </span>
         ) : (
-          <PostStatusChip status={status} onToggleApproved={onToggleApproved} />
+          <PostStatusChip status={status} sendState={sendState} onToggleApproved={onToggleApproved} />
         )}
+        </div>
       </div>
-    </button>
+      </div>
+    </div>
   );
 }

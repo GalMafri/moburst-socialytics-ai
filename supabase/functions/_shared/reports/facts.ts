@@ -124,14 +124,19 @@ const formatOf = (post: Any, link: string) => mediaLabel(mediaKind(postType(post
 
 export interface Period { start?: string | null; end?: string | null }
 
+/** True when the two days (YYYY-MM-DD) are the first and the last day of one calendar month. */
+export function isWholeMonth(start: unknown, end: unknown): boolean {
+  const s = new Date(`${String(start ?? "").slice(0, 10)}T00:00:00Z`);
+  const e = new Date(`${String(end ?? "").slice(0, 10)}T00:00:00Z`);
+  return !Number.isNaN(s.getTime()) && !Number.isNaN(e.getTime()) && s.getUTCDate() === 1
+    && s.getUTCFullYear() === e.getUTCFullYear() && s.getUTCMonth() === e.getUTCMonth()
+    && new Date(e.getTime() + 86400_000).getUTCDate() === 1;
+}
+
 /** "September" and "August" for a calendar month; otherwise the period and the one before it. */
 export function periodWords(p: Period | undefined): { now: string; before: string } {
-  const start = String(p?.start ?? "").slice(0, 10);
-  const end = String(p?.end ?? "").slice(0, 10);
-  const s = new Date(`${start}T00:00:00Z`);
-  const e = new Date(`${end}T00:00:00Z`);
-  if (!Number.isNaN(s.getTime()) && !Number.isNaN(e.getTime()) && s.getUTCDate() === 1 && s.getUTCMonth() === e.getUTCMonth()
-    && new Date(e.getTime() + 86400_000).getUTCDate() === 1) {
+  if (isWholeMonth(p?.start, p?.end)) {
+    const s = new Date(`${String(p?.start).slice(0, 10)}T00:00:00Z`);
     const month = (d: Date) => d.toLocaleDateString("en-US", { month: "long", timeZone: "UTC" });
     return { now: month(s), before: month(new Date(Date.UTC(s.getUTCFullYear(), s.getUTCMonth() - 1, 1))) };
   }

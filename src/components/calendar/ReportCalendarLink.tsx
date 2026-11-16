@@ -1,6 +1,8 @@
 /**
  * A report's posts live in the Calendar tab, planned a week at a time (Lital,
- * 19 Oct 2026), so the report's Content ideas tab points there. A report from
+ * 19 Oct 2026), so the report's Content ideas tab points there. The link
+ * carries no week: the client's calendar opens on this week in the client's
+ * own time zone. A report from
  * before the calendar existed, whose week was never imported, keeps showing
  * its own posts (passed as children).
  */
@@ -12,7 +14,6 @@ import { ArrowRight, CalendarDays } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
-import { mondayOf, todayIn } from "@/lib/calendarPosts";
 
 /**
  * hasBoard: the report wrote its own week of posts (reports before 19 Oct
@@ -38,10 +39,10 @@ export function ReportCalendarLink({ clientId, reportId, hasBoard, children }: {
     <EmptyState
       icon={CalendarDays}
       title="Posts are planned a week at a time"
-      description="Each week's posts are written the Monday before, from the latest results, competitors and trends, including this report's findings. They're in the Calendar, where each post's copy, design and schedule are managed."
+      description="This report's findings feed the weekly plan. Each post's copy, design and schedule are in the Calendar."
       action={
         <Button asChild size="sm">
-          <Link to={`/clients/${clientId}/calendar?week=${mondayOf(todayIn("UTC"))}`}>Open the calendar <ArrowRight /></Link>
+          <Link to={`/clients/${clientId}/calendar`}>Open the calendar <ArrowRight /></Link>
         </Button>
       }
     />

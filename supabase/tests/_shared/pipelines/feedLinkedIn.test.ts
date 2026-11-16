@@ -11,6 +11,7 @@ import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
 import { linkedInSourcePipeline } from "../../../functions/_shared/pipelines/definitions/linkedinSource";
 import { feedLinkedInAnswer, LINKEDIN_INLINE_BUDGET_MS } from "../../../functions/_shared/pipelines/feedLinkedIn";
 import { InlineRunStopped } from "../../../functions/_shared/pipelines/inline";
+import { ApifyTokenRefused, type ApifyClient } from "../../../functions/_shared/apify/client";
 import { fakeActor, POSTS } from "../../../fixtures/pipelines/moburst";
 
 const MOBURST = "d00ce604-2bcc-455a-9826-f80250db75cf";
@@ -80,6 +81,28 @@ describe("feedLinkedInAnswer", () => {
     const s = setup(["RUNNING"]);
     await expect(feedLinkedInAnswer(s.db, { engine: "app", pipeline: s.pipeline }, s.args, s.n8n)).rejects.toThrow(`did not finish in ${LINKEDIN_INLINE_BUDGET_MS / 1000} s`);
     expect(s.db.tables.report_pipeline_runs[0]).toMatchObject({ status: "stopped" });
+  });
+
+  it("on app, a token Apify refuses ends the run after one look, with no pause, so the refresh saves the feed without LinkedIn posts at once", async () => {
+    const s = setup();
+    let starts = 0;
+    let slept = 0;
+    const refusing: ApifyClient = {
+      async startRun() { starts += 1; throw new ApifyTokenRefused("Apify POST /acts/a/runs answered 401", 401); },
+      async getRun() { throw new ApifyTokenRefused("Apify GET /actor-runs/r answered 401", 401); },
+      async datasetPage() { return []; },
+      async datasetItems() { return []; },
+    };
+    const pipeline = linkedInSourcePipeline({ apify: () => refusing });
+    const args = { ...s.args, inline: { sleep: async (ms: number) => { slept += ms; s.advance(ms); } } };
+    const err = await feedLinkedInAnswer(s.db, { engine: "app", pipeline }, args, s.n8n).catch((e) => e);
+    expect(err).toBeInstanceOf(InlineRunStopped);
+    expect(String(err.message)).toContain("APIFY_API_TOKEN");
+    expect(starts).toBe(1);
+    expect(slept).toBe(0);
+    expect(s.db.tables.report_pipeline_steps.map((x) => [x.step, x.outcome])).toEqual([["collect", "stopped"]]);
+    expect(s.db.tables.report_pipeline_runs[0]).toMatchObject({ status: "stopped" });
+    expect(s.n8n).not.toHaveBeenCalled();
   });
 
   it("on app with no reviewed pages, answers nothing and runs nothing, as the n8n call did", async () => {

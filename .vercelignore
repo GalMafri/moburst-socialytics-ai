@@ -1,4 +1,7 @@
-# The site is the static build only, as on the server (serve -s dist).
-# api/ holds a client library and its tests; Vercel would otherwise
-# deploy every .ts file in it as a server function.
-/api
+# The site is the static build, as on the server (serve -s dist), plus one
+# function: api/picture.mjs, the picture service.
+# The rest of api/ is a client library and its tests; Vercel would otherwise
+# deploy every .ts file in it as a server function. A new entry in api/ must
+# be listed here (server/test/deploy.test.ts fails until it is).
+/api/client
+/api/mcp

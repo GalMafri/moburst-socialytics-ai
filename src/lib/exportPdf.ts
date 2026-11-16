@@ -82,12 +82,20 @@ async function layOutHiddenPanels(root: HTMLElement): Promise<() => void> {
   };
 }
 
+/** The browser refused the window the PDF prints from. The message is for the team; the button says it in plain words. */
+export class PopupBlockedError extends Error {
+  constructor() {
+    super("Pop-up blocked. Please allow pop-ups for this site and try again.");
+    this.name = "PopupBlockedError";
+  }
+}
+
 export async function exportReportToPdf({ contentRef, filename, title }: ExportOptions): Promise<void> {
   if (!contentRef.current) throw new Error("No content to export");
 
   const printWindow = window.open("", "_blank");
   if (!printWindow) {
-    throw new Error("Pop-up blocked. Please allow pop-ups for this site and try again.");
+    throw new PopupBlockedError();
   }
 
   // ── 1. Clone + expand all tab panels ──

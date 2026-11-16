@@ -4,9 +4,10 @@
  * Google's state; and a Google Slides deck, a new copy in ai@moburst.com's
  * Drive shared with whoever asks. The deck button says what is true: the
  * deck being made, the deck made on a date with Open, "Make a new deck" when
- * the strategy or a person's version changed since, or, until an admin
- * connects Google once in Settings, that Google Slides is not connected yet.
- * A request that does not get through is sent again quietly.
+ * the strategy or a person's version changed since, a deck that failed with
+ * a way to try again, or, while Google is not connected, that Google Slides
+ * is unavailable right now. A request that does not get through is sent
+ * again quietly, and said in words when it still does not.
  */
 
 import { useState, type RefObject } from "react";
@@ -30,12 +31,14 @@ export interface DeckExport {
 
 /** What the deck button says and does, from Google's state, the exports and the strategy. */
 export function deckState(a: { connected: boolean | null; exports: DeckExport[]; writtenAt: string; newestEdit: string | null }):
-  | { kind: "not_connected"; url?: string; on?: string } | { kind: "making" } | { kind: "made"; url: string; on: string } | { kind: "stale"; url: string; on: string } | { kind: "none" } {
+  | { kind: "not_connected"; url?: string; on?: string } | { kind: "failed"; url?: string; on?: string } | { kind: "making" } | { kind: "made"; url: string; on: string } | { kind: "stale"; url: string; on: string } | { kind: "none" } {
   const latest = a.exports[0];
   if (latest && (latest.status === "queued" || latest.status === "making")) return { kind: "making" };
   const done = a.exports.find((e) => e.status === "done" && e.url);
   // A deck made earlier stays in Drive and can still be opened.
   if (a.connected === false) return done ? { kind: "not_connected", url: done.url as string, on: madeOn(done.made_at ?? done.created_at) } : { kind: "not_connected" };
+  // The newest deck failed: say so, and keep an earlier deck that can still be opened.
+  if (latest?.status === "failed") return done ? { kind: "failed", url: done.url as string, on: madeOn(done.made_at ?? done.created_at) } : { kind: "failed" };
   if (!done) return { kind: "none" };
   const changed = Date.parse(done.strategy_written_at) !== Date.parse(a.writtenAt) || (!!a.newestEdit && (!done.edits_at || Date.parse(a.newestEdit) > Date.parse(done.edits_at)));
   return { kind: changed ? "stale" : "made", url: done.url as string, on: madeOn(done.made_at ?? done.created_at) };
@@ -82,7 +85,7 @@ export function StrategyExports({ clientId, client, writtenAt, newestEdit, conte
   return (
     <div className="flex flex-col items-start gap-1.5 lg:items-end" data-print="hide">
       <div className="flex flex-wrap items-center gap-2">
-        <ExportPdfButton contentRef={contentRef} filename={`${client} Social Strategy`} title={`${client} | Social Strategy`} />
+        <ExportPdfButton contentRef={contentRef} filename={`${client} Social strategy`} title={`${client} | Social strategy`} />
         {state.kind === "making" || asking ? (
           <Button size="sm" disabled><Loader2 className="animate-spin" /> Making the deck</Button>
         ) : state.kind === "made" ? (
@@ -94,6 +97,14 @@ export function StrategyExports({ clientId, client, writtenAt, newestEdit, conte
             <Button size="sm" onClick={() => void ask()}><Presentation /> Make a new deck</Button>
             <a className="t-link inline-flex items-center gap-1" href={state.url} target="_blank" rel="noopener noreferrer">Open the deck {state.on} <ExternalLink className="h-3 w-3" aria-hidden /></a>
           </>
+        ) : state.kind === "failed" ? (
+          // Nothing fails visibly (rule 7). A deck that was not made leaves the
+          // true state: no deck for this strategy yet, and an earlier one, if
+          // there is one, still opens.
+          <>
+            <Button size="sm" onClick={() => void ask()}><Presentation /> {state.url ? "Make a new deck" : "Google Slides deck"}</Button>
+            {state.url && <a className="t-link inline-flex items-center gap-1" href={state.url} target="_blank" rel="noopener noreferrer">Open the deck {state.on} <ExternalLink className="h-3 w-3" aria-hidden /></a>}
+          </>
         ) : (
           <>
             <Button size="sm" onClick={() => void ask()} disabled={state.kind === "not_connected"}><Presentation /> Google Slides deck</Button>
@@ -104,7 +115,7 @@ export function StrategyExports({ clientId, client, writtenAt, newestEdit, conte
         )}
       </div>
       {state.kind === "made" && <p className="t-label">Google Slides deck, {state.on}</p>}
-      {state.kind === "not_connected" && <p className="t-label">Google Slides is not connected yet. An admin connects it once in Settings. The PDF works now.</p>}
+      {state.kind === "not_connected" && <p className="t-label">Google Slides is unavailable right now. The PDF works.</p>}
     </div>
   );
 }

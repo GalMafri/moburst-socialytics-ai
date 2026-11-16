@@ -1,12 +1,12 @@
 import { COMPARED_RATE_LABEL, SPROUT_RATE_LABEL } from "@/lib/rateLabels";
 import { useNavigate, useParams } from "react-router-dom";
-import { cleanText, countryNames, formatDate, formatDateTime, formatNumbersInText, formatRange, languageNames, monthlyReportStatus, platformKey, platformName } from "@/lib/display";
+import { NO_DATA, cleanText, compactNumber, countryNames, formatDate, formatDateTime, formatNumbersInText, formatRange, languageNames, monthlyReportStatus, platformKey, platformName } from "@/lib/display";
 import { reportsMeasure } from "@/lib/platformMeasures";
 import { reportCounts, reportTrends, sproutEngagementRate, sproutEngagements, themesInPeriod } from "@/lib/reportFigures";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, biggestMove, describeChange, DELTA_MIN_BASE, SHOWN_METRIC_KEYS } from "@/components/ui/stat-card";
 import { useQuery } from "@tanstack/react-query";
 import { useReportInsights } from "@/hooks/useReportInsights";
-import { useTrendThemes } from "@/hooks/useTrendThemes";
+import { THEME_WAIT_MS, useTrendThemes, useWaitedOut } from "@/hooks/useTrendThemes";
 import { readShownInsights, shownCompetitive, shownSocial } from "../../supabase/functions/_shared/reports/shownFields";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -47,6 +47,7 @@ import {
 import { PlatformBadge, PlatformIcon, getPlatformColor } from "@/lib/platform-config";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Loading } from "@/components/ui/loading";
+import { LoadRetry } from "@/components/ui/load-error";
 import { useRef, useState, useMemo } from "react";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
 import { useAuth } from "@/hooks/useAuth";
@@ -60,13 +61,13 @@ import { CompetitiveSnapshot } from "@/components/competitive/CompetitiveSnapsho
 import { PostVisual, postType, usePostPreviews, type PostPreview } from "@/components/competitive/PostVisual";
 import { useInsightFeedback } from "@/hooks/useInsightFeedback";
 import { measuredEngagements } from "@/lib/trendEngagement";
-import { competitiveReportQuality } from "../../supabase/functions/_shared/competitive/reportEvidence";
+import { fetchNewestReadyCompetitive } from "@/lib/newestReadyCompetitive";
 import { Prose } from "@/components/ui/prose";
 import { Section, SectionNav } from "@/components/ui/section";
 import { ReportDecks } from "@/components/reports/ReportDecks";
 import { IndustryTrendsSection } from "@/components/reports/IndustryTrendsSection";
 import { InsightGrid } from "@/components/ui/insight-card";
-import { CompareBars, RankedBars, compactNumber } from "@/components/ui/bars";
+import { CompareBars, RankedBars } from "@/components/ui/bars";
 import {
   parseCsv,
   stripVoicePreset,
@@ -74,42 +75,73 @@ import {
   type ContentPillar,
 } from "@/lib/clientContext";
 
+const REPORT_PAGE_TITLE = "Monthly report";
+
+/** One name for each overview section: the rail and the section heading both read it. */
+const OVERVIEW_TITLES = {
+  glance: "At a glance",
+  highlights: "Highlights",
+  actions: "Where to act next",
+  field: "Against the field",
+  period: "Period over period",
+  platforms: "Performance by platform",
+  posts: "Top posts",
+  pillars: "Content pillars",
+} as const;
+
+/** The section names of one network's own trends, read by the rail and by the sections. */
+function trendParts(platformLabel: string, clientName: string) {
+  return {
+    themes: `${platformLabel} themes and hashtags`,
+    formats: `${platformLabel} formats that work`,
+    opportunities: `${platformLabel} opportunities for ${clientName || "your brand"}`,
+    takeaways: `${platformLabel} key takeaways`,
+    posts: `${platformLabel} trending posts`,
+  };
+}
+
+/** A pillar entry up to this long is a name and sits in a chip; a longer one is a sentence and gets a row. */
+const PILLAR_CHIP_MAX = 40;
+
+/**
+ * The report's top posts: its overall list and its per-network lists together, each post once. A network whose
+ * posts were all outranked in the overall list still has its own, so its filter shows. Stored reports with only the flat list read as before.
+ */
+function reportTopPosts(sprout: any): any[] {
+  const seen = new Set<string>();
+  const out: any[] = [];
+  const lists: any[][] = [Array.isArray(sprout?.top_posts) ? sprout.top_posts : [], ...Object.values<any>(sprout?.top_posts_by_platform || {}).map((l) => (Array.isArray(l) ? l : []))];
+  for (const post of lists.flat()) {
+    if (!post) continue;
+    const key = post.permalink || post.url;
+    if (key) { if (seen.has(key)) continue; seen.add(key); }
+    out.push(post);
+  }
+  return out;
+}
+
+function PillarEntries({ entries, variant }: { entries: string[]; variant: "secondary" | "outline" }) {
+  const names = entries.filter((e) => e.length <= PILLAR_CHIP_MAX);
+  const sentences = entries.filter((e) => e.length > PILLAR_CHIP_MAX);
+  return (
+    <div className="space-y-2">
+      {names.length > 0 && <div className="flex flex-wrap gap-1.5">{names.map((p) => <Badge key={p} variant={variant}>{p}</Badge>)}</div>}
+      {sentences.length > 0 && (
+        <ul className="space-y-1.5">
+          {sentences.map((p) => <li key={p} className="t-body flex gap-2"><span className="text-primary">•</span><span>{p}</span></li>)}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export default function ReportView() {
   const { id, reportId } = useParams();
   const navigate = useNavigate();
   const reportContentRef = useRef<HTMLDivElement>(null);
-  useRealtimeReports(id);
   const { isClient, isMoburstStaff } = useAuth();
   const [tab, setTab] = useState("overview");
-  const { verdictFor } = useInsightFeedback(id);
-
-  // The latest competitive analysis, so the overview can place this month
-  // against the field and surface the gaps the team decided to act on. Only
-  // one that passed the source checks: a held-back analysis is not shown here
-  // (the competitive tab says it is awaiting review), and its figures go
-  // through the same normalization as every other competitive screen. Its
-  // own query key, since CompetitiveSnapshot reads different columns.
-  const { data: latestCompetitive } = useQuery({
-    queryKey: ["competitive-latest-ready", id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("competitive_reports")
-        .select("id, created_at, report_data")
-        .eq("client_id", id!)
-        .eq("status", "complete")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (error) throw error;
-      if (!data || !competitiveReportQuality(data.report_data).ready) return null;
-      // Read as every reader reads it: its insights where it has them, through the evidence limits (shownFields.ts).
-      const insights = await readShownInsights(supabase, "competitive_reports", data.id);
-      return { ...data, report_data: shownCompetitive(data.report_data, insights).report };
-    },
-    enabled: !!id,
-  });
-
-  const { data: report, isLoading } = useQuery({
+  const { data: report, isLoading, isError: reportFailed, error: reportError, refetch: refetchReport } = useQuery({
     queryKey: ["report", reportId],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -133,21 +165,45 @@ export default function ReportView() {
     refetchIntervalInBackground: true,
   });
 
+
+  const { verdictFor } = useInsightFeedback(report?.client_id);
+
+  // The latest competitive analysis (read with the report's own client id), so the overview can place this month
+  // against the field and surface the gaps the team decided to act on. Only
+  // one that passed the source checks: a held-back analysis is not shown here
+  // (the competitive tab says it is awaiting review), and its figures go
+  // through the same normalization as every other competitive screen. Its
+  // own query key, since CompetitiveSnapshot reads different columns.
+  const { data: latestCompetitive } = useQuery({
+    queryKey: ["competitive-latest-ready", report?.client_id],
+    queryFn: async () => {
+      // The newest one that passed its checks: a newer held run never hides an older ready one.
+      const { row: data } = await fetchNewestReadyCompetitive((from, to) => supabase
+        .from("competitive_reports")
+        .select("id, created_at, report_data")
+        .eq("client_id", report!.client_id)
+        .eq("status", "complete")
+        .order("created_at", { ascending: false })
+        .order("id")
+        .range(from, to));
+      if (!data) return null;
+      // Read as every reader reads it: its insights where it has them, through the evidence limits (shownFields.ts).
+      const insights = await readShownInsights(supabase, "competitive_reports", data.id);
+      return { ...data, report_data: shownCompetitive(data.report_data, insights).report };
+    },
+    enabled: !!report?.client_id,
+  });
+
   // The report's insights, worked out from its figures (report_insights), in place of the model-written ones.
+  useRealtimeReports(report?.client_id);
   const { data: insightsRow } = useReportInsights("reports", reportId);
 
   // The weekly Trends collection's stored themes for the report's own period. When there are any, the report
   // shows them in place of its own TikTok and Instagram trends, whichever engine wrote it (reportTrends). A read
   // that does not answer is tried again quietly until one does, and the trend parts stay loading meanwhile.
   const storedThemes = useTrendThemes(report?.client_id ?? "", report?.date_range_start ?? "", report?.date_range_end ?? "", { untilRead: true });
-
-  const overviewPostUrls = useMemo(() => {
-    const rawRd = (report as any)?.report_data;
-    const rd0 = Array.isArray(rawRd) ? rawRd[0] : rawRd;
-    const posts: any[] = rd0?.sprout_performance?.top_posts || [];
-    return [...posts].sort((a, b) => (b.impressions ?? 0) - (a.impressions ?? 0)).slice(0, 3).map((p) => p.permalink || p.url);
-  }, [report]);
-  const { previews: overviewPreviews } = usePostPreviews(overviewPostUrls);
+  // The themes are tried for a while; after that the report shows its own trends, and the themes replace them when a try answers.
+  const themesWaitedOut = useWaitedOut(!!report?.client_id && !storedThemes.data, THEME_WAIT_MS);
 
   // Whether a generated calendar is ever actually read.
   useTrackView("report", reportId, {
@@ -158,8 +214,15 @@ export default function ReportView() {
 
   if (isLoading)
     return (
-      <AppLayout>
+      <AppLayout title={REPORT_PAGE_TITLE}>
         <Loading label="Loading report" />
+      </AppLayout>
+    );
+  // A read that did not answer keeps loading and is tried again on its own; it never says the report is missing.
+  if (!report && reportFailed)
+    return (
+      <AppLayout title={REPORT_PAGE_TITLE}>
+        <LoadRetry onRetry={refetchReport} context="monthly report" error={reportError} label="Loading report" />
       </AppLayout>
     );
   // A report that is not ready shows where it stands in words: running, or
@@ -167,13 +230,13 @@ export default function ReportView() {
   const status = report ? monthlyReportStatus(report, { isStaff: isMoburstStaff }) : null;
   if (!report || status?.hidden)
     return (
-      <AppLayout>
+      <AppLayout title={REPORT_PAGE_TITLE}>
         <EmptyState icon={FileText} title="This report is not available" description="It may still be running, or your account may not have access to it." />
       </AppLayout>
     );
   if (status && status.state !== "ready")
     return (
-      <AppLayout>
+      <AppLayout title={REPORT_PAGE_TITLE}>
         {status.state === "running" ? <Loading label="This report is being written. It appears here when it is ready." /> : (
           <EmptyState icon={FileText} title="This report runs again soon" description="It appears here when it is ready." />
         )}
@@ -183,11 +246,13 @@ export default function ReportView() {
   const rawRd = report.report_data as any;
   const rd = Array.isArray(rawRd) ? rawRd[0] : rawRd;
   const clientName = (report as any).clients?.name || "Client";
+  // Every read and link on this page is scoped by the report's own client.
+  const clientId: string = report.client_id;
 
   // Build the full client context once, pass down via props.
   const clientRow = (report as any).clients || {};
   const clientContext: ClientContext = {
-    client_id: clientRow.id || id || "",
+    client_id: clientRow.id || clientId,
     client_name: clientRow.name || "Client",
     brand_identity: clientRow.brand_identity || null,
     design_references: Array.isArray(clientRow.design_references)
@@ -214,7 +279,7 @@ export default function ReportView() {
   // Which trends the report shows, read once for every part of it (reportTrends): the weeks whose Monday falls in
   // its period (themesInPeriod). Until the themes are read, neither kind shows and every figure they change is held.
   const hasTrendPeriod = !!(report.client_id && report.date_range_start && report.date_range_end);
-  const themesPending = hasTrendPeriod && !storedThemes.data;
+  const themesPending = hasTrendPeriod && !storedThemes.data && !themesWaitedOut;
   const themesRead = themesInPeriod(storedThemes.data?.themes, report.date_range_start, report.date_range_end);
   const trends = reportTrends(aiAnalysis, themesRead, { pending: themesPending });
   const contentCalendar = rd?.content_calendar || aiAnalysis?.content_calendar || [];
@@ -300,33 +365,33 @@ export default function ReportView() {
   const competitiveTakeaways: string[] = shown.takeaways;
   const pillarRecs: string[] = shown.recommendations.map((r) => r.text);
   const pillarRecsBasis = shown.recommendations.map((r) => r.basedOn);
-  const hero = (() => {
-    const ch = monthComparison?.changes || {};
-    let best: { label: string; pct: number } | null = null;
-    for (const [k, v] of Object.entries<any>(ch)) {
-      const pct = typeof v?.percent === "number" ? v.percent : null;
-      if (pct == null || !Number.isFinite(pct)) continue;
-      if (!best || Math.abs(pct) > Math.abs(best.pct)) best = { label: k.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()), pct };
-    }
-    return best;
-  })();
+  // The headline move: one of the six metrics the tiles show, on a base big enough to mean something (biggestMove).
+  const hero = biggestMove(monthComparison?.changes);
+  const topPosts = reportTopPosts(sproutPerformance);
   // One-line takeaways for the section bands, computed from the data so every section states its point.
-  const pctOf = (v: any) => (typeof v?.percent === "number" && Number.isFinite(v.percent) ? (v.percent as number) : null);
   const metricName = (k: string) => k.replace(/_/g, " ");
+  // Only the six metrics the tiles show are counted or ranked, here and in the lines below.
+  const shownChanges = SHOWN_METRIC_KEYS.flatMap((k) => {
+    const v = monthComparison?.changes?.[k];
+    if (!v) return [];
+    const previous = Number.isFinite(Number(v.previous)) && v.previous != null ? Number(v.previous) : undefined;
+    const current = Number.isFinite(Number(v.current)) && v.current != null ? Number(v.current) : undefined;
+    const change = describeChange({ previous, current, percent: typeof v.percent === "number" ? v.percent : null });
+    return change ? [{ k, previous, current, percent: typeof v.percent === "number" && Number.isFinite(v.percent) ? (v.percent as number) : null, change }] : [];
+  });
   const glanceLine = (() => {
-    const ch = monthComparison?.changes || {};
-    const ps = Object.values<any>(ch).map(pctOf).filter((p): p is number => p != null);
-    if (!ps.length) return "This period against the one before it.";
-    const up = ps.filter((p) => p > 0).length, down = ps.filter((p) => p < 0).length;
-    return `${up} of ${ps.length} metrics rose and ${down} fell against the previous period${hero ? `; ${hero.label.toLowerCase()} moved most at ${hero.pct > 0 ? "+" : ""}${Math.round(hero.pct)}%` : ""}.`;
+    if (!shownChanges.length) return "This period against the one before it.";
+    const up = shownChanges.filter((m) => m.change.direction === "up").length, down = shownChanges.filter((m) => m.change.direction === "down").length;
+    return `${up} of ${shownChanges.length} metrics rose and ${down} fell against the previous period${hero ? `; ${hero.label.toLowerCase()} moved most at ${hero.percent > 0 ? "+" : ""}${Math.round(hero.percent)}%` : ""}.`;
   })();
   const periodLine = (() => {
-    const ch = monthComparison?.changes || {};
-    const movers = Object.entries<any>(ch).map(([k, v]) => ({ k, p: pctOf(v), c: Number(v?.current ?? 0), prev: Number(v?.previous ?? 0) })).filter((m) => m.p != null).sort((a, b) => Math.abs(b.p!) - Math.abs(a.p!));
-    if (!movers.length) return "Each metric on its own scale: this period in green, the previous period in grey.";
-    const flat = movers.filter((m) => m.p === 0).map((m) => metricName(m.k));
-    const top = movers.slice(0, 2).map((m) => `${metricName(m.k)} ${m.p! > 0 ? "+" : ""}${Math.round(m.p!)}% (${compactNumber(m.c)} vs ${compactNumber(m.prev)})`);
-    return `${top.join(" and ")}${flat.length ? `; ${flat.join(", ")} held flat` : ""}. This period in green, the previous period in grey.`;
+    if (!shownChanges.length) return "Each metric on its own scale: this period in green, the previous period in gray.";
+    // Moves on a base big enough for a percent come first, largest first; the rest follow by the size of the change.
+    const sized = (m: (typeof shownChanges)[number]) => (m.previous ?? 0) >= DELTA_MIN_BASE;
+    const movers = [...shownChanges].sort((a, b) => Number(sized(b)) - Number(sized(a)) || (sized(a) ? Math.abs(b.percent ?? 0) - Math.abs(a.percent ?? 0) : Math.abs((b.current ?? 0) - (b.previous ?? 0)) - Math.abs((a.current ?? 0) - (a.previous ?? 0))));
+    const flat = movers.filter((m) => m.change.direction === "flat").map((m) => metricName(m.k));
+    const top = movers.filter((m) => m.change.direction !== "flat").slice(0, 2).map((m) => `${metricName(m.k)} ${m.change.text.startsWith("from") || m.change.text === "New" ? m.change.text : `${m.change.text} (${compactNumber(m.current ?? 0)} vs ${compactNumber(m.previous ?? 0)})`}`);
+    return `${top.length ? `${top.join(" and ")}${flat.length ? "; " : ""}` : ""}${flat.length ? `${flat.join(", ")} held flat` : ""}${top.length || flat.length ? ". " : ""}This period in green, the previous period in gray.`;
   })();
   const platformLine = (() => {
     if (!platformBreakdown.length) return undefined;
@@ -338,8 +403,7 @@ export default function ReportView() {
     return `${a ? `${a.n} carries ${a.pct}% of impressions` : ""}${a && b ? "; " : ""}${b ? `${b.n} carries ${b.pct}% of ${platformBreakdown.every(p => p.current?.engagements != null) ? "engagements" : "reactions, comments and shares"}` : ""}. Every connected account below, with change against the previous period.`;
   })();
   const postsLine = (() => {
-    const posts: any[] = sproutPerformance?.top_posts || [];
-    const best = [...posts].sort((x, y) => Number(y.impressions ?? 0) - Number(x.impressions ?? 0))[0];
+    const best = [...topPosts].sort((x, y) => Number(y.impressions ?? 0) - Number(x.impressions ?? 0))[0];
     if (!best) return undefined;
     const plat = platformLabelOf(best.network_type || best.platform || "");
     return `The best post reached ${compactNumber(Number(best.impressions ?? 0))} impressions${plat ? ` on ${plat}` : ""}${best.engagements != null ? ` with ${compactNumber(Number(best.engagements))} engagements` : ""}. Lifetime metrics for posts published in the report period; ranked by impressions and engagement.`;
@@ -369,6 +433,18 @@ export default function ReportView() {
   const summary: string | null = shown.summary?.text ?? null;
   const summaryBasis = shown.summary?.basedOn;
   const pillars = aiAnalysis?.sprout_performance_analysis?.pillar_alignment;
+  // The overview's sections that render, numbered by their place in the order shown (no gap where one is missing).
+  const overviewShown: [keyof typeof OVERVIEW_TITLES, boolean][] = [
+    ["glance", !!monthComparison?.changes],
+    ["highlights", insights.length > 0 || !!summary],
+    ["actions", trends.held || actions.length > 0],
+    ["field", !!(latestCompetitive && compMe)],
+    ["period", !!monthComparison?.current_month],
+    ["platforms", platformBreakdown.length > 0],
+    ["posts", topPosts.length > 0],
+    ["pillars", !!pillars],
+  ];
+  const sectionNo = (sectionId: keyof typeof OVERVIEW_TITLES) => overviewShown.filter(([, shownHere]) => shownHere).findIndex(([k]) => k === sectionId) + 1;
   const pillarsLine = pillars
     ? `${(pillars.well_represented || []).length} pillars well represented, ${(pillars.underrepresented || []).length} need attention, ${pillarRecs.length} recommendations.`
     : undefined;
@@ -380,14 +456,7 @@ export default function ReportView() {
   const navItems =
     tab === "overview"
       ? [
-          { id: "glance", label: "At a glance" },
-          { id: "highlights", label: "Highlights" },
-          { id: "actions", label: "Where to act next" },
-          { id: "field", label: "Against the field" },
-          { id: "period", label: "Period over period" },
-          { id: "platforms", label: "By platform" },
-          { id: "posts", label: "Top posts" },
-          { id: "pillars", label: "Pillars" },
+          ...(Object.keys(OVERVIEW_TITLES) as (keyof typeof OVERVIEW_TITLES)[]).map((k) => ({ id: k, label: OVERVIEW_TITLES[k] })),
         ]
       : tab === "content"
         ? [
@@ -397,23 +466,23 @@ export default function ReportView() {
         : tab === "trends" && trends.source === "industry"
           ? [
               { id: "industry-trends", label: "Industry trends" },
-              { id: "industry-opportunities", label: "Opportunities" },
+              { id: "industry-opportunities", label: `Opportunities for ${clientName}` },
               { id: "industry-takeaways", label: "Key takeaways" },
             ]
         : tab === "trends"
           ? [
-              { id: "tiktok-overview", label: "TikTok trends" },
-              { id: "tiktok-themes", label: "TikTok themes" },
-              { id: "tiktok-formats", label: "TikTok formats" },
-              { id: "tiktok-opportunities", label: "TikTok opportunities" },
-              { id: "tiktok-takeaways", label: "TikTok takeaways" },
-              { id: "tiktok-posts", label: "TikTok posts" },
-              { id: "instagram-overview", label: "Instagram trends" },
-              { id: "instagram-themes", label: "Instagram themes" },
-              { id: "instagram-formats", label: "Instagram formats" },
-              { id: "instagram-opportunities", label: "Instagram opportunities" },
-              { id: "instagram-takeaways", label: "Instagram takeaways" },
-              { id: "instagram-posts", label: "Instagram posts" },
+              ...(["tiktok", "instagram"] as const).flatMap((net) => {
+                const label = platformName(net);
+                const parts = trendParts(label, clientName);
+                return [
+                  { id: `${net}-overview`, label: `${label} trends` },
+                  { id: `${net}-themes`, label: parts.themes },
+                  { id: `${net}-formats`, label: parts.formats },
+                  { id: `${net}-opportunities`, label: parts.opportunities },
+                  { id: `${net}-takeaways`, label: parts.takeaways },
+                  { id: `${net}-posts`, label: parts.posts },
+                ];
+              }),
             ]
           : [
               { id: "field-compare", label: "How the field compares" },
@@ -435,7 +504,7 @@ export default function ReportView() {
             <span className="flex items-center gap-2 flex-wrap">
               <span>{formatRange(rd?.report_period?.current_month) || formatRange({ start: report.date_range_start, end: report.date_range_end })}</span>
               <span className="opacity-50">·</span>
-              <span>Generated {formatDate(report.created_at)}</span>
+              <span>Generated {formatDate(report.created_at, { timeZone: clientContext.timezone })}</span>
               {countryNames(rd?.context?.geo) && (<><span className="opacity-50">·</span><span className="flex items-center gap-1"><Globe className="h-3.5 w-3.5" />{countryNames(rd.context.geo)}</span></>)}
               {languageNames(rd?.context?.languages) && (<><span className="opacity-50">·</span><span className="flex items-center gap-1"><Languages className="h-3.5 w-3.5" />{languageNames(rd.context.languages)}</span></>)}
             </span>
@@ -471,21 +540,21 @@ export default function ReportView() {
                 then detail, and the recommendations to close. The nav jumps to any of them. */}
 
             {monthComparison?.changes && (
-              <Section id="glance" index={1} title="At a glance" description={glanceLine}>
+              <Section id="glance" index={sectionNo("glance")} title={OVERVIEW_TITLES.glance} description={glanceLine}>
                 <MetricsCards changes={monthComparison.changes} previousMonth={monthComparison.previous_month} />
               </Section>
             )}
 
             {(insights.length > 0 || summary) && (
-              <Section id="highlights" index={2} title="Highlights" description="What happened this period and why, written from the numbers.">
+              <Section id="highlights" index={sectionNo("highlights")} title={OVERVIEW_TITLES.highlights} description="What happened this period and why, written from the numbers.">
                 <Card><CardContent className="space-y-5">
                     {(hero || summary) && (
                       <div className="grid gap-6 md:grid-cols-[auto_1fr] items-start">
                         {hero && (
                           <div className="min-w-[12rem]">
                             <p className="t-subhead">Biggest move</p>
-                            <p className={`text-[48px] leading-[52px] font-bold tracking-[-1px] ${hero.pct > 0 ? "text-success" : hero.pct < 0 ? "text-[#f87171]" : "text-white"}`}>
-                              {hero.pct > 0 ? "+" : ""}{Math.round(hero.pct)}%
+                            <p className={`t-hero ${hero.percent > 0 ? "text-success" : hero.percent < 0 ? "text-destructive" : "text-white"}`}>
+                              {hero.percent > 0 ? "+" : ""}{Math.round(hero.percent)}%
                             </p>
                             <p className="t-body">{hero.label} vs the previous period</p>
                           </div>
@@ -514,21 +583,21 @@ export default function ReportView() {
             {trends.held ? (
               // Held until the themes are read: the list and its count change when they arrive. Never printed.
               <div data-print="hide">
-                <Section id="actions" index={3} title="Where to act next">
+                <Section id="actions" index={sectionNo("actions")} title={OVERVIEW_TITLES.actions}>
                   <Loading label="Loading recommendations" />
                 </Section>
               </div>
             ) : actions.length > 0 && (
-              <Section id="actions" index={3} title="Where to act next" description={`${actions.length < totalRecommendations ? `${actions.length} of ${totalRecommendations}` : actions.length} recommendation${totalRecommendations === 1 ? "" : "s"}${(() => { const c: Record<string, number> = {}; for (const a of actions) c[a.source] = (c[a.source] || 0) + 1; const parts = Object.entries(c).map(([k, n]) => `${n} from ${k === "Competitors" ? "the competitive analysis" : k === "Trends" ? "the trends" : "performance"}`); return parts.length ? `: ${parts.join(", ")}` : ""; })()}. Each one opens its evidence.`}>
+              <Section id="actions" index={sectionNo("actions")} title={OVERVIEW_TITLES.actions} description={`${actions.length < totalRecommendations ? `${actions.length} of ${totalRecommendations}` : actions.length} recommendation${Math.max(actions.length, totalRecommendations) === 1 ? "" : "s"}${(() => { const c: Record<string, number> = {}; for (const a of actions) c[a.source] = (c[a.source] || 0) + 1; const parts = Object.entries(c).map(([k, n]) => `${n} from ${k === "Competitors" ? "the competitive analysis" : k === "Trends" ? "the trends" : "performance"}`); return parts.length ? `: ${parts.join(", ")}` : ""; })()}. Each one opens its evidence.`}>
                 <div className="grid gap-inner md:grid-cols-2 xl:grid-cols-3">
                   {actions.map((a, i) => (
                     <ActionCard
                       key={i}
                       action={a}
                       onOpen={() => openAction(a)}
-                      extra={isMoburstStaff && id ? (
+                      extra={isMoburstStaff ? (
                         <NewPostDialog
-                          clientId={id}
+                          clientId={clientId}
                           platforms={availablePlatforms.length ? availablePlatforms : ["Instagram", "LinkedIn", "TikTok", "Facebook", "X"]}
                           defaultDate={new Date().toISOString().slice(0, 10)}
                           initialIdea={[a.title, a.detail].filter(Boolean).join(". ")}
@@ -546,9 +615,9 @@ export default function ReportView() {
             {latestCompetitive && compMe && (
               <Section
                 id="field"
-                index={4}
-                title="Against the field"
-                description="The latest competitive analysis, in three numbers."
+                index={sectionNo("field")}
+                title={OVERVIEW_TITLES.field}
+                description="Where this brand stands in the latest competitive analysis."
                 action={<Button variant="outline" size="sm" data-print="hide" onClick={() => setTab("competitive")}>Open the competitive view <ArrowRight /></Button>}
               >
                 {/* The figures share the card's width instead of sitting at
@@ -566,13 +635,13 @@ export default function ReportView() {
             )}
 
             {monthComparison?.current_month && (
-              <Section id="period" index={5} title="Period-over-period performance" description={periodLine}>
+              <Section id="period" index={sectionNo("period")} title={OVERVIEW_TITLES.period} description={periodLine}>
                 <Card><CardContent><PerformanceChart comparison={monthComparison} /></CardContent></Card>
               </Section>
             )}
 
             {platformBreakdown.length > 0 && (
-              <Section id="platforms" index={6} title="Performance by platform" description={platformLine || "How each connected account performed this period."}>
+              <Section id="platforms" index={sectionNo("platforms")} title={OVERVIEW_TITLES.platforms} description={platformLine || "How each connected account performed this period."}>
                 <Card>
                   <CardContent className="grid gap-8 lg:grid-cols-2">
                     <div className="space-y-3">
@@ -586,7 +655,7 @@ export default function ReportView() {
                     {/* How the figures were collected: a note on the chart it
                         qualifies, not a loose paragraph between the band and
                         the card. */}
-                    <p className="t-label lg:col-span-2">Snapshot collected {formatDateTime(report.created_at)}. Profile figures cover the selected reporting period; Facebook and Instagram impressions represent views. LinkedIn clicks include all post clicks. Providers may revise historical data after collection.</p>
+                    <p className="t-label lg:col-span-2">Snapshot collected {formatDateTime(report.created_at, { timeZone: clientContext.timezone })}. Profile figures cover the selected reporting period; Facebook and Instagram impressions represent views. LinkedIn clicks include all post clicks. Figures can be revised after collection.</p>
                   </CardContent>
                 </Card>
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-inner">
@@ -595,27 +664,27 @@ export default function ReportView() {
               </Section>
             )}
 
-            {sproutPerformance?.top_posts?.length > 0 && (
-              <Section id="posts" index={7} title="Top posts" description={postsLine || "By impressions and by engagement, with a platform filter."}>
-                <Card><CardContent><TopPostsSection posts={sproutPerformance.top_posts} /></CardContent></Card>
+            {topPosts.length > 0 && (
+              <Section id="posts" index={sectionNo("posts")} title={OVERVIEW_TITLES.posts} description={postsLine || "By impressions and by engagement, with a platform filter."}>
+                <Card><CardContent><TopPostsSection posts={topPosts} /></CardContent></Card>
               </Section>
             )}
 
             {pillars && (
               <div id="report-pillars">
-                <Section id="pillars" index={8} title="Content pillar alignment" description={pillarsLine}>
+                <Section id="pillars" index={sectionNo("pillars")} title={OVERVIEW_TITLES.pillars} description={pillarsLine}>
                   <Card><CardContent className="space-y-5">
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {pillars.well_represented?.length > 0 && (
                           <div className="space-y-2">
                             <p className="t-subhead flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-success" /> Well represented</p>
-                            <div className="flex flex-wrap gap-1.5">{pillars.well_represented.map((p: string) => <Badge key={p} variant="secondary">{p}</Badge>)}</div>
+                            <PillarEntries entries={pillars.well_represented} variant="secondary" />
                           </div>
                         )}
                         {pillars.underrepresented?.length > 0 && (
                           <div className="space-y-2">
                             <p className="t-subhead flex items-center gap-1.5"><AlertCircle className="h-3.5 w-3.5 text-warning" /> Needs attention</p>
-                            <div className="flex flex-wrap gap-1.5">{pillars.underrepresented.map((p: string) => <Badge key={p} variant="outline">{p}</Badge>)}</div>
+                            <PillarEntries entries={pillars.underrepresented} variant="outline" />
                           </div>
                         )}
                       </div>
@@ -644,9 +713,9 @@ export default function ReportView() {
                   <ul className="flex items-center gap-x-6 gap-y-2 flex-wrap t-body">
                     {counts.postsAnalyzed != null && <li className="flex items-center gap-2"><span>Posts analyzed</span><span className="font-semibold tabular-nums">{counts.postsAnalyzed}</span></li>}
                     {/* The trend counts and the recommendations wait for the themes (reportTrends' held). */}
-                    {trends.source === "industry" && !trends.held && <li className="flex items-center gap-2"><span>Industry trends</span><span className="font-semibold tabular-nums">{counts.industryTrends}</span></li>}
-                    {trends.source === "own" && <li className="flex items-center gap-2"><span>TikTok trends</span><span className="font-semibold tabular-nums">{counts.tiktokTrends}</span></li>}
-                    {trends.source === "own" && <li className="flex items-center gap-2"><span>Instagram trends</span><span className="font-semibold tabular-nums">{counts.instagramTrends}</span></li>}
+                    {trends.source === "industry" && !trends.held && counts.industryTrends > 0 && <li className="flex items-center gap-2"><span>Industry trends</span><span className="font-semibold tabular-nums">{counts.industryTrends}</span></li>}
+                    {trends.source === "own" && counts.tiktokTrends > 0 && <li className="flex items-center gap-2"><span>TikTok trends</span><span className="font-semibold tabular-nums">{counts.tiktokTrends}</span></li>}
+                    {trends.source === "own" && counts.instagramTrends > 0 && <li className="flex items-center gap-2"><span>Instagram trends</span><span className="font-semibold tabular-nums">{counts.instagramTrends}</span></li>}
                     {!trends.held && <li className="flex items-center gap-2"><span>Recommendations</span><span className="font-semibold tabular-nums">{counts.recommendations}</span></li>}
                     {counts.calendarPosts > 0 && <li className="flex items-center gap-2"><span>Calendar posts</span><span className="font-semibold tabular-nums">{counts.calendarPosts}</span></li>}
                     {latestCompetitive && <li className="t-secondary">Latest competitive analysis included</li>}
@@ -659,13 +728,13 @@ export default function ReportView() {
           {/* ── CONTENT IDEAS ── */}
           {hasContent && (
             <TabsContent value="content" className="space-y-section">
-              <ReportCalendarLink clientId={id!} reportId={reportId!} hasBoard={contentCalendar.length > 0}>
+              <ReportCalendarLink clientId={clientId} reportId={reportId!} hasBoard={contentCalendar.length > 0}>
                 <ContentIdeasTab
                   contentCalendar={contentCalendar}
                   aiAnalysis={aiAnalysis}
                   sproutPerformance={sproutPerformance}
                   clientContext={clientContext}
-                  clientId={id}
+                  clientId={clientId}
                   reportId={reportId}
                   clientTimezone={clientContext.timezone}
                   availablePlatforms={availablePlatforms}
@@ -715,7 +784,7 @@ function ActionCard({ action, onOpen, extra }: { action: { source: string; title
         <span className="inline-flex items-center gap-1.5 t-subhead">{icon} Recommendation · {action.source}</span>
         <p className="t-h3 leading-snug">{action.title}</p>
         {action.detail && <p className="t-body">{action.detail}</p>}
-        <span className="mt-auto inline-flex items-center gap-1 t-link group-hover:underline self-start">{action.href ? "Open the competitive report" : action.source === "Performance" ? "See the pillar detail" : action.source === "Trends" ? "Open Trends" : "Open Competitive"} <ArrowRight className="h-3.5 w-3.5" /></span>
+        <span className="mt-auto inline-flex items-center gap-1 t-link group-hover:underline self-start">{action.href ? "Open the competitive report" : action.source === "Performance" ? "See the pillar detail" : action.source === "Trends" ? "Open the trends section" : "Open the competitive section"} <ArrowRight className="h-3.5 w-3.5" /></span>
       </button>
       {extra}
     </div>
@@ -746,7 +815,12 @@ function MetricsCards({ changes, previousMonth }: { changes: Record<string, any>
             label={label}
             icon={<Icon className="h-3.5 w-3.5" />}
             value={fmt(Number(d.current ?? 0))}
-            delta={{ percent: pct, previous: prev != null ? fmt(Number(prev)) : undefined }}
+            delta={{
+              percent: pct,
+              from: d.previous != null && Number.isFinite(Number(d.previous)) ? Number(d.previous) : undefined,
+              to: d.current != null && Number.isFinite(Number(d.current)) ? Number(d.current) : undefined,
+              previous: prev != null ? fmt(Number(prev)) : undefined,
+            }}
           />
         );
       })}
@@ -802,20 +876,20 @@ function PostCard({ post, preview }: { post: any; preview?: PostPreview | null }
           {reportsMeasure(post.network_type || post.platform, "impressions") && (
             <span className="flex items-center gap-1">
               <Eye className="h-3 w-3" />
-              {(post.impressions ?? 0).toLocaleString()}
+              {post.impressions == null ? NO_DATA : Number(post.impressions).toLocaleString()}
             </span>
           )}
           <span className="flex items-center gap-1">
             <Heart className="h-3 w-3" />
-            {(post.reactions ?? post.likes ?? 0).toLocaleString()}
+            {(post.reactions ?? post.likes) == null ? NO_DATA : Number(post.reactions ?? post.likes).toLocaleString()}
           </span>
           <span className="flex items-center gap-1">
             <MessageCircle className="h-3 w-3" />
-            {(post.comments ?? 0).toLocaleString()}
+            {post.comments == null ? NO_DATA : Number(post.comments).toLocaleString()}
           </span>
           <span className="flex items-center gap-1">
             <Share2 className="h-3 w-3" />
-            {(post.shares ?? 0).toLocaleString()}
+            {post.shares == null ? NO_DATA : Number(post.shares).toLocaleString()}
           </span>
         </div>
         {(post.permalink || post.url) && (
@@ -856,7 +930,7 @@ function postPlatformKey(post: any): string {
 /* ─── Platform Performance Card (mirrors the aggregate MetricsCards styling) ─── */
 function PlatformPerformanceCard({ platform }: { platform: any }) {
   // Full words. Six abbreviated columns ("Impr.", "Comm.") in a 440px card
-  // were the reason the labels had to be 11px and grey; three columns of two
+  // were the reason the labels had to be 11px and gray; three columns of two
   // rows fit the words at a size you can read.
   const metrics = [
     { key: "impressions", label: "Impressions" },
@@ -875,7 +949,7 @@ function PlatformPerformanceCard({ platform }: { platform: any }) {
   return (
     <article className="glass p-5 flex flex-col gap-4">
       {/* The platform is the title of this card, so it is set as one: 18px,
-          white, with its icon in the brand colour. It used to be a 12px badge
+          white, with its icon in the brand color. It used to be a 12px badge
           in the corner, which left the card without a heading at all. */}
       <header className="pb-3 border-b border-[rgba(255,255,255,0.08)] space-y-1">
         <div className="flex items-start justify-between gap-3">
@@ -907,14 +981,13 @@ function PlatformPerformanceCard({ platform }: { platform: any }) {
           const pct = typeof ch?.percent === "number" ? ch.percent : null;
           // A zero baseline isn't "+100% growth": surface it as "new" instead.
           const before = Number(ch?.previous ?? prev?.[key] ?? 0);
-          const isNew = ch != null && before === 0 && value > 0;
-          const tone = isNew || (pct != null && pct > 0) ? "text-success" : pct != null && pct < 0 ? "text-[#f87171]" : "text-[#9ca3af]";
-          const delta = value === 0 && before === 0 ? null : isNew ? "new" : pct == null ? null : `${pct > 0 ? "+" : ""}${Math.round(pct)}%`;
+          const delta = ch == null || (value === 0 && before === 0) ? null : describeChange({ previous: before, current: value, percent: pct });
+          const tone = !delta ? "" : delta.direction === "up" ? "text-success" : delta.direction === "down" ? "text-destructive" : "text-muted-foreground";
           return (
-            <div key={key} className="min-w-0" title={`${label}: ${value.toLocaleString()}${pct != null ? ` (${pct > 0 ? "+" : ""}${pct}% vs previous period)` : ""}`}>
+            <div key={key} className="min-w-0" title={`${label}: ${value.toLocaleString()}${delta ? ` (${delta.text} vs previous period)` : ""}`}>
               <dd className="flex items-baseline gap-1.5 flex-wrap">
                 <span className="t-h3 tabular-nums">{compactNumber(value)}</span>
-                {delta && <span className={`t-label font-semibold tabular-nums ${tone}`}>{delta}</span>}
+                {delta && <span className={`t-label font-semibold tabular-nums ${tone}`}>{delta.text}</span>}
               </dd>
               <dt className="t-label mt-0.5">{label}</dt>
             </div>
@@ -925,7 +998,7 @@ function PlatformPerformanceCard({ platform }: { platform: any }) {
       {Array.isArray(ai?.insights) && ai.insights.length > 0 && (
         <ul className="pt-4 border-t border-[rgba(255,255,255,0.08)] space-y-2.5">
           {ai.insights.map((txt: string, i: number) => (
-            <li key={i} className="t-body text-[#d1d5db] leading-[1.6] flex gap-3">
+            <li key={i} className="t-body text-muted-foreground leading-[1.6] flex gap-3">
               <span className="mt-[9px] h-1.5 w-1.5 rounded-full bg-[#b9e045] shrink-0" aria-hidden />
               <span className="min-w-0">{formatNumbersInText(txt)}</span>
             </li>
@@ -1021,6 +1094,7 @@ function TrendsSection({
   // The weighted engagement score is an internal ranking; clients see the measured engagements instead.
   const { isMoburstStaff } = useAuth();
   if (!analysis && !validPosts.length) return null;
+  const parts = trendParts(title.replace(/ trends$/, ""), clientName ?? "");
   const opportunities: string[] = analysis?.opportunities_for_client || [];
   const formats: string[] = analysis?.successful_formats || [];
   const takeaways: string[] = analysis?.key_takeaways || [];
@@ -1029,14 +1103,14 @@ function TrendsSection({
     <section className="space-y-8">
       <Section
         id={`${platform}-overview`}
-        title={<><span className="h-8 w-8 rounded-[10px] flex items-center justify-center shrink-0" style={{ backgroundColor: `${platformColor}22` }}><PlatformIcon platform={platform} className="h-4 w-4" /></span>{title}</>}
-        description={analysis?.overview ? undefined : "Trending content and what it means for the client."}
+        title={<><span className="h-8 w-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: `${platformColor}22` }}><PlatformIcon platform={platform} className="h-4 w-4" /></span>{title}</>}
+        description={analysis?.overview ? undefined : `Trending content and what it means for ${clientName || "your brand"}.`}
       >
         {analysis?.overview && <Card><CardContent className="pt-5"><Prose text={analysis.overview} /></CardContent></Card>}
       </Section>
 
       {(analysis?.top_themes?.length > 0 || analysis?.top_hashtags?.length > 0) && (
-        <Section id={`${platform}-themes`} title="Themes and hashtags" description="What the trending posts are about, and the tags carrying them.">
+        <Section id={`${platform}-themes`} title={parts.themes} description="What the trending posts are about, and the tags carrying them.">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {analysis.top_themes?.length > 0 && (
               <Card><CardContent className="pt-5 space-y-3">
@@ -1046,7 +1120,7 @@ function TrendsSection({
             )}
             {analysis.top_hashtags?.length > 0 && (
               <Card><CardContent className="pt-5 space-y-3">
-                <p className="t-subhead flex items-center gap-1.5"><span className="text-[14px] font-bold">#</span> Trending hashtags</p>
+                <p className="t-subhead flex items-center gap-1.5"><span className="t-label font-bold">#</span> Trending hashtags</p>
                 <div className="flex flex-wrap gap-2">{analysis.top_hashtags.map((h: string) => <Badge key={h} variant="outline" className="px-3 py-1 t-body">{h.startsWith("#") ? h : `#${h}`}</Badge>)}</div>
               </CardContent></Card>
             )}
@@ -1055,25 +1129,25 @@ function TrendsSection({
       )}
 
       {formats.length > 0 && (
-        <Section id={`${platform}-formats`} title={<><Sparkles className="h-5 w-5" /> What is working</>} description="Formats that keep winning in this space right now.">
+        <Section id={`${platform}-formats`} title={<><Sparkles className="h-5 w-5" /> {parts.formats}</>} description="Formats that keep winning in this space right now.">
           <InsightGrid items={formats} numbered={false} />
         </Section>
       )}
 
       {opportunities.length > 0 && (
-        <Section id={`${platform}-opportunities`} title={<><Target className="h-5 w-5 text-primary" /> Opportunities for {clientName || "your brand"}</>} description="Where the trend meets the client's strengths.">
+        <Section id={`${platform}-opportunities`} title={<><Target className="h-5 w-5 text-primary" /> {parts.opportunities}</>} description="Where the trend meets your strengths.">
           <InsightGrid items={opportunities} numbered={true} />
         </Section>
       )}
 
       {takeaways.length > 0 && (
-        <Section id={`${platform}-takeaways`} title={<><Lightbulb className="h-5 w-5 text-warning" /> Key takeaways</>}>
+        <Section id={`${platform}-takeaways`} title={<><Lightbulb className="h-5 w-5 text-warning" /> {parts.takeaways}</>}>
           <InsightGrid items={takeaways} numbered={false} />
         </Section>
       )}
 
       {shown.length > 0 && (
-        <Section id={`${platform}-posts`} title="Trending posts" description="The posts driving the trend, with the creative and the numbers behind each.">
+        <Section id={`${platform}-posts`} title={parts.posts} description="The posts driving the trend, with the creative and the numbers behind each.">
           {/* data-pdf-flow / data-pdf-media-row are print-only hints: on screen
               these stay a two-column grid with a fixed-width visual. */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4" data-pdf-flow>

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { compactNumber } from '@/lib/display';
 import { actionItems, competitiveStanding, contentWeek, reportHeadline } from '@/lib/clientOverview';
 import { thisWeek } from '@/lib/weekWindow';
 
@@ -15,6 +16,27 @@ describe('client overview', () => {
     expect(h.rose).toBe(2);
     expect(h.total).toBe(4);
     expect(reportHeadline({})).toBeNull();
+  });
+  it('counts every measure with a previous value, including one that rose from zero', () => {
+    const rd = { sprout_performance: { month_comparison: { changes: {
+      impressions: { current: 100, previous: 80, percent: 25 },
+      reactions: { current: 5, previous: 9, percent: -44.4 },
+      engagements: { current: 7, previous: 7, percent: 0 },
+      comments: { current: 4, previous: 0, percent: null },
+      shares: { current: 2, previous: 0, percent: null },
+    } } } };
+    const h = reportHeadline(rd)!;
+    expect(h.total).toBe(5);
+    expect(h.rose).toBe(3);
+    // A measure with no previous value is not a comparison.
+    expect(reportHeadline({ sprout_performance: { month_comparison: { changes: { impressions: { current: 3 }, shares: { current: 1, previous: 1, percent: 0 } } } } })!.total).toBe(1);
+  });
+  it('keeps two decimals from a million up', () => {
+    expect(compactNumber(1969952)).toBe('1.97M');
+    expect(compactNumber(2005449)).toBe('2.01M');
+    expect(compactNumber(2000000)).toBe('2M');
+    expect(compactNumber(1500000)).toBe('1.5M');
+    expect(compactNumber(12400)).toBe('12.4K');
   });
   it('says where the client leads and trails', () => {
     const s = competitiveStanding({ share_of_voice_pct: 19, competitors: [{ name: 'A' }, { name: 'B' }], benchmark_dimensions: [{ dimension: 'Audience', client: 10, competitor_avg: 5 }, { dimension: 'Cadence', client: 2, competitor_avg: 4 }] })!;

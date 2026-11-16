@@ -1,5 +1,9 @@
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { normalizePlatform } from "@/lib/platform";
+import { useAuth } from "@/hooks/useAuth";
+import { statusLabel } from "./postStatus";
+import { effectiveFilters } from "./effectiveFilters";
 import { PlatformSegment, Segment, SegmentedGroup } from "@/components/ui/segmented";
 
 export interface CalendarFilterState {
@@ -20,12 +24,13 @@ interface Props {
 }
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-const STATUSES: Array<{ value: string; label: string }> = [
+/** The status segments; the sent one is worded by who reads it (statusLabel). */
+const statuses = (isStaff: boolean): Array<{ value: string; label: string }> => [
   { value: "all", label: "All" },
   { value: "draft", label: "Draft" },
   { value: "designed", label: "Designed" },
   { value: "approved", label: "Approved" },
-  { value: "scheduled", label: "Scheduled" },
+  { value: "scheduled", label: statusLabel("scheduled", isStaff) },
 ];
 
 const DEFAULT_FILTERS: CalendarFilterState = {
@@ -35,7 +40,9 @@ const DEFAULT_FILTERS: CalendarFilterState = {
   language: "all",
 };
 
-export function CalendarFilters({ filters, onChange, availablePlatforms, availableLanguages, shown, total }: Props) {
+export function CalendarFilters({ filters: chosen, onChange, availablePlatforms, availableLanguages, shown, total }: Props) {
+  const { isMoburstStaff } = useAuth();
+  const filters = effectiveFilters(chosen, availablePlatforms);
   const hasActive =
     filters.day !== "all" ||
     filters.platform !== "all" ||
@@ -47,14 +54,14 @@ export function CalendarFilters({ filters, onChange, availablePlatforms, availab
       <div className="glass px-card py-3 flex flex-wrap items-center gap-x-6 gap-y-3">
         {/* Day */}
         <SegmentedGroup label="Day">
-          <Segment active={filters.day === "all"} onClick={() => onChange({ ...filters, day: "all" })}>
+          <Segment active={filters.day === "all"} onClick={() => onChange({ ...chosen, day: "all" })}>
             All
           </Segment>
           {DAYS.map((d) => (
             <Segment
               key={d}
               active={filters.day === d}
-              onClick={() => onChange({ ...filters, day: d })}
+              onClick={() => onChange({ ...chosen, day: d })}
               ariaLabel={d}
             >
               {d.slice(0, 3)}
@@ -66,7 +73,7 @@ export function CalendarFilters({ filters, onChange, availablePlatforms, availab
         <SegmentedGroup label="Platform">
           <Segment
             active={filters.platform === "all"}
-            onClick={() => onChange({ ...filters, platform: "all" })}
+            onClick={() => onChange({ ...chosen, platform: "all" })}
           >
             All
           </Segment>
@@ -74,19 +81,19 @@ export function CalendarFilters({ filters, onChange, availablePlatforms, availab
             <PlatformSegment
               key={p}
               platform={p}
-              active={filters.platform === p}
-              onClick={() => onChange({ ...filters, platform: p })}
+              active={normalizePlatform(filters.platform) === normalizePlatform(p)}
+              onClick={() => onChange({ ...chosen, platform: p })}
             />
           ))}
         </SegmentedGroup>
 
         {/* Status */}
         <SegmentedGroup label="Status">
-          {STATUSES.map((s) => (
+          {statuses(!!isMoburstStaff).map((s) => (
             <Segment
               key={s.value}
               active={filters.status === s.value}
-              onClick={() => onChange({ ...filters, status: s.value })}
+              onClick={() => onChange({ ...chosen, status: s.value })}
             >
               {s.label}
             </Segment>
@@ -98,7 +105,7 @@ export function CalendarFilters({ filters, onChange, availablePlatforms, availab
           <SegmentedGroup label="Language">
             <Segment
               active={filters.language === "all"}
-              onClick={() => onChange({ ...filters, language: "all" })}
+              onClick={() => onChange({ ...chosen, language: "all" })}
             >
               All
             </Segment>
@@ -106,7 +113,7 @@ export function CalendarFilters({ filters, onChange, availablePlatforms, availab
               <Segment
                 key={l}
                 active={filters.language === l}
-                onClick={() => onChange({ ...filters, language: l })}
+                onClick={() => onChange({ ...chosen, language: l })}
               >
                 <span className="uppercase">{l}</span>
               </Segment>

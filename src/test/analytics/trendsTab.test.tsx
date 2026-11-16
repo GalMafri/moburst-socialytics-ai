@@ -13,13 +13,19 @@ import { presetRange } from "@/lib/dateRange";
 const f = vi.hoisted(() => ({
   rpcs: [] as any[],
   noReports: false,
+  staff: false,
+  navigated: [] as string[],
   report: { id: "r1", status: "completed", created_at: "2026-10-07T07:20:00Z", date_range_start: "2026-09-01", date_range_end: "2026-09-30", report_data: {} },
 }));
 const report = f.report;
 vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
 vi.stubGlobal("IntersectionObserver", class { observe() {} unobserve() {} disconnect() {} });
-vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ isMoburstStaff: false, canRunAnalysis: false }) }));
-vi.mock("@/components/layout/AppLayout", () => ({ AppLayout: ({ children, nav, actions }: any) => <main>{nav}{actions}{children}</main> }));
+vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ isMoburstStaff: f.staff, canRunAnalysis: false }) }));
+vi.mock("react-router-dom", async (orig) => {
+  const mod: any = await orig();
+  return { ...mod, useNavigate: () => (to: string) => { f.navigated.push(to); } };
+});
+vi.mock("@/components/layout/AppLayout", () => ({ AppLayout: ({ children, nav, actions, back }: any) => <main>{back}{nav}{actions}{children}</main> }));
 vi.mock("@/components/reports/ExportPdfButton", () => ({ ExportPdfButton: () => null }));
 vi.mock("@/components/competitive/CompetitiveSnapshot", () => ({ CompetitiveSnapshot: () => null }));
 vi.mock("@/integrations/supabase/client", () => ({
@@ -44,7 +50,7 @@ vi.mock("@/integrations/supabase/client", () => ({
 }));
 
 let qc: QueryClient;
-beforeEach(() => { f.rpcs = []; f.noReports = false; });
+beforeEach(() => { f.rpcs = []; f.noReports = false; f.staff = false; f.navigated = []; });
 afterEach(() => { cleanup(); qc?.clear(); });
 
 function mount() {
@@ -66,7 +72,7 @@ it("asks for the weeks inside the period the page is showing, and shows them in 
   const { start, end } = presetRange("30d");
   expect(f.rpcs[0]).toEqual({ name: "trend_themes_in_range", p_client: "c1", p_from: start, p_to: end });
   // A new period asks again for that period's weeks.
-  fireEvent.click(screen.getByRole("button", { name: "7d" }));
+  fireEvent.click(screen.getByRole("button", { name: "Last 7 days" }));
   const week = presetRange("7d");
   await waitFor(() => expect(f.rpcs.at(-1)).toEqual({ name: "trend_themes_in_range", p_client: "c1", p_from: week.start, p_to: week.end }));
 });
@@ -101,4 +107,38 @@ it("still shows the Trends tab for a period with no report", async () => {
   mount();
   await openTrends();
   expect(await screen.findByText("Captain POV skits")).toBeInTheDocument();
+});
+
+it("does not show Report history under the Trends or Competitive tabs", async () => {
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "All time" }));
+  await screen.findByRole("heading", { name: /^Report history/ });
+  await openTrends();
+  await screen.findByText("Captain POV skits");
+  // Report history belongs to the Performance panel; the open panel here is Trends.
+  const openPanelHistory = () => document.querySelector('[role="tabpanel"][data-state="active"] #history');
+  expect(openPanelHistory()).toBeNull();
+  expect(screen.queryByRole("link", { name: /^Report history/ })).not.toBeInTheDocument();
+  fireEvent.mouseDown(screen.getByRole("tab", { name: /Competitive/ }), { button: 0 });
+  await waitFor(() => expect(document.querySelector('[role="tabpanel"][data-state="active"]')?.id).toMatch(/competitive/));
+  expect(openPanelHistory()).toBeNull();
+  expect(screen.queryByRole("link", { name: /^Report history/ })).not.toBeInTheDocument();
+});
+
+it("shows no empty Report history card in a window no report overlaps", async () => {
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Last 7 days" }));
+  await waitFor(() => expect(screen.queryByRole("heading", { name: /^Report history/ })).not.toBeInTheDocument());
+  expect(screen.queryByText("0 reports")).not.toBeInTheDocument();
+});
+
+it("sends a client user back to the dashboard and says so, and staff back to the client", async () => {
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Back to dashboard" }));
+  expect(f.navigated).toEqual(["/"]);
+  cleanup();
+  f.staff = true;
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Back to client" }));
+  expect(f.navigated.at(-1)).toBe("/clients/c1/setup");
 });

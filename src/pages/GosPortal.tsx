@@ -5,12 +5,12 @@
 // /logout also tears down the local Supabase session and any legacy hub token.
 import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { PORTAL_URL } from "@/utils/gosAuth";
+import { portalUrl } from "@/utils/gosAuth";
 import { clearHubToken } from "@/utils/hubAuth";
 
 export const PortalRedirect = () => {
   useEffect(() => {
-    window.location.replace(PORTAL_URL);
+    window.location.replace(portalUrl());
   }, []);
   return null;
 };
@@ -18,11 +18,13 @@ export const PortalRedirect = () => {
 export const Logout = () => {
   useEffect(() => {
     (async () => {
+      // Read before sign-out so the link goes back to the portal they used.
+      const destination = portalUrl();
       try {
         clearHubToken();
         await supabase.auth.signOut();
       } finally {
-        window.location.replace(PORTAL_URL);
+        window.location.replace(destination);
       }
     })();
   }, []);

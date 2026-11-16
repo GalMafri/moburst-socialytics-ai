@@ -74,6 +74,12 @@ export interface PipelineJobPayload {
   /** Small state carried from step to step (at most STATE_MAX_BYTES). Large data goes to the payload store. */
   state: Record<string, unknown>;
   poll?: PollState | null;
+  /** Time the run spent waiting for an account (StepResult waitingFor), which no limit of the run counts. */
+  paused_ms?: number;
+  /** When the wait for an account the run is in now began; absent when it is not waiting for one. */
+  paused_at?: string;
+  /** What that wait is for (StepResult waitingFor), for the reason a run stopped at its horizon records. */
+  paused_for?: string;
 }
 
 /**
@@ -132,6 +138,19 @@ export class StepRestart extends Error {
   }
 }
 
+/**
+ * Thrown by a step that knows trying again cannot change the outcome (a trend
+ * week in which every watched platform failed, for one): the runner ends the
+ * run as stopped at once with this message as its reason, and spends no
+ * further tries on it.
+ */
+export class StepStop extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StepStop";
+  }
+}
+
 /** What a step came to. A step that cannot go on throws; the runner retries it quietly. */
 export type StepResult<S extends Record<string, unknown> = Record<string, unknown>> =
   | { type: "next"; step: string; state?: S; detail?: Record<string, unknown> }
@@ -140,6 +159,14 @@ export type StepResult<S extends Record<string, unknown> = Record<string, unknow
     /** Seconds until the step is called again to look. */
     waitSeconds: number;
     handle: Record<string, unknown>;
+    /**
+     * Set when the step waits for an account or credential it needs (an API
+     * token that is not set or is refused). That is a state of the run: in a
+     * queued run no try is spent, and neither the poll limit nor the run's
+     * hours run while it lasts, up to the pipeline's waitHorizon. An inline run
+     * (inline.ts) stops at once, since it has only the request's time.
+     */
+    waitingFor?: string;
     state?: S;
     detail?: Record<string, unknown>;
   }
@@ -176,4 +203,13 @@ export interface PipelineDefinition<S extends Record<string, unknown> = Record<s
   maxPollMinutes?: number;
   /** How long the whole run may take before it stops (default MAX_RUN_HOURS). */
   maxRunHours?: number;
+  /**
+   * The latest moment a wait for an account (StepResult waitingFor) may hold
+   * a run, from what the run is for: a trends run's is the end of its week.
+   * Once it has passed, the runner stops a waiting run with that reason
+   * instead of letting it go on with stale work. Without one, or when it
+   * answers null, a wait ends with the run's own hours from its start
+   * (runHoursHorizon), so no run waits without a limit.
+   */
+  waitHorizon?: (run: PipelineRun) => Date | null;
 }

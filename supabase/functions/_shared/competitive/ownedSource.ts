@@ -39,14 +39,12 @@ export function ownedPostTotals(posts:Array<{channel?:unknown;engagementTotal?:u
     impressions:!posts.length?0:reach.some(r=>r!==null)?reach.reduce<number>((n,r)=>n+(r??0),0):null};
 }
 
-/** Normalize all assigned owned profiles, never an agency-wide name search.
- * Engagements are the one public count (engagementsOf): no clicks, saves,
- * Instagram or YouTube shares, the same actions competitor sources count. */
-export function normalizeOwnedCompetitive(profiles:OwnedProfile[],period:Period,postRows:any[],profileRows:any[],collectedAt:string) {
-  const previous=previousPeriod(period);
-  const ids=new Map(profiles.map(p=>[String(p.sprout_profile_id),p]));
-  if(ids.size!==profiles.length) throw new Error('Duplicate assigned client profiles');
-  const observations=new Map<string,any[]>();
+/** A row of Sprout's profile analytics: its dimensions (the profile and the day) and its metrics. */
+type AudienceRow={dimensions?:Record<string,unknown>;metrics?:Record<string,unknown>};
+
+/** Each assigned profile's follower readings by day, from Sprout's profile analytics rows. */
+function audienceReadings(ids:Map<string,OwnedProfile>,profileRows:AudienceRow[]) {
+  const observations=new Map<string,{date:string;followers:number|null}[]>();
   for(const row of profileRows) {
     const id=String(row.dimensions?.customer_profile_id || '');
     if(!ids.has(id)) throw new Error('Sprout audience belongs to an unassigned profile');
@@ -55,6 +53,32 @@ export function normalizeOwnedCompetitive(profiles:OwnedProfile[],period:Period,
     if(!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('Sprout audience date is missing');
     const rows=observations.get(id)||[]; rows.push({date,followers:metric(row,'lifetime_snapshot.followers_count')});observations.set(id,rows);
   }
+  return observations;
+}
+
+/**
+ * The client's followers per network: each assigned profile's newest reading
+ * in the rows, added up across the network's profiles. A network with a
+ * profile that has no reading has none (a total over fewer profiles would
+ * understate it), as the audience snapshot does.
+ */
+export function newestFollowers(profiles:OwnedProfile[],profileRows:AudienceRow[]):Record<string,number|null> {
+  const ids=new Map(profiles.map(p=>[String(p.sprout_profile_id),p]));
+  const observations=audienceReadings(ids,profileRows);
+  const newest=(id:string)=>[...(observations.get(id)||[])].filter(r=>r.followers!==null).sort((a,b)=>b.date.localeCompare(a.date))[0]?.followers??null;
+  const out:Record<string,number|null>={};
+  for(const network of new Set(profiles.map(p=>ownedNetwork(p.network_type)))) out[network]=sum(profiles.filter(p=>ownedNetwork(p.network_type)===network).map(p=>newest(String(p.sprout_profile_id))));
+  return out;
+}
+
+/** Normalize all assigned owned profiles, never an agency-wide name search.
+ * Engagements are the one public count (engagementsOf): no clicks, saves,
+ * Instagram or YouTube shares, the same actions competitor sources count. */
+export function normalizeOwnedCompetitive(profiles:OwnedProfile[],period:Period,postRows:any[],profileRows:any[],collectedAt:string) {
+  const previous=previousPeriod(period);
+  const ids=new Map(profiles.map(p=>[String(p.sprout_profile_id),p]));
+  if(ids.size!==profiles.length) throw new Error('Duplicate assigned client profiles');
+  const observations=audienceReadings(ids,profileRows);
   // Sprout does not report a follower count every day for every network
   // (LinkedIn and YouTube can go a week without one). A profile with no
   // reading in the window still contributes its posts; its followers and
@@ -143,16 +167,15 @@ export function ownedStories(profiles:OwnedProfile[],period:Period,postRows:any[
   return out;
 }
 
-/**
- * opts.fields: extra Sprout post fields to request (the weekly calendar asks for is_boosted).
- * opts.stories: also answer the period's Instagram Stories (ownedStories); the weekly calendar asks for them.
- */
-export async function collectOwnedCompetitive(db:any,client:any,period:Period,opts:{fields?:string[];stories?:boolean}={}) {
+// The Supabase admin client and the client's row, typed loosely as every reader of them here is.
+/** Sprout, opened for a client's assigned profiles: the profiles, the filter on them, and a reader of an analytics endpoint's every page. Null when none of the client's profiles is on a network Sprout covers. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function openSprout(db:any,client:any) {
   const {data:profiles,error}=await db.from('sprout_profiles').select('sprout_profile_id,network_type,native_name,profile_name,native_link').eq('client_id',client.id).neq('is_active',false);
   if(error) throw new Error('Could not read assigned client profiles');
   // Sprout does not expose X consistently; RivalIQ remains the X source.
   const selected=(profiles||[]).filter((p:OwnedProfile)=>['facebook','instagram','linkedin','youtube','tiktok'].includes(ownedNetwork(p.network_type)));
-  if(!selected.length) return {provider:'sprout',coverage:'not_connected',profiles:[],posts:[],metrics:null,period,...(opts.stories?{stories:[]}:{})};
+  if(!selected.length) return null;
   if(selected.length>100) throw new Error('More than 100 profiles assigned to this client');
   const tokenResponse=await fetch('https://identity.sproutsocial.com/oauth2/84e39c75-d770-45d9-90a9-7b79e3037d2c/v1/token',{
     method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id:(globalThis as any).Deno.env.get('SPROUT_CLIENT_ID')||'',client_secret:(globalThis as any).Deno.env.get('SPROUT_CLIENT_SECRET')||'',grant_type:'client_credentials',scope:'organization_id'}),signal:AbortSignal.timeout(15000),
@@ -162,8 +185,6 @@ export async function collectOwnedCompetitive(db:any,client:any,period:Period,op
   if(!token) throw new Error('Sprout connection did not return a token');
   const customer=String(client.sprout_customer_id||defaultSproutCustomerId());
   const filter=`customer_profile_id.eq(${selected.map((p:OwnedProfile)=>p.sprout_profile_id).join(',')})`;
-  const previous=previousPeriod(period);
-  const collectedAt=new Date().toISOString(); const latest=day(collectedAt);
   const pages=async(path:string,body:any)=>{
     const rows:any[]=[];
     for(let page=1;page<=100;page++) {
@@ -180,6 +201,32 @@ export async function collectOwnedCompetitive(db:any,client:any,period:Period,op
     throw new Error('Sprout source pagination limit exceeded');
   };
   const audience=async(range:Period)=>pages('profiles',{filters:[filter,`reporting_period.in(${range.start}...${range.end})`],metrics:['lifetime_snapshot.followers_count'],limit:1000});
+  return {selected,filter,pages,audience};
+}
+
+/** Days back the newest follower reading may be: Sprout can go a week without one for LinkedIn and YouTube. */
+export const FOLLOWERS_LOOKBACK_DAYS=14;
+
+/** The client's followers per Sprout network (lowercase: instagram, linkedin...), each from the profile's newest reading in the last two weeks; {} when Sprout does not cover the client. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function collectOwnedFollowers(db:any,client:any,now:Date=new Date()):Promise<Record<string,number|null>> {
+  const sprout=await openSprout(db,client);
+  if(!sprout) return {};
+  const end=day(now.toISOString());
+  const rows=await sprout.audience({start:new Date(Date.parse(end)-FOLLOWERS_LOOKBACK_DAYS*DAY).toISOString().slice(0,10),end});
+  return newestFollowers(sprout.selected,rows);
+}
+
+/**
+ * opts.fields: extra Sprout post fields to request (the weekly calendar asks for is_boosted).
+ * opts.stories: also answer the period's Instagram Stories (ownedStories); the weekly calendar asks for them.
+ */
+export async function collectOwnedCompetitive(db:any,client:any,period:Period,opts:{fields?:string[];stories?:boolean}={}) {
+  const sprout=await openSprout(db,client);
+  if(!sprout) return {provider:'sprout',coverage:'not_connected',profiles:[],posts:[],metrics:null,period,...(opts.stories?{stories:[]}:{})};
+  const {selected,filter,pages,audience}=sprout;
+  const previous=previousPeriod(period);
+  const collectedAt=new Date().toISOString(); const latest=day(collectedAt);
   const [postRows,currentRows,previousRows,latestRows]=await Promise.all([
     pages('posts',{timezone:'UTC',filters:[filter,`created_time.in(${previous.start}T00:00:00...${period.end}T23:59:59)`],fields:['guid','customer_profile_id','network','created_time','perma_link','text','post_type','content_category','visual_media',...(opts.fields||[])],metrics:['lifetime.reactions','lifetime.likes','lifetime.comments_count','lifetime.shares_count','lifetime.impressions','lifetime.video_views'],limit:50}),
     audience(period),audience(previous),audience({start:new Date(Date.parse(latest)-2*DAY).toISOString().slice(0,10),end:latest}),

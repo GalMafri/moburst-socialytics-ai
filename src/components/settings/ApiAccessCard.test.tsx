@@ -20,6 +20,11 @@ function mockFetch(handler: (url: string, init?: RequestInit) => unknown) {
 
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ isAdmin: true }) }));
 vi.mock("@/integrations/supabase/client", () => ({ supabase: { auth: { getSession: async () => ({ data: { session: { access_token: "jwt" } } }) } } }));
+vi.mock("@/lib/quietSend", async (original) => {
+  const actual = await original<typeof import("@/lib/quietSend")>();
+  // Sent again at once in tests: the waits are the real module's concern.
+  return { ...actual, sendQuietly: vi.fn((send: () => PromiseLike<{ error: unknown }>, opts: object = {}) => actual.sendQuietly(send, { ...opts, wait: async () => {} })) };
+});
 
 function renderCard() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -74,14 +79,14 @@ describe("ApiAccessCard", () => {
     expect(screen.queryByText(/no keys yet/i)).not.toBeInTheDocument();
   });
 
-  it("keeps the new key's details and says no key yet when the key is not made, never a failure", async () => {
+  it("keeps the new key's details and says the key is not created yet when the key is not made, never a failure", async () => {
     mockFetch(() => ({ data: [], next_cursor: null }));
     renderCard();
     fireEvent.click(await screen.findByRole("button", { name: /create key/i }));
     globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({ error: { code: "internal", message: "insert failed: duplicate key" } }), { status: 500 })) as unknown as typeof fetch;
     fireEvent.change(screen.getByLabelText(/^name/i), { target: { value: "New" } });
     fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
-    expect(await screen.findByText(/no key yet/i)).toBeInTheDocument();
+    expect(await screen.findByText("The key is not created yet. Your choices are kept.")).toBeInTheDocument();
     expect(screen.getByLabelText(/^name/i)).toHaveValue("New");
     expect(screen.queryByText(/insert failed|duplicate key|could not/i)).not.toBeInTheDocument();
   });
@@ -90,5 +95,60 @@ describe("ApiAccessCard", () => {
     mockFetch(() => ({ data: [], next_cursor: null }));
     renderCard();
     expect(await screen.findByText(/no keys yet/i)).toBeInTheDocument();
+  });
+
+  it("keeps a key that was not revoked as it is, and says so plainly", async () => {
+    mockFetch((url, init) => (init?.method === "DELETE" ? undefined : { data: keys, next_cursor: null }));
+    const base = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        calls.push({ url: String(url), init });
+        return new Response(JSON.stringify({ error: { code: "internal", message: "update failed" } }), { status: 500 });
+      }
+      return base(url, init);
+    }) as unknown as typeof fetch;
+    renderCard();
+    fireEvent.click((await screen.findAllByRole("button", { name: /revoke gOS/i }))[0]);
+    fireEvent.click(await screen.findByRole("button", { name: /yes, revoke/i }));
+    expect(await screen.findByText("gOS is not revoked yet.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Revoke gOS" })).toBeInTheDocument();
+    expect(screen.queryByText(/update failed/)).not.toBeInTheDocument();
+  });
+
+  it("does not send again a revoke the server refuses for good", async () => {
+    mockFetch((url, init) => (init?.method === "DELETE" ? undefined : { data: keys, next_cursor: null }));
+    const base = globalThis.fetch;
+    let deletes = 0;
+    globalThis.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        deletes++;
+        return new Response(JSON.stringify({ error: { code: "forbidden", message: "not allowed" } }), { status: 403 });
+      }
+      return base(url, init);
+    }) as unknown as typeof fetch;
+    renderCard();
+    fireEvent.click((await screen.findAllByRole("button", { name: /revoke gOS/i }))[0]);
+    fireEvent.click(await screen.findByRole("button", { name: /yes, revoke/i }));
+    expect(await screen.findByText("gOS is not revoked yet.", {}, { timeout: 500 })).toBeInTheDocument();
+    expect(deletes).toBe(1);
+  });
+
+  it("says so when the new key does not reach the clipboard", async () => {
+    mockFetch((url, init) => (init?.method === "POST" ? { data: { ...keys[0], id: "k3", name: "New", key: "soc_NEWKEY_value", warning: "" } } : { data: [], next_cursor: null }));
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: vi.fn().mockRejectedValue(new Error("denied")) } });
+    renderCard();
+    fireEvent.click(await screen.findByRole("button", { name: /create key/i }));
+    fireEvent.change(screen.getByLabelText(/^name/i), { target: { value: "New" } });
+    fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /copy key/i }));
+    expect(await screen.findByText(/not copied/i)).toBeInTheDocument();
+  });
+
+  it("describes the demo scope by what it starts", async () => {
+    mockFetch(() => ({ data: [], next_cursor: null }));
+    renderCard();
+    fireEvent.click(await screen.findByRole("button", { name: /create key/i }));
+    expect(screen.getByText(/start demo jobs/i)).toBeInTheDocument();
+    expect(screen.queryByText(/run every feature/i)).not.toBeInTheDocument();
   });
 });

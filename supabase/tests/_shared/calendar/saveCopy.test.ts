@@ -105,6 +105,51 @@ describe("saveCopy from the calendar", () => {
     expect(r).toMatchObject({ ok: true, changed: true, learned: { changes: CHANGES } });
   });
 
+  it("answers 404 and writes no revision for a calendar post (post: key) that has no row", async () => {
+    const t = writes(null);
+    const r = await saveCopy(t.w, { clientId: CLIENT, key: "post:00000000-0000-4000-8000-0000000000bb", copy: "New copy", source: "calendar", userId: PERSON, now: NOW });
+    expect(r).toEqual({ ok: false, status: 404, error: "No post with that key in this client's calendar." });
+    expect(t.iterations).toEqual([]);
+  });
+
+  it("writes the post first, so a failed post write leaves no revision behind", async () => {
+    const order: string[] = [];
+    const t = writes(POST, {
+      updatePost: async () => { order.push("post"); throw new Error("Could not save the copy: boom"); },
+      insertIteration: async () => { order.push("revision"); },
+    });
+    await expect(saveCopy(t.w, { clientId: CLIENT, key: "post:1", copy: "New copy", source: "calendar", userId: PERSON, now: NOW })).rejects.toThrow("boom");
+    expect(order).toEqual(["post"]);
+  });
+
+  it("puts the post's copy back when the revision cannot be written, and answers the revision's error", async () => {
+    const t = writes(POST, { insertIteration: async () => { throw new Error("Could not save the copy: boom"); } });
+    await expect(saveCopy(t.w, { clientId: CLIENT, key: "post:1", copy: "New copy", hashtags: ["new"], cta: "Book", source: "calendar", userId: PERSON, now: NOW })).rejects.toThrow("boom");
+    expect(t.updates).toHaveLength(2);
+    expect(t.updates[0].fields).toMatchObject({ copy: "New copy", hashtags: ["new"], cta: "Book" });
+    expect(t.updates[1].fields).toEqual({ copy: POST.copy, hashtags: POST.hashtags, cta: POST.cta });
+  });
+
+  it("puts the copy back after a failed revision on a save from Claude too, and the revision's error still wins when the copy cannot be put back", async () => {
+    let n = 0;
+    const t = writes(POST, {
+      insertIteration: async () => { throw new Error("Could not save the copy: boom"); },
+      updatePost: async () => { if (++n > 1) throw new Error("restore failed"); return "2026-11-03T12:00:00.5+00:00"; },
+    });
+    await expect(saveCopy(t.w, { clientId: CLIENT, key: "post:1", copy: "New copy", source: "claude", basedOn: AT, userId: PERSON, now: NOW })).rejects.toThrow("boom");
+    expect(n).toBe(2);
+  });
+
+  it("holds every source to the three limits", async () => {
+    const t = writes(POST);
+    const base = { clientId: CLIENT, key: "post:1", source: "calendar" as const, userId: PERSON, now: NOW };
+    expect(await saveCopy(t.w, { ...base, copy: "x".repeat(10_001) })).toEqual({ ok: false, status: 400, error: "Copy holds at most 10,000 characters." });
+    expect(await saveCopy(t.w, { ...base, copy: "ok", cta: "x".repeat(301) })).toEqual({ ok: false, status: 400, error: "The call to action holds at most 300 characters." });
+    expect(await saveCopy(t.w, { ...base, copy: "ok", hashtags: Array.from({ length: 31 }, (_, i) => `#t${i}`) })).toEqual({ ok: false, status: 400, error: "hashtags must be a list of at most 30 hashtags." });
+    expect(await saveCopy(t.w, { ...base, copy: "x".repeat(10_001), source: "regeneration" })).toMatchObject({ ok: false, status: 400 });
+    expect(t.iterations).toEqual([]);
+  });
+
   it("refuses empty copy", async () => {
     const { w, iterations } = writes(POST);
     expect(await saveCopy(w, { clientId: CLIENT, key: KEY, copy: "  ", source: "calendar", userId: PERSON, now: NOW })).toEqual({ ok: false, status: 400, error: "client_id, calendar_post_key and post_copy are required." });
@@ -191,6 +236,31 @@ describe("copyWrites", () => {
     expect(eqs(calls[4])).toEqual({ client_id: CLIENT, post_key: KEY, updated_at: AT });
   });
 
+  it("throws when the post cannot be written, instead of reading it as no row", async () => {
+    const { db } = fakeDb(() => ({ data: null, error: { message: "boom" } }));
+    await expect(copyWrites(db).updatePost(CLIENT, KEY, { copy: "x" })).rejects.toThrow("Could not save the copy: boom");
+  });
+
+  it("treats a revision sent again as written, and puts a different copy at the same version after the latest", async () => {
+    const row = { client_id: CLIENT, calendar_post_key: KEY, version: 2, post_copy: "Same copy" } as IterationRow;
+    const run = async (existingCopy: string) => {
+      const inserts: Array<Record<string, unknown>> = [];
+      let selects = 0;
+      const { db } = fakeDb((c) => {
+        if (op(c, "insert")) {
+          inserts.push(op(c, "insert")![0] as Record<string, unknown>);
+          return inserts.length === 1 ? { error: { code: "23505", message: "duplicate key" } } : {};
+        }
+        return { data: selects++ === 0 ? [{ post_copy: existingCopy }] : [{ version: 4 }] };
+      });
+      await copyWrites(db).insertIteration(row);
+      return inserts;
+    };
+    expect(await run("Same copy")).toHaveLength(1);
+    const second = await run("Another copy");
+    expect(second.map((r) => r.version)).toEqual([2, 5]);
+  });
+
   it("throws when the revision cannot be written, and reads a post no row matched as null", async () => {
     const { db } = fakeDb((c) => (op(c, "insert") ? { error: { message: "boom" } } : { data: op(c, "update") ? [] : null }));
     await expect(copyWrites(db).insertIteration({} as IterationRow)).rejects.toThrow("Could not save the copy: boom");
@@ -207,7 +277,7 @@ describe("the calendar's save_copy and undo_note", () => {
   type Row = Record<string, unknown>;
   const CHANGES = [{ op: "add" as const, id: "pref-1", description: "Never use exclamation marks.", platform: null }];
   const world = (post: Row = {}): FakeDb => tableDb({
-    calendar_posts: [{ client_id: "c1", post_key: "post:p1", copy: "Join us Friday!", platform: "Instagram", format: "Single image", ...post }],
+    calendar_posts: [{ client_id: "c1", post_key: "post:p1", copy: "Join us Friday!", platform: "Instagram", format: "Single image", updated_at: AT, ...post }],
     post_iterations: [],
   });
   function deps(db: FakeDb, over: Partial<CopyDeps> = {}) {
@@ -251,7 +321,7 @@ describe("the calendar's save_copy and undo_note", () => {
 
   it("learns from the copy the screen rewrote when a report's own post has no calendar row", async () => {
     const d = deps(tableDb({ calendar_posts: [], post_iterations: [] }));
-    await saveCopyAction(d, regenerated({ note: "Shorter", previous_copy: " Join us this Friday! " }));
+    await saveCopyAction(d, regenerated({ calendar_post_key: '["r1",0,0,"Friday","Week of 2026-10-12","Instagram","Join us this Friday!"]', note: "Shorter", previous_copy: " Join us this Friday! " }));
     expect(d.learn.mock.calls[0][1]).toMatchObject({ kind: "rewrite_note", before: "Join us this Friday!", after: "Join us Friday.", platform: "Instagram" });
   });
 

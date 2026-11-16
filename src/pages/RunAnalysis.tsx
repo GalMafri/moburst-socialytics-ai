@@ -1,8 +1,8 @@
 import { useReportRun } from "@/hooks/useReportRun";
 import { ReportRunStatus } from "@/components/reports/ReportRunStatus";
-import { RUN_ESTIMATE } from "@/lib/reportRun";
+import { RUN_ESTIMATE, lastCompleteMonth, listedMonthlyReports } from "@/lib/reportRun";
 import { Link, useParams, useNavigate } from "react-router-dom";
-import { countryNames, formatDate, formatDateTime, languageNames, listedRuns, platformName } from "@/lib/display";
+import { countryNames, formatDate, formatDateTime, languageNames, platformName } from "@/lib/display";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -18,13 +18,16 @@ import { Label } from "@/components/ui/label";
 import { Loading } from "@/components/ui/loading";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
 import { Navigate } from "react-router-dom";
-import { localDateString } from "@/lib/calendarDate";
-import { competitiveReportQuality } from "../../supabase/functions/_shared/competitive/reportEvidence";
+import { todayInZone } from "@/lib/weekWindow";
+import { newestReadyReport } from "../../supabase/functions/_shared/competitive/reportEvidence";
+import { socialRangeError } from "../../supabase/functions/_shared/reports/competitiveRange";
 
 // A person's monthly report run. Asking queues it (run-report); the
 // scheduled path makes the report and runs it again quietly when it does not
 // finish, so this page shows it running from the request until the report
 // exists, and never a failure (useReportRun).
+
+type PastReport = { id: string; client_id: string | null; status: string | null; created_at: string | null; date_range_start: string | null; date_range_end: string | null; duration_minutes: number | null; report_period: unknown };
 
 export default function RunAnalysis() {
   const { id } = useParams();
@@ -32,12 +35,10 @@ export default function RunAnalysis() {
   const { canRunAnalysis } = useAuth();
   const run = useReportRun(id, "social");
   const active = run.view.state !== "idle" && run.view.state !== "ready";
-  // Date range defaults: current month start -> today
-  const now = new Date();
-  const defaultStart = localDateString(new Date(now.getFullYear(), now.getMonth(), 1));
-  const defaultEnd = localDateString(now);
-  const [dateRangeStart, setDateRangeStart] = useState(defaultStart);
-  const [dateRangeEnd, setDateRangeEnd] = useState(defaultEnd);
+  // The period: the last complete month, counted from today in the client's
+  // own zone once the client is loaded (the browser's zone is the staff
+  // member's, not the client's). Today in that zone is the last day offered.
+  const [picked, setPicked] = useState<{ start?: string; end?: string }>({});
   // Wall-clock for the whole run, so latency is measured as the user feels it.
   const runStartedAt = useRef(0);
 
@@ -53,6 +54,12 @@ export default function RunAnalysis() {
     },
     enabled: !!id,
   });
+
+  const today = client ? todayInZone(client.timezone) : "";
+  const defaults = client ? lastCompleteMonth(today) : { start: "", end: "" };
+  const dateRangeStart = picked.start ?? defaults.start;
+  const dateRangeEnd = picked.end ?? defaults.end;
+  const rangeError = client ? socialRangeError({ start: dateRangeStart, end: dateRangeEnd }, client.timezone) : null;
 
   const { data: profiles } = useQuery({
     queryKey: ["sprout-profiles", id],
@@ -81,7 +88,7 @@ export default function RunAnalysis() {
         .order("created_at", { ascending: false })
         .limit(12);
       if (error) throw error;
-      return (data || []).find((r) => competitiveReportQuality(r.report_data).ready) ?? null;
+      return newestReadyReport(data);
     },
     enabled: !!id,
   });
@@ -91,10 +98,10 @@ export default function RunAnalysis() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("reports")
-        .select("*")
+        .select<string, PastReport>("id, client_id, status, created_at, date_range_start, date_range_end, duration_minutes, report_period:report_data->report_period")
         .eq("client_id", id!)
         .order("created_at", { ascending: false })
-        .limit(10);
+        .limit(30);
       if (error) throw error;
       return data;
     },
@@ -105,8 +112,7 @@ export default function RunAnalysis() {
   const runRange = "range" in run.view ? run.view.range : null;
   useEffect(() => {
     if (!runRange) return;
-    setDateRangeStart(runRange.start);
-    setDateRangeEnd(runRange.end);
+    setPicked({ start: runRange.start, end: runRange.end });
   }, [runRange?.start, runRange?.end]);
 
   // The run this page watched made its report: open it.
@@ -135,23 +141,22 @@ export default function RunAnalysis() {
 
   if (!client)
     return (
-      <AppLayout title="Run analysis" description="The configuration the monthly report uses and the period it covers.">
+      <AppLayout title="Monthly report" description="The configuration the monthly report uses and the period it covers.">
         <Loading label="Loading the client" />
       </AppLayout>
     );
 
-  const listed = listedRuns("monthly", pastReports, { isStaff: true });
+  const listed = listedMonthlyReports(pastReports, { isStaff: true }).slice(0, 10);
   const summary: [string, React.ReactNode][] = [
     ["Platforms", (client.primary_platforms || []).map((p: string) => platformName(p)).join(", ") || "None yet"],
     ["Regions", countryNames(client.geo) || "None yet"],
     ["Languages", languageNames(client.language) || "None yet"],
-    ["Keywords", client.social_keywords?.length || 0],
-    ["Profiles", profiles?.length || 0],
+    ["Social accounts", profiles?.length || 0],
     ["Competitive context", latestCompetitive ? `From ${formatDate(latestCompetitive.created_at)}` : "None yet"],
   ];
 
   return (
-    <AppLayout title={`Analyze: ${client.name}`} description="The configuration the monthly report uses and the period it covers.">
+    <AppLayout title={`Monthly report: ${client.name}`} description="The configuration the monthly report uses and the period it covers.">
         {/* The same flow panels as the competitive run: what the report
             uses, the period and options, the run, then past runs. It was five
             stacked cards in an 896px column with a centered run button. */}
@@ -165,7 +170,7 @@ export default function RunAnalysis() {
             ))}
           </dl>
           {profiles && profiles.length === 0 && (
-            <p className="t-secondary">No social accounts are matched to this client yet. They are matched on their own once the accounts are in Sprout.</p>
+            <p className="t-secondary">No social accounts are connected to this client yet.</p>
           )}
         </Section>
 
@@ -173,25 +178,26 @@ export default function RunAnalysis() {
           layout="split"
           eyebrow="Period"
           title={<><CalendarDays className="h-4 w-4 text-[#b9e045]" aria-hidden /> Report date range</>}
-          description="Defaults to the current month. The comparison period is the same number of days immediately before the start date."
+          description="Defaults to the last complete month."
         >
           <div className="grid gap-inner sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="range-start">Start date</Label>
-              <Input id="range-start" disabled={active} type="date" value={dateRangeStart} onChange={(e) => setDateRangeStart(e.target.value)} max={dateRangeEnd} />
+              <Input id="range-start" disabled={active} type="date" value={dateRangeStart} onChange={(e) => setPicked((p) => ({ ...p, start: e.target.value }))} max={dateRangeEnd} />
             </div>
             <div className="space-y-2">
               <Label htmlFor="range-end">End date</Label>
-              <Input id="range-end" disabled={active} type="date" value={dateRangeEnd} onChange={(e) => setDateRangeEnd(e.target.value)} min={dateRangeStart} max={defaultEnd} />
+              <Input id="range-end" disabled={active} type="date" value={dateRangeEnd} onChange={(e) => setPicked((p) => ({ ...p, end: e.target.value }))} min={dateRangeStart} max={today} />
             </div>
           </div>
+          {rangeError && <p className="t-secondary">{rangeError}</p>}
           <div className="border-t border-[rgba(255,255,255,0.06)] pt-4 space-y-4">
             {run.view.state === "idle" && (
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                <Button onClick={runAnalysis} disabled={!profiles || profiles.length === 0 || run.isLoading || run.sending}>
-                  <Play /> Run full analysis
+                <Button onClick={runAnalysis} disabled={!profiles || profiles.length === 0 || !!rangeError || run.isLoading || run.sending}>
+                  <Play /> Run monthly report
                 </Button>
-                <p className="t-secondary">{run.notStarted ? "The analysis has not started yet." : RUN_ESTIMATE}</p>
+                <p className="t-secondary">{run.notStarted ? "The monthly report has not started yet." : RUN_ESTIMATE}</p>
               </div>
             )}
 
@@ -199,7 +205,7 @@ export default function RunAnalysis() {
 
             {run.view.state === "ready" && (
               <p className="inline-flex items-center gap-2 t-h4 !text-success">
-                <CheckCircle2 className="h-5 w-5" aria-hidden /> Analysis complete. Opening the report.
+                <CheckCircle2 className="h-5 w-5" aria-hidden /> Monthly report complete. Opening the report.
               </p>
             )}
           </div>
@@ -207,7 +213,7 @@ export default function RunAnalysis() {
 
         {/* Past runs */}
         {listed.length > 0 && (
-          <Section layout="split" eyebrow="Results" title="Recent analyses" description="Finished reports open from here.">
+          <Section layout="split" eyebrow="Results" title="Recent monthly reports" description="Finished reports open from here.">
             <ul className="space-y-2">
               {listed.map((r) => {
                 const body = (

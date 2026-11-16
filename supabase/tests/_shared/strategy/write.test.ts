@@ -9,7 +9,7 @@
 // evidence holds.
 import { describe, expect, it } from "vitest";
 import {
-  CHECK_MAX_TOKENS, CHECK_MODEL, parseStrategy, readPending, savePending, saveStrategy, startStrategy, STRATEGY_MAX_TOKENS, STRATEGY_MODEL, strategyEvidence,
+  CHECK_MAX_TOKENS, CHECK_MODEL, parseStrategy, RELATIVE_DATE, pillarShares, PILLAR_SHARE_MIN_POSTS, platformFigures, readPending, savePending, saveStrategy, startStrategy, STRATEGY_MAX_TOKENS, STRATEGY_MODEL, strategyEvidence,
   strategyPhase, strategyProblems, strategyRequest, type PendingStrategy, type PhaseOutcome, type StrategyEvidence, type StrategyIO,
 } from "../../../functions/_shared/strategy/write";
 import type { StrategyPlatform } from "../../../functions/_shared/strategy/platforms";
@@ -199,6 +199,132 @@ describe("the code checks", () => {
 });
 
 
+describe("the house-rule checks on the writer's text", () => {
+  const foundIn = (d: unknown, e: StrategyEvidence) => { const parsed = parseStrategy(JSON.stringify(d), e); return "error" in parsed ? parsed.error : ""; };
+  const found = (over: Record<string, unknown>) => foundIn(draft(over), E);
+  const withPurpose = (purpose: string) => ({ pillars: [{ ...draft().pillars[0], purpose }, draft().pillars[1]] });
+  const withGoalWhy = (why: string) => ({ goals: [{ ...draft().goals[0], why }, draft().goals[1]] });
+
+  it("passes the draft as it is", () => {
+    expect(found({})).toBe("");
+  });
+
+  it("flags British spelling, and names the word and where it is", () => {
+    expect(found(withPurpose("Make captains feel recognisable."))).toMatch(/The pillar "Beer League Truths"'s purpose uses the British spelling "recognisable"; write American English/);
+    for (const word of ["favourite", "behaviour", "colour", "organised", "centre", "programme"]) expect(found(withPurpose(`Our ${word} way.`)), word).toMatch(/British spelling/);
+    // American spelling, and words that only look British, pass.
+    expect(found(withPurpose("Our favorite way to organize the exercise and the otherwise rise."))).toBe("");
+  });
+
+  it("lets text copied from the client's own pillar names, name, competitors and posts keep its wording", () => {
+    const e: StrategyEvidence = { ...E, pillars: [{ name: "Human Behaviour Insights", description: "", share: null }, ...E.pillars.slice(1)] };
+    const named = (why: string) => draft({ goals: [{ ...draft().goals[0], why }, draft().goals[1]], pillars: [{ ...draft().pillars[0], name: "Human Behaviour Insights" }, draft().pillars[1]] });
+    expect(foundIn(named("Grow the Human Behaviour Insights series."), e)).toBe("");
+    expect(foundIn(named("Grow our behaviour series."), e)).toMatch(/British spelling "behaviour"/);
+    // An example hook is the brand's own voice and language.
+    expect(found({ pillars: [{ ...draft().pillars[0], ideas: [{ hook: "Your favourite colour, captain", format: "reel" }, draft().pillars[0].ideas[1]] }, draft().pillars[1]] })).toBe("");
+  });
+
+  it("flags talk about how much data there is", () => {
+    for (const why of ["The data is thin here.", "Thin data on TikTok.", "There is no posting rate yet.", "Run a slot test first.", "Not enough data to say."]) {
+      expect(found(withGoalWhy(why)), why).toMatch(/Goal 1's why talks about the data/);
+    }
+  });
+
+  it("flags tool and vendor names", () => {
+    for (const why of ["Sprout Social shows reach.", "From RivalIQ's read.", "Claude AI wrote this.", "Apify found it."]) expect(found(withGoalWhy(why)), why).toMatch(/names a tool/);
+  });
+
+  it("lets ordinary client wording through: lovable, zodiac signs, early signals, plan weeks, and words from the brief", () => {
+    for (const why of ["Make the mascot feel lovable.", "Zodiac content for every Gemini and Leo fan.", "Sonnet and opus lovers read poetry here.", "Sprout seeds of the garden brand."]) expect(found(withGoalWhy(why)), why).toBe("");
+    const tiktok = (week: string, day30 = "Look for early signals in saves.") => draft({ platforms: [draft().platforms[0], { ...draft().platforms[1], first_30: [week, "Three skits", "Reply videos", "Review"], checks: { day_30: day30, day_90: "Follows" } }, draft().platforms[2]] });
+    expect(foundIn(tiktok("Set up the account this week"), E)).toBe("");
+    expect(foundIn(tiktok("Post the first skit next week"), E)).toBe("");
+    // Anywhere else a relative date still goes stale.
+    expect(found(withGoalWhy("We grew last week."))).toMatch(/write a date/);
+    // The client's own brief, brand book or site may use a word the checks flag.
+    expect(foundIn(draft(withGoalWhy("Keep the colour that fans love.")), { ...E, brief: "Our colour is orange." })).toBe("");
+    // Real tool names and models still fail.
+    for (const why of ["Sprout Social shows reach.", "Claude AI wrote this.", "Gemini Pro found it.", "OpenAI helped."]) expect(found(withGoalWhy(why)), why).toMatch(/names a tool/);
+  });
+
+  it("flags relative dates, which go stale inside a 90-day plan", () => {
+    for (const why of ["Last month we published twice.", "Posting has grown this quarter.", "We just finished a launch.".replace("just finished", "recently finished"), "Over the last 8 weeks we posted 3 times."]) {
+      expect(found(withGoalWhy(why)), why).toMatch(/Goal 1's why says ".+"; write a date/);
+    }
+    expect(found(withGoalWhy("We posted 3 times from 8 Sep to 2 Nov."))).toBe("");
+  });
+
+  it("lets a 30-day or 90-day check speak relative to the check day, since it is read then", () => {
+    const checks = (day_30: string, day_90: string) => draft({ platforms: [{ ...draft().platforms[0], checks: { day_30, day_90 } }, draft().platforms[1], draft().platforms[2]] });
+    expect(foundIn(checks("Compare saves over the last 30 days with the baseline.", "Reach in the past 90 days against day one."), E)).toBe("");
+    // The goal's why is read all through the plan, so it still cannot.
+    expect(found(withGoalWhy("Reach over the last 30 days."))).toMatch(/write a date/);
+  });
+
+  it("flags a relative date even when the client's own brief says it", () => {
+    const e: StrategyEvidence = { ...E, brief: "Last month we launched the new league." };
+    expect(foundIn(draft(withGoalWhy("Last month we launched the new league.")), e)).toMatch(/Goal 1's why says "Last month"; write a date/);
+  });
+
+  it("lets a recurring 'this week' format through and flags 'this week' stated as a fact", () => {
+    const post = (text: string) => draft({ platforms: [{ ...draft().platforms[0], post: [text, "Two", "Three"] }, draft().platforms[1], draft().platforms[2]] });
+    expect(foundIn(post("A weekly series, This week in sleep science"), E)).toBe("");
+    expect(foundIn(post("Next week's drop: the sleep kit"), E)).toBe("");
+    expect(foundIn(post("This week we posted three reels"), E)).toMatch(/write a date/);
+  });
+
+  it("lets ordinary product wording through the data-talk check", () => {
+    for (const why of ["Include a small sample with each order.", "No rate hikes this season.", "A tiny sample of the new scent in every box."]) expect(found(withGoalWhy(why)), why).toBe("");
+    for (const why of ["The sample size is small.", "There is no posting rate yet.", "Limited data on TikTok."]) expect(found(withGoalWhy(why)), why).toMatch(/talks about the data/);
+  });
+
+  it("flags 'tracked' wording, which is false for a client whose competitors nobody tracks", () => {
+    expect(found(withGoalWhy("Match the median of tracked competitors."))).toMatch(/the competitors we chose/);
+    expect(found(withGoalWhy("Match the usual pace in this category."))).toBe("");
+  });
+
+  it("sends the flagged line back to the writer in its own words, once", async () => {
+    const bad = draft(withGoalWhy("The data is thin on Instagram."));
+    const { out, phases, bodies } = await drive(reply(bad), reply(draft()), clean);
+    expect(phases).toEqual(["write", "reask", "check"]);
+    expect(JSON.stringify(bodies[1].messages)).toMatch(/Goal 1's why talks about the data/);
+    expect(out.kind).toBe("passed");
+  });
+
+  it("tells the writer the rules before it writes", () => {
+    const body = strategyRequest(E) as { system: string };
+    expect(body.system).toMatch(/American spelling/);
+    expect(body.system).toMatch(/never name a tool/i);
+    expect(body.system).toMatch(/never say how much data there is/i);
+    expect(body.system).toMatch(/no relative dates/i);
+    expect(body.system).toMatch(/the usual pace in this category/);
+    expect(body.system).not.toMatch(/tracked/i);
+  });
+});
+
+describe("what the writer is told about competitors and pace", () => {
+  const prompt = (e: StrategyEvidence) => (strategyRequest(e) as { messages: Array<{ content: string }> }).messages[0].content;
+  it("words a pace taken from every company as the usual pace in this category, never as a tracked median", () => {
+    const e: StrategyEvidence = { ...E, platforms: [...E.platforms.slice(0, 1), platform("TikTok", "new", { cadence: { per_week: 2, source: "all_tracked" } }), ...E.platforms.slice(2)] };
+    const line = prompt(e).split("\n").find((l) => l.startsWith("- TikTok"))!;
+    expect(line).toContain("2 posts a week, the usual pace in this category");
+    expect(line).not.toMatch(/track/i);
+  });
+  it("names the competitors the team chose, not tracked ones, and gives the window in dates", () => {
+    const text = prompt(E);
+    expect(text).toContain("The competitors we chose: BenchApp, TeamSnap");
+    expect(text).not.toMatch(/tracked/i);
+    expect(text).toContain("from 2026-08-04 to 2026-11-02");
+  });
+  it("leaves out a competitor whose read has too few posts to compare", () => {
+    const small = { company: "TeamSnap", client: false, platform: "Instagram", posts: 2, posts_per_week: 0.1, median_engagement: 37, rate_per_view: null, followers: null };
+    const text = prompt({ ...E, competitor_figures: [...E.competitor_figures, small] });
+    expect(text).toContain("BenchApp on Instagram");
+    expect(text).not.toContain("TeamSnap on Instagram");
+  });
+});
+
 describe("writing a strategy, one model call per run", () => {
   it("writes in one run and checks in the next, as fields, with code's figures, dates and real posts", async () => {
     const { out, phases, bodies } = await drive(reply(draft(), { input_tokens: 1000, output_tokens: 700 }), clean);
@@ -276,7 +402,7 @@ describe("writing a strategy, one model call per run", () => {
     expect(fix.content).toContain("Double installs by March");
     // The check reads the evidence and every section of the strategy, as lines.
     expect(bodies[1].messages[0].content).toContain("Pay The Pyper keeps rec league captains");
-    expect(bodies[1].messages[0].content).toContain("- Double installs by March (Instagram median engagement per post: 42 today, above it by 31 Jan 2027)");
+    expect(bodies[1].messages[0].content).toContain("- Double installs by March (Instagram median engagement per post: 42 today, above it by Jan 31, 2027)");
   });
 
   it("ends the write when the fix is still flagged, after at most three Opus and two Sonnet calls", async () => {
@@ -313,9 +439,9 @@ describe("what the writer is told", () => {
     const body = strategyRequest(E) as { system: string; messages: Array<{ content: string }> };
     const prompt = body.messages[0].content;
     for (const part of [
-      "rec league captains", "Beer League Truths (60% of the brand's calendar posts over the last 8 weeks)", "2.4 posts a week", "median engagement per post 42", "3.1%",
+      "rec league captains", "Beer League Truths (60% of the brand's calendar posts from 2026-09-07 to 2026-11-02)", "2.4 posts a week", "median engagement per post 42", "3.1%",
       "@paythepyper", "Captains plan seasons there.", "BenchApp on Instagram: 4.67 posts a week", "Our playoff checklist", "2.7x", "Never mock other apps.", "job ads", "Office day",
-      "data: Instagram from Sprout", "goal metrics allowed: posts_per_week, median_engagement, engagement_rate, followers", "data: TikTok: no public posts found", "goal metrics allowed: posts_per_week.",
+      "data: Instagram from your own account", "goal metrics allowed: posts_per_week, median_engagement, engagement_rate, followers", "data: TikTok not measured yet", "goal metrics allowed: posts_per_week.",
       "written on 2026-11-02",
     ]) {
       expect(prompt).toContain(part);
@@ -326,6 +452,17 @@ describe("what the writer is told", () => {
     expect(`${body.system}\n${prompt}`).toMatch(/"we" for Moburst/);
     expect(`${body.system}\n${prompt}`).toMatch(/never quote or describe one of the brand's own posts/);
     expect(`${body.system}\n${prompt}`).not.toMatch(/—/);
+  });
+
+  it("words the evidence with dates, so nothing in the prompt models a relative phrase", () => {
+    const sources = ["setting", "published_8w", "published_90d", "competitors", "all_tracked"] as const;
+    for (const source of sources) {
+      const e: StrategyEvidence = { ...E, platforms: E.platforms.map((p) => ({ ...p, cadence: { per_week: 3, source } })) };
+      const prompt = (strategyRequest(e) as { messages: Array<{ content: string }> }).messages[0].content;
+      expect(prompt.match(RELATIVE_DATE)?.[0], source).toBeUndefined();
+    }
+    const prompt = (strategyRequest(E) as { messages: Array<{ content: string }> }).messages[0].content;
+    expect(prompt).toContain("from 2026-09-07 to 2026-11-02");
   });
 
   it("gives a pillar's share only where the client's calendar has posts", () => {
@@ -379,6 +516,19 @@ describe("the evidence a strategy is written from", () => {
       { client_id: "c1", section_key: "positioning", text: "ignored", value: { statement: "Built for captains.", points: [] } },
     ],
     ...over,
+  });
+
+  it("gives the writer a person's goal words with the latest write's targets", async () => {
+    const latest = { items: [
+      { title: "Grow Instagram", why: "w", platform: "Instagram", metric: "median_engagement", direction: "above", baseline: 42, by: "2027-02-01" },
+      { title: "Grow LinkedIn", why: "w", platform: "LinkedIn", metric: "followers", direction: "above", baseline: 900, by: "2027-02-01" },
+    ] };
+    const db = fakeDb(tables({
+      content_strategies: [{ client_id: "c1", sections: { goals: latest } }],
+      content_strategy_edits: [{ client_id: "c1", section_key: "goals", text: "x", value: { items: [{ title: "LinkedIn my way", why: "Mine.", platform: "LinkedIn", metric: "followers", direction: "above" }] } }],
+    }));
+    const e = (await strategyEvidence(db, client(), NOW, io()))!;
+    expect(e.edits.goals).toBe("- Grow Instagram (Instagram median engagement per post: 42 today, above it by Feb 1, 2027). Why: w\n- LinkedIn my way (LinkedIn followers: 900 today, above it by Feb 1, 2027). Why: Mine.");
   });
 
   it("waits for the trend profile", async () => {
@@ -435,25 +585,131 @@ describe("the evidence a strategy is written from", () => {
     expect(e.competitors).toEqual(["BenchApp", "Rinkside"]);
   });
 
-  it("shares each pillar by the client's own calendar posts over the last 8 weeks", async () => {
+  it("shares each pillar by the client's own calendar posts that carry a pillar of the strategy, over the last 8 weeks", async () => {
     const posts = [
-      post("2026-10-30", "Beer League Truths"), post("2026-10-20", "Beer League Truths"), post("2026-09-10", " beer league truths "),
+      post("2026-10-30", "Beer League Truths"), post("2026-10-20", "Beer League Truths"), post("2026-09-10", " beer league truths "), post("2026-09-12", "Beer League Truths"),
       post("2026-10-01", "Captain Life"), post("2026-10-02", null),
       post("2026-08-20", "Captain Life"), // more than 8 weeks ago
       post("2026-11-09", "Captain Life"), // planned, not posted yet
       post("2026-10-15", "Captain Life", "c2"), // another client's
     ];
     const e = (await strategyEvidence(fakeDb(tables({ calendar_posts: posts })), client(), NOW, io()))!;
+    // 4 of the 5 posts under a current pillar are Beer League Truths; the post with no pillar counts for none.
     expect(e.pillars).toEqual([
-      { name: "Beer League Truths", description: "Funny", share: 60 },
+      { name: "Beer League Truths", description: "Funny", share: 80 },
       { name: "Captain Life", description: "", share: 20 },
       { name: "Rink Rules", description: "", share: 0 },
     ]);
   });
 
+  it("gives no share when only a few posts carry a pillar of the strategy, as after a rename", async () => {
+    const renamed = Array.from({ length: 9 }, (_, i) => post(`2026-10-${10 + i}`, "Old pillar name"));
+    const e = (await strategyEvidence(fakeDb(tables({ calendar_posts: [...renamed, post("2026-10-01", "Captain Life")] })), client(), NOW, io()))!;
+    expect(e.pillars.map((p) => p.share)).toEqual([null, null, null]);
+  });
+
   it("gives no share at all for a client with no calendar posts in the last 8 weeks", async () => {
     const e = (await strategyEvidence(fakeDb(tables({ calendar_posts: [post("2026-08-01", "Captain Life"), post("2026-11-20", "Rink Rules")] })), client(), NOW, io()))!;
     expect(e.pillars.map((p) => p.share)).toEqual([null, null, null]);
+  });
+});
+
+describe("a platform's figures", () => {
+  const sproutInput = (over: Record<string, unknown> = {}) => ({ sprout: true, own: [] as never[], publicPosts: [] as never[], now: NOW, ...over });
+  const own = (i: number) => ({ id: `o${i}`, platform: "Instagram", format: "image", publishedAt: new Date(NOW.getTime() - (3 + i * 5) * 86_400_000).toISOString(), text: "x", link: null, impressions: 1000, engagement: 40 });
+
+  it("gives a Sprout platform its follower count from the account's own reading", () => {
+    const f = platformFigures("Instagram", sproutInput({ own: [own(0), own(1), own(2)], followers: 5200 }));
+    expect(f).toMatchObject({ basis: "measured", rate_kind: "impression", followers: 5200 });
+    // No reading means no number, never a made-up one.
+    expect(platformFigures("Instagram", sproutInput({ own: [own(0)] })).followers).toBeNull();
+    expect(platformFigures("Instagram", sproutInput({ own: [own(0)], followers: null })).followers).toBeNull();
+  });
+
+  it("reads a connected account with no posts as not measured, with no rate", () => {
+    const f = platformFigures("Facebook", sproutInput({ followers: 300 }));
+    expect(f).toMatchObject({ basis: "none", posts: 0, rate: null, rate_kind: null, followers: 300 });
+  });
+
+  it("keeps the public read's followers for a platform Sprout does not cover", () => {
+    const tiktok = (i: number) => ({ company: "Pay The Pyper", client: true, platform: "TikTok", id: `t${i}`, publishedAt: new Date(NOW.getTime() - (3 + i) * 86_400_000).toISOString(), text: "", link: null, format: "short_video", engagement: 10, views: 100, followers: 2400, boosted: false, source: "apify" as const });
+    expect(platformFigures("TikTok", { sprout: false, own: [], publicPosts: [tiktok(1), tiktok(2)], now: NOW }).followers).toBe(2400);
+  });
+});
+
+describe("a pillar's share of the calendar", () => {
+  const at = (...pillars: Array<string | null>) => pillars.map((pillar) => ({ pillar }));
+  it("is counted over the posts that carry a current pillar, any case, and is null when posts carry only old names", () => {
+    expect(PILLAR_SHARE_MIN_POSTS).toBe(5);
+    expect(pillarShares(["A", "B"], at("a", "A", "A", "b", "B ", null, ""))).toEqual([60, 40]);
+    expect(pillarShares(["A", "B"], at("Old A", "Old A", "Old A", "Old A", "Old A", "Old B", "Old B"))).toEqual([null, null]);
+    expect(pillarShares(["A", "B"], at("A", "A", "B"))).toEqual([null, null]);
+    expect(pillarShares(["A"], [])).toEqual([null]);
+  });
+
+  it("gives no share when some posts sit under old names, never a split over the matched few (the Yangra shape)", () => {
+    const names = ["Festival celebrations", "Festival stories", "Hindu wisdom", "Puja guides"];
+    const window = [...Array(6).fill("festival stories"), ...Array(4).fill("hindu wisdom & quotes"), ...Array(6).fill("festival rituals guide")];
+    expect(pillarShares(names, at(...window))).toEqual([null, null, null, null]);
+    // Without the posts under old names the same six posts are a clean mix.
+    expect(pillarShares(names, at(...Array(6).fill("festival stories"), ...Array(4).fill("hindu wisdom"))).map((n) => n)).toEqual([0, 60, 40, 0]);
+  });
+});
+
+describe("a client's public posts with hidden engagement", () => {
+  it("still count for presence and cadence, and stay out of medians and scores", async () => {
+    const posts = Array.from({ length: 8 }, (_, i) => ({
+      company: "Pay The Pyper", client: true, platform: "Instagram", id: `ig${i}`, publishedAt: new Date(NOW.getTime() - (5 + i * 7) * 86400_000).toISOString(),
+      text: `post ${i}`, link: null, format: "image", engagement: null, views: null, followers: 900, boosted: false, source: "apify" as const,
+    }));
+    const e = (await strategyEvidence(fakeDb({
+      trend_profiles: [{ client_id: "c1", audience: "A", fit_rubric: "F", platforms: [], written_at: "2026-11-01T00:00:00Z" }],
+      sprout_profiles: [], clients: [{ id: "c1" }], calendar_posts: [], content_strategy_edits: [],
+    }), { id: "c1", name: "Pay The Pyper", content_pillars: [], primary_platforms: [], field_sources: {}, posting_rhythm: null }, NOW, {
+      gather: async () => ({ own: [], learnedRhythm: [], evidence: [], avoid: [], thin: [], examples: {}, fallbackRates: { competitors: {}, allTracked: null } }),
+      trackedRates: async () => ({}), voiceBlock: async () => "", competitiveBrief: async () => "", competitorSet: async () => [], siteText: async () => "", feedSnapshots: async () => [],
+    }, { version: 2, key: "k", status: "done", started_at: NOW.toISOString(), window: { start: "2026-08-04", end: "2026-11-02" }, runs: [], posts } as never))!;
+    const ig = e.platforms.find((p) => p.platform === "Instagram")!;
+    expect(ig.state).toBe("posting");
+    expect(ig.baseline).toMatchObject({ posts: 8, median_engagement: null, engagement_rate: null });
+    expect(ig.baseline!.posts_per_week).toBeGreaterThan(0.5);
+    expect(e.evidence.filter((x) => x.kind === "own")).toEqual([]);
+  });
+});
+
+describe("the client's followers in the evidence", () => {
+  it("reads the Sprout followers once, for the platforms Sprout measures", async () => {
+    const asked: string[] = [];
+    const e = (await strategyEvidence(fakeDb({
+      trend_profiles: [{ client_id: "c1", audience: "A", fit_rubric: "F", platforms: [], written_at: "2026-11-01T00:00:00Z" }],
+      sprout_profiles: [{ client_id: "c1", network_type: "instagram", native_name: "pyper", is_active: true }],
+      clients: [{ id: "c1" }], calendar_posts: [], content_strategy_edits: [],
+    }), { id: "c1", name: "Pay The Pyper", content_pillars: [], primary_platforms: ["Instagram"], field_sources: { primary_platforms: { by: "person" } }, posting_rhythm: null }, NOW, {
+      gather: async () => ({
+        own: [{ id: "1", platform: "Instagram", format: "image", publishedAt: "2026-10-20T12:00:00Z", text: "x", link: null, impressions: 100, engagement: 5 }],
+        learnedRhythm: [{ platform: "Instagram", perWeek: 1, days: [], time: null, average: 0.9, source: "published_8w" }],
+        evidence: [], avoid: [], thin: [], examples: {}, fallbackRates: { competitors: {}, allTracked: null },
+      }),
+      trackedRates: async () => ({}), voiceBlock: async () => "", competitiveBrief: async () => "", competitorSet: async () => [], siteText: async () => "", feedSnapshots: async () => [],
+      ownedFollowers: async (_db, client) => { asked.push(client.id); return { instagram: 5200 }; },
+    }))!;
+    expect(e.platforms.find((p) => p.platform === "Instagram")!.figures).toMatchObject({ basis: "measured", followers: 5200 });
+    expect(asked).toEqual(["c1"]);
+  });
+});
+
+describe("the competitors stored with a platform", () => {
+  it("keep only competitors whose read has enough posts to compare", async () => {
+    const small = { company: "TeamSnap", client: false, platform: "Instagram", posts: 2, posts_per_week: 0.1, median_engagement: 37, rate_per_view: null, followers: null };
+    const { out } = await drive(reply(draft()), clean);
+    if (out.kind !== "passed") throw new Error("not passed");
+    expect(out.value.platforms[0].competitors.map((c) => c.company)).toEqual(["BenchApp"]);
+    const call = calls(reply(draft()), clean);
+    const withSmall = { ...startStrategy({ ...E, competitor_figures: [...E.competitor_figures, small] }, "k", NOW) };
+    const first = await strategyPhase(call.call, "key", withSmall);
+    const second = await strategyPhase(call.call, "key", (first as { pending: PendingStrategy }).pending);
+    if (second.kind !== "passed") throw new Error("not passed");
+    expect(second.value.platforms[0].competitors.map((c) => c.company)).toEqual(["BenchApp"]);
   });
 });
 

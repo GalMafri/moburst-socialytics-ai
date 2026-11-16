@@ -35,15 +35,17 @@ import { applyRhythmSetting, numberEvidence, scoreOwnPosts, type EvidenceItem, t
 import { fmtMultiple } from "../calendar/reasonText.ts";
 import { competitorSet, feedSnapshots, gatherEvidence, trackedRates, type Gathered } from "../calendar/runWeek.ts";
 import { competitiveBrief } from "../competitive/brief.ts";
+import { collectOwnedFollowers } from "../competitive/ownedSource.ts";
 import { setBy } from "../lifecycle/fields.ts";
 import { activeTerms } from "../trends/profile.ts";
 import { clip } from "../trends/text.ts";
 import { loadClientVoice } from "../voice/load.ts";
 import { voicePromptBlock, type VoiceExample } from "../voice/voice.ts";
-import { baselineOf, pillarSectionKey, platformKey, platformSectionKey, platformStates, type Cadence, type StrategyPlatform, type WrittenPlatform, type WrittenState } from "./platforms.ts";
+import { calendarShareWindow, pillarShares, SHARE_DAYS } from "./pillarShares.ts";
+import { baselineOf, pillarSectionKey, type PresencePost, platformKey, platformSectionKey, platformStates, type Cadence, type StrategyPlatform, type WrittenPlatform, type WrittenState } from "./platforms.ts";
 import { baselineFor, basisOf, basisWords, metricsFor, rateKindOf, type PlatformFigures } from "./basis.ts";
-import { feedPosts, figures, fromCompetitorSet, READ_DAYS, type CompanyFigures, type PublicPost, type PublicReadState } from "./publicRead.ts";
-import { AVOID_SOURCES, DIRECTIONS, GOAL_METRICS, metricWords, sectionLines, STRATEGY_SHAPE, type AvoidSource, type Direction, type Goal, type GoalMetric, type WorkedPost } from "./sections.ts";
+import { comparableCompetitors, feedPosts, figures, fromCompetitorSet, READ_DAYS, type CompanyFigures, type PublicPost, type PublicReadState } from "./publicRead.ts";
+import { AVOID_SOURCES, DIRECTIONS, GOAL_METRICS, editShown, metricWords, sectionLines, STRATEGY_SHAPE, type AvoidSource, type Direction, type Goal, type GoalMetric, type WorkedPost } from "./sections.ts";
 
 export type { WrittenPlatform };
 
@@ -57,8 +59,8 @@ export const CHECK_MODEL = "claude-sonnet-5-5";
 /** Room for the reply and Opus's thinking, which counts against it (the calendar's week plan gives the same model 16,000). */
 export const STRATEGY_MAX_TOKENS = 16000;
 export const CHECK_MAX_TOKENS = 4000;
-/** A pillar's share is of the client's calendar posts over this many days (8 weeks), up to today. */
-const SHARE_DAYS = 56;
+// The pillar shares are worked out in ./pillarShares.ts (no Deno imports), so the strategy page computes them the same way.
+export { PILLAR_SHARE_MIN_POSTS, pillarShares, SHARE_DAYS } from "./pillarShares.ts";
 const BRIEF_CHARS = 6000;
 const SITE_CHARS = 2500;
 const BOOK_CHARS = 2500;
@@ -122,6 +124,8 @@ export interface StrategyIO {
   siteText(url: string): Promise<string>;
   /** The client's weekly competitor feeds (rivaliq_snapshots, endpoint feed), newest first. */
   feedSnapshots(db: Db, clientId: string): Promise<Array<{ payload: Any }>>;
+  /** The client's followers per Sprout network (lowercase network name), each profile's newest reading; a platform without one has no follower count. */
+  ownedFollowers?(db: Db, client: Any, now: Date): Promise<Record<string, number | null>>;
 }
 
 /** The evidence as the app reads it: the calendar's own evidence, voice and competitive picture. */
@@ -134,6 +138,7 @@ export function liveStrategyIO(siteText: (url: string) => Promise<string>): Stra
     competitorSet: (db, clientId) => competitorSet(db, clientId),
     siteText,
     feedSnapshots: (db, clientId) => feedSnapshots(db, clientId),
+    ownedFollowers: (db, client, now) => collectOwnedFollowers(db, client, now),
   };
 }
 
@@ -148,17 +153,6 @@ async function tryOr<T>(f: () => Promise<T>, fallback: T): Promise<T> {
   } catch {
     return fallback;
   }
-}
-
-/**
- * Each pillar's share of the client's calendar posts: the posts that carry its
- * name (any case) over every post in the window, as a whole percent. Null for
- * every pillar when the window has no posts.
- */
-export function pillarShares(names: string[], posts: Array<{ pillar: string | null }>): Array<number | null> {
-  if (!posts.length) return names.map(() => null);
-  const key = (s: unknown) => String(s ?? "").trim().toLowerCase();
-  return names.map((n) => Math.round((100 * posts.filter((p) => key(p.pillar) === key(n)).length) / posts.length));
 }
 
 function pillarsOf(v: unknown): Array<{ name: string; description: string }> {
@@ -179,17 +173,27 @@ export function keysInPlay(platforms: StrategyPlatform[], pillars: Array<{ name:
 }
 
 /** A client's public post as the calendar's own posts are kept. */
-const asOwn = (p: PublicPost): OwnPost => ({
+const asOwn = (p: PublicPost): PresencePost => ({
   id: p.id, platform: p.platform, format: p.format, publishedAt: p.publishedAt, text: p.text, link: p.link, impressions: null, engagement: p.engagement, boosted: p.boosted,
 });
 
-/** A platform's figures: Sprout's measured numbers where it has the account, else the public read's. */
-export function platformFigures(platform: string, i: { sprout: boolean; own: OwnPost[]; publicPosts: PublicPost[]; now: Date }): PlatformFigures {
+/**
+ * A platform's figures: Sprout's measured numbers where it has the account and
+ * the account has posts, else the public read's. followers is the Sprout
+ * account's own newest count, which a platform Sprout measures has no public
+ * read for.
+ */
+export function platformFigures(platform: string, i: { sprout: boolean; own: PresencePost[]; publicPosts: PublicPost[]; now: Date; followers?: number | null }): PlatformFigures {
   const pub = figures(i.publicPosts.filter((p) => p.client && p.platform === platform), i.now)[0];
-  const followers = pub?.followers ?? null;
+  const followers = i.followers ?? pub?.followers ?? null;
   if (i.sprout) {
     const b = baselineOf(i.own, platform, i.now);
-    return { platform, basis: "measured", posts: b.posts, posts_per_week: b.posts_per_week, median_engagement: b.median_engagement, rate: b.engagement_rate, rate_kind: "impression", followers };
+    const basis = basisOf({ sprout: true, posts: b.posts });
+    const measured = basis === "measured";
+    return {
+      platform, basis, posts: b.posts, posts_per_week: b.posts_per_week, median_engagement: measured ? b.median_engagement : null,
+      rate: measured ? b.engagement_rate : null, rate_kind: measured ? "impression" : null, followers,
+    };
   }
   const posts = pub?.posts ?? 0;
   const basis = basisOf({ sprout: false, posts });
@@ -217,6 +221,8 @@ export async function strategyEvidence(db: Db, client: Any, now: Date, io: Strat
   if (accountsError) throw new Error(`Could not read the client's social accounts: ${accountsError.message}`);
   const { data: edits, error: editsError } = await db.from("content_strategy_edits").select("section_key, text, value").eq("client_id", client.id);
   if (editsError) throw new Error(`Could not read the team's versions of the strategy: ${editsError.message}`);
+  // The latest write's sections: a person's goals and platform words are shown over its numbers, dates and worked posts.
+  const latest = await tryOr(async () => (await db.from("content_strategies").select("sections").eq("client_id", client.id).maybeSingle()).data?.sections as Record<string, unknown> | null, null);
   const extras = await tryOr(async () => (await db.from("clients").select("brand_book_text").eq("id", client.id).maybeSingle()).data, null);
 
   // The public read: the stored weekly feed's posts and what the app's public readers brought back.
@@ -229,12 +235,13 @@ export async function strategyEvidence(db: Db, client: Any, now: Date, io: Strat
 
   // The client's own posts: Sprout and RivalIQ's copy (the calendar's), and its public posts the app read on platforms neither covers.
   const seen = new Set(g.own.map((p) => p.id));
+  // Every public post of the client counts for presence, cadence and post counts. One that hides its engagement is left out of scores and medians where they are made.
   const added = (read?.posts ?? []).filter((p) => p.client && !onSprout(p.platform) && !seen.has(p.id)).map(asOwn);
-  const own = [...g.own, ...added];
+  const own: PresencePost[] = [...g.own, ...added];
   let evidence = g.evidence;
   let avoid = g.avoid;
   if (added.length) {
-    const scored = scoreOwnPosts(own, now);
+    const scored = scoreOwnPosts(own.filter((p): p is OwnPost => p.engagement !== null), now);
     evidence = [...numberEvidence({ ownTop: scored.top, competitors: [], topics: [], trends: [], findings: [] }), ...g.evidence.filter((e) => e.kind !== "own")];
     avoid = scored.low.map((s) => `${s.post.platform} ${s.post.format} from ${s.post.publishedAt.slice(0, 10)} got ${s.multiple}x the usual ${s.metric}: ${s.post.text.replace(/\s+/g, " ").slice(0, 140)}`);
   }
@@ -249,11 +256,16 @@ export async function strategyEvidence(db: Db, client: Any, now: Date, io: Strat
   };
   let states = platformStates(input);
   if (states.needsAllTracked) states = platformStates({ ...input, rates: { ...g.fallbackRates, allTracked: await io.trackedRates(db) } });
-  const platforms = states.platforms.map((p) => ({ ...p, figures: platformFigures(p.platform, { sprout: onSprout(p.platform), own, publicPosts, now }) }));
+  // The followers of the accounts Sprout measures: each profile's newest reading, from the reader the reports use. A read that fails leaves them unknown.
+  const ownedFollowers = sprout.size ? await tryOr(async () => (await io.ownedFollowers?.(db, client, now)) ?? {}, {} as Record<string, number | null>) : {};
+  const platforms = states.platforms.map((p) => ({
+    ...p, figures: platformFigures(p.platform, { sprout: onSprout(p.platform), own, publicPosts, now, followers: ownedFollowers[platformKey(p.platform)] ?? null }),
+  }));
 
   // The client's own calendar posts over the last 8 weeks, read from calendar_posts as the calendar reads them.
+  const shareDays = calendarShareWindow(now);
   const { data: calendar, error: calendarError } = await db.from("calendar_posts").select("pillar")
-    .eq("client_id", client.id).gte("post_date", day(new Date(now.getTime() - SHARE_DAYS * DAY))).lte("post_date", day(now));
+    .eq("client_id", client.id).gte("post_date", shareDays.start).lte("post_date", shareDays.end);
   if (calendarError) throw new Error(`Could not read the client's calendar: ${calendarError.message}`);
   const pillars = pillarsOf(client.content_pillars);
   const shares = pillarShares(pillars.map((p) => p.name), (calendar ?? []) as Array<{ pillar: string | null }>);
@@ -289,7 +301,7 @@ export async function strategyEvidence(db: Db, client: Any, now: Date, io: Strat
     thin: g.thin,
     edits: Object.fromEntries(((edits ?? []) as Array<{ section_key: string; text: string; value: unknown }>)
       .filter((r) => inPlay.has(r.section_key))
-      .map((r) => [r.section_key, sectionLines(r.section_key, r.value && typeof r.value === "object" ? r.value : str(r.text))])
+      .map((r) => [r.section_key, sectionLines(r.section_key, editShown(r.section_key, r, latest?.[r.section_key]))])
       .filter(([, lines]) => lines)),
     sources: [
       ...(brief ? ["brief"] : []),
@@ -307,21 +319,29 @@ export async function strategyEvidence(db: Db, client: Any, now: Date, io: Strat
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const percent = (rate: number) => `${Math.round(rate * 1000) / 10}%`;
 
-function cadenceWords(c: Cadence | null): string {
+/** The 8 weeks a pillar share and a calendar-pace cadence cover, as dates (YYYY-MM-DD). */
+function shareWindow(e: StrategyEvidence): { start: string; end: string } {
+  return { start: day(new Date(new Date(`${e.written_on}T00:00:00Z`).getTime() - SHARE_DAYS * DAY)), end: e.written_on };
+}
+
+function cadenceWords(c: Cadence | null, e: StrategyEvidence): string {
   if (!c) return "no posting rate is known for it yet";
   const n = `${c.per_week} post${c.per_week === 1 ? "" : "s"} a week`;
   switch (c.source) {
     case "setting": return `${n}, as the team set it for the calendar`;
-    case "published_8w": return `${n}, the brand's own pace over the last 8 weeks, which the calendar follows`;
-    case "published_90d": return `${n}, the brand's own pace over the last 90 days, which the calendar follows`;
-    case "competitors": return `${n}, the median of its tracked competitors`;
-    case "all_tracked": return `${n}, the median across every company we track`;
+    case "published_8w": {
+      const w = shareWindow(e);
+      return `${n}, the brand's own pace from ${w.start} to ${w.end}, which the calendar follows`;
+    }
+    case "published_90d": return `${n}, the brand's own pace from ${e.window.start} to ${e.window.end}, which the calendar follows`;
+    case "competitors": return `${n}, the median of the competitors we chose`;
+    case "all_tracked": return `${n}, the usual pace in this category`;
   }
 }
 
-function figureWords(f: PlatformFigures): string[] {
+function figureWords(f: PlatformFigures, e: StrategyEvidence): string[] {
   const parts: string[] = [`data: ${basisWords(f)}`];
-  if (f.basis !== "none") parts.push(`${plural(f.posts, "post")} in the last 90 days (${f.posts_per_week} a week)`);
+  if (f.basis !== "none") parts.push(`${plural(f.posts, "post")} from ${e.window.start} to ${e.window.end} (${f.posts_per_week} a week)`);
   if (f.median_engagement !== null && (f.basis === "measured" || f.basis === "public")) parts.push(`median engagement per post ${f.median_engagement}`);
   if (f.rate !== null && f.rate_kind) parts.push(`engagement rate per ${f.rate_kind} ${percent(f.rate)}`);
   if (f.followers !== null) parts.push(`${f.followers.toLocaleString("en-US")} followers`);
@@ -329,21 +349,21 @@ function figureWords(f: PlatformFigures): string[] {
   return parts;
 }
 
-function platformLine(p: StrategyEvidence["platforms"][number]): string {
-  const parts = [`cadence ${cadenceWords(p.cadence)}`, ...figureWords(p.figures)];
+function platformLine(p: StrategyEvidence["platforms"][number], e: StrategyEvidence): string {
+  const parts = [`cadence ${cadenceWords(p.cadence, e)}`, ...figureWords(p.figures, e)];
   const handle = p.handle ? ` (${p.state === "posting" ? "account" : "existing account, quiet"} @${p.handle.replace(/^@/, "")})` : "";
   const why = p.profile_reason && p.state === "candidate" ? ` The trend profile lists it: ${p.profile_reason}` : "";
   return `- ${p.platform}${handle}: ${parts.join("; ")}.${why}`;
 }
 
 function competitorLines(e: StrategyEvidence): string {
-  const rows = e.competitor_figures.filter((c) => c.posts > 0).map((c) => {
+  const rows = comparableCompetitors(e.competitor_figures).map((c) => {
     const parts = [`${c.posts_per_week} posts a week`];
     if (c.median_engagement !== null) parts.push(`median engagement per post ${c.median_engagement}`);
     if (c.followers !== null) parts.push(`${c.followers.toLocaleString("en-US")} followers`);
     return `- ${c.company} on ${c.platform}: ${parts.join(", ")}`;
   });
-  return rows.length ? `\nThe tracked competitors over the same 90 days (code's figures; a "vs" point may cite them):\n${rows.join("\n")}` : "";
+  return rows.length ? `\nThe competitors we chose, over the same days, ${e.window.start} to ${e.window.end} (code's figures; a "vs" point may cite them):\n${rows.join("\n")}` : "";
 }
 
 /** One piece of the calendar's evidence. Only the client's own posts keep their id, for "worked". */
@@ -355,10 +375,10 @@ function itemLine(e: EvidenceItem): string {
 }
 
 const EVIDENCE_TITLES: Array<[EvidenceItem["kind"], string]> = [
-  ["own", "The brand's posts that beat its usual numbers in the last 90 days (an id here may be named only in a platform's \"worked\" list):"],
-  ["competitor", "Competitor posts that beat that competitor's usual numbers in the newest week:"],
-  ["topic", "Topics several competitors posted about in the newest week:"],
-  ["trend", "Industry trends this week, each shown by a real post that fit the brand's audience:"],
+  ["own", "The brand's posts that beat its usual numbers (an id here may be named only in a platform's \"worked\" list):"],
+  ["competitor", "Competitor posts that beat that competitor's usual numbers:"],
+  ["topic", "Topics several competitors posted about:"],
+  ["trend", "Industry trend topics, each shown by a real post that fit the brand's audience:"],
   ["report", "Findings from the latest monthly report:"],
 ];
 
@@ -367,12 +387,13 @@ function evidenceText(e: StrategyEvidence): string {
   const c = e.client;
   lines.push(`Brand: ${c.name}`);
   lines.push(`Market: ${c.market.join(", ") || "not set"}; content languages: ${c.languages.join(", ") || "en"}`);
-  lines.push(`The strategy is written on ${e.written_on} for the 90 days after it.`);
+  lines.push(`The strategy is written on ${e.written_on} for the 90 days after it. The figures below cover the 90 days from ${e.window.start} to ${e.window.end}.`);
   if (e.brief) lines.push(`\nBrief (it carries the words of any strategy document):\n${e.brief}`);
   if (e.pillars.length) {
     const shared = e.pillars.some((p) => p.share !== null);
-    const title = shared ? "Content pillars, each with its share of the brand's calendar posts over the last 8 weeks (counted in code; use the shares as given):" : "Content pillars:";
-    const share = (p: StrategyEvidence["pillars"][number]) => (p.share === null ? "" : ` (${p.share}% of the brand's calendar posts over the last 8 weeks)`);
+    const sw = shareWindow(e);
+    const title = shared ? `Content pillars, each with its share of the brand's calendar posts from ${sw.start} to ${sw.end} (counted in code; use the shares as given):` : "Content pillars:";
+    const share = (p: StrategyEvidence["pillars"][number]) => (p.share === null ? "" : ` (${p.share}% of the brand's calendar posts from ${sw.start} to ${sw.end})`);
     lines.push(`\n${title}\n${e.pillars.map((p) => `- ${p.name}${share(p)}${p.description ? `: ${p.description}` : ""}`).join("\n")}`);
   }
   if (e.keywords.length) lines.push(`\nKeywords the team uses for the brand: ${e.keywords.join(", ")}`);
@@ -380,7 +401,7 @@ function evidenceText(e: StrategyEvidence): string {
   if (e.brand_book) lines.push(`\nBrand book (excerpt):\n${e.brand_book}`);
   if (e.voice) lines.push(`\n${e.voice}`);
   if (e.site) lines.push(`\nWebsite (excerpt):\n${e.site}`);
-  if (e.competitors.length) lines.push(`\nTracked competitors: ${e.competitors.join(", ")}`);
+  if (e.competitors.length) lines.push(`\nThe competitors we chose: ${e.competitors.join(", ")}`);
   if (e.competitive_brief) lines.push(`\n${e.competitive_brief}`);
   const p = e.profile;
   lines.push(`\nThe industry trend profile:\nAudience: ${p.audience}\nWhat fits: ${p.fit_rubric}`);
@@ -388,9 +409,9 @@ function evidenceText(e: StrategyEvidence): string {
 
   const of = (state: StrategyPlatform["state"]) => e.platforms.filter((x) => x.state === state);
   lines.push("\nPlatforms. Every number here was worked out in code; use them as given and add no others.");
-  if (of("posting").length) lines.push(`Posting now (the brand published there in the last 90 days):\n${of("posting").map(platformLine).join("\n")}`);
-  if (of("new").length) lines.push(`New (the brand chose it or has an account there, with no posts in 90 days):\n${of("new").map(platformLine).join("\n")}`);
-  if (of("candidate").length) lines.push(`Suggested (where the industry's audience is active; the brand neither posts there nor chose it):\n${of("candidate").map(platformLine).join("\n")}`);
+  if (of("posting").length) lines.push(`Posting now (the brand published there from ${e.window.start} to ${e.window.end}):\n${of("posting").map((x) => platformLine(x, e)).join("\n")}`);
+  if (of("new").length) lines.push(`New (the brand chose it or has an account there, with no posts from ${e.window.start} to ${e.window.end}):\n${of("new").map((x) => platformLine(x, e)).join("\n")}`);
+  if (of("candidate").length) lines.push(`Suggested (where the industry's audience is active; the brand neither posts there nor chose it):\n${of("candidate").map((x) => platformLine(x, e)).join("\n")}`);
   const comp = competitorLines(e);
   if (comp) lines.push(comp);
 
@@ -399,7 +420,7 @@ function evidenceText(e: StrategyEvidence): string {
     if (items.length) lines.push(`\n${title}\n${items.map(itemLine).join("\n")}`);
   }
   if (e.avoid.length) lines.push(`\nThe brand's posts that did worst:\n${e.avoid.map((a) => `- ${a}`).join("\n")}`);
-  if (e.thin.length) lines.push(`\nWhere the evidence is thin:\n${e.thin.map((t) => `- ${t}`).join("\n")}`);
+  if (e.thin.length) lines.push(`\nWhere the evidence is still early (never say so in the text):\n${e.thin.map((t) => `- ${t}`).join("\n")}`);
   const edits = Object.entries(e.edits);
   if (edits.length) {
     lines.push(`\nThe team's own versions of these sections. They stay exactly as the team wrote them; keep every other section consistent with them:\n${edits.map(([k, v]) => `[${k}]\n${v}`).join("\n\n")}`);
@@ -412,7 +433,7 @@ const STRATEGY_SYSTEM = `You write the social media strategy that Moburst, a mar
 Write these parts, as fields:
 - goals: two to four goals for the 90 days. Each has a title (at most ${CAPS.goal_title} characters), why (one line, at most ${CAPS.goal_why}), the platform it is on (one of the platforms posting now or new), the metric (one of the metrics allowed for that platform) and the direction ("above" or "below" today's figure). Goals stated in the brief or a strategy document win. Code adds today's figure and the date.
 - audience: who (one line, at most ${CAPS.who}), wants (exactly three items, each at most ${CAPS.want}), where (the platforms where they are, from the platforms given).
-- positioning: statement (one sentence, at most ${CAPS.statement}) and up to three points, each naming one tracked competitor in "vs" and the difference in "point" (at most ${CAPS.point}), citing a competitor figure given where one fits.
+- positioning: statement (one sentence, at most ${CAPS.statement}) and up to three points, each naming one of the competitors we chose in "vs" and the difference in "point" (at most ${CAPS.point}), citing a competitor figure given where one fits.
 - pillars: one per content pillar, named exactly as given: purpose (at most ${CAPS.purpose}), formats (up to three, such as carousel, reel, short video), planned_share (a whole percent; the shares add up to 100), and exactly two ideas, each a hook (at most ${CAPS.hook}) and its format. Write the hooks in the brand's first content language.
 - platforms: one per platform posting now or new, and one per suggested platform you mark new: role (at most ${CAPS.role}), post (exactly three items, what we post, each at most ${CAPS.post}), worked (up to two ids of the brand's own posts listed as beating its usual numbers on that platform, or none), checks (day_30 and day_90: what we look at then, each at most ${CAPS.check}). A new platform also gets first_30: exactly four lines, one per week, each at most ${CAPS.week}.
 - candidates: every suggested platform, marked "new" or "not_now", with a one-line reason (at most ${CAPS.reason}). At most two can be new.
@@ -423,6 +444,10 @@ Rules:
 - An evidence id (such as P1) may appear only in a platform's worked list, nowhere else.
 - A goal on a platform whose data is thin or has no public posts uses only posts_per_week or followers.
 - Never use an em dash; use a period, a comma, a colon or parentheses.
+- Use American spelling (color, organize, behavior, favorite).
+- Write what we do and what is planned. Never say how much data there is or is not (no "thin data", "no rate", "slot test"). Never name a tool, a vendor or a model.
+- No relative dates ("last month", "this quarter", "recently", "over the last 8 weeks"): the plan is read for 90 days, so it goes stale. Write the date ("from 8 Sep to 2 Nov") or leave the time out.
+- Call the brand's rivals "the competitors we chose". Word a pace taken from the whole category as "the usual pace in this category".
 
 Answer with one JSON object and nothing else.`;
 
@@ -454,15 +479,103 @@ export interface StrategyDraft {
 const EVIDENCE_ID = /\b[PCTNR]\d{1,2}\b/;
 const DASH = /—|\s–\s/;
 
+/** A text field of a draft and where it is, for the problem that names it. An example hook is the brand's own voice and language. */
+/** `anchored`: the line is read against a date of its own (a launch week, the 30-day or 90-day check day), so a relative phrase in it does not go stale. */
+interface DraftLine { where: string; text: string; hook?: boolean; anchored?: boolean }
+
 /** Every text field of a draft, the worked ids left out. */
-function draftTexts(d: StrategyDraft): string[] {
+function draftLines(d: StrategyDraft): DraftLine[] {
   return [
-    ...d.goals.flatMap((g) => [g.title, g.why]), d.audience.who, ...d.audience.wants, d.positioning.statement,
-    ...d.positioning.points.flatMap((p) => [p.vs, p.point]),
-    ...d.pillars.flatMap((p) => [p.purpose, ...p.formats, ...p.ideas.flatMap((i) => [i.hook, i.format])]),
-    ...d.platforms.flatMap((p) => [p.role, ...p.post, ...p.first_30, p.checks.day_30, p.checks.day_90]),
-    ...d.candidates.map((c) => c.reason), ...d.avoid.map((a) => a.pattern),
+    ...d.goals.flatMap((g, i) => [{ where: `Goal ${i + 1}'s title`, text: g.title }, { where: `Goal ${i + 1}'s why`, text: g.why }]),
+    { where: "The audience's who", text: d.audience.who }, ...d.audience.wants.map((text, i) => ({ where: `Want ${i + 1}`, text })),
+    { where: "The positioning statement", text: d.positioning.statement },
+    ...d.positioning.points.flatMap((p, i) => [{ where: `Positioning point ${i + 1}'s competitor`, text: p.vs }, { where: `Positioning point ${i + 1}`, text: p.point }]),
+    ...d.pillars.flatMap((p) => [
+      { where: `The pillar "${p.name}"'s purpose`, text: p.purpose }, ...p.formats.map((text) => ({ where: `A format of "${p.name}"`, text })),
+      ...p.ideas.flatMap((idea, i) => [{ where: `Idea ${i + 1} of "${p.name}"`, text: idea.hook, hook: true }, { where: `Idea ${i + 1} of "${p.name}"'s format`, text: idea.format }]),
+    ]),
+    ...d.platforms.flatMap((p) => [
+      { where: `${p.platform}'s role`, text: p.role }, ...p.post.map((text, i) => ({ where: `${p.platform}'s post item ${i + 1}`, text })),
+      ...p.first_30.map((text, i) => ({ where: `${p.platform}'s week ${i + 1}`, text, anchored: true })),
+      { where: `${p.platform}'s 30-day check`, text: p.checks.day_30, anchored: true }, { where: `${p.platform}'s 90-day check`, text: p.checks.day_90, anchored: true },
+    ]),
+    ...d.candidates.map((c) => ({ where: `The reason for ${c.platform}`, text: c.reason })),
+    ...d.avoid.map((a, i) => ({ where: `Pattern ${i + 1} to avoid`, text: a.pattern })),
   ];
+}
+
+// The house rules for what a client reads, checked in code because the writer
+// slips: American spelling, no talk about how much data there is, no tool or
+// vendor names, no relative dates (a 90-day plan is read for 90 days), and no
+// "tracked" wording (it is false for a client whose competitors nobody tracks).
+
+/** UK forms of words with a US spelling: a -our word, -re and -ence words, doubled consonants, and the -ise family. */
+const BRITISH = new RegExp([
+  "\\b(?:behaviour|colour|favour|flavour|honour|humour|labour|neighbour|endeavour|rumour|savour|vapour|harbour|armour)\\w*",
+  "\\b(?:centre|theatre|programme|catalogue|metre|litre|fibre)(?:s|d)?\\b",
+  "\\b(?:defence|licence|offence|whilst|amongst|learnt|judgement|fulfil|enrol|sceptic\\w*|analyse|analysed|analysing|per cent)\\b",
+  "\\b(?:travell|cancell|modell|labell|focuss|signall)(?:ed|ing|er|ers)\\b",
+  "\\b(?:organis|recognis|personalis|optimis|prioritis|customis|realis|summaris|emphasis|minimis|maximis|utilis|standardis|specialis|monetis|categoris|capitalis|familiaris|memoris|normalis|visualis|localis|characteris|authoris|apologis|criticis|finalis|mobilis|digitis|popularis|socialis|stabilis|generalis|harmonis|centralis|globalis|sensitis|systematis)(?:e|es|ed|ing|ation|ations|er|ers|able|ability)\\b",
+].join("|"), "i");
+
+// Each form names the data itself ("sample size", "sample of posts", "posting rate"), so a product's "small sample" or "no rate hikes" passes.
+const DATA_TALK = [
+  /\b(?:data|evidence|signal|sample size|sample of posts|post sample) (?:is|are|was|were|looks?|seems?) (?:still |very |quite )?(?:thin|sparse|limited|scarce|patchy|early|small)\b/i,
+  /\b(?:thin|sparse|limited|patchy) (?:data|signal|evidence)\b/i,
+  /\b(?:small|tiny|thin|limited) (?:sample size|sample of posts|post sample)\b/i,
+  /\bno (?:posting|follower|engagement) rates?\b/i,
+  /\bslot tests?\b/i,
+  /\bnot enough (?:data|posts|history|evidence)\b/i,
+  /\bno (?:public )?(?:posts|data) (?:found|available|yet)\b/i,
+];
+// Only forms that cannot be everyday words: "Sprout Social" (not "sprout"), and
+// "Claude" or "Gemini" only beside "AI" or a model name.
+const VENDORS = /\b(?:sprout social|rivaliq|apify|supabase|higgsfield|openai|chatgpt|anthropic|n8n|(?:claude|gemini)(?: ai| model| pro| flash| opus| sonnet| haiku|[- ]\d)|ai (?:claude|gemini)|gpt-?\d)\b/i;
+// "this week" and "next week" often name a recurring format ("This week in sleep science"), so only "this week" stating a fact is flagged.
+export const RELATIVE_DATE = new RegExp([
+  "\\b(?:last|past|previous) (?:week|month|quarter|year|weekend)\\b",
+  "\\b(?:this|next|coming) (?:month|quarter|year|weekend)\\b",
+  "\\bthis week,? (?:we|the brand|it|they) (?:\\w+ )?(?:posted|published|launched|ran|saw|reached|hit|grew|got|had|is|are|was|were|has|have|did)\\b",
+  "\\b(?:recently|lately|yesterday|right now|at the moment|just behind us)\\b",
+  "\\b(?:in|over|during|within) the (?:last|past|previous) (?:\\d+ )?(?:days?|weeks?|months?|years?)\\b",
+  "\\b\\d+ (?:days?|weeks?|months?) ago\\b",
+].join("|"), "i");
+const TRACKED = /\b(?:tracked (?:competitors?|companies|brands|median)|(?:competitors|companies|brands) we track)\b/i;
+
+const escapeRe = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** The client's own words, which the checks leave alone: its pillar names, its name, its competitors', its keywords, its handles and what its posts say. */
+function ownWords(e: StrategyEvidence): RegExp | null {
+  const words = [
+    ...e.pillars.map((p) => p.name), e.client.name, ...e.competitors, ...e.keywords, ...e.platforms.map((p) => p.handle ?? ""),
+    ...e.evidence.map((x) => x.text), ...e.avoid.map((a) => a.replace(/^.*?: /, "")),
+  ].map((w) => w.trim()).filter((w) => w.length >= 3).sort((a, b) => b.length - a.length);
+  return words.length ? new RegExp(words.map(escapeRe).join("|"), "gi") : null;
+}
+
+/** What a draft's text says that the house rules do not allow, each as a line for the writer naming the field and the words. */
+function houseRuleProblems(d: StrategyDraft, e: StrategyEvidence): string[] {
+  const out: string[] = [];
+  const own = ownWords(e);
+  // What the client wrote itself (brief, brand book, website) may use any of these words; a draft that quotes it is its own wording.
+  const source = [e.brief, e.brand_book, e.brand_notes, e.site].join("\n").toLowerCase();
+  const fresh = (m: string | undefined) => (m && !source.includes(m.toLowerCase()) ? m : undefined);
+  for (const { where, text, hook, anchored } of draftLines(d)) {
+    if (hook || !text) continue;
+    const t = own ? text.replace(own, " ") : text;
+    const british = fresh(t.match(BRITISH)?.[0]);
+    if (british) out.push(`${where} uses the British spelling "${british}"; write American English.`);
+    const talk = fresh(DATA_TALK.map((re) => t.match(re)?.[0]).find(Boolean));
+    if (talk) out.push(`${where} talks about the data ("${talk}"); say what we do, never how much data there is.`);
+    const vendor = fresh(t.match(VENDORS)?.[0]);
+    if (vendor) out.push(`${where} names a tool ("${vendor}"); never name a tool, a vendor or a model.`);
+    // A launch week or a check day is read against its own date. Anywhere else a relative date goes stale, whoever wrote it first: the client's own text does not exempt it.
+    const relative = anchored ? undefined : t.match(RELATIVE_DATE)?.[0];
+    if (relative) out.push(`${where} says "${relative}"; write a date (such as "from 8 Sep to 2 Nov") or leave the time out, because this plan is read for 90 days.`);
+    const tracked = fresh(t.match(TRACKED)?.[0]);
+    if (tracked) out.push(`${where} says "${tracked}"; say "the competitors we chose", or "the usual pace in this category" for a median across brands.`);
+  }
+  return out;
 }
 
 /** What a draft does not meet; empty when it is fine. */
@@ -569,9 +682,10 @@ export function strategyProblems(d: StrategyDraft, e: StrategyEvidence): string[
     if (!(AVOID_SOURCES as readonly string[]).includes(a.source) || a.source === "team") out.push(`Pattern ${i + 1}'s source must be posts, trend_profile or brief.`);
   });
 
-  const texts = draftTexts(d);
+  const texts = draftLines(d).map((l) => l.text);
   if (texts.some((t) => EVIDENCE_ID.test(t))) out.push("An evidence id (such as P1 or C2) may appear only in a platform's worked list; say what it was in words.");
   if (texts.some((t) => DASH.test(t))) out.push("Use no em dashes; use a period, a comma, a colon or parentheses instead.");
+  out.push(...houseRuleProblems(d, e));
   return out;
 }
 
@@ -717,7 +831,8 @@ export function assemble(d: StrategyDraft, e: StrategyEvidence): WrittenStrategy
         role: s.role, post: s.post, worked, ...(state === "new" ? { first_30: s.first_30 } : {}), checks: s.checks,
       };
     }
-    const competitors = e.competitor_figures.filter((c) => c.platform === p.platform);
+    // Only competitors whose read has enough posts to be compared with the brand and each other.
+    const competitors = comparableCompetitors(e.competitor_figures.filter((c) => c.platform === p.platform));
     return { ...p, state, reason: chosen?.reason ?? null, suggested: p.state === "candidate", figures: p.figures, competitors };
   });
   const notNow = platforms.filter((p) => p.state === "not_now");

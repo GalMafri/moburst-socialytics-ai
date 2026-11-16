@@ -74,6 +74,14 @@ describe("the monthly report's competitive context", () => {
   });
 });
 
+describe("the competitive context's posting hours", () => {
+  const ZONED = { ...REPORT, report_data: { ...REPORT.report_data, aggregates: { ...REPORT.report_data.aggregates, time_zone: "America/New_York" } } };
+  it("names the time zone the hours are in, and none for an older report that has none", () => {
+    expect(competitiveContext(ZONED, [], [])!.time_zone).toBe("America/New_York");
+    expect(competitiveContext(REPORT, [], [])!.time_zone).toBeNull();
+  });
+});
+
 describe("a monthly report run's payload", () => {
   it("carries the competitive context with the report's own fields when its insights can't be read, and never fails for them", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});

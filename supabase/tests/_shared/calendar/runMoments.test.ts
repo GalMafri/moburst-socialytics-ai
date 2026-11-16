@@ -13,7 +13,7 @@ vi.mock("../../../functions/_shared/voice/load.ts", async (original) => ({
   learnFromSignal: m.learn,
 }));
 
-import { runMomentFeedback, runMomentsList, runWeekMoments } from "../../../functions/_shared/calendar/runMoments";
+import { runMomentFeedback, runMomentsList, runWeekMoments, strategyOf } from "../../../functions/_shared/calendar/runMoments";
 import type { WeekJob } from "../../../functions/_shared/calendar/runWeek";
 
 vi.stubGlobal("Deno", { env: { get: (name: string) => (name === "ANTHROPIC_API_KEY" ? "test" : undefined) } });
@@ -176,5 +176,21 @@ describe("moment_feedback", () => {
     const db = fakeDb({ moment_removals: [{ id: "r1", client_id: "mob", moment_name: "Election Day", category: "civic_political", post_date: "2026-11-03" }] });
     expect(await runMomentFeedback(db, job({ kind: "moment_feedback", payload: { removal_id: "r1" } }), NOW)).toMatchObject({ status: "done", result: { ops: 1 } });
     expect(m.learn).toHaveBeenCalledWith(db, "mob", { kind: "moment_removed", moment: "Election Day", category: "civic_political", date: "2026-11-03" });
+  });
+});
+
+describe("strategyOf", () => {
+  it("gives plain lines with the current target for a goals edit holding only typed words", async () => {
+    const goals = { items: [{ title: "Grow leads", why: "Calls.", platform: "Instagram", metric: "posts_per_week", direction: "above", baseline: 2, by: "2027-02-01" }] };
+    const typed = { items: [{ title: "Win more leads", why: "Phone calls.", platform: "Instagram", metric: "posts_per_week", direction: "above" }] };
+    const db = fakeDb({
+      content_strategies: [{ client_id: "mob", written_at: "2026-11-03T08:00:00Z", sections: { goals, audience: { who: "Drivers", wants: ["Fast help"], where: [] }, avoid: { items: [{ pattern: "Fear", source: "team" }] } } }],
+      content_strategy_edits: [{ client_id: "mob", section_key: "goals", text: "- Win more leads. Why: Phone calls.", value: typed }],
+    });
+    const out = await strategyOf(db as never, "mob");
+    expect(out.ownWords).toContain("Win more leads");
+    expect(out.ownWords).toContain("Feb 1, 2027");
+    expect(out.forJudge).toContain("Drivers");
+    expect(out.forJudge + out.ownWords).not.toContain("[object Object]");
   });
 });

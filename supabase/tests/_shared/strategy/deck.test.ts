@@ -42,9 +42,9 @@ describe("the slides", () => {
       "Strategy | The Plan", "Strategy | Where We Start", "Strategy | Audience and Positioning", "Strategy | Content Pillars",
       "Platforms | Instagram", "Platforms | TikTok", "Platforms | First 30 Days", "Platforms | LinkedIn", "Strategy | What We Avoid",
     ]);
-    expect(plan.slides[0].text).toEqual({ client_title: "Acme | Social Strategy", period: "Our plan for 3 Nov 2026 to 1 Feb 2027" });
-    expect(plan.slides[2].text.c1_body).toBe("Instagram median engagement per post: 42 today, above it by 1 Feb 2027\n\nWhy: Carousels beat the usual 2.7x.");
-    expect(plan.slides[3].text.data_line).toBe("Based on public posts from 5 Aug to 3 Nov 2026");
+    expect(plan.slides[0].text).toEqual({ client_title: "Acme | Social Strategy", period: "Our plan for Nov 3, 2026 to Feb 1, 2027" });
+    expect(plan.slides[2].text.c1_body).toBe("Instagram median engagement per post: 42 today, above it by Feb 1, 2027\n\nWhy: Carousels beat the usual 2.7x.");
+    expect(plan.slides[3].text.data_line).toBe("Based on public posts from Aug 5 to Nov 3, 2026");
     expect(Object.keys(plan.charts).sort()).toEqual(["mix", "start"]);
     expect(plan.over).toEqual([]);
   });
@@ -83,11 +83,24 @@ describe("the slides", () => {
     expect(avoid.text).toMatchObject({ c1_label: "TEAM", c1_body: "Memes about other apps" });
   });
 
+  it("keeps a person's goal wording over the latest targets, for the goal cards and each platform's measure", () => {
+    // Stored the way the edit sheet stores it: words and the goal's identity, no numbers. The latest write lists the goals in another order.
+    const plan = planDeck(input(1, 2, { edits: [
+      { section_key: "goals", text: "- My words", value: { items: [{ title: "My words", why: "Mine.", platform: "Instagram", metric: "median_engagement", direction: "above" }] } },
+    ] }), measure);
+    const goals = plan.slides.find((s) => s.text.title === "Strategy | The Plan")!;
+    expect(goals.text.c1_label).toBe("My words");
+    expect(goals.text.c1_body).toContain("Instagram median engagement per post: 42 today, above it by Feb 1, 2027");
+    expect(goals.text.c1_body).toContain("Why: Mine.");
+    const platform = plan.slides.find((s) => s.text.title === "Platforms | Instagram")!;
+    expect(JSON.stringify(platform.text)).toContain("Measure: Instagram median engagement per post: 42 today");
+  });
+
   it("keeps the cover title to two lines of 40pt, the name alone when the full title is longer", () => {
     expect(planDeck(input(1, 2, { client: "Ab" }), (t, size) => t.length * 0.3 * size).slides[0].archetype).toBe("cover-1");
     expect(planDeck(input(1, 2, { client: "Pay The Pyper" }), measure).slides[0]).toMatchObject({ archetype: "cover-2", text: { client_title: "Pay The Pyper | Social Strategy" } });
     const long = planDeck(input(1, 2, { client: "The Very Long Brand Name Company" }), measure).slides[0];
-    expect(long).toMatchObject({ archetype: "cover-2", text: { client_title: "The Very Long Brand Name Company", period: "Social Strategy | Our plan for 3 Nov 2026 to 1 Feb 2027" } });
+    expect(long).toMatchObject({ archetype: "cover-2", text: { client_title: "The Very Long Brand Name Company", period: "Social Strategy | Our plan for Nov 3, 2026 to Feb 1, 2027" } });
   });
 
   it("names the copy for the client and the month", () => {

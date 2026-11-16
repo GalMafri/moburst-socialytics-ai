@@ -4,7 +4,7 @@
 // profile are skipped before anything is paid for.
 import { describe, expect, it } from "vitest";
 import { pipelineDb } from "../../functions/_shared/pipelines/testDriver";
-import { FILTER_CHECK_MAX_POSTS, filterCheckRequest, runTrendJob, startTrendReplay, startTrendWeek, weekStartOf } from "../../functions/run-scheduled-jobs/trends";
+import { FILTER_CHECK_MAX_POSTS, filterCheckRequest, recollectEmptyWeeks, runTrendJob, startTrendReplay, startTrendWeek, weekStartOf } from "../../functions/run-scheduled-jobs/trends";
 import type { ScheduledJob } from "../../functions/_shared/scheduled-jobs/types";
 
 const NOW = new Date("2026-11-01T10:00:00.000Z");
@@ -101,6 +101,81 @@ describe("the weekly trend_refresh job", () => {
     expect(again.status).toBe("done");
     expect(again.result).toMatchObject({ started: true });
     expect(db.tables.report_pipeline_runs.at(-1)!.dedupe_key).toBe("trends:c1:2026-10-26:again-5");
+  });
+});
+
+// An explicitly invoked action (harness mode trends_recollect), never run by a
+// schedule: a week closed partial in which every watched platform failed and
+// nothing was kept is opened again and collected through the normal path.
+describe("recollecting a week that brought nothing back", () => {
+  const failedWeek = (client: string, id: string, over: Record<string, unknown> = {}) => ({
+    id, client_id: client, week_start: "2026-10-26", status: "partial", finished_at: NOW.toISOString(),
+    platforms: { tiktok: { status: "failed" }, instagram: { status: "failed" }, linkedin: { status: "not_watched" } }, ...over,
+  });
+  const seed = (weeks: Array<Record<string, unknown>>, extra: Record<string, Array<Record<string, unknown>>> = {}) => pipelineDb({
+    trend_profiles: [{ client_id: "c1" }, { client_id: "c2" }, { client_id: "c3" }],
+    clients: ["c1", "c2", "c3", "c4", "c5", "c6"].map((id) => ({ id, archived_at: null, exclude_from_reporting: false, demo_job_id: null })),
+    trend_weeks: weeks, ...extra,
+  }, () => NOW);
+
+  it("reopens the week and starts trends_v1 on it as the weekly job would, from each client's own week", async () => {
+    const db = seed([failedWeek("c1", "w1"), failedWeek("c2", "w2")]);
+    const out = await recollectEmptyWeeks(db, NOW);
+    expect(out.map((r) => ("runId" in r ? "started" : "skipped"))).toEqual(["started", "started"]);
+    expect(db.tables.trend_weeks.map((w) => w.status)).toEqual(["running", "running"]);
+    expect(db.tables.trend_weeks[0].finished_at).toBeNull();
+    expect(db.tables.report_pipeline_runs).toHaveLength(2);
+    expect(db.tables.report_pipeline_runs[0]).toMatchObject({ kind: "trends", pipeline: "trends_v1", mode: "app", client_id: "c1", real_table: "trend_weeks", real_id: "w1", input: { week_start: "2026-10-26" } });
+    expect(db.tables.report_pipeline_runs[0].dedupe_key).toBe("trends:c1:2026-10-26:recollect-1");
+  });
+
+  it("takes one client when it is named, and never starts a week twice", async () => {
+    const db = seed([failedWeek("c1", "w1"), failedWeek("c2", "w2")]);
+    const out = await recollectEmptyWeeks(db, NOW, "c1");
+    expect(out).toHaveLength(1);
+    expect(db.tables.trend_weeks.map((w) => w.status)).toEqual(["running", "partial"]);
+    const again = await recollectEmptyWeeks(db, NOW, "c1");
+    expect(again).toEqual([{ clientId: "c1", skipped: expect.stringMatching(/not a week that brought nothing back/i) }]);
+    expect(db.tables.report_pipeline_runs).toHaveLength(1);
+  });
+
+  it("leaves alone a week that kept a post, has a theme, had a platform that answered, is done, or is not this week", async () => {
+    const db = seed(
+      [
+        failedWeek("c1", "w1"), failedWeek("c2", "w2"),
+        failedWeek("c3", "w3", { platforms: { tiktok: { status: "failed" }, instagram: { status: "empty" } } }),
+        failedWeek("c4", "w4", { status: "done" }), failedWeek("c5", "w5", { week_start: "2026-10-19" }),
+        failedWeek("c6", "w6", { platforms: {} }),
+      ],
+      { trend_posts: [{ id: "p1", week_id: "w1", kept: true }], trend_themes: [{ id: "t1", week_id: "w2" }] },
+    );
+    const out = await recollectEmptyWeeks(db, NOW);
+    expect(out).toEqual([]);
+    expect(db.tables.trend_weeks.filter((w) => w.status === "running")).toHaveLength(0);
+    expect(db.tables.report_pipeline_runs ?? []).toHaveLength(0);
+  });
+
+  it.each([
+    ["archived", { archived_at: "2026-10-01T00:00:00.000Z" }],
+    ["excluded from reporting", { exclude_from_reporting: true }],
+    ["a demo client", { demo_job_id: "demo-1" }],
+  ])("collects nothing for a client that is %s, as the weekly job would not", async (_n, over) => {
+    const db = seed([failedWeek("c1", "w1"), failedWeek("c2", "w2")]);
+    Object.assign(db.tables.clients.find((c) => c.id === "c1")!, over);
+    const out = await recollectEmptyWeeks(db, NOW);
+    expect(out.map((r) => r.clientId)).toEqual(["c2"]);
+    expect(db.tables.trend_weeks.map((w) => w.status)).toEqual(["partial", "running"]);
+    expect(db.tables.report_pipeline_runs).toHaveLength(1);
+    const named = await recollectEmptyWeeks(db, NOW, "c1");
+    expect(named).toEqual([{ clientId: "c1", skipped: expect.stringMatching(/not an active client/i) }]);
+    expect(db.tables.report_pipeline_runs).toHaveLength(1);
+  });
+
+  it("starts nothing for a client without a trend profile", async () => {
+    const db = pipelineDb({ trend_profiles: [], clients: [{ id: "c1", archived_at: null, exclude_from_reporting: false, demo_job_id: null }], trend_weeks: [failedWeek("c1", "w1")] }, () => NOW);
+    const out = await recollectEmptyWeeks(db, NOW);
+    expect(out).toEqual([{ clientId: "c1", skipped: expect.stringMatching(/no trend profile/i) }]);
+    expect(db.tables.trend_weeks[0].status).toBe("partial");
   });
 });
 

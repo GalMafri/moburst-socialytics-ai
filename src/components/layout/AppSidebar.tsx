@@ -14,10 +14,10 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { Home, FileText, Settings, TrendingUp, LogOut, ExternalLink, Gauge, Crosshair, CalendarDays, Compass, KeyRound } from "lucide-react";
-import { PORTAL_URL } from "@/utils/gosAuth";
+import { portalUrl } from "@/utils/gosAuth";
 
 // One nav row, written once (the Intercept nav spec: 52px rows, 24px icons).
-const NAV_ITEM = "h-[52px] rounded-[12px] px-[12px] gap-[16px] text-[16px] font-medium tracking-[-0.5px] transition-all";
+const NAV_ITEM = "h-[52px] rounded-[12px] px-[12px] gap-[16px] text-[15px] font-medium tracking-[-0.5px] transition-all";
 const NAV_IDLE = "text-[#b1b7c1] opacity-80 hover:opacity-100 hover:text-white hover:bg-[rgba(255,255,255,0.03)]";
 
 export function AppSidebar() {
@@ -71,7 +71,7 @@ export function AppSidebar() {
                     tooltip="Switch tool"
                     className={`${NAV_ITEM} ${NAV_IDLE}`}
                   >
-                    <a href={PORTAL_URL}>
+                    <a href={portalUrl()}>
                       <ExternalLink className="h-[24px] w-[24px]" />
                       <span>Switch tool</span>
                     </a>
@@ -110,7 +110,7 @@ export function AppSidebar() {
               <div className="h-8 w-8 rounded-full bg-[#b9e045] flex items-center justify-center text-black t-badge">
                 {user.name?.charAt(0)?.toUpperCase() || "U"}
               </div>
-              <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-[#10b981] border-2 border-[#1a1d23]" />
+              <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-success border-2 border-background" />
             </div>
             <div className="flex-1 min-w-0 group-data-[collapsible=icon]:hidden">
               <div className="t-body font-medium text-white truncate leading-tight">{user.name}</div>

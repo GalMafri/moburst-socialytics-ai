@@ -46,12 +46,12 @@
 
 import { runActorStep, type ApifyFactory } from "../apifyStep.ts";
 import { claudeBatchStep } from "../claude.ts";
-import { MAX_STEP_ATTEMPTS } from "../runner.ts";
+import { MAX_STEP_ATTEMPTS, runHoursHorizon } from "../runner.ts";
 import { ANTHROPIC_API_KEY, APIFY_API_TOKEN, RIVALIQ_API_KEY } from "../secrets.ts";
 import type { PipelineDefinition, StepContext, StepResult } from "../types.ts";
 import { LINKEDIN_ACTOR, mergeLinkedInPosts, prepareCompetitiveLinkedInSources, verifyLinkedInRows } from "../linkedin/sources.ts";
 import { aggregateCompetitive } from "../competitive/aggregate.ts";
-import { analysisProblems, analysisRequest, parseAnswer, repairRequest } from "../competitive/analysis.ts";
+import { analysisProblems, analysisRequest, answerWithoutVendors, parseAnswer, repairRequest } from "../competitive/analysis.ts";
 import { assembleReportData, audienceDayOf, buildPostWindows, checkReadiness, mergeOwnedPosts, mergePostPages, previousPeriodOf, resolveLandscape, runConfig, type RunConfig } from "../competitive/nodes.ts";
 import { loadReplaySnapshots, replaySources, type ReplayInput } from "../competitive/replay.ts";
 import { RivalIqBusy, rivalIqReader, type RivalIqRead } from "../competitive/rivaliq.ts";
@@ -118,6 +118,10 @@ export function competitivePipeline(deps: CompetitiveDeps = {}): PipelineDefinit
     appCapable: true,
     secrets: [RIVALIQ_API_KEY, ANTHROPIC_API_KEY],
     awaitedSecrets: [APIFY_API_TOKEN],
+    // A report is asked for now: a wait for the Apify token holds the run no
+    // longer than the run itself may take, and the dispatch that owns a real
+    // report makes it again once the run stops.
+    waitHorizon: (run) => runHoursHorizon(run),
     first: "start",
     steps: {
       async start(ctx) {
@@ -279,7 +283,14 @@ export function competitivePipeline(deps: CompetitiveDeps = {}): PipelineDefinit
           need(ctx, "landscape"), need(ctx, "rivaliq.companies"), need(ctx, "posts.merged"),
           need(ctx, "rivaliq.metrics.summary"), need(ctx, "rivaliq.metrics.previous"), need(ctx, "rivaliq.metrics.timeseries"), need(ctx, "rivaliq.metrics.audience"),
         ]);
-        let aggregates = aggregateCompetitive({ cfg: cfgOf(ctx), landscape, companiesResp, postsResp, metricsResp, metricsPrevResp, seriesResp, audienceResp, body: requestOf(ctx) });
+        // Posting hours are counted in the client's own zone (clients.timezone).
+        const cfg = cfgOf(ctx);
+        if (!cfg.time_zone) {
+          const { data: client, error } = await ctx.db.from("clients").select("timezone").eq("id", cfg.client_id).maybeSingle();
+          if (error) throw new Error(`The client's time zone could not be read: ${error.message}`);
+          if (client?.timezone) cfg.time_zone = String(client.timezone);
+        }
+        let aggregates = aggregateCompetitive({ cfg, landscape, companiesResp, postsResp, metricsResp, metricsPrevResp, seriesResp, audienceResp, body: requestOf(ctx) });
         const replay = input(ctx).replay;
         if (replay) {
           // Saved Sprout figures counted under earlier rules are counted again from the saved posts, as the app does for stored reports.
@@ -305,7 +316,7 @@ export function competitivePipeline(deps: CompetitiveDeps = {}): PipelineDefinit
         const parsed = parseAnswer(answer.text);
         const problems = "value" in parsed ? analysisProblems(parsed.value) : [parsed.error];
         if (!problems.length && "value" in parsed) {
-          await ctx.payloads.put("analysis.parsed", parsed.value);
+          await ctx.payloads.put("analysis.parsed", answerWithoutVendors(parsed.value, await need(ctx, "aggregates")));
           return { type: "next", step: "assemble", detail: { stop_reason: answer.stop_reason } };
         }
         return { type: "next", step: "repair", state: { ...ctx.state, repair_error: problems.join("; ").slice(0, 4000) }, detail: { stop_reason: answer.stop_reason, problems: problems.slice(0, 10) } };
@@ -326,7 +337,7 @@ export function competitivePipeline(deps: CompetitiveDeps = {}): PipelineDefinit
         const parsed = parseAnswer(answer.text);
         const problems = "value" in parsed ? analysisProblems(parsed.value) : [parsed.error];
         if (!problems.length && "value" in parsed) {
-          await ctx.payloads.put("analysis.parsed", parsed.value);
+          await ctx.payloads.put("analysis.parsed", answerWithoutVendors(parsed.value, await need(ctx, "aggregates")));
           return { type: "next", step: "assemble", detail: { repaired: true } };
         }
         const rounds = Number(ctx.state.analysis_rounds ?? 0);

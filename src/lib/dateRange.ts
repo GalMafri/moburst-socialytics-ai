@@ -23,9 +23,26 @@ function utcDay(d: Date): Date {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 }
 
-/** Range for a preset, ending yesterday (the last full day of data). */
-export function presetRange(preset: Exclude<RangePreset, "custom">, now: Date = new Date()): DateRange {
-  const today = utcDay(now);
+/** The calendar date it is now in a time zone (yyyy-mm-dd). A missing or unknown zone reads as UTC. */
+export function localToday(timeZone?: string | null, now: Date = new Date()): string {
+  if (timeZone) {
+    try {
+      return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+    } catch {
+      // An unknown zone reads as UTC.
+    }
+  }
+  return toISODate(now);
+}
+
+/** The last full day of data in a time zone: yesterday there. */
+export function yesterdayIn(timeZone?: string | null, now: Date = new Date()): string {
+  return toISODate(new Date(new Date(`${localToday(timeZone, now)}T00:00:00Z`).getTime() - 86400000));
+}
+
+/** Range for a preset, ending yesterday (the last full day of data) in the client's time zone (UTC when none is given). */
+export function presetRange(preset: Exclude<RangePreset, "custom">, now: Date = new Date(), timeZone?: string | null): DateRange {
+  const today = utcDay(new Date(`${localToday(timeZone, now)}T00:00:00Z`));
   if (preset === "previous_month") {
     const first = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 1));
     const last = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 0));
@@ -35,6 +52,22 @@ export function presetRange(preset: Exclude<RangePreset, "custom">, now: Date = 
   const end = new Date(today.getTime() - 86400000);
   const start = new Date(end.getTime() - (days - 1) * 86400000);
   return { start: toISODate(start), end: toISODate(end) };
+}
+
+/** The longest window one live-figures call answers. */
+export const MAX_CALL_DAYS = 366;
+
+/** A window split into contiguous pieces of at most MAX_CALL_DAYS days (one piece when it is short enough). */
+export function chunkWindow(w: DateRange, maxDays = MAX_CALL_DAYS): DateRange[] {
+  const out: DateRange[] = [];
+  let s = new Date(`${w.start}T00:00:00Z`);
+  const end = new Date(`${w.end}T00:00:00Z`);
+  while (s <= end) {
+    const e = new Date(Math.min(s.getTime() + (maxDays - 1) * 86400000, end.getTime()));
+    out.push({ start: toISODate(s), end: toISODate(e) });
+    s = new Date(e.getTime() + 86400000);
+  }
+  return out;
 }
 
 export function rangeDays(range: DateRange): number {

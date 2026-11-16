@@ -14,7 +14,10 @@
 // (Apify holds the answer until the run ends), so this is a short breath
 // between looks, not a timer standing in for the provider. A step that
 // throws, or time running out, stops the run; the caller's own quiet retry
-// decides what happens next.
+// decides what happens next. A step that waits for an account (StepResult
+// waitingFor: an API token that is not set or is refused) stops the run after
+// that one look: an inline run has only the request's time, so it cannot wait
+// for an account, and the caller goes on without this answer at once.
 
 import { smallDetail, STEP_BUDGET_MS, type RunStore, type StepLog, type StepOutcome, type StepServices } from "./runner.ts";
 import type { OutputWriter, PipelineDefinition, PipelineRun, PollState, RealTable, StepContext, StepResult } from "./types.ts";
@@ -135,6 +138,9 @@ export async function runPipelineInline(def: PipelineDefinition, a: InlineStart,
         step = result.step;
         poll = null;
         continue;
+      }
+      if (typeof result.waitingFor === "string" && result.waitingFor !== "") {
+        throw new Error(`it waits for ${result.waitingFor}, which an inline run cannot wait for`);
       }
       const prev = poll as PollState | null;
       poll = prev && JSON.stringify(prev.handle) === JSON.stringify(result.handle)

@@ -3,7 +3,7 @@
 // the refresh token goes only to Vault (through google_token_save), only
 // ai@moburst.com is kept, and the status never carries a token.
 import { describe, expect, it } from "vitest";
-import { finishSignIn, googleStatus, PENDING_TTL_MS, startSignIn } from "../../../functions/_shared/google/connect";
+import { finishSignIn, googleStatus, PENDING_TTL_MS, pendingReturnOrigin, startSignIn } from "../../../functions/_shared/google/connect";
 import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
 
 const config = { clientId: "cid", clientSecret: "GOCSPX-secret-value" };
@@ -51,5 +51,17 @@ describe("connecting Google", () => {
     const db = fakeDb({ google_connection: [{ id: true, account_email: "ai@moburst.com", connected_at: "2026-11-01T00:00:00Z" }] });
     expect(await googleStatus(db, null)).toEqual({ ready: false, connected: false, account_email: null, connected_at: null });
     expect(await googleStatus(fakeDb({}), config)).toEqual({ ready: true, connected: false, account_email: null, connected_at: null });
+  });
+
+  it("remembers the address the sign-in was started from, for the way back", async () => {
+    const db = fakeDb({}, { google_token_save: () => null });
+    await startSignIn(db, config, "https://x.supabase.co/functions/v1/google-auth", NOW, "https://socialytics.moburst.ai");
+    expect(db.tables.google_connection[0].pending_return_origin).toBe("https://socialytics.moburst.ai");
+    expect(await pendingReturnOrigin(db)).toBe("https://socialytics.moburst.ai");
+    // A start with no address of the app's own returns to the default.
+    const other = fakeDb({}, { google_token_save: () => null });
+    await startSignIn(other, config, "r", NOW, "https://evil.example");
+    expect(await pendingReturnOrigin(other)).toBe("https://socialytics.moburst.com");
+    expect(await pendingReturnOrigin(fakeDb({}))).toBe("https://socialytics.moburst.com");
   });
 });

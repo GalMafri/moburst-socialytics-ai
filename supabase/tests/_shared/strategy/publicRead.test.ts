@@ -7,7 +7,7 @@
 // platform are never read in public; client and competitors are kept apart;
 // the read waits across runs and is reused for 7 days.
 import { describe, expect, it } from "vitest";
-import { feedPosts, figures, INSTAGRAM_LATEST, planTargets, PUBLIC_READERS, readInputs, stepRead, targetsKey, TIKTOK_MAX_PER_PROFILE, type PublicPost, type PublicReadState } from "../../../functions/_shared/strategy/publicRead";
+import { comparableCompetitors, COMPETITOR_MIN_POSTS, feedPosts, figures, INSTAGRAM_LATEST, planTargets, READ_VERSION, PUBLIC_READERS, readInputs, stepRead, targetsKey, TIKTOK_MAX_PER_PROFILE, type PublicPost, type PublicReadState } from "../../../functions/_shared/strategy/publicRead";
 import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
 import type { ApifyClient, ApifyRun } from "../../../functions/_shared/apify/client";
 
@@ -25,6 +25,13 @@ describe("the stored feed", () => {
     expect(posts.map((p) => [p.id, p.company, p.client, p.platform, p.views, p.followers])).toEqual([
       ["a", "BenchApp", false, "Instagram", null, null], ["b", "Acme", true, "TikTok", 5000, 900],
     ]);
+  });
+});
+
+describe("the stored feed, engagement it does not give", () => {
+  it("keeps a post with no engagement figure as unknown, and one with a real 0 as 0", () => {
+    const posts = feedPosts([snapshot([rq({ postId: "a", engagementTotal: undefined }), rq({ postId: "b", engagementTotal: -1 }), rq({ postId: "c", engagementTotal: 0 })])], "Acme", "2026-08-05");
+    expect(posts.map((p) => p.engagement)).toEqual([null, null, 0]);
   });
 });
 
@@ -106,6 +113,46 @@ describe("the figures", () => {
   });
 });
 
+describe("engagement the platform does not show", () => {
+  const ig = [{ company: "Acme", client: false, platform: "Instagram", url: "https://www.instagram.com/acme/" }];
+  const post = (over: Record<string, unknown>) => ({ id: "1", type: "Image", url: "https://www.instagram.com/p/A/", caption: "x", likesCount: 10, commentsCount: 2, timestamp: "2026-10-20T10:00:00.000Z", ...over });
+  const read = (posts: Record<string, unknown>[]) => PUBLIC_READERS.Instagram.normalize({ username: "acme", followersCount: 900, latestPosts: posts }, ig);
+
+  it("reads a hidden like count (-1, or none at all) as unknown, never as 0", () => {
+    const [hidden, missing, nothing, shown] = read([post({ id: "a", likesCount: -1 }), post({ id: "b", likesCount: undefined }), post({ id: "c", likesCount: null }), post({ id: "d", likesCount: 0, commentsCount: 0 })]);
+    expect([hidden.engagement, missing.engagement, nothing.engagement]).toEqual([null, null, null]);
+    // A post that shows 0 likes and 0 comments really has none.
+    expect(shown.engagement).toBe(0);
+  });
+
+  const p = (i: number, engagement: number | null, over: Partial<PublicPost> = {}): PublicPost => ({
+    company: "Waxing the City", client: false, platform: "Instagram", id: `p${i}`, publishedAt: new Date(NOW.getTime() - (3 + i) * 86_400_000).toISOString(), text: "", link: null,
+    format: "image", engagement, views: null, followers: 500, boosted: false, source: "apify", capped: 12, ...over,
+  });
+
+  it("leaves unknown posts out of the median, and gives no median when most of a company's posts are unknown", () => {
+    const mostly = [...Array.from({ length: 7 }, (_, i) => p(i, null)), ...Array.from({ length: 5 }, (_, i) => p(i + 7, 10 + i))];
+    expect(figures(mostly, NOW)[0]).toMatchObject({ posts: 12, median_engagement: null });
+    const some = [...Array.from({ length: 5 }, (_, i) => p(i, null)), ...Array.from({ length: 7 }, (_, i) => p(i + 5, 10 + i))];
+    expect(figures(some, NOW)[0]).toMatchObject({ posts: 12, median_engagement: 13 });
+    // A company whose posts all show their numbers is as before.
+    expect(figures(Array.from({ length: 12 }, (_, i) => p(i, 20)), NOW)[0].median_engagement).toBe(20);
+  });
+
+  it("counts only posts that show their numbers in a rate per view", () => {
+    const tt = (i: number, engagement: number | null) => p(i, engagement, { platform: "TikTok", views: 1000 });
+    expect(figures([tt(0, 50), tt(1, null), tt(2, 150)], NOW)[0].rate_per_view).toBe(0.1);
+  });
+});
+
+describe("competitors a bar chart can compare", () => {
+  const f = (company: string, posts: number) => ({ company, client: false, platform: "Instagram", posts, posts_per_week: 1, median_engagement: 30, rate_per_view: null, followers: null });
+  it("keeps a competitor only when its read has enough posts to stand for its pace", () => {
+    expect(COMPETITOR_MIN_POSTS).toBe(8);
+    expect(comparableCompetitors([f("BenchApp", 1), f("TeamSnap", 7), f("TeamLinkt", 8), f("Rinkside", 40)]).map((c) => c.company)).toEqual(["TeamLinkt", "Rinkside"]);
+  });
+});
+
 describe("a read across runs", () => {
   const run = (id: string, status: ApifyRun["status"]): ApifyRun => ({ id, status, defaultDatasetId: `ds-${id}`, usageTotalUsd: 0.04 });
   function apify(states: Record<string, ApifyRun["status"]>, rows: Record<string, unknown[]>) {
@@ -138,12 +185,23 @@ describe("a read across runs", () => {
   });
 
   it("is reused for 7 days for the same profiles, and read again after, or when the profiles change", async () => {
-    const done: PublicReadState = { key: targetsKey(targets), status: "done", started_at: NOW.toISOString(), read_at: NOW.toISOString(), window: { start: "2026-08-05", end: "2026-11-03" }, runs: [], posts: [] };
+    const done: PublicReadState = { version: READ_VERSION, key: targetsKey(targets), status: "done", started_at: NOW.toISOString(), read_at: NOW.toISOString(), window: { start: "2026-08-05", end: "2026-11-03" }, runs: [], posts: [] };
     const a = apify({}, {});
     expect(await stepRead(done, targets, () => a.client, new Date(NOW.getTime() + 6 * 86_400_000))).toBe(done);
     expect(a.started).toHaveLength(0);
     expect((await stepRead(done, targets, () => a.client, new Date(NOW.getTime() + 8 * 86_400_000))).status).toBe("reading");
     expect((await stepRead(done, [...targets, { ...targets[0], company: "BenchApp", client: false, url: "https://www.tiktok.com/@benchapp" }], () => a.client, NOW)).status).toBe("reading");
+  });
+
+  it("reads again a stored read made before the current read version, even inside its 7 days", async () => {
+    const stored: PublicReadState = { key: targetsKey(targets), status: "done", started_at: NOW.toISOString(), read_at: NOW.toISOString(), window: { start: "2026-08-05", end: "2026-11-03" }, runs: [], posts: [], version: READ_VERSION };
+    const a = apify({}, {});
+    expect(await stepRead(stored, targets, () => a.client, new Date(NOW.getTime() + 86_400_000))).toBe(stored);
+    const { version: _gone, ...old } = stored;
+    expect((await stepRead(old as PublicReadState, targets, () => a.client, new Date(NOW.getTime() + 86_400_000))).status).toBe("reading");
+    expect((await stepRead({ ...stored, version: READ_VERSION - 1 }, targets, () => a.client, new Date(NOW.getTime() + 86_400_000))).status).toBe("reading");
+    // A read made now carries the version.
+    expect((await stepRead(null, [], () => null, NOW)).version).toBe(READ_VERSION);
   });
 
   it("needs no run with nothing to read, and goes on without public posts when Apify cannot run", async () => {
@@ -181,5 +239,19 @@ describe("what the read is made from", () => {
     expect(got.profiles.map((p) => `${p.company} ${p.platform}`)).toEqual(["Acme tiktok", "BenchApp tiktok", "BenchApp linkedin"]);
     expect([...got.tracked].sort()).toEqual(["acme|Instagram", "benchapp|TikTok"]);
     expect([...got.sprout]).toEqual(["LinkedIn"]);
+  });
+});
+
+describe("the days a company's figures cover", () => {
+  it("are the whole window, or fewer days when the read reached its cap", () => {
+    const now = new Date("2026-11-02T10:00:00.000Z");
+    const mk = (n: number, capped?: number) => Array.from({ length: n }, (_, i) => ({
+      company: "BenchApp", client: false, platform: "Instagram", id: `b${i}`, publishedAt: new Date(now.getTime() - (3 + i) * 86400_000).toISOString(),
+      text: "x", link: null, format: "image", engagement: 10, views: null, followers: null, boosted: false, source: "apify" as const, ...(capped ? { capped } : {}),
+    }));
+    expect(figures(mk(20), now)[0].covers).toEqual({ start: "2026-08-04", end: "2026-11-02" });
+    const capped = figures(mk(12, 12), now)[0].covers;
+    expect(capped.end).toBe("2026-11-02");
+    expect(capped.start > "2026-10-01" && capped.start <= "2026-10-26").toBe(true);
   });
 });

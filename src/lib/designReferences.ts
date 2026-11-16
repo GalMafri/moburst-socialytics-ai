@@ -83,3 +83,6 @@ export function lookLine(synthesis: unknown): string {
   const what = typeof change.what === "string" ? change.what.trim().replace(/\.+$/, "") : "";
   return `New look in posts since ${formatDate(change.since)}${what ? `: ${what}.` : "."}`;
 }
+
+/** The background a client's design settings start from until a person or the brand's own color sets it. It is stored client data (the saved background of a design), so it lives here and not in a component. */
+export const DEFAULT_DESIGN_BACKGROUND = "#0B0E1A";

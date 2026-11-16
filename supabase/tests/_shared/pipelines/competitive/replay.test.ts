@@ -22,6 +22,8 @@ import { pickReplaySnapshots, replayAttempt } from "../../../../functions/_share
 const here = dirname(fileURLToPath(import.meta.url));
 // deno-lint-ignore no-explicit-any
 const FX: any = JSON.parse(readFileSync(join(here, "..", "..", "..", "..", "fixtures", "pipelines", "competitive-replay-moburst-2026-09.json"), "utf8"));
+// The stored analysis as a model wrote it, data source names and all: the pipeline mends the wording itself.
+const CLEAN_ANALYSIS = FX.real_analysis;
 const MOBURST = FX.report.client_id;
 const REPORT = FX.report.id;
 // deno-lint-ignore no-explicit-any
@@ -121,7 +123,7 @@ describe("replay of a past competitive report from its saved snapshots", () => {
   });
 
   it("with Claude: one batch request on Opus 5.5 with the ported prompt, its answer parsed and stored", async () => {
-    const r = await replay({ reuse: false, answers: [JSON.stringify(FX.real_analysis)], engines: [{ kind: "competitive", client_id: MOBURST, engine: "shadow" }] });
+    const r = await replay({ reuse: false, answers: [JSON.stringify(CLEAN_ANALYSIS)], engines: [{ kind: "competitive", client_id: MOBURST, engine: "shadow" }] });
     expect(r.result.outcome.status).toBe("done");
     expect(r.calls).toEqual([]);
     expect(r.unchanged()).toBe(true);
@@ -137,10 +139,23 @@ describe("replay of a past competitive report from its saved snapshots", () => {
     expect(competitiveFigures(shownCompetitiveReport(shadow, postsSnapshot()))).toEqual(FX.expected);
   });
 
+  it("completes a real stored answer that names a data source with no repair round and no second model call, naming none in what it stores", async () => {
+    expect(JSON.stringify(FX.real_analysis)).toMatch(/RivalIQ/);
+    const r = await replay({ reuse: false, answers: [JSON.stringify(FX.real_analysis)], engines: [{ kind: "competitive", client_id: MOBURST, engine: "shadow" }] });
+    expect(r.result.outcome.status).toBe("done");
+    expect(r.claude.requests).toHaveLength(1);
+    expect(r.result.calls.map((c) => c.step)).not.toContain("repair");
+    // The writer was given no vendor name to repeat.
+    // deno-lint-ignore no-explicit-any
+    const sent = (r.claude.requests[0].params as any).messages[0].content as string;
+    expect(sent.split("\n\n").slice(0, 2).join("\n\n")).not.toMatch(/RivalIQ|Sprout/);
+    expect(JSON.stringify(r.db.tables.shadow_competitive_reports[0].report_data.ai_analysis)).not.toMatch(/RivalIQ|Rival IQ|Sprout/);
+  });
+
   it("repairs an answer that does not match its format with the parser's repair prompt", async () => {
     // deno-lint-ignore no-explicit-any
-    const broken: any = { ...FX.real_analysis, gaps_for_client: FX.real_analysis.gaps_for_client.map((g: any) => ({ ...g, platform: "Instagram Reels" })) };
-    const r = await replay({ reuse: false, answers: ["Here is the analysis:\n" + JSON.stringify(broken), JSON.stringify(FX.real_analysis)], engines: [{ kind: "competitive", client_id: MOBURST, engine: "shadow" }] });
+    const broken: any = { ...CLEAN_ANALYSIS, gaps_for_client: CLEAN_ANALYSIS.gaps_for_client.map((g: any) => ({ ...g, platform: "Instagram Reels" })) };
+    const r = await replay({ reuse: false, answers: ["Here is the analysis:\n" + JSON.stringify(broken), JSON.stringify(CLEAN_ANALYSIS)], engines: [{ kind: "competitive", client_id: MOBURST, engine: "shadow" }] });
     expect(r.result.outcome.status).toBe("done");
     expect(r.claude.requests).toHaveLength(2);
     // deno-lint-ignore no-explicit-any

@@ -12,7 +12,7 @@ import CompetitiveRun from '@/pages/CompetitiveRun';
 // request until the report exists. It never shows a failure or a retry.
 
 type Request = { job_id: string; status: string; requested_at: string; range_start: string; range_end: string; report_id: string | null; open: boolean; runs: number; next_at: string };
-const f=vi.hoisted(()=>({running:false,started:'',request:null as null | Request,invokes:vi.fn(),profiles:'ready',setsError:false}));
+const f=vi.hoisted(()=>({running:false,started:'',request:null as null | Request,invokes:vi.fn(),profiles:'ready',setsError:false,zone:'UTC',past:[] as Array<Record<string,unknown>>}));
 vi.mock('@/hooks/useAuth',()=>({useAuth:()=>({canRunAnalysis:true})}));
 vi.mock('@/hooks/useRealtimeReport',()=>({useRealtimeReports:()=>{}}));
 vi.mock('@/lib/telemetry',()=>({track:vi.fn()}));
@@ -24,10 +24,11 @@ vi.mock('@/integrations/supabase/client',()=>({supabase:{
  const filters:any={};let one=false;
  const q:any={select:()=>q,eq(k:string,v:any){filters[k]=v;return q},gt:()=>q,in:()=>q,order:()=>q,limit:()=>q,maybeSingle(){one=true;return q},then(resolve:any){
   const report={id:'existing',status:'running',created_at:f.started,date_range_start:'2026-09-01',date_range_end:'2026-09-17'};
-  let data:any=table==='clients'?{id:'client',name:'Fixture',social_keywords:['test']}
+  let data:any=table==='clients'?{id:'client',name:'Fixture',social_keywords:['test'],timezone:f.zone}
    :table==='competitor_sets'?[{id:'set',status:'confirmed',created_at:'2026-09-01',confirmed_at:'2026-09-01',confirmed_by:null,rivaliq_landscape_id:'612909',tracked_since:'2026-09-02T00:00:00Z'}]
    :table==='sprout_profiles'?[{id:'profile'}]
    :table==='competitors'?['One','Two','Three'].map((name,i)=>({id:String(i),name,selected_rank:i+1,competitor_handles:f.profiles==='missing'&&i===0?[]:[{is_active:true,source:f.profiles==='weak'&&i===0?'auto':'rivaliq',detection_confidence:0.4}]}))
+   :table==='reports'&&!one?f.past
    :one?(filters.status==='running'?(f.running?report:null):null):[];
   return Promise.resolve({data,error:(f.setsError&&table==='competitor_sets')?new Error('offline'):null}).then(resolve);
  }};return q;
@@ -36,7 +37,7 @@ const clients:QueryClient[]=[];
 function mount(kind:string){const client=new QueryClient({defaultOptions:{queries:{retry:false,gcTime:0}}});clients.push(client);return render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/client']}><Routes><Route path='/:id' element={kind==='social'?<RunAnalysis/>:<CompetitiveRun/>}/></Routes></MemoryRouter></QueryClientProvider>);}
 async function tick(ms=20){await act(async()=>{await vi.advanceTimersByTimeAsync(ms)});}
 const request=(over:Partial<Request>={}):Request=>({job_id:'job',status:'queued',requested_at:new Date().toISOString(),range_start:'2026-09-01',range_end:'2026-09-17',report_id:null,open:true,runs:0,next_at:new Date().toISOString(),...over});
-beforeEach(()=>{vi.useFakeTimers();vi.setSystemTime(new Date('2026-09-17T12:00:00Z'));f.started=new Date().toISOString();f.running=false;f.request=null;f.profiles='ready';f.setsError=false;f.invokes.mockReset();});
+beforeEach(()=>{vi.useFakeTimers();vi.setSystemTime(new Date('2026-09-17T12:00:00Z'));f.started=new Date().toISOString();f.running=false;f.request=null;f.profiles='ready';f.setsError=false;f.zone='UTC';f.past=[];f.invokes.mockReset();});
 afterEach(()=>{cleanup();clients.splice(0).forEach(c=>c.clear());vi.useRealTimers();});
 
 for(const kind of ['social','competitive']) describe(kind+' run screen',()=>{
@@ -60,22 +61,22 @@ for(const kind of ['social','competitive']) describe(kind+' run screen',()=>{
  it('says the run is complete once the report it watched exists',async()=>{
   f.request=request();mount(kind);await tick();
   f.request=request({status:'done',open:false,report_id:'made'});await tick(8000);
-  expect(screen.getByText(kind==='social'?'Analysis complete. Opening the report.':'Analysis complete')).toBeInTheDocument();
+  expect(screen.getByText(kind==='social'?'Monthly report complete. Opening the report.':'Analysis complete')).toBeInTheDocument();
  });
  it('asks quietly, and says only that it has not started when the request is not taken',async()=>{
   f.invokes.mockResolvedValue({data:null,error:{message:'Edge Function returned a non-2xx status code',context:{status:409}}});
   mount(kind);await tick();await tick();
-  fireEvent.click(screen.getByRole('button',{name:kind==='social'?'Run full analysis':'Run competitive analysis'}));await tick();await tick();
-  expect(screen.getByText('The analysis has not started yet.')).toBeInTheDocument();expect(screen.queryByRole('alert')).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:kind==='social'?'Run monthly report':'Run competitive analysis'}));await tick();await tick();
+  expect(screen.getByText(kind==='social'?'The monthly report has not started yet.':'The analysis has not started yet.')).toBeInTheDocument();expect(screen.queryByRole('alert')).toBeNull();
  });
 });
 
 it('asks for the monthly report with no trend switch: trends come from the stored weeks',async()=>{
  f.invokes.mockResolvedValue({data:{job_id:'job',queued:true},error:null});mount('social');await tick();await tick();
  expect(screen.queryByRole('switch')).toBeNull();expect(screen.queryByText(/include trend|trend analysis|trend settings/i)).toBeNull();
- fireEvent.click(screen.getByRole('button',{name:'Run full analysis'}));await tick();
+ fireEvent.click(screen.getByRole('button',{name:'Run monthly report'}));await tick();
  expect(f.invokes).toHaveBeenCalledTimes(1);
- expect(f.invokes).toHaveBeenCalledWith('run-report',{body:{client_id:'client',kind:'social',date_range_start:'2026-09-01',date_range_end:'2026-09-17'}});
+ expect(f.invokes).toHaveBeenCalledWith('run-report',{body:{client_id:'client',kind:'social',date_range_start:'2026-08-01',date_range_end:'2026-08-31'}});
 });
 
 for (const state of ['missing','weak']) it(`runs a confirmed competitive selection whose profiles are ${state}: tracking reads RivalIQ by website`,async()=>{
@@ -97,4 +98,43 @@ it('custom periods reject reversed/future dates and accept a single complete day
  fireEvent.change(start,{target:{value:'2026-09-16'}});fireEvent.change(end,{target:{value:'2026-09-15'}});expect(run).toBeDisabled();
  fireEvent.change(end,{target:{value:'2026-09-18'}});expect(run).toBeDisabled();
  fireEvent.change(end,{target:{value:'2026-09-16'}});expect(run).toBeEnabled();expect(screen.getByText(/1 days of posts/)).toBeInTheDocument();expect(f.invokes).not.toHaveBeenCalled();
+});
+
+describe('the monthly report run page',()=>{
+ it('names the monthly report in its title, list and button, states the usual time, and lists no keywords or rules',async()=>{
+  f.past=[{id:'r1',client_id:'client',status:'completed',created_at:'2026-09-01T08:00:00Z',date_range_start:'2026-08-01',date_range_end:'2026-08-31',duration_minutes:8}];
+  mount('social');await tick();await tick();
+  expect(screen.getByText('Recent monthly reports')).toBeInTheDocument();
+  expect(screen.getByText('This usually takes about 10 minutes.')).toBeInTheDocument();
+  expect(screen.queryByText('Keywords')).toBeNull();
+  expect(screen.queryByText(/90 minutes|comparison period|Sprout/)).toBeNull();
+  expect(screen.queryByText(/Recent analyses|Run full analysis/)).toBeNull();
+ });
+ it('lists one ready report for a month that was run again',async()=>{
+  const row=(id:string,at:string)=>({id,client_id:'client',status:'completed',created_at:at,date_range_start:'2026-08-01',date_range_end:'2026-08-31',duration_minutes:8});
+  f.past=[row('new','2026-09-03T08:00:00Z'),row('old','2026-09-01T08:00:00Z')];
+  mount('social');await tick();await tick();
+  expect(screen.getAllByText('Ready')).toHaveLength(1);
+ });
+ it('defaults to the last complete month and takes today from the client\'s zone, not the browser\'s',async()=>{
+  // 22:30 UTC on 12 Nov is already 13 Nov in Israel and still 12 Nov in New York.
+  vi.setSystemTime(new Date('2026-11-12T22:30:00Z'));f.zone='America/New_York';
+  mount('social');await tick();await tick();
+  const start=screen.getByLabelText('Start date') as HTMLInputElement,end=screen.getByLabelText('End date') as HTMLInputElement;
+  expect([start.value,end.value]).toEqual(['2026-10-01','2026-10-31']);
+  expect(end.max).toBe('2026-11-12');
+ });
+ it('rolls to the new month when the client\'s zone has already crossed it',async()=>{
+  vi.setSystemTime(new Date('2026-11-30T22:30:00Z'));f.zone='Asia/Jerusalem';
+  mount('social');await tick();await tick();
+  expect([(screen.getByLabelText('Start date') as HTMLInputElement).value,(screen.getByLabelText('End date') as HTMLInputElement).value]).toEqual(['2026-11-01','2026-11-30']);
+  expect((screen.getByLabelText('End date') as HTMLInputElement).max).toBe('2026-12-01');
+ });
+ it('does not ask for a reversed or future period',async()=>{
+  mount('social');await tick();await tick();
+  const run=screen.getByRole('button',{name:'Run monthly report'});expect(run).toBeEnabled();
+  fireEvent.change(screen.getByLabelText('End date'),{target:{value:'2026-09-18'}});expect(run).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('End date'),{target:{value:'2026-07-31'}});expect(run).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('End date'),{target:{value:'2026-08-31'}});expect(run).toBeEnabled();
+ });
 });

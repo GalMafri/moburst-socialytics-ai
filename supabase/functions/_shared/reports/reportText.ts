@@ -26,13 +26,15 @@
 
 import { normalizedCompetitiveMetrics } from "../competitive/reportMetrics.ts";
 import { sourceCompetitiveSummary, withCompetitiveEvidenceLimits } from "../competitive/reportEvidence.ts";
+import { SPROUT_RATE_LABEL } from "./rateNames.ts";
 import { sproutEngagementRate, sproutEngagements, sproutImpressions } from "./socialFigures.ts";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
 
 export type ReportKind = "competitive" | "social";
-export type FigureKind = "percent" | "posts" | "cadence" | "audience" | "engagement" | "impressions";
+/** "change": the count by which a figure changed, as a summary line writes it after the percent ("↓ 13817% (+829)"). */
+export type FigureKind = "percent" | "posts" | "cadence" | "audience" | "engagement" | "impressions" | "change";
 export type Figure = { key: string; label: string; kind: FigureKind; value: number };
 
 const valid = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n);
@@ -141,13 +143,16 @@ export function socialFigures(reportData: Any): Figure[] {
     h.add(`${key}|engagements`, `${label}, engagements`, "engagement", sproutEngagements(m));
     h.add(`${key}|impressions`, `${label}, impressions`, "impressions", sproutImpressions(m));
     h.add(`${key}|views`, `${label}, video views`, "impressions", num(m.video_views));
-    h.add(`${key}|engagement_rate`, `${label}, Sprout engagement rate`, "percent", sproutEngagementRate(m), RATE);
+    h.add(`${key}|engagement_rate`, `${label}, ${SPROUT_RATE_LABEL}`, "percent", sproutEngagementRate(m), RATE);
   };
   const changes = (key: string, label: string, ch: Any) => {
     // Text writes a fall as "down 28%": a change is matched by its size.
+    // Its count is matched the same way: "(+829)" or "(-12)".
     for (const [metric, v] of Object.entries(ch || {}) as [string, Any][]) {
       const pct = num(v?.percent);
+      const count = num(v?.absolute);
       h.add(`${key}|${metric}_change`, `${label}, ${metric.replace(/_/g, " ")} change`, "percent", pct == null ? null : Math.abs(pct));
+      h.add(`${key}|${metric}_change_count`, `${label}, ${metric.replace(/_/g, " ")} change in count`, "change", count == null ? null : Math.abs(count));
     }
   };
   for (const p of Array.isArray(sp.platform_breakdown) ? sp.platform_breakdown : []) {
@@ -205,10 +210,14 @@ const UNIT_AFTER: Array<[FigureKind, RegExp]> = [
 ];
 const TARGET_BEFORE = /\b(?:target(?:ing)?|aim(?:ing)?(?:\s+for)?|goal|get\s+to|toward|towards|hit|reach\s+for|at\s+least)\s*(?:of\s+|an?\s+|the\s+)?(?:[a-z]+\s+){0,3}$/i;
 
+/** A signed count in brackets right after a percent: the count of a change ("↓ 13817% (+829)"). */
+const CHANGE_COUNT_BEFORE = /%\s*\(\s*[+\-\u2212]$/;
+
 /**
  * The numbers a text quotes as a figure: a percentage (a rate, a share or a
- * change), or a count of posts, followers, engagements or impressions and
- * views, or posts a week. A target is not a quoted figure.
+ * change), the count of a change written after its percent, or a count of
+ * posts, followers, engagements or impressions and views, or posts a week. A
+ * target is not a quoted figure.
  */
 export function quotedFigures(text: string): Claim[] {
   const claims: Claim[] = [];
@@ -216,7 +225,8 @@ export function quotedFigures(text: string): Claim[] {
     const after = text.slice(n.end, n.end + 40);
     if (/^\s?\+/.test(after)) continue;
     if (TARGET_BEFORE.test(text.slice(Math.max(0, n.start - 40), n.start))) continue;
-    const kind: FigureKind | undefined = n.percent ? "percent" : UNIT_AFTER.find(([, re]) => re.test(after))?.[0];
+    const changeCount = !n.percent && CHANGE_COUNT_BEFORE.test(text.slice(Math.max(0, n.start - 12), n.start)) && /^\s*\)/.test(after);
+    const kind: FigureKind | undefined = n.percent ? "percent" : changeCount ? "change" : UNIT_AFTER.find(([, re]) => re.test(after))?.[0];
     if (!kind) continue;
     claims.push({ text: n.text, value: n.value, tolerance: n.tolerance, kind, start: n.start, end: n.end });
   }
@@ -380,7 +390,7 @@ export const CORRECTION_SYSTEM = [
 export function correctionPrompt(context: { client: string; kind: ReportKind; period?: string | null }, stale: StaleSentence[], shown: Figure[]): string {
   const lines = [
     `Report: ${context.kind === "competitive" ? "competitive analysis" : "monthly social report"} for ${context.client}${context.period ? `, ${context.period}` : ""}.`,
-    "Comparisons with competitors count the same actions for every company: likes, comments and shares (not on Instagram or YouTube), divided by impressions, with views on TikTok and YouTube. That is the engagement rate compared on likes, comments and shares. The client's comparison figures come from its Sprout posts with ads left out; competitors' from RivalIQ. The client's own monthly figures are Sprout's as Sprout reports them, and the Sprout engagement rate is Sprout's engagements over Sprout's impressions.",
+    `Comparisons with competitors count the same actions for every company: likes, comments and shares (not on Instagram or YouTube), divided by impressions, with views on TikTok and YouTube. That is the engagement rate compared on likes, comments and shares. The client's comparison figures come from its Sprout posts with ads left out; competitors' from RivalIQ. The client's own monthly figures are Sprout's as Sprout reports them, and the ${SPROUT_RATE_LABEL.toLowerCase()} is Sprout's engagements over Sprout's impressions.`,
     "",
     "Figures the report shows now:",
     ...figureList(stale, shown).map((l) => `- ${l}`),
@@ -414,9 +424,261 @@ export function parseCorrection(text: string): Map<string, string> | null {
 }
 
 /**
+ * British spellings, by word family and ending: -our words with their
+ * suffixes ("behaviour", "behavioural"), -ise/-yse verbs with theirs
+ * ("organisation", "organisational", "recognisable", "analysed"), -re words
+ * and the few spelled differently. Text the reports write is American English.
+ * Plain endings such as "rise", "promise" or "exercise" are not matched, and
+ * neither is "analyses", the plural of "analysis".
+ */
+const OUR_ROOTS = "behaviour|colour|favour|flavour|honour|humour|labour|neighbour|rumour|harbour|endeavour|vapour|savour|armour|odour|rigour|vigour|splendour|parlour|saviour".split("|");
+const OUR_ENDINGS = "s|ed|ing|ful|fully|less|ist|ists|al|ally|ite|ites|able|ably|er|ers|hood|hoods".split("|");
+/** Prefixes the -our, -ise and -yse families take ("unfavourable", "reorganise", "misbehaviour", "underutilised"). */
+const PREFIXES = "un|re|dis|mis|de|over|under".split("|");
+const ISE_ROOTS = "conceptualis|galvanis|publicis|scrutinis|humanis|dramatis|sympathis|empathis|hypothesis|patronis|amortis|vandalis|colonis|hypnotis|marginalis|ostracis|plagiaris|pressuris|scandalis|sterilis|stigmatis|symbolis|terroris|theoris|tokenis|trivialis|urbanis|organis|optimis|personalis|prioritis|recognis|realis|specialis|maximis|minimis|summaris|customis|utilis|emphasis|localis|categoris|standardis|capitalis|finalis|visualis|normalis|generalis|authoris|digitis|mobilis|synchronis|criticis|apologis|monetis|harmonis|familiaris|memoris|socialis|stabilis|sensitis|popularis|commercialis|modernis|centralis|itemis|characteris|materialis|formalis|legalis|civilis|globalis|industrialis|internationalis|revolutionis|rationalis|neutralis|randomis|incentivis|operationalis|contextualis|sanitis|fertilis|hospitalis|victimis|jeopardis|energis|subsidis".split("|");
+const ISE_ENDINGS = "e|es|ed|ing|ation|ations|ational|able|ably|ability|er|ers".split("|");
+const YSE_ROOTS = "analys|paralys|catalys|dialys|hydrolys".split("|");
+const YSE_ENDINGS = "e|ed|ing|er|ers".split("|");
+// Words that double the l before a suffix only in British spelling: "fuelled",
+// "totalling", "modeller" (American "fueled", "totaling", "modeler"). Only
+// roots whose American inflected form keeps one l belong here. "install",
+// "enroll" and "fulfill" double the l in American English too ("installed"),
+// so only their bare British forms are matched (WORDS below). "cancelled" is
+// accepted American spelling and is not matched.
+const LL_ROOTS = "fuel|level|channel|counsel|total|travel|model|label|signal|equal|dial|pencil|marvel|quarrel|tunnel|duel|jewel".split("|");
+const LL_ENDINGS = "ed|ing|er|ers".split("|");
+/** Single British words and their American spelling. */
+const WORDS: Record<string, string> = {
+  centre: "center", centres: "centers", centred: "centered", centring: "centering",
+  theatre: "theater", theatres: "theaters", metre: "meter", metres: "meters", litre: "liter", litres: "liters",
+  fibre: "fiber", fibres: "fibers", calibre: "caliber", lustre: "luster", sombre: "somber",
+  programme: "program", programmes: "programs", judgement: "judgment", whilst: "while", amongst: "among", learnt: "learned",
+  licence: "license", licences: "licenses", defence: "defense", offence: "offense", pretence: "pretense",
+  cheque: "check", cheques: "checks", cosy: "cozy", tyre: "tire", tyres: "tires", mould: "mold", plough: "plow", aluminium: "aluminum",
+  artefact: "artifact", artefacts: "artifacts", enquiry: "inquiry", enquiries: "inquiries", counsellor: "counselor", counsellors: "counselors",
+  ageing: "aging", jewellery: "jewelry",
+  practise: "practice", practises: "practices", practised: "practiced", practising: "practicing",
+  sceptic: "skeptic", sceptics: "skeptics", sceptical: "skeptical", sceptically: "skeptically", scepticism: "skepticism",
+  manoeuvre: "maneuver", manoeuvres: "maneuvers", manoeuvred: "maneuvered", manoeuvring: "maneuvering",
+  // British forms of words American English spells with -ll.
+  instal: "install", instals: "installs", instalment: "installment", instalments: "installments",
+  enrol: "enroll", enrols: "enrolls", enrolment: "enrollment", enrolments: "enrollments",
+  fulfil: "fulfill", fulfils: "fulfills", fulfilment: "fulfillment", fulfilments: "fulfillments",
+};
+
+/** The word families the check matches, for tests that walk every form. */
+export const SPELLING_FAMILIES = {
+  our: { roots: OUR_ROOTS, endings: OUR_ENDINGS },
+  ise: { roots: ISE_ROOTS, endings: ISE_ENDINGS },
+  yse: { roots: YSE_ROOTS, endings: YSE_ENDINGS },
+  ll: { roots: LL_ROOTS, endings: LL_ENDINGS },
+  words: Object.keys(WORDS),
+} as const;
+
+const alt = (xs: readonly string[]) => [...xs].sort((a, b) => b.length - a.length).join("|");
+const PREFIX = `(?:${alt(PREFIXES)})?`;
+const BRITISH_SOURCE = "\\b(?:"
+  + `${PREFIX}(?:${alt(OUR_ROOTS)})(?:${alt(OUR_ENDINGS)})?`
+  + `|${PREFIX}(?:${alt(ISE_ROOTS)})(?:${alt(ISE_ENDINGS)})`
+  + `|${PREFIX}(?:${alt(YSE_ROOTS)})(?:${alt(YSE_ENDINGS)})`
+  + `|(?:${alt(LL_ROOTS)})l(?:${alt(LL_ENDINGS)})`
+  + `|${alt(Object.keys(WORDS))}`
+  + ")\\b";
+const BRITISH_SPELLING = new RegExp(BRITISH_SOURCE, "i");
+
+/** The American spelling of one word the check matches (a prefix kept as written), in the word's own case. */
+function toAmerican(word: string): string {
+  const own = toAmericanBare(word);
+  if (own !== word) return own;
+  const prefix = PREFIXES.find((p) => word.toLowerCase().startsWith(p) && toAmericanBare(word.slice(p.length)) !== word.slice(p.length));
+  return prefix ? word.slice(0, prefix.length) + toAmericanBare(word.slice(prefix.length)) : word;
+}
+
+function toAmericanBare(word: string): string {
+  const w = word.toLowerCase();
+  const strip = (roots: readonly string[], endings: readonly string[], optional = false) => {
+    for (const r of [...roots].sort((a, b) => b.length - a.length)) {
+      if (!w.startsWith(r)) continue;
+      const e = w.slice(r.length);
+      if (endings.includes(e) || (optional && e === "")) return { r, e };
+    }
+    return null;
+  };
+  let out = WORDS[w];
+  if (!out) {
+    const ll = LL_ROOTS.find((r) => w.startsWith(`${r}l`) && LL_ENDINGS.includes(w.slice(r.length + 1)));
+    const our = strip(OUR_ROOTS, OUR_ENDINGS, true);
+    const ise = strip(ISE_ROOTS, ISE_ENDINGS) ?? strip(YSE_ROOTS, YSE_ENDINGS);
+    if (ll) out = ll + w.slice(ll.length + 1);
+    else if (our) out = our.r.replace(/our$/, "or") + our.e;
+    else if (ise) out = `${ise.r.slice(0, -1)}z${ise.e}`;
+    else return word;
+  }
+  if (word.length > 1 && word === word.toUpperCase()) return out.toUpperCase();
+  return /^\p{Lu}/u.test(word) ? out[0].toUpperCase() + out.slice(1) : out;
+}
+
+/** Text inside double or single quotation marks (a post or a client term quoted as written). An apostrophe inside a word does not open a quote. */
+const QUOTED = /"[^"]*"|\u201c[^\u201d]*\u201d|(?<![\p{L}\p{N}])'[^'\n]*'(?![\p{L}\p{N}])|\u2018[^\u2019\n]*\u2019(?![\p{L}\p{N}])/gu;
+
+/** A pattern for the names of companies, which may hold any word; null when there are none. */
+export function namesPattern(names: Array<string | null | undefined>): RegExp | null {
+  const list = [...new Set(names.map((n) => String(n ?? "").trim()).filter(Boolean))].sort((a, b) => b.length - a.length);
+  return list.length ? new RegExp(list.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "gi") : null;
+}
+
+/**
+ * What a text may spell the British way without it being the model's
+ * spelling: the names of companies (any words), and the phrases of the text
+ * the analysis read that hold a British word (a client's own pillar "Human
+ * Behaviour Insights", a trend caption "Colour Your Accessory Box"). A phrase
+ * is kept by its words, lowercased, with each run of spaces as one space.
+ */
+export interface Exemption { names: RegExp | null; phrases: Set<string> }
+/** What the spelling check is given to leave out: an Exemption, or a names pattern alone. */
+export type SpellingExempt = Exemption | RegExp | null;
+
+/** A word as the check reads it: letters and digits, joined by an apostrophe or a hyphen ("Armour's", "colour-coded"). */
+const TOKEN = /[\p{L}\p{N}]+(?:['\u2019-][\p{L}\p{N}]+)*/gu;
+type Token = { at: number; end: number; word: string };
+const tokensOf = (t: string): Token[] => [...t.matchAll(TOKEN)].map((m) => ({ at: m.index ?? 0, end: (m.index ?? 0) + m[0].length, word: m[0] }));
+const phraseKey = (s: string) => s.toLowerCase().replace(/\s+/g, " ");
+/** The longest phrase kept: the British word with two neighbors on each side. */
+const PHRASE_TOKENS = 5;
+
+/**
+ * What an analysis may spell the British way: the names, and the phrases of
+ * the text the analysis read that hold a British word. A phrase is the word
+ * with up to two neighbors on each side, or the whole text when it is that
+ * one word. The same word on its own in the model's text is still its
+ * spelling. Null when there is nothing to leave out.
+ */
+export function exemptPattern(names: Array<string | null | undefined>, sources: string[]): Exemption | null {
+  const own = new Set<string>();
+  const only = new RegExp(`^(?:${BRITISH_SPELLING.source})$`, "i");
+  // A token's own word: "Armour's" is "Armour", "colour-coded" is "colour" and "coded".
+  const base = (word: string) => word.replace(/['\u2019]s$/i, "");
+  const british = (word: string) => base(word).split("-").some((part) => only.test(part));
+  for (const t of sources) {
+    const tokens = tokensOf(t);
+    if (tokens.length === 1 && british(tokens[0].word)) own.add(phraseKey(tokens[0].word));
+    tokens.forEach((tok, i) => {
+      if (!british(tok.word)) return;
+      for (let from = Math.max(0, i - 2); from <= i; from++) {
+        for (let to = i; to <= Math.min(tokens.length - 1, i + 2); to++) {
+          if (to <= from) continue;
+          own.add(phraseKey(t.slice(tokens[from].at, tokens[to].end)));
+          // The phrase that ends on the word without its possessive ("Under Armour" from "Under Armour's").
+          if (to === i) own.add(phraseKey(t.slice(tokens[from].at, tokens[to].at + base(tokens[to].word).length)));
+        }
+      }
+    });
+  }
+  const nameList = [...new Set(names.map((n) => String(n ?? "").trim()).filter(Boolean))].sort((x, y) => y.length - x.length);
+  const esc = (n: string) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+  const namesRe = nameList.length ? new RegExp(nameList.map(esc).join("|"), "giu") : null;
+  return namesRe || own.size ? { names: namesRe, phrases: own } : null;
+}
+
+/** Where a phrase may start and end inside a token: at its edges, and at each apostrophe or hyphen in it ("colour" in "colour-coded", "Armour" in "Armour's"). */
+function cuts(text: string, tok: Token): { starts: number[]; ends: number[] } {
+  const starts = [tok.at];
+  const ends = [tok.end];
+  for (let k = tok.at; k < tok.end; k++) {
+    if (/['\u2019-]/.test(text[k])) { ends.push(k); starts.push(k + 1); }
+  }
+  return { starts, ends };
+}
+
+/**
+ * Whether the British word at `at` sits in one of the input's own phrases.
+ * Each word is looked up by the phrases around it (at most five words), so
+ * the cost grows with the text, not with the number of phrases.
+ */
+function inOwnPhrase(text: string, tokens: Token[], at: number, end: number, phrases: Set<string>): boolean {
+  // The token that holds the word, by binary search over the tokens in text order.
+  let lo = 0;
+  let hi = tokens.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (tokens[mid].at <= at) lo = mid; else hi = mid - 1;
+  }
+  const i = tokens[lo] && tokens[lo].at <= at && end <= tokens[lo].end ? lo : -1;
+  if (i < 0) return false;
+  for (let from = Math.max(0, i - (PHRASE_TOKENS - 1)); from <= i; from++) {
+    for (let to = i; to <= Math.min(tokens.length - 1, from + PHRASE_TOKENS - 1); to++) {
+      for (const s of cuts(text, tokens[from]).starts) {
+        if (s > at) continue;
+        for (const e of cuts(text, tokens[to]).ends) {
+          if (e < end) continue;
+          if (phrases.has(phraseKey(text.slice(s, e)))) return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * The first British spelling in a text, or null when it is all American.
+ * Company names and text inside quotation marks (a post quoted as it was
+ * written) are left out.
+ */
+export function britishSpelling(text: string, names: SpellingExempt = null): string | null {
+  return britishMatches(text, names)[0]?.word ?? null;
+}
+
+/** "Theatre" and "Centre" written as part of a name ("Majestic Theatre", "Rogers Centre") keep their own spelling. */
+const NAME_WORDS = new Set(["centre", "centres", "theatre", "theatres"]);
+/** Words that start a phrase without naming anything ("The Theatre"). */
+const NOT_A_NAME = new Set(["the", "a", "an", "this", "that", "these", "those", "our", "your", "their", "its", "his", "her", "my", "in", "at", "on", "for", "of", "and", "or", "to", "by", "with"]);
+function partOfName(text: string, at: number, word: string): boolean {
+  if (!NAME_WORDS.has(word.toLowerCase()) || !/^\p{Lu}/u.test(word)) return false;
+  const before = /([\p{L}\p{N}'\u2019&.-]+)\s+$/u.exec(text.slice(0, at))?.[1];
+  return !!before && /^\p{Lu}/u.test(before) && !/[.!?:;]$/.test(before) && !NOT_A_NAME.has(before.toLowerCase());
+}
+
+/** Links, @handles and #hashtags: an address or a tag is written as it is, whatever its words. */
+const LINKS = /\bhttps?:\/\/\S+|\bwww\.\S+|(?<![\p{L}\p{N}_])[@#][\p{L}\p{N}_]+/gu;
+
+/** Every British spelling in a text with where it sits: quoted text, links, handles, hashtags and names left out, and the input's own phrases and a name's own Theatre or Centre. */
+function britishMatches(text: string, exempt: SpellingExempt): Array<{ at: number; word: string }> {
+  const blank = (m: string) => " ".repeat(m.length);
+  let masked = text.replace(QUOTED, blank).replace(LINKS, blank);
+  const names = exempt instanceof RegExp ? exempt : exempt?.names ?? null;
+  if (names) masked = masked.replace(new RegExp(names.source, names.flags.includes("g") ? names.flags : `${names.flags}g`), blank);
+  const phrases = exempt instanceof RegExp ? null : exempt?.phrases;
+  let tokens: Token[] | null = null;
+  const out: Array<{ at: number; word: string }> = [];
+  for (const m of masked.matchAll(new RegExp(BRITISH_SOURCE, "gi"))) {
+    const at = m.index ?? 0;
+    if (partOfName(text, at, m[0])) continue;
+    if (phrases?.size && inOwnPhrase(text, tokens ??= tokensOf(text), at, at + m[0].length, phrases)) continue;
+    out.push({ at, word: m[0] });
+  }
+  return out;
+}
+
+/**
+ * The text with every British spelling the check above flags written the
+ * American way, by the word map (no model). Quoted text, names and the
+ * input's own phrases (`exempt`, as for britishSpelling) stay as written, and
+ * so does every other character.
+ */
+export function americanSpelling(text: string, exempt: SpellingExempt = null): string {
+  let out = "";
+  let at = 0;
+  for (const m of britishMatches(text, exempt)) {
+    out += text.slice(at, m.at) + toAmerican(m.word);
+    at = m.at + m.word.length;
+  }
+  return out + text.slice(at);
+}
+
+/**
  * Why a corrected sentence cannot be used, or null when it can: it must
  * answer every sentence, stay a sentence of about the same length, add no
- * dash, and every number in it must be one the sentence already had or one
+ * dash or British spelling, and every number in it must be one the sentence already had or one
  * the report shows now (nothing invented).
  */
 export function checkCorrection(stale: StaleSentence[], answer: Map<string, string> | null, shown: Figure[]): string | null {
@@ -428,6 +690,8 @@ export function checkCorrection(stale: StaleSentence[], answer: Map<string, stri
     if (/\n/.test(text) && !/\n/.test(s.sentence)) return `${s.id} came back as more than one line.`;
     const dashes = (t: string) => (t.match(/[\u2013\u2014]/g) || []).length;
     if (dashes(text) > dashes(s.sentence)) return `${s.id} came back with a dash.`;
+    const british = britishSpelling(text);
+    if (british && !britishSpelling(s.sentence)) return `${s.id} came back with the British spelling "${british}".`;
     const before = numbersIn(s.sentence);
     for (const n of numbersIn(text)) {
       const kept = before.some((b) => Math.abs(b.value - n.value) <= Math.max(b.tolerance, n.tolerance));

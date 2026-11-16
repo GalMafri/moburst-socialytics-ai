@@ -9,8 +9,8 @@
  *   (likes, comments and shares; views as the impressions of video), because
  *   competitors have no click data.
  */
-export const SPROUT_RATE_LABEL = "Sprout engagement rate";
-export const SPROUT_RATE_NOTE = "Sprout's engagements divided by Sprout's impressions, as Sprout reports them";
+export const SPROUT_RATE_LABEL = "Reported engagement rate";
+export const SPROUT_RATE_NOTE = "All engagements, including clicks, divided by impressions";
 export const COMPARED_RATE_LABEL = "Engagement rate, compared on likes, comments and shares";
 /** For a small tile beside the full label. */
 export const COMPARED_RATE_SHORT = "Compared engagement rate";

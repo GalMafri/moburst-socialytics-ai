@@ -6,13 +6,13 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import type { ApifyClient } from "../../../../functions/_shared/apify/client";
+import { ApifyTokenRefused, type ApifyClient } from "../../../../functions/_shared/apify/client";
 import { makeRegistry } from "../../../../functions/_shared/pipelines/registry";
 import { startPipelineRun } from "../../../../functions/_shared/pipelines/store";
 import { drivePipeline, pipelineDb, testClock } from "../../../../functions/_shared/pipelines/testDriver";
 import { TREND_SOURCES } from "../../../../functions/_shared/trends/sources";
 import { TREND_PLATFORMS, type TrendPlatform } from "../../../../functions/_shared/trends/types";
-import { TRENDS_PIPELINE, trendsPipeline, type TrendsDeps } from "../../../../functions/_shared/pipelines/definitions/trends";
+import { TRENDS_PIPELINE, trendsPipeline, trendWeekEnd, type TrendsDeps } from "../../../../functions/_shared/pipelines/definitions/trends";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -23,22 +23,26 @@ const ENV = (n: string) => ({ ANTHROPIC_API_KEY: "ak", APIFY_API_TOKEN: "ap" } a
 const NOW = "2026-11-01T10:00:00.000Z";
 
 /** The six actors, answering with the recorded rows. */
-type ApifyOptions = { fail?: TrendPlatform; answers?: Partial<Record<TrendPlatform, Any[][]>>; inputs?: Array<{ platform: TrendPlatform; input: Any }> };
+type ApifyOptions = { fail?: TrendPlatform | "all"; refuse?: number; gate?: { refuse: number | null; afterFirstStart?: boolean }; answers?: Partial<Record<TrendPlatform, Any[][]>>; inputs?: Array<{ platform: TrendPlatform; input: Any }> };
 function apify(calls: TrendPlatform[], o: ApifyOptions = {}): TrendsDeps["apify"] {
   const byActor = Object.fromEntries(TREND_PLATFORMS.map((p) => [TREND_SOURCES[p].actor.id, p])) as Record<string, TrendPlatform>;
   const runs: Record<string, { platform: TrendPlatform; rows: Any[] }> = {};
   const queued = Object.fromEntries(Object.entries(o.answers ?? {}).map(([k, v]) => [k, [...(v ?? [])]])) as Partial<Record<TrendPlatform, Any[][]>>;
   const client: ApifyClient = {
     async startRun(actorId, input) {
+      if (o.refuse || o.gate?.refuse) throw new ApifyTokenRefused(`Apify answered ${o.refuse ?? o.gate?.refuse}`, (o.refuse ?? o.gate?.refuse) as number);
       const platform = byActor[actorId];
       calls.push(platform);
       o.inputs?.push({ platform, input });
       const id = `r${calls.length}`;
       runs[id] = { platform, rows: queued[platform]?.shift() ?? fixture(platform) };
+      // The account starts refusing the token once a run has started.
+      if (o.gate?.afterFirstStart) o.gate.refuse = 401;
       return { id, status: "RUNNING", defaultDatasetId: `ds-${id}` };
     },
     async getRun(id) {
-      return { id, status: o.fail === runs[id].platform ? "FAILED" : "SUCCEEDED", defaultDatasetId: `ds-${id}`, usageTotalUsd: 0.01 };
+      if (o.gate?.refuse) throw new ApifyTokenRefused(`Apify answered ${o.gate.refuse}`, o.gate.refuse);
+      return { id, status: o.fail === "all" || o.fail === runs[id].platform ? "FAILED" : "SUCCEEDED", defaultDatasetId: `ds-${id}`, usageTotalUsd: 0.01 };
     },
     async datasetPage() { return []; },
     async datasetItems(datasetId) { return runs[datasetId.slice(3)].rows; },
@@ -113,14 +117,14 @@ function setup(o: SetupOptions = {}) {
   return { clock, db };
 }
 
-async function run(o: SetupOptions & ClaudeOptions & { deps?: Partial<TrendsDeps>; fail?: TrendPlatform; answers?: ApifyOptions["answers"]; refreshMidRun?: boolean } = {}) {
+async function run(o: SetupOptions & ClaudeOptions & { deps?: Partial<TrendsDeps>; fail?: TrendPlatform | "all"; refuse?: number; answers?: ApifyOptions["answers"]; refreshMidRun?: boolean } = {}) {
   const { clock, db } = setup(o);
   const calls: TrendPlatform[] = [];
   const requests: Any[] = [];
   const inputs: Array<{ platform: TrendPlatform; input: Any }> = [];
   // The monthly hashtag refresh lands while Claude is rewriting, after the run read the profile.
   const onRewrite = o.refreshMidRun ? () => { db.tables.trend_profiles[0].hashtags_at = "2026-11-01T09:30:00.000Z"; } : o.onRewrite;
-  const pipeline = trendsPipeline({ apify: apify(calls, { fail: o.fail, answers: o.answers, inputs }), claudeFetch: claude(requests, { ...o, onRewrite }), ...o.deps });
+  const pipeline = trendsPipeline({ apify: apify(calls, { fail: o.fail, refuse: o.refuse, answers: o.answers, inputs }), claudeFetch: claude(requests, { ...o, onRewrite }), ...o.deps });
   const registry = makeRegistry([pipeline], () => true);
   const { run_id } = await startPipelineRun(db, { mode: "app", pipeline, clientId: "c1", realTable: "trend_weeks", realId: "w1", input: { week_start: "2026-10-26" }, dedupe: "trends:c1:2026-10-26" });
   const driven = await drivePipeline(db, registry, run_id, { clock, env: ENV });
@@ -168,6 +172,89 @@ describe("trends_v1", () => {
     expect(r.week.platforms.linkedin.status).toBe("failed");
     expect(r.posts.some((p) => p.platform === "linkedin")).toBe(false);
     expect(r.posts.some((p) => p.kept && p.platform === "tiktok")).toBe(true);
+  });
+
+  it("stops the run and writes no week when every watched platform failed, so the week is collected again", async () => {
+    const r = await run({ fail: "all" });
+    expect(r.driven.outcome.status).toBe("failed");
+    expect(r.db.tables.report_pipeline_runs.find((x) => x.id === r.run_id)!.status).toBe("stopped");
+    expect(r.week.status).toBe("running");
+    expect(r.posts).toHaveLength(0);
+    // Saving again cannot help, so the save step is not tried again.
+    expect(r.driven.calls.filter((c) => c.step === "save")).toHaveLength(1);
+  });
+
+  it("waits out a refused token of any length as a state of the run: no try, no stop, the same run read once it works", async () => {
+    const baseline = await run();
+    const { clock, db } = setup();
+    const calls: TrendPlatform[] = [];
+    const gate = { refuse: null as number | null, afterFirstStart: true };
+    const pipeline = trendsPipeline({ apify: apify(calls, { gate }), claudeFetch: claude([]) });
+    const registry = makeRegistry([pipeline], () => true);
+    // Monday morning of the run's week, so 15 hours of waiting stay inside the week.
+    clock.set(new Date("2026-10-26T06:00:00.000Z"));
+    const { run_id } = await startPipelineRun(db, { mode: "app", pipeline, clientId: "c1", realTable: "trend_weeks", realId: "w1", input: { week_start: "2026-10-26" }, dedupe: "trends:c1:2026-10-26" });
+    const job = db.tables.scheduled_jobs.find((j) => j.payload?.run_id === run_id)!;
+    const started = clock.now().getTime();
+    // Refused for 15 fake hours: past the run's 12 hours and a started job's 180 minutes.
+    for (let round = 0; clock.now().getTime() - started < 15 * 3_600_000; round++) {
+      if (round > 30) throw new Error("the refusal never lasted 15 fake hours");
+      const ended = await drivePipeline(db, registry, run_id, { clock, env: ENV, maxCalls: 20 }).then(() => true, (e) => { if (!String(e.message).includes("did not finish")) throw e; return false; });
+      if (ended) throw new Error("the run ended while the token was refused");
+    }
+    expect(db.tables.trend_weeks.find((w) => w.id === "w1")!.status).toBe("running");
+    expect(db.tables.report_pipeline_runs.find((x) => x.id === run_id)!.status).toBe("running");
+    expect(job.attempts).toBeLessThanOrEqual(1);
+    expect(job.payload.poll.handle).toMatchObject({ apify_run_id: "r1" });
+    expect(calls).toEqual([calls[0]]);
+
+    // The token works again: the same run is read, no second one is started for it, and the week is saved whole.
+    gate.refuse = null;
+    gate.afterFirstStart = false;
+    const done = await drivePipeline(db, registry, run_id, { clock, env: ENV });
+    expect(done.outcome.status).toBe("done");
+    expect(db.tables.trend_weeks.find((w) => w.id === "w1")!.status).toBe("done");
+    expect(calls.length).toBe(baseline.calls.length);
+  });
+
+  it("an account wait cannot pass the end of the run's week: the run stops, and only the new week's run goes on once the token works", async () => {
+    const { clock, db } = setup();
+    const calls: TrendPlatform[] = [];
+    const gate = { refuse: null as number | null, afterFirstStart: true };
+    const pipeline = trendsPipeline({ apify: apify(calls, { gate }), claudeFetch: claude([]) });
+    const registry = makeRegistry([pipeline], () => true);
+    // Sunday morning of the week of 26 Oct (Israel time): the week ends at midnight.
+    const { run_id } = await startPipelineRun(db, { mode: "app", pipeline, clientId: "c1", realTable: "trend_weeks", realId: "w1", input: { week_start: "2026-10-26" }, dedupe: "trends:c1:2026-10-26" });
+    const stopped = await drivePipeline(db, registry, run_id, { clock, env: ENV });
+    expect(stopped.outcome.status).toBe("failed");
+    const old = db.tables.report_pipeline_runs.find((x) => x.id === run_id)!;
+    expect(old.status).toBe("stopped");
+    expect(old.outcome).toContain("APIFY_API_TOKEN");
+    expect(clock.now().getTime()).toBeGreaterThanOrEqual(Date.parse("2026-11-01T22:00:00.000Z"));
+    expect(clock.now().getTime()).toBeLessThan(Date.parse("2026-11-01T23:00:00.000Z"));
+    // Nothing of the stopped run is saved; the week has no run going, so the weekly close step closes it.
+    expect(db.tables.trend_weeks.find((w) => w.id === "w1")!.status).toBe("running");
+    expect(calls).toHaveLength(1);
+
+    // The token works again: the stopped run is not looked at again, and the new week is collected.
+    gate.refuse = null;
+    gate.afterFirstStart = false;
+    clock.set(new Date("2026-11-02T08:00:00.000Z"));
+    const again = await drivePipeline(db, registry, run_id, { clock, env: ENV }).catch(() => null);
+    expect(again?.outcome.status ?? "skipped").not.toBe("done");
+    const fresh = await startPipelineRun(db, { mode: "app", pipeline, clientId: "c1", realTable: "trend_weeks", realId: "w2", input: { week_start: "2026-11-02" }, dedupe: "trends:c1:2026-11-02" });
+    const done = await drivePipeline(db, registry, fresh.run_id, { clock, env: ENV });
+    expect(done.outcome.status).toBe("done");
+    expect(db.tables.trend_weeks.find((w) => w.id === "w2")!.status).toBe("done");
+    expect(db.tables.trend_weeks.find((w) => w.id === "w1")!.status).toBe("running");
+  });
+
+  it("a week's horizon is the next Monday at midnight in Israel time, in winter and in summer", () => {
+    expect(trendWeekEnd("2026-10-26")!.toISOString()).toBe("2026-11-01T22:00:00.000Z");
+    expect(trendWeekEnd("2026-06-01")!.toISOString()).toBe("2026-06-07T21:00:00.000Z");
+    expect(trendWeekEnd("not a date")).toBeNull();
+    const run = { started_at: "2026-10-26T09:00:00.000Z", input: { week_start: "2026-10-26" } } as Any;
+    expect(trendsPipeline().waitHorizon!(run)!.toISOString()).toBe("2026-11-01T22:00:00.000Z");
   });
 
   it("re-asks once when the filter answer is wrong, then stores every candidate with nothing kept", async () => {

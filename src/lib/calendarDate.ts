@@ -1,3 +1,5 @@
+import { postingTimeOf } from "../../supabase/functions/_shared/calendar/reasonText";
+
 /** A calendar date must not move to the previous day during UTC serialization. */
 export function localDateString(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -19,7 +21,7 @@ export function scheduledInstant(date: string, time: string, timeZone: string): 
       hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
     });
   } catch {
-    throw new Error("The client's timezone is invalid. Correct it in Client Setup before scheduling.");
+    throw new Error("The client's timezone is invalid. Correct it in the client's setup before scheduling.");
   }
   const asWall = (instant: number) => {
     const parts = Object.fromEntries(formatter.formatToParts(instant).map((p) => [p.type, p.value]));
@@ -55,16 +57,48 @@ export function dateInputOf(label: string | null | undefined): string {
  * it names no time. Reads "6:45 PM", "6 PM", "6:45pm EST" and "18:45".
  */
 export function timeInputOf(postingTime: string | null | undefined): string {
-  const text = String(postingTime ?? "");
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const twelve = /\b(\d{1,2})(?::(\d{2}))?\s*([AP])\.?M\b/i.exec(text);
-  if (twelve) {
-    const h = Number(twelve[1]);
-    const min = Number(twelve[2] ?? "0");
-    if (h < 1 || h > 12 || min > 59) return "";
-    const pm = twelve[3].toUpperCase() === "P";
-    return `${pad((h % 12) + (pm ? 12 : 0))}:${pad(min)}`;
+  return postingTimeOf(postingTime) ?? "";
+}
+
+/** A posting time as minutes after midnight, for putting a day's posts in order; null when it names no time. */
+export function postingMinutes(postingTime: string | null | undefined): number | null {
+  const t = postingTimeOf(postingTime);
+  return t ? Number(t.slice(0, 2)) * 60 + Number(t.slice(3)) : null;
+}
+
+/** Sorts a day's posts by their time; a post with no time goes last. */
+export function byPostingTime(a: string | null | undefined, b: string | null | undefined): number {
+  return (postingMinutes(a) ?? Infinity) - (postingMinutes(b) ?? Infinity) || 0;
+}
+
+/**
+ * A posting time as people read it, in one form: "6:45 PM", with the client's
+ * zone name beside it when the zone is known ("6:45 PM EST"). The zone name is
+ * the one in force on the post's date (EST or EDT), or today's without a date.
+ */
+export function postingTimeText(postingTime: string | null | undefined, timeZone?: string | null, date?: string | null): string {
+  const t = postingTimeOf(postingTime);
+  if (!t) return "";
+  const h = Number(t.slice(0, 2));
+  const text = `${h % 12 || 12}:${t.slice(3)} ${h < 12 ? "AM" : "PM"}`;
+  if (!timeZone) return text;
+  try {
+    const at = /^\d{4}-\d{2}-\d{2}/.test(String(date ?? "")) ? new Date(`${String(date).slice(0, 10)}T12:00:00Z`) : new Date();
+    const zone = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "short" }).formatToParts(at).find((p) => p.type === "timeZoneName")?.value;
+    return zone ? `${text} ${zone}` : text;
+  } catch {
+    return text;
   }
-  const day = /\b([01]?\d|2[0-3]):([0-5]\d)\b/.exec(text);
-  return day ? `${pad(Number(day[1]))}:${day[2]}` : "";
+}
+
+/** The time most of these posts use, as HH:MM; a tie goes to the one that comes first (give the newest first). null with none. */
+export function commonPostingTime(times: Array<string | null | undefined>): string | null {
+  const counts = new Map<string, number>();
+  for (const t of times) {
+    const hhmm = postingTimeOf(t);
+    if (hhmm) counts.set(hhmm, (counts.get(hhmm) ?? 0) + 1);
+  }
+  let best: string | null = null;
+  for (const [t, n] of counts) if (best === null || n > (counts.get(best) ?? 0)) best = t;
+  return best;
 }

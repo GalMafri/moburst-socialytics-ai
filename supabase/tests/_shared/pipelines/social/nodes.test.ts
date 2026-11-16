@@ -3,7 +3,9 @@
 // fact and never tells anyone what to do; with no stored trends it says
 // nothing about trends at all.
 import { describe, expect, it } from "vitest";
-import { buildPresentationContent, generateRunSummary, prepareBriefText } from "../../../../functions/_shared/pipelines/social/nodes";
+import { MOBURST, moburstPages, moburstRequest } from "../../../../fixtures/pipelines/social";
+import { aggregateSprout, buildPresentationContent, combineBrief, generateRunSummary, prepareBriefText, workflowConfiguration } from "../../../../functions/_shared/pipelines/social/nodes";
+import { shownWarnings } from "../../../../functions/_shared/reports/shownWarnings";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -102,3 +104,57 @@ describe("Build Presentation Content on stored trends", () => {
 function post(url: string, platform: string): Any {
   return { platform, url, author: `creator ${url.slice(-3)}`, text: "A caption about planning.", posted_at: null, format: "short_video", views: 100, likes: 10, comments: 2, shares: 1, saves: 0 };
 }
+
+describe("the warnings the run summary writes", () => {
+  it("are all ones a report shows: a warning the engine can write never drops out of the API unseen", () => {
+    const written = new Set<string>();
+    const summarize = (gamma: Any, prepared: Any, combined: Any) => generateRunSummary({
+      gamma, presentation: {}, clientData: {}, combined, config: {}, sprout: null, ai: { sprout_performance_analysis: {} }, prepared,
+      industryTrends: null, startedAt: new Date("2026-11-01T00:00:00.000Z"), now: new Date("2026-11-01T00:05:00.000Z"),
+    }).warnings as string[];
+    const briefs = [
+      prepareBriefText({ brief_file_id: "f1", brief_text: "Saved brief." }, { text: "" }),
+      prepareBriefText({ brief_file_id: "f1", brief_text: "" }, { text: "" }),
+      prepareBriefText({ brief_text: "Saved brief." }, { text: "" }),
+    ];
+    const notSummarized = combineBrief({ error: "The brief analysis did not answer." }, { client_name: "X" }, { brief_text: "Some brief.", brief_source: "client_setup", brief_warning: "" });
+    for (const gamma of [{}, { _gamma_timeout: true }, { status: "completed", url: "https://gamma.app/docs/x" }]) {
+      for (const prepared of briefs) for (const w of summarize(gamma, prepared, {})) written.add(w);
+      for (const w of summarize(gamma, {}, notSummarized)) written.add(w);
+    }
+    expect(written.size).toBeGreaterThanOrEqual(5);
+    expect(shownWarnings([...written])).toEqual([...written]);
+  });
+});
+
+describe("Aggregate Sprout Social Data: the ranked lists the report page reads", () => {
+  const aggregate = (): Any => aggregateSprout({ pages: moburstPages(), combined: MOBURST.combine, config: workflowConfiguration(moburstRequest(), new Date("2026-10-01T10:00:00.000Z")), setup: MOBURST.sprout_setup });
+
+  it("stores, per platform, the top 5 by engagement and the top 5 by impressions, each ranked on its own figure", () => {
+    const out = aggregate();
+    const byEngagement = out.top_posts_by_platform as Record<string, Any[]>;
+    const byImpressions = out.top_posts_by_platform_impressions as Record<string, Any[]>;
+    expect(Object.keys(byImpressions).sort()).toEqual(Object.keys(byEngagement).sort());
+    for (const [platform, list] of Object.entries(byImpressions)) {
+      expect(list.length).toBeGreaterThan(0);
+      expect(list.length).toBeLessThanOrEqual(5);
+      expect(list.map((p) => p.impressions)).toEqual([...list.map((p) => p.impressions)].sort((a, b) => b - a));
+      expect(byEngagement[platform].map((p) => p.engagement)).toEqual([...byEngagement[platform].map((p) => p.engagement)].sort((a, b) => b - a));
+    }
+  });
+
+  it("holds a network's best post by impressions even when five others beat it on engagement", () => {
+    const pages = moburstPages();
+    const row = (id: number, impressions: number, engagements: number) => ({
+      ...pages.posts[0].data[0],
+      guid: `g${id}`,
+      perma_link: `https://example.com/p/${id}`,
+      metrics: { ...pages.posts[0].data[0].metrics, "lifetime.impressions": impressions, "lifetime.engagements": engagements },
+    });
+    const data = [row(1, 10, 900), row(2, 10, 800), row(3, 10, 700), row(4, 10, 600), row(5, 10, 500), row(6, 99999, 1)];
+    const out = aggregateSprout({ pages: { ...pages, posts: [{ ...pages.posts[0], data }] }, combined: MOBURST.combine, config: workflowConfiguration(moburstRequest(), new Date("2026-10-01T10:00:00.000Z")), setup: MOBURST.sprout_setup });
+    const platform = Object.keys(out.top_posts_by_platform)[0];
+    expect(out.top_posts_by_platform[platform].map((p: Any) => p.url)).not.toContain("https://example.com/p/6");
+    expect(out.top_posts_by_platform_impressions[platform][0].url).toBe("https://example.com/p/6");
+  });
+});

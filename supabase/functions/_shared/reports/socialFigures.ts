@@ -3,7 +3,7 @@
 // clients"). The team checks the monthly report against Sprout's own screen,
 // so the client's performance screens (the monthly report, Analytics, the
 // social side of the public API) show Sprout's figures as Sprout reports
-// them, and say so ("Sprout engagement rate"):
+// them, and say so ("Reported engagement rate"):
 //
 //   engagements      Sprout's own engagements total, which counts clicks
 //                    where Sprout does; a report stored before that total

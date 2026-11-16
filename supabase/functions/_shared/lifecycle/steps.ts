@@ -44,6 +44,7 @@ import { scrapeMarkdown, searchWeb } from "../net/firecrawl.ts";
 import { FollowFailure } from "../competitive/rivaliqFollowFailure.ts";
 import { followerMarkets, pageOf, runSocialRead, socialResult, socialVersionKey, topPostsText } from "./socialRead.ts";
 import { liveSocialIO } from "./socialIO.ts";
+import { linksTo, siteLinkSet } from "./siteLinks.ts";
 import { matchProfiles, platformsOf, profileKeyOf, profileListKey, siteProfileLinks, type SproutProfile } from "./accounts.ts";
 import { libraryPaths, MAX_REFS, pickBackground, placementFor } from "./designSettings.ts";
 import { referencesFor } from "../design-prompts/designRefs.ts";
@@ -60,7 +61,7 @@ import { activeTerms, askTwice, evidenceKey, hashtagsRequest, monthIn, parseHash
 import { HASHTAG_PLATFORMS } from "../trends/types.ts";
 import { liveStrategyIO, readPending, savePending, saveStrategy, startStrategy, strategyEvidence, strategyPhase, type StrategyIO } from "../strategy/write.ts";
 import { advancePublicRead, POLL_MINUTES } from "../strategy/publicRead.ts";
-import { desiredProfiles, profileInputs, profilesKey } from "../strategy/profiles.ts";
+import { desiredProfiles, profileInputs, profilesKey, syncProfiles } from "../strategy/profiles.ts";
 import { apifyClient, APIFY_TOKEN_ENV } from "../apify/client.ts";
 import type { StepOutcome, StepPolicy, StepRow } from "./policy.ts";
 import { clipText } from "../text/clip.ts";
@@ -143,7 +144,7 @@ export const deps = {
   strategyIO: (): StrategyIO => liveStrategyIO((url) => deps.trendIO().siteText(url)),
   /** The strategy's 90-day public read (strategy/publicRead.ts): the stored feed, and the app's Apify actors for what it does not cover. */
   strategyPublicRead: (db: Db, client: ClientRow, rows: Map<string, StepRow>) => advancePublicRead(db, { id: client.id, name: client.name },
-    { tracking: rows.get("tracking")?.result ?? null, brand_read: rows.get("brand_read")?.result ?? null }, deps.now(), {
+    { tracking: rows.get("tracking")?.result ?? null, brand_read: rows.get("brand_read")?.result ?? null, accounts: rows.get("accounts")?.result ?? null }, deps.now(), {
       apify: () => (env(APIFY_TOKEN_ENV) ? apifyClient({ token: env(APIFY_TOKEN_ENV) }) : null),
       feedSnapshots: (d, id) => feedSnapshots(d, id),
     }),
@@ -358,8 +359,8 @@ export const STEPS: Record<string, StepDef> = {
       const looked = { posts: posts.length, months: 12, ...(search ? { searched_at: search.searched_at, queries: search.queries, searched: search.tried } : {}) };
       if (!website) return { status: "waiting", reason: "website", recheckDays: 7, result: { ...looked, most_linked: found.most_linked, tried, ...statedOther } };
       // Which of the client's profiles the site links to, for the setup page's line.
-      const keys = new Set(linked);
-      const linkedNetwork = profiles.map((p) => ({ p, k: profileKeyOf(p) })).find((x) => x.k && keys.has(x.k))?.p.network_type ?? null;
+      const keys = siteLinkSet(linked);
+      const linkedNetwork = profiles.map((p) => ({ p, k: profileKeyOf(p) })).find((x) => x.k && linksTo(keys, x.k))?.p.network_type ?? null;
       const written = await writeClientFields(db, client.id, { website_url: website });
       return { status: "done", result: { ...looked, website, confirmed_by: confirmedBy, linked_network: linkedNetwork, found_at: now.toISOString(), written: written.written, kept: written.skipped, ...statedOther } };
     },
@@ -641,14 +642,17 @@ export const STEPS: Record<string, StepDef> = {
       const customer = String(client.sprout_customer_id || defaultSproutCustomerId());
       const profiles = await deps.listCustomerProfiles(customer);
       const textOnly = await parentPageFor(db, client);
-      let links = textOnly ? [] : (rows.get("brand_read")?.result?.site_profiles as string[] | undefined) ?? null;
-      if (!links && client.website_url) {
+      // The homepage's links are read here with a free page fetch, every run, and added to what the brand read stored: the stored list may predate the way a handle's own case is kept, and the brand read itself is a paid read that comes round every 180 days.
+      const stored = textOnly ? [] : (rows.get("brand_read")?.result?.site_profiles as string[] | undefined) ?? [];
+      let fresh: string[] = [];
+      if (!textOnly && client.website_url) {
         try {
-          links = siteProfileLinks((await deps.fetchSiteHtml(normalizeWebsite(String(client.website_url)), {})).html);
+          fresh = siteProfileLinks((await deps.fetchSiteHtml(normalizeWebsite(String(client.website_url)), {})).html);
         } catch {
-          links = [];
+          fresh = [];
         }
       }
+      const links = [...new Set([...stored, ...fresh])].sort();
       const { data: assignedRows, error } = await db.from("sprout_profiles").select("client_id, sprout_profile_id, network_type, is_active");
       if (error) throw new Error(`Could not read the assigned accounts: ${error.message}`);
       const assigned = new Map<string, string[]>();
@@ -659,7 +663,7 @@ export const STEPS: Record<string, StepDef> = {
       const { data: removedRows, error: removedError } = await db.from("sprout_profile_removals").select("sprout_profile_id").eq("client_id", client.id);
       if (removedError) throw new Error(`Could not read the client's removed accounts: ${removedError.message}`);
       const removed = new Set<string>((removedRows ?? []).map((r: { sprout_profile_id: unknown }) => String(r.sprout_profile_id)));
-      const matches = matchProfiles({ client: { id: client.id, name: client.name }, profiles, siteLinks: links ?? [], assigned, removed });
+      const matches = matchProfiles({ client: { id: client.id, name: client.name }, profiles, siteLinks: links, assigned, removed });
       if (matches.length) {
         const insert = matches.map((m) => ({
           client_id: client.id, sprout_profile_id: Number(m.profile.id), profile_name: m.profile.name, native_name: m.profile.native_name,
@@ -676,12 +680,17 @@ export const STEPS: Record<string, StepDef> = {
       if (platforms.length && lifecycleMayWrite(client.field_sources, "primary_platforms") && platforms.join(",") !== current.join(",")) {
         written = (await writeClientFields(db, client.id, { primary_platforms: platforms })).written;
       }
+      // The client's public profiles follow the same links, so a stored handle written without its case is mended here, not by a paid read.
+      if (!textOnly) {
+        const pi = await profileInputs(db, { id: client.id, name: client.name }, { tracking: rows.get("tracking")?.result ?? null, brand_read: null, accounts: { site_profiles: links } });
+        await syncProfiles(db, client.id, pi.rows, desiredProfiles(pi), deps.now());
+      }
       return {
         status: "done",
         result: {
           profiles: profiles.length, list: textHash(profileListKey(profiles)),
           matched: matches.map((m) => ({ id: m.profile.id, network: m.profile.network_type, handle: m.profile.native_name, by: m.by })),
-          assigned: mine.length, platforms, written,
+          assigned: mine.length, platforms, written, site_profiles: links,
         },
       };
     },
@@ -928,7 +937,7 @@ export const STEPS: Record<string, StepDef> = {
       if (error) throw new Error(`Could not read the client's social accounts: ${error.message}`);
       const networks = [...new Set((data ?? []).map((r: { network_type: unknown }) => String(r.network_type ?? "")))].filter(Boolean).sort().join(",");
       // Version 2 (fields, public reads): each client gets one rewrite after release, and another when its public profiles change.
-      const profiles = desiredProfiles(await profileInputs(db, { id: client.id, name: client.name }, { tracking: rows.get("tracking")?.result ?? null, brand_read: rows.get("brand_read")?.result ?? null }));
+      const profiles = desiredProfiles(await profileInputs(db, { id: client.id, name: client.name }, { tracking: rows.get("tracking")?.result ?? null, brand_read: rows.get("brand_read")?.result ?? null, accounts: rows.get("accounts")?.result ?? null }));
       return `v2|profile:${p.written_at}|networks:${networks}|rhythm:${textHash(JSON.stringify(client.posting_rhythm ?? null))}|public:${profilesKey(profiles)}|set:${await competitorsKey(db, client.id)}${socialVersionKey(rows, postsOnly(client))}`;
     },
     async run(db, client, { rows }) {

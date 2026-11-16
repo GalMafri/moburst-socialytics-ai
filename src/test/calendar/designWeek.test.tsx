@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { buttonLabel, doneLine, filmingLine, previewLine, progressLine, waitingLine, weekMinutes } from '@/lib/designWeek';
+import { typicalMinutes } from '@/lib/designRequests';
 import { DesignWeekBand } from '@/components/calendar/DesignWeekButton';
 import { DesignRequestsProvider } from '@/components/reports/calendar/DesignRequestsContext';
 import { DesignRequestsDockItems } from '@/components/reports/calendar/DesignRequestsDock';
@@ -20,6 +21,8 @@ const f = vi.hoisted(() => ({
   requests: [] as any[],
   preview: null as any,
   started: null as any,
+  weekStartDown: false,
+  weekStopDown: false,
   invokes: [] as any[],
 }));
 vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
@@ -30,6 +33,8 @@ vi.mock('@/integrations/supabase/client', () => ({ supabase: {
   functions: { invoke: async (name: string, opts: any) => {
     f.invokes.push({ name, ...opts.body });
     if (opts.body.action === 'week_preview') return { data: f.preview, error: null };
+    if (opts.body.action === 'week_start' && f.weekStartDown) return { data: { error: 'busy' }, error: null };
+    if (opts.body.action === 'week_stop' && f.weekStopDown) return { data: { error: 'busy' }, error: null };
     if (opts.body.action === 'week_start') return { data: f.started ?? { run: { id: 'run-new' }, added: ['a'], left_out_no_price: 0 }, error: null };
     if (opts.body.action === 'week_stop') return { data: { run: { id: 'run-1', status: 'stopped' } }, error: null };
     return { data: null, error: null };
@@ -40,7 +45,7 @@ vi.mock('@/integrations/supabase/client', () => ({ supabase: {
     return q;
   },
 } }));
-afterEach(() => { cleanup(); f.staff = true; f.runs = []; f.requests = []; f.preview = null; f.started = null; f.invokes = []; });
+afterEach(() => { cleanup(); f.staff = true; f.runs = []; f.requests = []; f.preview = null; f.started = null; f.weekStartDown = false; f.weekStopDown = false; f.invokes = []; });
 
 const WEEK = '2026-11-02';
 const counts = (over: any = {}) => ({ single: 0, story: 0, carousel: 0, video: 0, copy_waits: 0, filming: 0, ...over });
@@ -59,11 +64,11 @@ const band = () => mount(<DesignWeekBand clientId="c1" clientName="Pay The Pyper
 
 describe('the words', () => {
   it('says what a press designs and roughly what it costs', () => {
-    expect(previewLine(counts({ single: 6, carousel: 2, video: 1 }), 100, 45)).toBe('9 posts this week have no design yet: 6 designs, 2 carousels, 1 video. About 100 Higgsfield credits and 45 minutes.');
+    expect(previewLine(counts({ single: 6, carousel: 2, video: 1 }), 100, 45)).toBe('9 posts this week have no design yet: 6 designs, 2 carousels, 1 video. About 100 video credits and 45 minutes.');
     expect(previewLine(counts({ single: 1 }), 0, 10)).toBe('1 post this week has no design yet: 1 design. About 10 minutes.');
     expect(previewLine(counts({ carousel: 3 }), 0, 75)).toBe('3 posts this week have no design yet: 3 carousels. About 1 hour and 15 minutes.');
     // Stories are designed like any still and named apart, last, with their network when they share one (3 Nov 2026).
-    expect(previewLine(counts({ single: 6, story: 2, video: 1, story_platform: 'Instagram' }), 100, 45)).toBe('9 posts this week have no design yet: 6 designs, 1 video and 2 Instagram Stories. About 100 Higgsfield credits and 45 minutes.');
+    expect(previewLine(counts({ single: 6, story: 2, video: 1, story_platform: 'Instagram' }), 100, 45)).toBe('9 posts this week have no design yet: 6 designs, 1 video and 2 Instagram Stories. About 100 video credits and 45 minutes.');
     expect(previewLine(counts({ single: 6, story: 2, carousel: 1 }), 0, 45)).toBe('9 posts this week have no design yet: 6 designs, 1 carousel and 2 Stories. About 45 minutes.');
     expect(previewLine(counts({ story: 1, story_platform: 'Facebook' }), 0, 10)).toBe('1 post this week has no design yet: 1 Facebook Story. About 10 minutes.');
     expect(previewLine(counts({ story: 1 }), 0, 10)).toBe('1 post this week has no design yet: 1 Story. About 10 minutes.');
@@ -83,8 +88,15 @@ describe('the words', () => {
   it('counts the week as it goes, and when it is done', () => {
     expect(progressLine({ total: 9, ready: 3 })).toBe("Designing this week's posts: 3 of 9 ready.");
     expect(doneLine(9, null)).toBe('9 posts designed.');
-    expect(doneLine(1, 145)).toBe('1 post designed. 145 Higgsfield credits used.');
+    expect(doneLine(1, 145)).toBe('1 post designed. 145 video credits used.');
     expect(doneLine(2, 0)).toBe('2 posts designed.');
+  });
+
+  it('names no vendor and no press in the lines staff read', () => {
+    const lines = [previewLine(counts({ video: 2 }), 200, 20), doneLine(2, 200)];
+    for (const line of lines) expect(line).not.toMatch(/Higgsfield|press/i);
+    expect(lines[0]).toContain('200 video credits');
+    expect(lines[1]).toContain('200 video credits used');
   });
 
   it('takes the usual minutes of each post, two at a time, rounded up to five', () => {
@@ -101,7 +113,7 @@ describe('the band', () => {
   it('shows staff what a press designs, and presses with the estimate shown', async () => {
     f.preview = { client_name: 'Pay The Pyper', week_start: WEEK, counts: counts({ single: 6, carousel: 2, video: 1, filming: 1 }), credits: 100, credits_per_clip: 100, run_id: null, credits_used: null };
     band();
-    expect(await screen.findByText('9 posts this week have no design yet: 6 designs, 2 carousels, 1 video. About 100 Higgsfield credits and 45 minutes.')).toBeInTheDocument();
+    expect(await screen.findByText('9 posts this week have no design yet: 6 designs, 2 carousels, 1 video. About 100 video credits and 45 minutes.')).toBeInTheDocument();
     expect(screen.getByText("1 video is filmed, so it isn't included.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Design 9 posts' }));
     await waitFor(() => expect(f.invokes.find((i) => i.action === 'week_start')).toBeTruthy());
@@ -124,16 +136,16 @@ describe('the band', () => {
     band();
     // The videos are not part of what this press designs: the count, the kinds and the minutes leave them out.
     expect(await screen.findByText('2 posts this week have no design yet: 2 designs. About 10 minutes.')).toBeInTheDocument();
-    expect(screen.getByText("Video prices can't be read right now. The videos wait for the next press. The other posts go ahead.")).toBeInTheDocument();
+    expect(screen.getByText('Video prices are unavailable right now, so this run leaves the videos out. The other posts go ahead.')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Design 2 posts' }));
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Designing this week's posts", { description: 'The videos wait for the next press; the other posts are being designed.' }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Designing this week's posts", { description: 'The videos are left out of this run; the other posts are being designed.' }));
     expect(f.invokes.find((i) => i.action === 'week_start').estimate).toEqual({ posts: 2, single: 2, story: 0, carousel: 0, video: 0, credits: 0, credits_per_clip: null, minutes: 10 });
   });
 
   it("hides the button when the week's only posts are videos it cannot price", async () => {
     f.preview = { client_name: 'Pay The Pyper', week_start: WEEK, counts: counts({ video: 2 }), credits: null, credits_per_clip: null, price_unavailable: true, run_id: null, credits_used: null };
     band();
-    expect(await screen.findByText("Video prices can't be read right now. The videos wait for the next press.")).toBeInTheDocument();
+    expect(await screen.findByText('Video prices are unavailable right now, so the videos are not designed yet.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Design / })).toBeNull();
     expect(screen.queryByText(/have no design yet|has no design yet/)).toBeNull();
     expect(screen.queryByText(/The other posts go ahead/)).toBeNull();
@@ -145,7 +157,7 @@ describe('the band', () => {
     band();
     fireEvent.click(await screen.findByRole('button', { name: 'Design 2 posts' }));
     await waitFor(() => expect(toast.success).toHaveBeenLastCalledWith("Designing this week's posts", { description: 'Each post shows where it stands on its card.' }));
-    expect(screen.queryByText(/Video prices can't be read/)).toBeNull();
+    expect(screen.queryByText(/Video prices are unavailable/)).toBeNull();
   });
 
   it('offers nothing when the week has nothing to design', async () => {
@@ -188,7 +200,46 @@ describe('the band', () => {
     f.runs = [run({ status: 'done', finished_at: '2026-11-03T12:00:00Z', posts: [runPost('a', { state: 'started', request_id: 'r1' }), runPost('b', { state: 'started', request_id: 'r2' })] })];
     f.requests = [request('r1', { status: 'ready', batch_id: 'run-1' }), request('r2', { status: 'ready', batch_id: 'run-1' })];
     band();
-    expect(await screen.findByText('2 posts designed. 145 Higgsfield credits used.')).toBeInTheDocument();
+    expect(await screen.findByText('2 posts designed. 145 video credits used.')).toBeInTheDocument();
+  });
+});
+
+describe('a press on the week band that gets no answer', () => {
+  it('says the week is not started yet, with no error, and keeps the button', async () => {
+    const { toast } = await import('sonner');
+    f.preview = { client_name: 'Pay The Pyper', week_start: WEEK, counts: counts({ single: 2 }), credits: 0, credits_per_clip: null, run_id: null, credits_used: null };
+    f.weekStartDown = true;
+    band();
+    fireEvent.click(await screen.findByRole('button', { name: 'Design 2 posts' }));
+    const line = await screen.findByText('Not started yet.');
+    expect(line.closest('[role=status]')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Design 2 posts' })).toBeEnabled();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it('says the rest of the week is not stopped yet', async () => {
+    f.preview = { client_name: 'Pay The Pyper', week_start: WEEK, counts: counts(), credits: 0, credits_per_clip: 100, run_id: 'run-1', credits_used: 0 };
+    f.runs = [run({ posts: [runPost('a', { state: 'started', request_id: 'r1' }), runPost('b')] })];
+    f.requests = [request('r1', { batch_id: 'run-1', calendar_post_key: 'a' })];
+    f.weekStopDown = true;
+    band();
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop designing the rest' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop the rest' }));
+    expect(await screen.findByText('Not stopped yet.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Stop designing the rest' })).toBeInTheDocument();
+  });
+});
+
+describe('the usual time of a design', () => {
+  const done = (i: number, minutes: number, hoursLater: number) => request(`h${i}`, {
+    status: 'ready', options_wanted: 1, started_at: '2026-11-03T10:00:00Z', ended_at: new Date(Date.parse('2026-11-03T10:00:00Z') + minutes * 60000).toISOString(),
+    updated_at: new Date(Date.parse('2026-11-03T10:00:00Z') + hoursLater * 3600000).toISOString(),
+  });
+  it('is measured from when the request started to when it ended, not to when its row was last touched', () => {
+    expect(typicalMinutes({ kind: 'single' }, [done(1, 5, 4), done(2, 9, 6), done(3, 6, 5)])).toBe(6);
+  });
+  it('falls back to the default until three requests have an end time', () => {
+    expect(typicalMinutes({ kind: 'single' }, [done(1, 5, 4), done(2, 9, 6), { ...done(3, 6, 5), ended_at: null }])).toBe(7);
   });
 });
 
@@ -220,5 +271,24 @@ describe('each post and the dock', () => {
     expect(screen.getAllByRole('status')).toHaveLength(1);
     expect(screen.getByText('1 of 3 ready')).toBeInTheDocument();
     expect(screen.queryByText(/Preparing your/)).toBeNull();
+  });
+
+  it("heads a finished week with its count unless every post is designed", async () => {
+    const recent = new Date().toISOString();
+    f.runs = [run({ status: 'done', finished_at: recent, posts: ['a', 'b', 'c', 'd', 'e'].map((k, i) => runPost(k, { state: 'started', request_id: `r${i}` })) })];
+    f.requests = ['a', 'b', 'c', 'd', 'e'].map((k, i) => request(`r${i}`, { batch_id: 'run-1', calendar_post_key: k, status: i < 3 ? 'ready' : 'closed', stage: 'ready', updated_at: recent }));
+    mount(<DesignRequestsProvider clientId="c1" onOpenPost={() => {}}><DesignRequestsDockItems /></DesignRequestsProvider>);
+    expect(await screen.findByText('3 of 5 posts designed')).toBeInTheDocument();
+    expect(screen.queryByText('3 of 5 ready')).toBeNull();
+    expect(screen.getByText('2 not designed yet')).toBeInTheDocument();
+    expect(screen.queryByText("This week's posts are designed")).toBeNull();
+  });
+
+  it("says the week's posts are designed when every one is", async () => {
+    const recent = new Date().toISOString();
+    f.runs = [run({ status: 'done', finished_at: recent, posts: ['a', 'b'].map((k, i) => runPost(k, { state: 'started', request_id: `r${i}` })) })];
+    f.requests = ['a', 'b'].map((k, i) => request(`r${i}`, { batch_id: 'run-1', calendar_post_key: k, status: 'ready', stage: 'ready', updated_at: recent }));
+    mount(<DesignRequestsProvider clientId="c1" onOpenPost={() => {}}><DesignRequestsDockItems /></DesignRequestsProvider>);
+    expect(await screen.findByText("This week's posts are designed")).toBeInTheDocument();
   });
 });

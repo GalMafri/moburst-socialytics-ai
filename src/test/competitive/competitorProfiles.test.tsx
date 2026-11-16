@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import CompetitorReview from '@/pages/CompetitorReview';
+import { portalUrl, rememberPortal } from '@/utils/gosAuth';
 const f=vi.hoisted(()=>({auto:true,calls:[] as any[],writes:[] as any[],toast:vi.fn(),detect:null as null|((id:string)=>Promise<any>)}));
 vi.mock('@/hooks/useAuth',()=>({useAuth:()=>({canRunAnalysis:true})}));
 vi.mock('@/hooks/use-toast',()=>({useToast:()=>({toast:f.toast})}));
@@ -41,14 +42,17 @@ it('keeps completed empty results across visits without repeating lookups or off
 });
 
 it('shows an expired session once instead of blaming missing competitor profiles',async()=>{
+ rememberPortal('hub');
  f.detect=async()=>({data:null,error:{context:new Response(JSON.stringify({error:'Invalid or expired session.'}),{status:401})}});
- mount();await screen.findByText('Profile lookups continue once you are signed in again from the Moburst portal.');expect(screen.queryByText(/failed/i)).toBeNull();expect(screen.queryByRole('alert')).toBeNull();expect(screen.getByRole('link',{name:'Open Moburst portal'})).toHaveAttribute('href','https://tools.moburst.com/dashboard');expect(screen.getAllByText('Waiting for portal sign-in')).toHaveLength(2);
+ mount();await screen.findByText('Profile lookups continue once you are signed in again from the Moburst portal.');expect(screen.queryByText(/failed/i)).toBeNull();expect(screen.queryByRole('alert')).toBeNull();expect(screen.getByRole('link',{name:'Open Moburst portal'})).toHaveAttribute('href',portalUrl());expect(portalUrl()).toBe('https://tools.moburst.com');expect(screen.getAllByText('Waiting for portal sign-in')).toHaveLength(2);
 });
 
 it('separates unverified suggestions and prevents selecting them without a verified profile',async()=>{
  f.detect=async()=>({data:{results:[{status:'unverified',detected:[],warnings:['Company website unavailable.']}]},error:null});
  mount();fireEvent.click(await screen.findByRole('button',{name:'Show unverified suggestions'}));
  expect(screen.getAllByText('Unverified suggestion')).toHaveLength(2);
+ // The true state, with no failure wording and a verb that agrees with the count.
+ expect(screen.getByText(/2 suggestions are unverified and left out of the selection/)).toBeInTheDocument();expect(screen.queryByText(/could not/i)).toBeNull();
  expect(screen.getAllByRole('button',{name:'Select'}).filter(b=>b.hasAttribute('disabled'))).toHaveLength(2);
  expect(screen.getByRole('link',{name:/company_a/})).toBeInTheDocument();
  fireEvent.click(screen.getByRole('button',{name:'Hide unverified suggestions'}));

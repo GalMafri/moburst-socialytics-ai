@@ -50,7 +50,7 @@ describe("describeInvokeError", () => {
 
   it("says the request was not sent when there was no response at all", async () => {
     quiet();
-    expect(await describeInvokeError({ name: "FunctionsFetchError", message: "Failed to send a request to the Edge Function" })).toMatch(/could not be sent/i);
+    expect(await describeInvokeError({ name: "FunctionsFetchError", message: "Failed to send a request to the Edge Function" })).toMatch(/was not sent/i);
     expect(await describeInvokeError(null)).toMatch(/did not go through/i);
   });
 

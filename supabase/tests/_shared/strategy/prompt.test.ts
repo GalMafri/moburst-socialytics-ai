@@ -68,12 +68,21 @@ describe("the strategy block", () => {
       },
     });
     const block = strategyBlock(v2, [{ section_key: "avoid", text: "- Memes about other apps", value: { items: [{ pattern: "Memes about other apps", source: "team" }] } }]);
-    for (const part of ["- Grow engagement per post (Instagram median engagement per post: 42 today, above it by 1 Feb 2027). Why: Carousels beat the usual.", "Rec league captains.", "- vs BenchApp: Useful over funny.", "- Beer League Truths: Make captains laugh. Formats: carousel Planned share: 60%", "- Instagram: Our home base. What we post: - Checklists", "- Memes about other apps"]) {
+    for (const part of ["- Grow engagement per post (Instagram median engagement per post: 42 today, above it by Feb 1, 2027). Why: Carousels beat the usual.", "Rec league captains.", "- vs BenchApp: Useful over funny.", "- Beer League Truths: Make captains laugh. Formats: carousel Planned share: 60%", "- Instagram: Our home base. What we post: - Checklists", "- Memes about other apps"]) {
       expect(block).toContain(part);
     }
     expect(block).not.toContain("Office photos");
     expect(block).not.toContain("Reach new captains.");
     expect(block.length).toBeLessThanOrEqual(STRATEGY_BLOCK_CHARS);
+  });
+
+  it("gives a person's edited goals their targets from the latest write", () => {
+    const goal = (platform: string, metric: string, baseline: number) => ({ title: `Latest ${platform}`, why: "Because.", platform, metric, direction: "above", baseline, by: "2027-02-01" });
+    const block = strategyBlock(stored({ shape: 2, sections: { goals: { items: [goal("Instagram", "median_engagement", 42), goal("LinkedIn", "followers", 900)] } } }), [
+      { section_key: "goals", text: "- Mine", value: { items: [{ title: "Grow LinkedIn my way", why: "Mine.", platform: "LinkedIn", metric: "followers", direction: "above" }] } },
+    ]);
+    expect(block).toContain("- Grow LinkedIn my way (LinkedIn followers: 900 today, above it by Feb 1, 2027). Why: Mine.");
+    expect(block).toContain("- Latest Instagram (Instagram median engagement per post: 42 today, above it by Feb 1, 2027)");
   });
 
   it("is empty for a client with no strategy, and reads people's versions with the stored one", async () => {

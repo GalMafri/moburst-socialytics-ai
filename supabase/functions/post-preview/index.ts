@@ -15,8 +15,11 @@
 // copy is what gets cached. Any signed-in user may call this (read-only data).
 
 import { createClient } from "../_shared/supabase.ts";
-import { isPubliclyFetchable } from "../_shared/net/safeUrl.ts";
-import { OAUTH_READ_ONLY, oauthClientOf } from "../_shared/auth/authz.ts";
+import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { fetchPublic, isExpiringCdnUrl, isPubliclyFetchable, socialPlatformOf } from "../_shared/net/safeUrl.ts";
+import { type Hint, hintMayPersist } from "./hints.ts";
+import { AuthzError, OAUTH_READ_ONLY, SERVER_SECRET_HEADER, oauthClientOf } from "../_shared/auth/authz.ts";
+import { requireStaffOrSystem } from "../_shared/auth/requireStaff.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -39,19 +42,12 @@ const MAX_PER_CALL = 40;
 const CONCURRENCY = 8;
 
 type Preview = { url: string; platform: string | null; media_type: string; image_url: string | null; title: string | null; status: "ok" | "unavailable" | "expiring" };
-type Hint = { url: string; image?: string | null; media_type?: string | null };
-type Db = ReturnType<typeof createClient>;
+// The client createClient returns: the default schema is "public", which a
+// ReturnType of the generic function would not carry.
+type Db = SupabaseClient;
 
-function platformOf(url: string): string | null {
-  const h = (() => { try { return new URL(url).hostname.toLowerCase(); } catch { return ""; } })();
-  if (h.includes("youtube.com") || h.includes("youtu.be")) return "youtube";
-  if (h.includes("tiktok.com")) return "tiktok";
-  if (h.includes("instagram.com")) return "instagram";
-  if (h.includes("facebook.com") || h.includes("fb.com") || h.includes("fb.watch")) return "facebook";
-  if (h.includes("linkedin.com")) return "linkedin";
-  if (h.includes("x.com") || h.includes("twitter.com")) return "x";
-  return null;
-}
+// Decided on the parsed host, never on a substring of the whole URL.
+const platformOf = socialPlatformOf;
 
 function youtubeId(url: string): string | null {
   const m = url.match(/(?:v=|\/shorts\/|youtu\.be\/|\/embed\/)([A-Za-z0-9_-]{6,})/);
@@ -60,7 +56,7 @@ function youtubeId(url: string): string | null {
 
 const isVideoFile = (u: string) => /\.(mp4|mov|webm|m4v)(\?|#|$)/i.test(u);
 // Signed CDN links that stop working after hours or days; always copied into the bucket.
-const isExpiringCdn = (u: string) => /cdninstagram\.com|fbcdn\.net|scontent[-.]|lookaside\.fbsbx\.com|media\.licdn\.com|tiktokcdn(-[a-z]+)?\.com/i.test(u);
+const isExpiringCdn = isExpiringCdnUrl;
 // LinkedIn answers some posts with its generic logo instead of the creative.
 const isGenericPlaceholder = (u: string) => /static\.licdn\.com\/aero-v1\/sc\/h\//i.test(u);
 
@@ -88,8 +84,8 @@ async function persist(supabase: Db, sourceUrl: string, postUrl: string): Promis
     // Facebook's crawler image host only answers link-preview crawlers.
     const crawlerFirst = /lookaside\.fbsbx\.com|media\.licdn\.com/i.test(sourceUrl);
     const first = /lookaside\.fbsbx\.com/i.test(sourceUrl) ? FB_CRAWLER_UA : crawlerFirst ? CRAWLER_UA : UA;
-    let r = await fetch(sourceUrl, { headers: { "User-Agent": first, Accept: "image/*" }, signal: AbortSignal.timeout(8000) });
-    if (!r.ok) r = await fetch(sourceUrl, { headers: { "User-Agent": first === UA ? CRAWLER_UA : UA, Accept: "image/*" }, signal: AbortSignal.timeout(8000) });
+    let r = await fetchPublic(sourceUrl, { headers: { "User-Agent": first, Accept: "image/*" }, signal: AbortSignal.timeout(8000) });
+    if (!r.ok) r = await fetchPublic(sourceUrl, { headers: { "User-Agent": first === UA ? CRAWLER_UA : UA, Accept: "image/*" }, signal: AbortSignal.timeout(8000) });
     if (!r.ok) return null;
     const ct = (r.headers.get("content-type") || "image/jpeg").split(";")[0].trim();
     if (!ct.startsWith("image/")) return null;
@@ -114,7 +110,7 @@ async function persist(supabase: Db, sourceUrl: string, postUrl: string): Promis
  */
 async function persistVideoHead(supabase: Db, sourceUrl: string, postUrl: string): Promise<string | null> {
   try {
-    const r = await fetch(sourceUrl, { headers: { "User-Agent": UA, Range: "bytes=0-1999999" }, signal: AbortSignal.timeout(12000) });
+    const r = await fetchPublic(sourceUrl, { headers: { "User-Agent": UA, Range: "bytes=0-1999999" }, signal: AbortSignal.timeout(12000) });
     if (!(r.status === 200 || r.status === 206)) return null;
     const ct = (r.headers.get("content-type") || "video/mp4").split(";")[0].trim();
     if (!ct.startsWith("video/")) return null;
@@ -149,7 +145,7 @@ async function instagramMedia(supabase: Db, url: string): Promise<string | null>
 }
 
 async function ogPreview(url: string, userAgent: string = UA): Promise<Partial<Preview>> {
-  const resp = await fetch(url, { headers: { "User-Agent": userAgent, Accept: "text/html" }, redirect: "follow", signal: AbortSignal.timeout(8000) });
+  const resp = await fetchPublic(url, { headers: { "User-Agent": userAgent, Accept: "text/html" }, signal: AbortSignal.timeout(8000) });
   if (!resp.ok) return { status: "unavailable" };
   const html = (await resp.text()).slice(0, 400_000);
   const meta = (prop: string) => {
@@ -266,13 +262,30 @@ async function resolve(supabase: Db, hint: Hint): Promise<Preview> {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
-    const auth = req.headers.get("Authorization") || "";
-    if (!auth.startsWith("Bearer ")) return json({ error: "Sign-in required." }, 401);
-    // It writes the preview cache and storage, so a token from Supabase's OAuth server (the Claude connector), which only reads, is refused.
-    if (oauthClientOf(auth.slice(7))) return json({ error: OAUTH_READ_ONLY }, 403);
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    const { data: who } = await supabase.auth.getUser(auth.slice(7));
-    if (!who?.user) return json({ error: "Invalid or expired session." }, 401);
+    let isStaff: boolean;
+    if (req.headers.get(SERVER_SECRET_HEADER)) {
+      // The project's own work (a report being written resolves its posts' previews) presents the operational secret and is trusted like staff, so the creatives it knows become durable.
+      await requireStaffOrSystem(req);
+      isStaff = true;
+    } else {
+      const auth = req.headers.get("Authorization") || "";
+      if (!auth.startsWith("Bearer ")) return json({ error: "Sign-in required." }, 401);
+      // It writes the preview cache and storage, so a token from Supabase's OAuth server (the Claude connector), which only reads, is refused.
+      if (oauthClientOf(auth.slice(7))) return json({ error: OAUTH_READ_ONLY }, 403);
+      const { data: who } = await supabase.auth.getUser(auth.slice(7));
+      if (!who?.user) return json({ error: "Invalid or expired session." }, 401);
+
+      // Asked once per request, with the caller's own token, the same check
+      // requireStaff makes. Only staff may plant a creative for a post; a
+      // hint from anyone else answers that one request and is never stored.
+      const asCaller = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
+        global: { headers: { Authorization: `Bearer ${auth.slice(7)}` } },
+        auth: { persistSession: false },
+      });
+      const { data: staffFlag } = await asCaller.rpc("is_moburst_staff");
+      isStaff = staffFlag === true;
+    }
 
     const body = await req.json();
     const hints = new Map<string, Hint>();
@@ -288,37 +301,69 @@ Deno.serve(async (req) => {
     if (Array.isArray(body.posts)) for (const p of body.posts) if (p && typeof p === "object") add({ url: p.url, image: p.image ?? p.image_url ?? null, media_type: p.media_type ?? p.mediaType ?? null });
     if (Array.isArray(body.urls)) for (const u of body.urls) add({ url: String(u || "") });
     if (body.url) add({ url: String(body.url) });
-    const all = [...hints.keys()];
-    if (all.length === 0) return json({ previews: {} });
+    const out: Record<string, Preview> = {};
+    // Only a permalink on a supported social network is looked up. Anything
+    // else is answered unavailable with no request made and nothing stored.
+    const all: string[] = [];
+    for (const u of hints.keys()) {
+      if (platformOf(u)) all.push(u);
+      else out[u] = { url: u, platform: null, media_type: "unknown", image_url: null, title: null, status: "unavailable" };
+    }
+    if (all.length === 0) return json({ previews: out });
 
     const { data: cached } = await supabase.from("post_previews").select("*").in("url", all);
     const now = Date.now();
-    const out: Record<string, Preview> = {};
     const todo: Hint[] = [];
+    const ownRows = new Map<string, Hint>();
     for (const u of all) {
       const c = (cached || []).find((x) => x.url === u) as (Preview & { fetched_at: string }) | undefined;
       const age = c ? now - new Date(c.fetched_at).getTime() : Infinity;
       // A miss is retried after an hour, or straight away when the caller now knows the creative.
-      const hintedCreative = !!hints.get(u)?.image;
+      const hintedCreative = !!hints.get(u)?.image && hintMayPersist(hints.get(u)!, isStaff);
       const valid = c && ((c.status === "ok" && age < OK_TTL_MS) || (c.status !== "ok" && age < MISS_TTL_MS && !hintedCreative));
       // A cached hit that still points at an expiring CDN link (image or video) is re-resolved so it gets a durable copy.
       // An "expiring" row is one we could not copy; it is served as-is and
       // retried on the miss schedule instead of on every single render.
       if (valid && !(c!.status === "ok" && c!.image_url && isExpiringCdn(c!.image_url))) out[u] = c as Preview;
       else if (c && c.status === "expiring" && age < MISS_TTL_MS && !hintedCreative) out[u] = c as Preview;
-      else todo.push(hints.get(u)!);
+      else {
+        const h = hints.get(u)!;
+        // A stored row whose link is an expiring one is our own data: it is
+        // copied into storage now, whoever asks, instead of being dropped.
+        if (c && c.image_url && isExpiringCdn(c.image_url) && !h.image) ownRows.set(u, { url: u, image: c.image_url, media_type: c.media_type });
+        todo.push(h);
+      }
     }
     const results: Preview[] = [];
+    // A hint from a caller who is not staff is not stored: the post is
+    // resolved from our own sources only, and the caller's creative answers
+    // this one request when nothing else did (below).
+    const resolveFor = async (h: Hint): Promise<Preview> => {
+      const own = ownRows.get(h.url);
+      if (!own) return resolve(supabase, hintMayPersist(h, isStaff) ? h : { url: h.url });
+      // The stored link is tried first. When it can no longer be copied (it
+      // has expired) the post is resolved from its sources again, which
+      // reaches a fresh link, rather than pinning the row to the dead one.
+      const first = await resolve(supabase, own);
+      if (first.status !== "expiring") return first;
+      return resolve(supabase, { url: h.url, media_type: own.media_type });
+    };
     for (let i = 0; i < todo.length; i += CONCURRENCY) {
-      results.push(...(await Promise.all(todo.slice(i, i + CONCURRENCY).map((h) => resolve(supabase, h)))));
+      results.push(...(await Promise.all(todo.slice(i, i + CONCURRENCY).map(resolveFor))));
     }
     if (results.length > 0) {
       const stamp = new Date().toISOString();
       await supabase.from("post_previews").upsert(results.map((p) => ({ ...p, fetched_at: stamp })), { onConflict: "url" });
       for (const p of results) out[p.url] = p;
     }
+    for (const u of all) {
+      const h = hints.get(u)!;
+      if (hintMayPersist(h, isStaff) || out[u]?.image_url || !isPubliclyFetchable(h.image)) continue;
+      out[u] = { url: u, platform: platformOf(u), media_type: mediaTypeOf(h.media_type), image_url: h.image!, title: null, status: "ok" };
+    }
     return json({ previews: out });
   } catch (err) {
+    if (err instanceof AuthzError) return json({ error: err.message }, err.status);
     return json({ error: err instanceof Error ? err.message : String(err) }, 500);
   }
 });

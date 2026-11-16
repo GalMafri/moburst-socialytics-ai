@@ -123,3 +123,26 @@ it("says where each schedule stands in plain words, never the scheduler's own no
   expect(screen.getByText('Paused.')).toBeInTheDocument();
   expect(screen.queryByText(/triggered social report|at Lital's request|Latest:/)).toBeNull();
 });
+
+it('names the monthly run in the header, and keeps the data vendor out of the Sprout Social tab', async () => {
+  const { container } = mount('sprout');
+  expect(await screen.findByText('Public profiles')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Run monthly report' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Run report' })).toBeNull();
+  expect(container.textContent).not.toMatch(/RivalIQ/);
+});
+
+it('never calls the app "the product" on any setup tab', async () => {
+  for (const tab of ['info', 'sprout', 'strategy', 'competitors', 'brief', 'schedule']) {
+    const { container, unmount } = mount(tab);
+    await screen.findAllByText(/./);
+    await waitFor(() => expect(container.querySelector('[role="tabpanel"]')?.textContent?.length).toBeGreaterThan(20));
+    expect((container.textContent ?? '').match(/.{0,50}the product.{0,50}/i)?.[0] ?? '', tab).toBe('');
+    unmount();
+  }
+});
+
+it('says what the competitor choice weighs in two plain sentences', async () => {
+  mount('competitors');
+  expect(await screen.findByText('The three closest competitors with a website are chosen automatically. Notes from the account team are weighed heavily in that choice.')).toBeInTheDocument();
+});

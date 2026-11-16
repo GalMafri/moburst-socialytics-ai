@@ -1,6 +1,6 @@
 // @vitest-environment node
-import { describe, expect, it } from "vitest";
-import { extractImageUrls, logoOnPage, parseBrandReply, parseSocialBrandReply, readSocialBrand, siteTextExcerpt, visionImageType } from "../../../functions/_shared/brand/research";
+import { describe, expect, it, vi } from "vitest";
+import { fetchSiteHtml, researchBrand, extractImageUrls, logoOnPage, parseBrandReply, parseSocialBrandReply, readSocialBrand, siteTextExcerpt, visionImageType } from "../../../functions/_shared/brand/research";
 
 const BASE = "https://www.example.com";
 
@@ -92,5 +92,53 @@ describe("the brand read from social profiles", () => {
     expect(parts.filter((p) => p.type === "image_url")).toHaveLength(1);
     expect(parts[0].text).toContain("P1 Order ahead");
     expect(parts[0].text).toContain("Austin, TX");
+  });
+});
+
+describe("fetchSiteHtml address check", () => {
+  const timeout = () => { if (!AbortSignal.timeout) (AbortSignal as unknown as { timeout: () => AbortSignal }).timeout = () => new AbortController().signal; };
+
+  it("refuses a private address without fetching it", async () => {
+    timeout();
+    const fetchImpl = vi.fn();
+    await expect(fetchSiteHtml("http://169.254.169.254/", { fetchImpl })).rejects.toThrow();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("refuses a public page that redirects to a private address, before requesting it", async () => {
+    timeout();
+    const fetchImpl = vi.fn(async (u: string) => (u === "https://example.com/"
+      ? new Response(null, { status: 302, headers: { location: "http://169.254.169.254/latest" } })
+      : new Response("secret")));
+    await expect(fetchSiteHtml("https://example.com/", { fetchImpl })).rejects.toThrow();
+    expect(fetchImpl.mock.calls.map((c) => c[0])).toEqual(["https://example.com/"]);
+  });
+
+  it("still reads an ordinary public page", async () => {
+    timeout();
+    const fetchImpl = vi.fn(async () => new Response("<html>ok</html>"));
+    expect((await fetchSiteHtml("https://example.com/", { fetchImpl })).html).toBe("<html>ok</html>");
+  });
+});
+
+describe("researchBrand never reaches a private address through the page it reads", () => {
+  const timeout = () => { if (!AbortSignal.timeout) (AbortSignal as unknown as { timeout: () => AbortSignal }).timeout = () => new AbortController().signal; };
+  const PRIVATE = "169.254.169.254";
+  const PAGE = `<html><head><link rel="stylesheet" href="http://${PRIVATE}/style.css"><link rel="stylesheet" href="https://example.com/redirect.css"></head>
+    <body><header><img class="logo" src="http://${PRIVATE}/logo.svg"><img src="http://${PRIVATE}/hero.png" class="logo"></header></body></html>`;
+
+  it("never requests a stylesheet, SVG or image the page names on a private address, or one that redirects there", async () => {
+    timeout();
+    const requested: string[] = [];
+    const fetchImpl = vi.fn(async (u: string) => {
+      requested.push(u);
+      if (u === "https://example.com/") return new Response(PAGE, { status: 200 });
+      if (u === "https://example.com/redirect.css") return new Response(null, { status: 302, headers: { location: `http://${PRIVATE}/latest` } });
+      if (u.startsWith("https://api.openai.com/")) return new Response(JSON.stringify({ choices: [{ message: { content: "{}" } }] }), { status: 200 });
+      return new Response("secret", { status: 200 });
+    });
+    await researchBrand({ websiteUrl: "https://example.com/", openaiKey: "sk", fetchImpl }).catch(() => null);
+    expect(requested.filter((u) => u.includes(PRIVATE))).toEqual([]);
+    expect(requested).toContain("https://example.com/redirect.css");
   });
 });

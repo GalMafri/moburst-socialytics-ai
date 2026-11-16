@@ -8,8 +8,8 @@
  *   * the person must hold a Socialytics role in user_roles, read at every
  *     call, so removing a role cuts access at the next one;
  *   * the client scope is the set of ids the person can select from clients:
- *     admins see all, unrestricted staff every non-demo client, company-
- *     restricted staff their companies, client users their own client.
+ *     admins see all clients, Moburst users every non-demo client, and
+ *     client users their own companies.
  */
 import type { ClientScope } from "../_shared/api/router.ts";
 import { scopeOf } from "../_shared/api/keys.ts";
@@ -33,7 +33,7 @@ export interface AccessReads {
 
 export type Admission = { ok: true; person: Person } | { ok: false; status: 401 | 403; message: string };
 
-const RANK: Role[] = ["admin", "moburst_user", "client"];
+export const RANK: Role[] = ["admin", "moburst_user", "client"];
 const str = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
 
 export async function admit(claims: Record<string, unknown> | null, reads: AccessReads): Promise<Admission> {

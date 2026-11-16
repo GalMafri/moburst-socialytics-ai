@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
-  clientOriginLine, cleanText, declinedBrandLine, competitiveRunStatus, countryNames, eventName, firstRunSentence, formatDate, formatDateTime, formatRange, sproutDraftLine,
+  countOf, NO_DATA, clientOriginLine, cleanText, declinedBrandLine, competitiveRunStatus, countryNames, eventName, firstRunSentence, formatDate, formatDateTime, formatRange, sproutDraftLine,
   isRawProfileId, languageNames, locationOrigin, notePointKindName, noteReadLine, noteStateLine, onboardingFacts, platformKey, platformName, profileName, roleName, timelineDetail, timelineKindName, usageStateName,
 } from "@/lib/display";
 import { isActiveClient } from "@/lib/activeClients";
@@ -237,10 +237,10 @@ describe("what the product read from a client's social profiles (onboarding from
       .toBe("Drafted from the client's posts on Nov 3, 2026.");
     expect(onboardingFacts(olo(), [{ step: "brief_pillars", status: "waiting", result: { waiting_for: "posts", text_posts: 3 } }]).brief).toBe("Written once the client has 5 posts with text. It has 3.");
   });
-  it("names the three competitors chosen, and why tracking has not started, as a plain fact", () => {
+  it("says why tracking has not started, as a plain fact, and carries no competitor names of its own", () => {
     const chosen = { step: "competitors", status: "done", result: { selected: ["Toast", "ChowNow", "Square"], chosen_from: "posts" } };
     expect(onboardingFacts(olo(), [chosen, { step: "tracking", status: "waiting", result: { waiting_for: "client_website" } }]).competitors)
-      .toEqual({ names: ["Toast", "ChowNow", "Square"], tracking: "RivalIQ follows companies by their website, so tracking starts once the client's website is found." });
+      .toEqual({ tracking: "RivalIQ follows companies by their website, so tracking starts once the client's website is found." });
     expect(onboardingFacts(olo({ website_url: "https://olo.com" }), [chosen, { step: "tracking", status: "waiting", result: { waiting_for: "rivaliq_full" } }]).competitors.tracking)
       .toBe("The RivalIQ plan is full. Tracking starts when a place opens.");
     expect(onboardingFacts(olo({ website_url: "https://www.moburst.com/services/organic/podcast-booking/" }), [chosen, { step: "tracking", status: "waiting", result: { waiting_for: "own_site" } }]).competitors.tracking)
@@ -256,5 +256,18 @@ describe("what the product read from a client's social profiles (onboarding from
     expect(g.logo && g.timezone && h.timezone).toBeTruthy();
     expect(text).not.toMatch(/social_read|brief_pillars|waiting|lifecycle|profile_picture|linkedin_page|profile_address|local business|undefined|null|NaN|\u2014|\u2013/);
     expect(text).not.toMatch(/colour|organis|recognis/);
+  });
+});
+
+describe("the empty-value word and counts", () => {
+  it("has one word for a figure that is not there", () => {
+    expect(NO_DATA).toBe("No data");
+  });
+  it("chooses the singular or the plural from the number", () => {
+    expect(countOf(1, "competitor")).toBe("1 competitor");
+    expect(countOf(0, "competitor")).toBe("0 competitors");
+    expect(countOf(3, "competitor")).toBe("3 competitors");
+    expect(countOf(2, "company", "companies")).toBe("2 companies");
+    expect(countOf(1, "company", "companies")).toBe("1 company");
   });
 });

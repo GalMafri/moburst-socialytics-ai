@@ -71,7 +71,7 @@ it('lists the learned design preferences with their source and date, and Remove 
   expect(within(note).getByText(/From a regenerate note · Nov 3, 2026/)).toBeInTheDocument();
   const feedback = screen.getByText('Dark backgrounds.').closest('.glass-inner') as HTMLElement;
   expect(within(feedback).getByText('Prefer')).toBeInTheDocument();
-  expect(within(feedback).getByText(/From Not right · Oct 20, 2026/)).toBeInTheDocument();
+  expect(within(feedback).getByText(/From a design marked not right · Oct 20, 2026/)).toBeInTheDocument();
   fireEvent.click(within(note).getByRole('button', { name: 'Remove this design preference' }));
   await waitFor(() => expect(f.deletes).toEqual([{ table: 'design_learnings', filters: { id: 'd1' } }]));
 });

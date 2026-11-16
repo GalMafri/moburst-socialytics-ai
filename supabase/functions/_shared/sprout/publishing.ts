@@ -34,7 +34,8 @@ export type SproutMediaType = "PHOTO" | "VIDEO" | "DOCUMENT";
 
 /** What Sprout answered when it did not do what was asked; status 0 when it never answered. */
 export class SproutRefusal extends Error {
-  constructor(public step: "token" | "profiles" | "media" | "post", public status: number, message: string, public detail = "") {
+  /** madeNone: Sprout answered with its list of posts and the list has no entry for the profile, which is Sprout saying it made none. */
+  constructor(public step: "token" | "profiles" | "media" | "post", public status: number, message: string, public detail = "", public madeNone = false) {
     super(message);
   }
 }
@@ -189,8 +190,11 @@ export interface CreatedPost {
  * Creates the post. Sprout answers with one post per profile (fan-out); the
  * profile's own entry carries the post's id. A profile Sprout dropped (media
  * its network does not take) has no entry, and no post was made for it.
- * Sent again only when Sprout said it did nothing (a rate limit, unavailable),
- * never after a lost answer, so a post is never made twice.
+ * Sent again only when Sprout said it did nothing: 429 (a rate limit) and 503
+ * ("The server is overloaded and cannot process the request", Sprout's status
+ * table); never after a lost answer or another server error, so a post is
+ * never made twice. A final 429 or 503 is a refusal (send.ts records it as
+ * failed), for the same reason.
  */
 export async function createDraftPost(fetchImpl: typeof fetch, customerId: string, token: string, post: DraftPost, waits?: number[]): Promise<CreatedPost> {
   const r = await sproutRequest(fetchImpl, `${API_BASE}/${encodeURIComponent(customerId)}/publishing/posts`, {
@@ -203,7 +207,13 @@ export async function createDraftPost(fetchImpl: typeof fetch, customerId: strin
   // deno-lint-ignore no-explicit-any
   const mine = ((data?.data ?? []) as any[]).find((d) => String(d?.customer_profile_id) === String(post.profileId));
   const publishing = mine?.internal?.publishing;
-  if (!publishing?.publishing_post_id) throw new SproutRefusal("post", r.status, "Sprout made no post for the profile.", JSON.stringify(data ?? null).slice(0, 500));
+  if (!publishing?.publishing_post_id) {
+    // An answer that lists its posts and has no entry for the profile is Sprout's own word that no post was made
+    // (a profile it dropped has no entry). An entry for the profile whose id cannot be read says the post was
+    // probably made, and an answer that cannot be read says nothing either way: neither is "made none".
+    const madeNone = Array.isArray(data?.data) && !mine;
+    throw new SproutRefusal("post", r.status, madeNone ? "Sprout made no post for the profile." : "Sprout's answer has no post id for the profile.", JSON.stringify(data ?? null).slice(0, 500), madeNone);
+  }
   return {
     publishingPostId: String(publishing.publishing_post_id),
     permaLink: publishing.perma_link ? String(publishing.perma_link) : null,

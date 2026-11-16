@@ -10,7 +10,9 @@
 //      them counted again from its own stored posts (storedFigures.ts).
 //   2. The sentences of its text that quote a figure it no longer shows are
 //      found (reportText.ts staleReportText). None: the job is done, with no
-//      model call.
+//      model call. A monthly report's own figures change only through the
+//      stored-report repair (repairStored.ts), which keeps the figures the
+//      text was written from in correction_audit; the job reads them there.
 //   3. One model call rewrites those sentences; an answer that adds a number
 //      the report does not show is refused and the job tries again later.
 //   4. The corrected sentences are written in place. The report's text and
@@ -84,6 +86,21 @@ function asWritten(reportData: Any, audit: Any): Any {
 }
 
 /**
+ * A monthly report's figures as its text was written: the Sprout figures and
+ * run summary kept in correction_audit when a repair changed them after
+ * (repairStored.ts), else the report as stored.
+ */
+function socialAsWritten(reportData: Any, audit: Any): Any {
+  const original = audit?.original;
+  if (!original || (original.sprout_performance === undefined && original.metrics_summary === undefined)) return reportData;
+  return {
+    ...reportData,
+    ...(original.sprout_performance !== undefined ? { sprout_performance: original.sprout_performance } : {}),
+    ...(original.metrics_summary !== undefined ? { metrics_summary: original.metrics_summary } : {}),
+  };
+}
+
+/**
  * The competitive report a monthly report shows beside its own figures: the
  * client's latest finished one written before the monthly report, read as
  * written and as shown now, under a prefix so its figures stay its own.
@@ -112,10 +129,9 @@ export async function reportTextCheck(db: Db, table: string, reportId: string): 
     shown = competitiveFigures(rd, "shown");
   } else {
     const beside = await competitiveBeside(db, row.client_id, row.created_at);
-    // The report's own Sprout figures are shown as stored: only the competitive figures beside them can have changed.
-    const own = socialFigures(rd);
-    stored = [...own, ...beside.stored];
-    shown = [...own, ...beside.shown];
+    // The report's own Sprout figures as the text was written, and as shown now (they differ only after a repair).
+    stored = [...socialFigures(socialAsWritten(rd, row.correction_audit)), ...beside.stored];
+    shown = [...socialFigures(rd), ...beside.shown];
   }
   return { kind, row, stale: staleReportText(kind, rd, stored, shown), shown };
 }

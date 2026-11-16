@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { KIT_BATCH, KIT_EDIT_LONG, KIT_MAKE_MS, KIT_MAX, MAX_KIT_TRIES, kitEditSize, kitStillCheckPrompt, parseKitStillCheck, type KitDone, kitClaim, kitDoneCount, kitDoneOf, kitForStyle, kitKeptFrom, kitWork, KIT_MIN, kitCleanPrompt, kitKept, kitNext, kitPath, kitPaths, kitPickPrompt, kitState, parseKitPick, postsRouteInput, videoRouteFor } from "../../../functions/_shared/video/kit";
+import { KIT_BATCH, KIT_EDIT_LONG, KIT_MAKE_MS, KIT_MAX, MAX_KIT_TRIES, kitEditSize, kitStillCheckPrompt, parseKitStillCheck, type KitDone, kitClaim, kitClaimed, kitDoneCount, kitDoneOf, kitEditKept, kitEditPath, kitEditsWith, kitEditsWithout, kitForStyle, kitKeptFrom, kitWork, KIT_MIN, kitCleanPrompt, kitKept, kitNext, kitPath, kitPaths, kitPickPrompt, kitState, parseKitPick, postsRouteInput, videoRouteFor } from "../../../functions/_shared/video/kit";
 
 describe("kit limits and paths", () => {
   it("keeps at most six stills and needs at least two", () => {
@@ -297,6 +297,30 @@ describe("kit tries", () => {
   });
 });
 
+describe("a kit claim that ended for a reason outside its stills (a wait, a refused call)", () => {
+  it("costs no try, and is spared once: the claim after it is counted as any other", () => {
+    expect(kitClaim({ tries: 1, seen: 2, spared: true }, 2)).toEqual({ tries: 1, seen: 2 });
+    expect(kitClaim({ tries: 1, seen: 2 }, 2)).toEqual({ tries: 2, seen: 2 });
+    // Anything but true spares nothing (the mark is kept on the job's state as true).
+    expect(kitClaim({ tries: 1, seen: 2, spared: "yes" }, 2)).toEqual({ tries: 2, seen: 2 });
+  });
+
+  it("is forgotten by the claim that follows it, with the tries and the stills seen kept on the state", () => {
+    const spared = { kit_of: "2026-11-12T08:00:00.000Z", kit_pick: ["a", "b"], kit_done: { "0": { path: "k0" } }, kit_tries: 1, kit_seen: 1, kit_spared: true, kit_edits: { "1-1": "e" } };
+    const next = kitClaimed(spared, "2026-11-12T08:00:00.000Z");
+    expect(next).toEqual({ kit_of: "2026-11-12T08:00:00.000Z", kit_pick: ["a", "b"], kit_done: { "0": { path: "k0" } }, kit_tries: 1, kit_seen: 1, kit_edits: { "1-1": "e" } });
+    // The same state with no mark: the claim finished nothing, so it is a try.
+    expect(kitClaimed(next, "2026-11-12T08:00:00.000Z").kit_tries).toBe(2);
+    // The state handed in is left as it was.
+    expect(spared.kit_spared).toBe(true);
+  });
+
+  it("starts the pick over, with the tries kept, when the style was learned again", () => {
+    const old = { kit_of: "2026-11-01T00:00:00.000Z", kit_pick: ["a"], kit_done: { "0": { path: "k0" } }, kit_tries: 2, kit_seen: 1, kit_spared: true };
+    expect(kitClaimed(old, "2026-11-12T08:00:00.000Z")).toEqual({ kit_of: "2026-11-12T08:00:00.000Z", kit_tries: 2, kit_seen: 0 });
+  });
+});
+
 describe("kitForStyle", () => {
   it("keeps a kit in progress made from the same style", () => {
     const s = { kit_of: "2026-11-10T10:00:00Z", kit_pick: ["f0"], kit_done: { "0": { path: "a" } }, kit_seen: 1, kit_tries: 1, other: 1 };
@@ -308,8 +332,43 @@ describe("kitForStyle", () => {
     expect(kitForStyle(s, "2026-11-11T09:00:00Z")).toEqual({ kit_of: "2026-11-11T09:00:00Z", kit_tries: 1, other: 1 });
   });
 
+  it("drops the paid edits kept for the old pick when the style was learned again", () => {
+    const s = { kit_of: "2026-11-10T10:00:00Z", kit_pick: ["f0"], kit_edits: { "0-1": "c1/style/kit-0-edit-1.png" }, kit_tries: 1 };
+    expect(kitForStyle(s, "2026-11-11T09:00:00Z")).toEqual({ kit_of: "2026-11-11T09:00:00Z", kit_tries: 1 });
+  });
+
   it("ties a first claim to the style it starts from", () => {
     expect(kitForStyle({}, "2026-11-10T10:00:00Z")).toEqual({ kit_of: "2026-11-10T10:00:00Z" });
     expect(kitForStyle({}, undefined)).toEqual({ kit_of: null });
+  });
+});
+
+describe("kit edits kept across a wait", () => {
+  it("stores each cleaning round's paid edit under a name of its own", () => {
+    expect(kitEditPath("c1", 2, 1)).toBe("c1/style/kit-2-edit-1.png");
+    expect(kitEditPath("c1", 2, 2)).toBe("c1/style/kit-2-edit-2.png");
+  });
+
+  it("finds the paid edit of a still's round, so only its transcode is tried again", () => {
+    const edits = { "2-1": "c1/style/kit-2-edit-1.png", "3-2": "c1/style/kit-3-edit-2.png" };
+    expect(kitEditKept(edits, 2, 1)).toBe("c1/style/kit-2-edit-1.png");
+    expect(kitEditKept(edits, 3, 2)).toBe("c1/style/kit-3-edit-2.png");
+    expect(kitEditKept(edits, 2, 2)).toBeNull();
+    expect(kitEditKept(undefined, 2, 1)).toBeNull();
+    expect(kitEditKept({ "2-1": 5 }, 2, 1)).toBeNull();
+  });
+
+  it("adds a round's paid edit to the kept edits", () => {
+    expect(kitEditsWith(undefined, 2, 1, "a")).toEqual({ "2-1": "a" });
+    expect(kitEditsWith({ "3-1": "c" }, 2, 2, "b")).toEqual({ "3-1": "c", "2-2": "b" });
+    expect(kitEditKept(kitEditsWith({}, 4, 2, "d"), 4, 2)).toBe("d");
+  });
+
+  it("forgets a still's edits once the still is done, keeping the others", () => {
+    const edits = { "2-1": "a", "2-2": "b", "3-1": "c" };
+    expect(kitEditsWithout(edits, 2)).toEqual({ "3-1": "c" });
+    expect(kitEditsWithout(undefined, 2)).toEqual({});
+    // One round alone: an edit the picture service could not work with.
+    expect(kitEditsWithout(edits, 2, 1)).toEqual({ "2-2": "b", "3-1": "c" });
   });
 });

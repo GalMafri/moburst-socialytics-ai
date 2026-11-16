@@ -180,6 +180,16 @@ describe("the Design tab's Regenerate", () => {
     expect(screen.queryByLabelText('What should change? (optional)')).toBeNull();
   });
 
+  it("says the first design is not started yet when the server answers 500, with no error text", async () => {
+    f.answers['design-request:create'] = { data: null, error: { message: 'Edge Function returned a non-2xx status code', context: { status: 500 } } };
+    panel([]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Create design' }));
+    expect((await screen.findByText('Not started yet.')).closest('[role=status]')).not.toBeNull();
+    expect(screen.queryByText(/non-2xx|Edge Function/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Create design' })).toBeEnabled();
+    expect(f.toastError).not.toHaveBeenCalled();
+  });
+
   it('keeps the note in its box when the design does not start', async () => {
     f.answers['design-request:create'] = { data: { error: 'no' }, error: null };
     panel();

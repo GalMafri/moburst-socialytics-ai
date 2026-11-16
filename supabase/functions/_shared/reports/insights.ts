@@ -40,7 +40,7 @@
 // this same code and input (pipelines/social/runInsights.ts), so the job
 // meets the stored input and makes no call.
 
-import { numbersIn, sentences } from "./reportText.ts";
+import { britishSpelling, exemptPattern, numbersIn, sentences, type SpellingExempt } from "./reportText.ts";
 import { competitiveChanges, competitiveFacts, socialChanges, socialFacts, type Fact } from "./facts.ts";
 import { GAP_PLATFORMS } from "../pipelines/competitive/analysis.ts";
 import { insightKey } from "./payloads.ts";
@@ -205,7 +205,7 @@ const UP = /\b(rose|rise|rises|risen|rising|up|grew|grow|grows|growing|increased
 const DOWN = /\b(fell|fall|falls|fallen|falling|down|dropped|drops?|declined?|declines|declining|decreased?|decreases|decreasing|shrank|shrinks?|slipped|slid)\b/gi;
 
 /** The problems with one piece of text against the facts it cites. */
-function textProblems(where: string, text: string, citedIds: string[], byId: Map<string, Fact>, names: RegExp | null): string[] {
+function textProblems(where: string, text: string, citedIds: string[], byId: Map<string, Fact>, names: RegExp | null, exempt: SpellingExempt): string[] {
   const out: string[] = [];
   if (!text) return [`${where} is empty.`];
   if (/[–—]/.test(text)) out.push(`${where} has a dash; use commas or periods.`);
@@ -222,6 +222,8 @@ function textProblems(where: string, text: string, citedIds: string[], byId: Map
   }
   // The words, without the companies' own names ("Top Shelf Co" is no comparison).
   const words = names ? text.replace(names, " ") : text;
+  const british = britishSpelling(text, exempt);
+  if (british) out.push(`${where} spells "${british}" the British way; use American English.`);
   const id = FACT_ID.exec(words);
   if (id) out.push(`${where} writes a fact id (${id[0]}); never write them.`);
   const size = SIZE.exec(words);
@@ -261,16 +263,21 @@ function textProblems(where: string, text: string, citedIds: string[], byId: Map
 /**
  * Why an answer can't be shown, or nothing when it can. `client` is the
  * report's client, whose name may hold any word; `rejected`, the keys
- * (insightKey) of the suggestions the team rejected.
+ * (insightKey) of the suggestions the team rejected; `sources`, the input's
+ * other text (post sample, rejected suggestions, preferences: insightsSources).
+ * British spellings the input already holds, in the facts' sentences or the
+ * sources, are the source's words: the same rule as the analysis check
+ * (reportText.ts exemptPattern).
  */
-export function checkInsights(fields: InsightFields | null, facts: Fact[], opts: { client?: string; rejected?: string[] } = {}): string[] {
+export function checkInsights(fields: InsightFields | null, facts: Fact[], opts: { client?: string; rejected?: string[]; sources?: string[] } = {}): string[] {
   const client = opts.client ?? "";
   const rejected = new Set(opts.rejected ?? []);
   if (!fields) return ["The answer could not be read as the JSON asked for."];
   const byId = new Map(facts.map((f) => [f.id, f]));
   const companies = [...new Set([client, ...facts.flatMap((f) => [f.company, f.leader])].map((n) => String(n ?? "").trim()).filter(Boolean))].sort((a, b) => b.length - a.length);
   const names = companies.length ? new RegExp(companies.map(escapeRe).join("|"), "gi") : null;
-  const check = (where: string, text: string, cited: string[]) => textProblems(where, text, cited, byId, names);
+  const exempt = exemptPattern(companies, [...facts.map((f) => f.sentence), ...(opts.sources ?? [])]);
+  const check = (where: string, text: string, cited: string[]) => textProblems(where, text, cited, byId, names, exempt);
   const out: string[] = [];
   if (fields.kind === "social") {
     if (!fields.summary) out.push("The summary is missing.");
@@ -450,6 +457,11 @@ export async function insightsInput(db: Db, table: string, row: Any, history?: I
   };
 }
 
+/** The input's text besides the facts, which an answer may repeat as written: the post sample, the rejected suggestions and the preferences. */
+export function insightsSources(input: InsightsInput): string[] {
+  return [...input.sample.map((p) => p.text), ...input.rejected.map((r) => r.gap), ...input.preferences];
+}
+
 /** One answer: asked, checked, asked once more with its problems named, else the facts in code's own words. */
 export async function writeInsights(input: InsightsInput, deps: InsightsDeps): Promise<{ fields: InsightFields; source: "model" | "template"; problems: string[]; input_tokens: number; output_tokens: number }> {
   const used = { input: 0, output: 0 };
@@ -464,7 +476,7 @@ export async function writeInsights(input: InsightsInput, deps: InsightsDeps): P
     used.input += Number(usage?.input_tokens) || 0;
     used.output += Number(usage?.output_tokens) || 0;
     const fields = result.stopReason === "refusal" ? null : parseInsights(input.kind, result.text);
-    const found = checkInsights(fields, input.facts, { client: input.client, rejected: input.rejected.map((r) => r.key) });
+    const found = checkInsights(fields, input.facts, { client: input.client, rejected: input.rejected.map((r) => r.key), sources: insightsSources(input) });
     if (!found.length && fields) return { fields: orderByFacts(fields), source: "model", problems, input_tokens: used.input, output_tokens: used.output };
     problems = found;
   }

@@ -20,6 +20,7 @@
 // 2026); the calls go through the Message Batches API (pipelines/claude.ts),
 // so a long answer never meets a step's time limit.
 
+import { withoutDataVendors, withoutVendorsIn } from "../../reports/shownFields.ts";
 import { ANALYSIS_SYSTEM_PROMPT } from "./prompt.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -54,7 +55,7 @@ export const ANALYSIS_EXAMPLE = {
     example_post_urls: ["https://www.instagram.com/p/abc123/", "https://www.tiktok.com/@rival/video/1"],
   }],
   posting_time_insights: {
-    summary: "The field owns 15:00-21:00 UTC; the client's single 18:00 slot competes head-on for attention it does not need to.",
+    summary: "The field owns 15:00-21:00; the client's single 18:00 slot competes head-on for attention it does not need to.",
     empty_airtime: "Weekday middays and weekends are uncontested across every account in the set.",
   },
   recommended_schedule: {
@@ -88,7 +89,7 @@ export const ANALYSIS_SCHEMA = {
     posting_time_insights: { type: "object", required: ["summary", "empty_airtime"], properties: { summary: str, empty_airtime: str } },
     recommended_schedule: { type: "object", required: ["by_weekday", "by_hour", "rationale"], properties: {
       by_weekday: { type: "object", required: [...WEEKDAYS], properties: Object.fromEntries(WEEKDAYS.map((d) => [d, { type: "integer" }])) },
-      by_hour: { type: "object", description: "UTC hour (\"0\" to \"23\") to posts per week", additionalProperties: { type: "integer" } },
+      by_hour: { type: "object", description: "Hour of the day (\"0\" to \"23\") in the time zone the data names, UTC when it names none, to posts per week", additionalProperties: { type: "integer" } },
       rationale: str,
     } },
     gaps_for_client: { type: "array", items: { type: "object", required: ["gap", "platform", "why_it_matters", "suggested_play"], properties: { gap: str, platform: { type: "string", enum: [...GAP_PLATFORMS] }, why_it_matters: str, suggested_play: str } } },
@@ -109,7 +110,7 @@ export const FORMAT_INSTRUCTIONS = [
 ].join("\n\n");
 
 /** The repo's agent text (n8n/competitive-metric-coverage.mjs), before the data. */
-export const ANALYSIS_INTRO = "Analyze this aggregated competitor data for the client and produce the exact JSON the schema requires.\n\ncomparison_metrics hold every company's figures. The client's come from its own Sprout profiles (measured, ads left out) on every platform Sprout covers, and from RivalIQ on a platform it does not; competitors' come from RivalIQ and verified public LinkedIn posts. Engagements are reactions or likes, comments and shares (not on Instagram or YouTube) for every company: never clicks, saves or views. The engagement rate is engagements divided by impressions (views on TikTok and YouTube); across networks it leaves out LinkedIn. Audience in the cross-network benchmark excludes LinkedIn. Current audience snapshots carry audience_as_of and must never be described as historical growth. A competitor's impressions are RivalIQ estimates; the client's are measured.";
+export const ANALYSIS_INTRO = "Analyze this aggregated competitor data for the client and produce the exact JSON the schema requires.\n\ncomparison_metrics hold every company's figures. The client's are measured from its own connected profiles (ads left out) on every platform they cover, and estimated on a platform they do not; competitors' are estimates from period totals and verified public LinkedIn posts. Engagements are reactions or likes, comments and shares (not on Instagram or YouTube) for every company: never clicks, saves or views. The engagement rate is engagements divided by impressions (views on TikTok and YouTube); across networks it leaves out LinkedIn. Audience in the cross-network benchmark excludes LinkedIn. Current audience snapshots carry audience_as_of and must never be described as historical growth. A competitor's impressions are estimates; the client's are measured.";
 
 /** The live node's appendix (version 079ef9fd): the team's learned preferences, when the request carries any. */
 export function preferencesAppendix(prefs: unknown): string {
@@ -118,9 +119,46 @@ export function preferencesAppendix(prefs: unknown): string {
     : "";
 }
 
+/** Keys that hold a company's name or a link, where a vendor's name can be a company's own. */
+const NAME_KEYS = new Set(["name", "competitor", "company", "example_post_urls", "platform", "url", "handle"]);
+const NEUTRAL_VALUES: Record<string, string> = { sprout: "measured", rivaliq: "estimated", sprout_and_rivaliq: "measured_and_estimated" };
+
+/** The names of the companies in an aggregate: a company called "Sprout Social" is a name wherever it appears. */
+export function companyNamesOf(aggregates: Any): string[] {
+  return (Array.isArray(aggregates?.companies) ? aggregates.companies : []).map((c: Any) => c?.name).filter((n: unknown): n is string => typeof n === "string");
+}
+
+/**
+ * The figures as the writer is given them: the same numbers, with no data
+ * vendor in a key, a label or a note, so nothing the writer reads gives it a
+ * name to repeat. The stored aggregates keep their own keys; only this copy changes.
+ */
+export function writerAggregates(aggregates: Any): Any {
+  const keep = companyNamesOf(aggregates);
+  const walk = (value: Any, key: string): Any => {
+    if (typeof value === "string") {
+      if (NAME_KEYS.has(key)) return value;
+      if (value in NEUTRAL_VALUES) return NEUTRAL_VALUES[value];
+      if (/^rivaliq_/.test(value)) return value.replace(/^rivaliq_/, "");
+      return withoutDataVendors(value, keep);
+    }
+    if (Array.isArray(value)) return value.map((v) => walk(v, key));
+    if (value && typeof value === "object") {
+      return Object.fromEntries(Object.entries(value).map(([k, v]) => [k.replace(/rivaliq/g, "provider").replace(/sprout/g, "owned"), walk(v, k)]));
+    }
+    return value;
+  };
+  return walk(aggregates, "");
+}
+
+/** A parsed answer with no data vendor named, whatever the writer wrote: a wording slip is mended here, never sent back to a paid repair. */
+export function answerWithoutVendors<T>(answer: T, aggregates: Any): T {
+  return withoutVendorsIn(answer, "", companyNamesOf(aggregates));
+}
+
 /** The analysis request: the system message, then the data, the preferences and the format. */
 export function analysisRequest(aggregates: Any, teamPreferences: unknown): Record<string, unknown> {
-  const text = `${ANALYSIS_INTRO}\n\n${JSON.stringify(aggregates)}${preferencesAppendix(teamPreferences)}\n\n${FORMAT_INSTRUCTIONS}`;
+  const text = `${ANALYSIS_INTRO}\n\n${JSON.stringify(writerAggregates(aggregates))}${preferencesAppendix(teamPreferences)}\n\n${FORMAT_INSTRUCTIONS}`;
   return {
     model: ANALYSIS_MODEL,
     max_tokens: ANALYSIS_MAX_TOKENS,
@@ -198,7 +236,7 @@ export function analysisProblems(v: Any): string[] {
   } else if (!isObj(s)) out.push("recommended_schedule must be an object or null");
   else {
     if (!isObj(s.by_weekday) || !WEEKDAYS.every((d) => isInt(s.by_weekday[d]))) out.push("recommended_schedule.by_weekday must give Mon to Sun as whole numbers");
-    if (!isObj(s.by_hour) || !Object.entries(s.by_hour).every(([h, n]) => /^(?:[0-9]|1[0-9]|2[0-3])$/.test(h) && isInt(n))) out.push("recommended_schedule.by_hour must map UTC hours 0 to 23 to whole numbers");
+    if (!isObj(s.by_hour) || !Object.entries(s.by_hour).every(([h, n]) => /^(?:[0-9]|1[0-9]|2[0-3])$/.test(h) && isInt(n))) out.push("recommended_schedule.by_hour must map hours 0 to 23 to whole numbers");
     if (!isStr(s.rationale)) out.push("recommended_schedule.rationale must be a string");
   }
   (Array.isArray(v.gaps_for_client) ? v.gaps_for_client : []).forEach((g: Any, i: number) => {

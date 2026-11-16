@@ -33,6 +33,14 @@ export class FeedRefreshError extends Error {
   }
 }
 
+/** The topic pass did not give an answer: the model errored or its reply could not be read. A reply with no shared topic is not this. */
+export class TopicsNotDetectedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TopicsNotDetectedError";
+  }
+}
+
 export interface FeedRefreshEnv {
   rivaliqKey: string | undefined;
   anthropicKey: string | undefined;
@@ -42,6 +50,13 @@ export interface FeedRefreshEnv {
   days?: number;
   /** Tests give their own pieces of the in-app LinkedIn run (no pause between looks); the refresh uses the database's. */
   linkedinInline?: Partial<InlineDeps>;
+  /**
+   * The saved feed snapshot whose topic pass is run again (the feed job's retry
+   * of a pass that did not finish). Nothing is collected: the topics are found
+   * in that snapshot's posts and saved. A snapshot that is not the client's
+   * leaves this out of account and the whole refresh runs.
+   */
+  topicsSnapshotId?: string | null;
 }
 
 const RIVALIQ = "https://api.rivaliq.com/v3";
@@ -140,18 +155,24 @@ async function detectTopics(clientName: string, posts: any[], start: string, end
       url: p.postLink || null,
     }));
   const prompt = topicPrompt(clientName, compact, start, end, known);
-  const r = await anthropicFetch("/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 2000, messages: [{ role: "user", content: prompt }] }),
-  });
+  let r: Response;
+  try {
+    r = await anthropicFetch("/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 2000, messages: [{ role: "user", content: prompt }] }),
+    });
+  } catch (e) {
+    console.error("[refresh-competitor-feed] model unreachable", e instanceof Error ? e.message : String(e));
+    throw new TopicsNotDetectedError("The topic model could not be reached.");
+  }
   if (!r.ok) {
     console.error("[refresh-competitor-feed] model error", r.status, (await r.text()).slice(0, 200));
-    return [];
+    throw new TopicsNotDetectedError(`The topic model answered [${r.status}].`);
   }
-  const text: string = (await r.json()).content?.[0]?.text?.trim() || "";
-  const raw = text.match(/\{[\s\S]*\}/)?.[0] || "";
   try {
+    const text: string = (await r.json()).content?.[0]?.text?.trim() || "";
+    const raw = text.match(/\{[\s\S]*\}/)?.[0] || "";
     const parsed = JSON.parse(raw);
     const topics: Topic[] = Array.isArray(parsed?.topics) ? parsed.topics : [];
     const urls = new Set(compact.map((p) => p.url).filter(Boolean));
@@ -167,7 +188,7 @@ async function detectTopics(clientName: string, posts: any[], start: string, end
         confidence: Math.max(0, Math.min(1, Number(t.confidence) || 0.5)),
       }));
   } catch {
-    return [];
+    throw new TopicsNotDetectedError("The topic model's reply could not be read.");
   }
 }
 
@@ -265,9 +286,96 @@ async function harvestOwnCreative(
   }
 }
 
-export async function refreshCompetitorFeed(admin: any, clientId: string, env: FeedRefreshEnv) {
+/**
+ * The topic pass: the topics two or more companies posted about inside the
+ * window, each saved as a competitive_alerts row. A pass that gave no answer
+ * (the model errored, its reply could not be read) is reported as
+ * notDetected with the snapshot it ran on, not as a pass with no topics.
+ */
+async function saveFeedTopics(
+  admin: any, clientId: string, clientName: string, socialPosts: any[], window: { start: string; end: string },
+  anthropicKey: string | undefined, snapshotId: string | null,
+): Promise<{ alerts: number; notDetected: boolean; snapshotId: string | null }> {
+  // The earlier windows' topics, dismissed ones included: the model is asked
+  // to reuse a key when the theme is the same, so a theme is counted once
+  // and a dismissed theme stays dismissed. The alert's identity includes the
+  // window it was found in, so without a shared key every week made a new
+  // row and a dismissal only ever applied to the week it was made in.
+  const { data: prior } = await admin
+    .from("competitive_alerts")
+    .select("topic, topic_key, window_start, status")
+    .eq("client_id", clientId)
+    .lte("window_start", window.start)
+    .gte("window_start", iso(new Date(Date.now() - 90 * DAY)))
+    .order("window_start", { ascending: false })
+    .limit(200);
+  const known = knownTopics((prior || []) as KnownTopic[], window.start);
+  const dismissedKeys = new Set<string>((prior || []).filter((r: any) => r.status === "dismissed" && r.topic_key).map((r: any) => String(r.topic_key)));
+
+  let detected: Topic[];
+  try {
+    detected = await detectTopics(clientName, socialPosts, window.start, window.end, anthropicKey, known);
+  } catch (e) {
+    if (e instanceof TopicsNotDetectedError) return { alerts: 0, notDetected: true, snapshotId };
+    throw e;
+  }
+  const topics = topicRows(detected, known, dismissedKeys);
+
+  let saved = 0;
+  for (const t of topics) {
+    const { error } = await admin.from("competitive_alerts").upsert(
+      {
+        client_id: clientId,
+        window_start: window.start,
+        window_end: window.end,
+        // Carried forward rather than re-raised. The row is still written,
+        // so the topic stays in the record and a person can bring it back.
+        ...(t.dismissed ? { status: "dismissed" } : {}),
+        topic: t.topic,
+        topic_key: t.topic_key,
+        summary: t.summary,
+        companies: t.companies,
+        platforms: t.platforms,
+        post_urls: t.post_urls,
+        post_count: t.post_urls.length,
+        confidence: t.confidence,
+      },
+      { onConflict: "client_id,window_start,topic_key", ignoreDuplicates: false },
+    );
+    // Two separate questions. Folding them into one condition sent a
+    // SUCCESSFUL write of a carried-forward dismissal into the error branch,
+    // where error is null, and the whole refresh died on the dereference.
+    if (error) console.error("[refresh-competitor-feed] alert upsert failed", error.message);
+    else if (!t.dismissed) saved += 1;
+  }
+
+  return { alerts: saved, notDetected: false, snapshotId };
+}
+
+/** What a refresh answers with. The two flags are set only when the feed was saved short of its LinkedIn posts or its topics. */
+export type FeedRefreshResult = {
+  client_id: string; landscape_id: unknown; window: { start: string; end: string }; posts: number; truncated: boolean; alerts: number;
+  design_refs?: { added: number; kept: number; skipped: string[] };
+  linkedin_not_collected?: true; topics_not_detected?: true; snapshot_id?: string | null;
+};
+
+export async function refreshCompetitorFeed(admin: any, clientId: string, env: FeedRefreshEnv): Promise<FeedRefreshResult> {
   const { data: client } = await admin.from("clients").select("id, name, website_url, sprout_customer_id").eq("id", clientId).maybeSingle();
   if (!client) throw new FeedRefreshError("Client not found", 404);
+  // A topic pass that did not finish is run again on the feed it was saved
+  // with: the posts are already stored, so nothing is collected again.
+  if (env.topicsSnapshotId) {
+    const { data: snap } = await admin.from("rivaliq_snapshots").select("id, landscape_id, payload")
+      .eq("id", env.topicsSnapshotId).eq("client_id", clientId).eq("endpoint", "feed").maybeSingle();
+    const stored = snap?.payload as { window?: { start: string; end: string }; socialPosts?: unknown[] } | undefined;
+    if (stored?.window && Array.isArray(stored.socialPosts)) {
+      const found = await saveFeedTopics(admin, clientId, client.name, stored.socialPosts, stored.window, env.anthropicKey, snap.id);
+      return {
+        client_id: clientId, landscape_id: snap.landscape_id, window: stored.window, posts: stored.socialPosts.length, truncated: false, alerts: found.alerts,
+        ...(found.notDetected ? { topics_not_detected: true as const, snapshot_id: found.snapshotId } : {}),
+      };
+    }
+  }
   const key = env.rivaliqKey;
   if (!key) throw new FeedRefreshError("RIVALIQ_API_KEY is not configured", 500);
 
@@ -343,12 +451,12 @@ export async function refreshCompetitorFeed(admin: any, clientId: string, env: F
   const selectedIds = new Set(plan.companyIds);
   const socialPosts = mergeOwnedCompetitivePosts([...rivalPosts.filter(p=>selectedIds.has(String(p.companyId))), ...linkedin.socialPosts],owned,{id:match.client_company_id,name:client.name});
 
-  const {error: snapshotError} = await admin.from("rivaliq_snapshots").insert({
+  const {data: savedSnapshot, error: snapshotError} = await admin.from("rivaliq_snapshots").insert({
     client_id: clientId,
     landscape_id: landscapeId,
     endpoint: "feed",
     payload: { window, client_company_id: match.client_company_id, socialPosts, owned_source: {profiles:owned.profiles,coverage:owned.coverage}, owned_metrics:owned.metrics, linkedin_sources: plan.sources, additional_metrics: linkedin.additional_metrics, fetched_at: new Date().toISOString(), truncated: false },
-  });
+  }).select("id").single();
 
   if (snapshotError) throw new Error('Could not save the refreshed feed.');
 
@@ -361,54 +469,13 @@ export async function refreshCompetitorFeed(admin: any, clientId: string, env: F
   // RivalIQ call, so the newest of them become references too.
   const harvest = await harvestOwnCreative(admin, clientId, match.client_company_id, socialPosts, client.name);
 
-  // The earlier windows' topics, dismissed ones included: the model is asked
-  // to reuse a key when the theme is the same, so a theme is counted once
-  // and a dismissed theme stays dismissed. The alert's identity includes the
-  // window it was found in, so without a shared key every week made a new
-  // row and a dismissal only ever applied to the week it was made in.
-  const { data: prior } = await admin
-    .from("competitive_alerts")
-    .select("topic, topic_key, window_start, status")
-    .eq("client_id", clientId)
-    .lte("window_start", window.start)
-    .gte("window_start", iso(new Date(Date.now() - 90 * DAY)))
-    .order("window_start", { ascending: false })
-    .limit(200);
-  const known = knownTopics((prior || []) as KnownTopic[], window.start);
-  const dismissedKeys = new Set<string>((prior || []).filter((r: any) => r.status === "dismissed" && r.topic_key).map((r: any) => String(r.topic_key)));
-
-  const topics = topicRows(await detectTopics(client.name, socialPosts, window.start, window.end, env.anthropicKey, known), known, dismissedKeys);
-
-  let saved = 0;
-  for (const t of topics) {
-    const { error } = await admin.from("competitive_alerts").upsert(
-      {
-        client_id: clientId,
-        window_start: window.start,
-        window_end: window.end,
-        // Carried forward rather than re-raised. The row is still written,
-        // so the topic stays in the record and a person can bring it back.
-        ...(t.dismissed ? { status: "dismissed" } : {}),
-        topic: t.topic,
-        topic_key: t.topic_key,
-        summary: t.summary,
-        companies: t.companies,
-        platforms: t.platforms,
-        post_urls: t.post_urls,
-        post_count: t.post_urls.length,
-        confidence: t.confidence,
-      },
-      { onConflict: "client_id,window_start,topic_key", ignoreDuplicates: false },
-    );
-    // Two separate questions. Folding them into one condition sent a
-    // SUCCESSFUL write of a carried-forward dismissal into the error branch,
-    // where error is null, and the whole refresh died on the dereference.
-    if (error) console.error("[refresh-competitor-feed] alert upsert failed", error.message);
-    else if (!t.dismissed) saved += 1;
-  }
+  const found = await saveFeedTopics(admin, clientId, client.name, socialPosts, window, env.anthropicKey, savedSnapshot?.id ?? null);
 
   return {
-    client_id: clientId, landscape_id: landscapeId, window, posts: socialPosts.length, truncated: socialPosts.length >= PAGE_LIMIT, alerts: saved, design_refs: harvest,
+    client_id: clientId, landscape_id: landscapeId, window, posts: socialPosts.length, truncated: socialPosts.length >= PAGE_LIMIT, alerts: found.alerts, design_refs: harvest,
+    // Set only when the feed was saved but its topic pass gave no answer.
+    // snapshot_id is the saved feed whose topics the feed job's retry finds.
+    ...(found.notDetected ? { topics_not_detected: true as const, snapshot_id: found.snapshotId } : {}),
     // Set only when the feed was saved without its LinkedIn posts. Why is in the log only.
     ...(notCollected ? { linkedin_not_collected: true as const } : {}),
   };
@@ -417,11 +484,13 @@ export async function refreshCompetitorFeed(admin: any, clientId: string, env: F
 /**
  * A refresh a person started (the feed page's refresh-competitor-feed). Its
  * answer is the saved feed either way; when that feed was saved without its
- * LinkedIn posts, a feed refresh is queued to collect them, with the feed
- * job's retry and end rules (feedRetry.ts).
+ * LinkedIn posts or without its topics, a feed refresh is queued to collect
+ * them, with the feed job's retry and end rules (feedRetry.ts).
  */
 export async function refreshCompetitorFeedOnDemand(admin: any, clientId: string, env: FeedRefreshEnv) {
   const result = await refreshCompetitorFeed(admin, clientId, env);
   if (result.linkedin_not_collected) await queueFeedRetry(admin, clientId);
+  // Only the topic pass is missing: the retry runs it on the saved snapshot and collects nothing.
+  else if (result.topics_not_detected) await queueFeedRetry(admin, clientId, new Date(), result.snapshot_id ? { topics_snapshot_id: result.snapshot_id } : null);
   return result;
 }

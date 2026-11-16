@@ -132,6 +132,74 @@ const INSIGHTS: InsightFields = {
   ],
 };
 
+describe("shownCompetitive names no data vendor in the narrative, for every reader", () => {
+  const withVendors = () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const report: any = competitive();
+    report.ai_analysis = {
+      ...report.ai_analysis,
+      executive_summary: "Cadence: RivalIQ's totals show 12 posts a week.\n\nReach: captured as actual via Sprout.",
+      competitor_breakdowns: [{ name: "Sprout Social", is_client: false, copy_style: "Short hooks.", platform_notes: [{ platform: "instagram", note: "Captured as actual via Sprout." }] }],
+      recommended_schedule: { by_weekday: { Mon: 1 }, by_hour: { "12": 1 }, rationale: "RivalIQ shows a midday gap." },
+      gaps_for_client: [{ gap: "Weekly Reels", platform: "instagram", why_it_matters: "Per Sprout, Reels lead.", suggested_play: "Post one a week." }],
+    };
+    return report;
+  };
+  const strings = (x: unknown): string[] => (typeof x === "string" ? [x] : x && typeof x === "object" ? Object.entries(x).filter(([k]) => k !== "name" && k !== "based_on").flatMap(([, v]) => strings(v)) : []);
+
+  it("replaces the names in every narrative string of ai_analysis, for staff and clients", () => {
+    for (const staff of [false, true]) {
+      const shown = shownCompetitive(withVendors(), null, { staff });
+      const text = strings(shown.report.ai_analysis).join("\n");
+      expect(text).not.toMatch(/RivalIQ|Rival IQ|Sprout/);
+      expect(shown.report.ai_analysis.competitor_breakdowns[0].platform_notes[0].note).toBe("Captured as actual via the data source.");
+      expect(shown.report.ai_analysis.recommended_schedule.rationale).toBe("The data source shows a midday gap.");
+      expect(shown.gaps[0].why_it_matters).toBe("Per the data source, Reels lead.");
+      // A company's own name is a name, not a source.
+      expect(shown.report.ai_analysis.competitor_breakdowns[0].name).toBe("Sprout Social");
+    }
+  });
+
+  it("reads a report's own summary with no vendor named, as one paragraph", () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const report: any = withVendors();
+    delete report.aggregates.metric_semantics_version;
+    const shown = shownCompetitive(report, null);
+    expect(shown.summary[0].text).toContain("The data source's totals show 12 posts a week.");
+    expect(shown.summary[0].text).not.toMatch(/RivalIQ|Sprout/);
+  });
+
+  it("keeps what staff are told a figure rests on", () => {
+    expect(shownCompetitive(competitive(), row(INSIGHTS), { staff: true }).gaps[0].based_on).toContain("Sprout and RivalIQ");
+  });
+
+  it("leaves the ordinary word 'sprout' alone and a competitor called Sprout Social named in prose", () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const report: any = competitive();
+    report.aggregates.companies.push({ name: "Sprout Social", is_client: false, post_count: 3, observed_post_count: 3 });
+    report.ai_analysis = { ...report.ai_analysis, recommended_schedule: { by_weekday: { Mon: 1 }, by_hour: { "12": 1 }, rationale: "Ideas sprout in comments.\n\nSprout Social posts daily, and RivalIQ shows it." } };
+    const text = shownCompetitive(report, null).report.ai_analysis.recommended_schedule.rationale;
+    expect(text).toContain("Ideas sprout in comments.");
+    expect(text).toContain("Sprout Social posts daily, and the data source shows it.");
+  });
+
+  it("names no vendor however the writer spells it", () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const report: any = competitive();
+    report.ai_analysis = { ...report.ai_analysis, recommended_schedule: { by_weekday: { Mon: 1 }, by_hour: { "12": 1 }, rationale: "Rivaliq shows it.\n\nPer rivalIQ and RivalIq, and sprout social, Reels lead. Ideas sprout in comments." } };
+    const text = shownCompetitive(report, null).report.ai_analysis.recommended_schedule.rationale;
+    expect(text).not.toMatch(/rival ?iq|sprout social/i);
+    expect(text).toContain("Ideas sprout in comments.");
+  });
+
+  it("cleans the summary paragraphs taken from an older insights row", () => {
+    const old: InsightFields = { kind: "competitive", summary: [{ text: "RivalIQ shows Moburst ranks 2nd of 2 on followers.", facts: ["F2"] }], gaps: null };
+    const shown = shownCompetitive(competitive(), row(old));
+    expect(shown.summary.map((p) => p.text).join(" ")).not.toMatch(/RivalIQ|Rival IQ|Sprout/);
+    expect(shown.summary[0].text).toBe("The data source shows Moburst ranks 2nd of 2 on followers.");
+  });
+});
+
 describe("shownCompetitive", () => {
   it("is main's reading of the report without a row: normalized, through the evidence limits", () => {
     const shown = shownCompetitive(competitive(), null);

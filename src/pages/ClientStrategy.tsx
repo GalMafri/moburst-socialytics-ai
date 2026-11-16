@@ -1,8 +1,8 @@
 /**
  * A client's social strategy (spec: docs/superpowers/specs/2026-11-03-
  * strategy-v2-design.md). The lifecycle writes it from the brief, the trend
- * profile, the competitors and the client's own posts (Sprout where profiles
- * are assigned, public posts everywhere else), and writes it again when those
+ * profile, the competitors and the client's own posts (connected accounts where
+ * they are assigned, public posts everywhere else), and writes it again when those
  * change and once a month; nobody has to start it. It reads as cards, lists
  * and numbers in six band sections; each card's pencil opens its fields, and
  * a person's version is kept whenever the strategy is rewritten. Staff only;
@@ -22,7 +22,7 @@ import { Loading } from "@/components/ui/loading";
 import { LoadRetry } from "@/components/ui/load-error";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { newestEdit, type PageStrategy, type StrategyEdit } from "@/lib/strategyView";
+import { newestEdit, shownValue, type PageStrategy, type StrategyEdit } from "@/lib/strategyView";
 import { StrategyHeader } from "@/components/strategy/StrategyHeader";
 import { GoalCards, PlanTiles } from "@/components/strategy/GoalCards";
 import { Measures, PlatformStart } from "@/components/strategy/Baseline";
@@ -32,6 +32,7 @@ import { NotNow, PlatformCard } from "@/components/strategy/PlatformCard";
 import { AvoidList } from "@/components/strategy/AvoidList";
 import { StrategyExports } from "@/components/strategy/StrategyExports";
 import { pillarSectionKey, platformSectionKey } from "../../supabase/functions/_shared/strategy/platforms";
+import { pillarShares, calendarShareWindow } from "../../supabase/functions/_shared/strategy/pillarShares";
 import type { Goal } from "../../supabase/functions/_shared/strategy/sections";
 
 const NAV = [
@@ -60,12 +61,14 @@ function ClientSwitcher({ value }: { value: string }) {
 }
 
 /** The strategy's six sections, from the stored strategy and people's versions. */
-export function StrategyBody({ clientId, client, logo, strategy, edits, onSaved }: {
+export function StrategyBody({ clientId, client, logo, strategy, edits, posts, onSaved }: {
   clientId: string;
   client: string;
   logo: string | null;
   strategy: PageStrategy;
   edits: StrategyEdit[];
+  /** The client's calendar posts of the last 8 weeks: each pillar's share is worked out from them as the page opens. */
+  posts: Array<{ pillar: string | null }>;
   onSaved: () => unknown;
 }) {
   const byKey = new Map(edits.map((e) => [e.section_key, e]));
@@ -73,13 +76,16 @@ export function StrategyBody({ clientId, client, logo, strategy, edits, onSaved 
   const section = (key: string) => ({ clientId, sectionKey: key, product: sections[key] ?? "", edit: byKey.get(key), onSaved });
   const platforms = Array.isArray(strategy.platforms) ? strategy.platforms : [];
   const live = platforms.filter((p) => p.state !== "not_now");
-  const pillars = Array.isArray(strategy.pillars) ? strategy.pillars : [];
-  const goalsValue = byKey.get("goals")?.value ?? sections.goals;
+  const stored = Array.isArray(strategy.pillars) ? strategy.pillars : [];
+  const shares = pillarShares(stored.map((p) => p.name), posts);
+  const pillars = stored.map((p, i) => ({ ...p, share: shares[i] }));
+  const shownGoals = shownValue(sections.goals, byKey.get("goals"));
+  const goalsValue = shownGoals && typeof shownGoals === "object" ? shownGoals : sections.goals;
   const goals = goalsValue && typeof goalsValue === "object" && Array.isArray((goalsValue as { items?: unknown }).items) ? (goalsValue as { items: Goal[] }).items : [];
   const hasNotNow = platforms.some((p) => p.state === "not_now") || byKey.has("not_now") || !!sections.not_now;
   return (
     <>
-      <StrategyHeader client={client} logo={logo} writtenAt={strategy.written_at} sources={Array.isArray(strategy.sources) ? strategy.sources : []} platforms={platforms} />
+      <StrategyHeader client={client} logo={logo} writtenAt={strategy.written_at} sources={Array.isArray(strategy.sources) ? strategy.sources : []} platforms={platforms} updating={!!strategy.updating} />
 
       <Section index={1} id="strategy-plan" title="The plan">
         <PlanTiles platforms={platforms} pillars={pillars.length} />
@@ -141,10 +147,12 @@ export default function ClientStrategy() {
   const strategy = useQuery({
     queryKey: ["content-strategy", id],
     enabled: !!id,
+    // A version being written shows as Updating; the page picks the new one up when it lands.
+    refetchInterval: (q) => (q.state.data?.updating ? 20_000 : false),
     queryFn: async () => {
-      const { data, error } = await supabase.from("content_strategies").select("shape, sections, platforms, pillars, sources, written_at").eq("client_id", id!).maybeSingle();
+      const { data, error } = await supabase.from("content_strategies").select<string, PageStrategy>("shape, sections, platforms, pillars, sources, written_at, updating:pending->>phase").eq("client_id", id!).maybeSingle();
       if (error) throw error;
-      return data as unknown as PageStrategy | null;
+      return data;
     },
   });
   const edits = useQuery({
@@ -154,6 +162,18 @@ export default function ClientStrategy() {
       const { data, error } = await supabase.from("content_strategy_edits").select("section_key, text, value, editor_name, edited_at, source").eq("client_id", id!);
       if (error) throw error;
       return (data ?? []) as StrategyEdit[];
+    },
+  });
+
+  // The calendar's posts of the last 8 weeks, which each pillar's share is counted from (the same rule the strategy is written with).
+  const posts = useQuery({
+    queryKey: ["strategy-calendar-posts", id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { start, end } = calendarShareWindow(new Date());
+      const { data, error } = await supabase.from("calendar_posts").select("pillar").eq("client_id", id!).gte("post_date", start).lte("post_date", end);
+      if (error) throw error;
+      return (data ?? []) as Array<{ pillar: string | null }>;
     },
   });
 
@@ -178,15 +198,15 @@ export default function ClientStrategy() {
         </div>
       ) : undefined}
     >
-      {strategy.isLoading || edits.isLoading ? (
+      {strategy.isLoading || edits.isLoading || posts.isLoading ? (
         <Loading label="Loading the strategy" />
-      ) : strategy.isError || edits.isError ? (
-        <LoadRetry context="content strategy" error={strategy.error || edits.error} onRetry={() => { void strategy.refetch(); void edits.refetch(); }} />
+      ) : strategy.isError || edits.isError || posts.isError ? (
+        <LoadRetry context="content strategy" error={strategy.error || edits.error || posts.error} onRetry={() => { void strategy.refetch(); void edits.refetch(); void posts.refetch(); }} />
       ) : !s ? (
-        <EmptyState icon={Compass} title="No strategy yet" description="Written once the client's brief and trend profile are ready." />
+        <EmptyState icon={Compass} title="No strategy yet" description="The strategy appears here as soon as it is written." />
       ) : (
         <div ref={contentRef} className="space-y-section">
-          <StrategyBody clientId={id!} client={name} logo={logo} strategy={s} edits={edits.data ?? []} onSaved={() => edits.refetch()} />
+          <StrategyBody clientId={id!} client={name} logo={logo} strategy={s} edits={edits.data ?? []} posts={posts.data ?? []} onSaved={() => edits.refetch()} />
         </div>
       )}
     </AppLayout>

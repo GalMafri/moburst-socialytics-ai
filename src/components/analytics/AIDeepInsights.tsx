@@ -9,6 +9,8 @@ import { Eye, Heart, Percent, ListChecks, Loader2 } from "lucide-react";
 import { reportCounts, reportTrends, themesInPeriod } from "@/lib/reportFigures";
 import { useTrendThemes } from "@/hooks/useTrendThemes";
 import { engagementRate } from "@/lib/competitiveMetrics";
+import { countOf } from "@/lib/display";
+import { formatCount } from "@/lib/platformMeasures";
 
 interface Props {
   clientId: string;
@@ -55,12 +57,12 @@ export function AIDeepInsights({ clientId, reports, chartData }: Props) {
         const pct = Math.round(((last.impressions - first.impressions) / first.impressions) * 100);
         if (pct > 0) {
           result.push({
-            text: `Impressions grew ${pct}% across reports (${first.impressions.toLocaleString()} → ${last.impressions.toLocaleString()})`,
+            text: `Impressions grew ${pct}% across reports (${formatCount(first.impressions)} → ${formatCount(last.impressions)})`,
             type: "up",
           });
         } else if (pct < 0) {
           result.push({
-            text: `Impressions declined ${Math.abs(pct)}% across reports (${first.impressions.toLocaleString()} → ${last.impressions.toLocaleString()})`,
+            text: `Impressions declined ${Math.abs(pct)}% across reports (${formatCount(first.impressions)} → ${formatCount(last.impressions)})`,
             type: "down",
           });
         }
@@ -79,12 +81,12 @@ export function AIDeepInsights({ clientId, reports, chartData }: Props) {
       // Engagement rate
       if (last.engagement_rate > first.engagement_rate) {
         result.push({
-          text: `Sprout engagement rate improved from ${first.engagement_rate.toFixed(2)}% to ${last.engagement_rate.toFixed(2)}%`,
+          text: `Reported engagement rate improved from ${first.engagement_rate.toFixed(2)}% to ${last.engagement_rate.toFixed(2)}%`,
           type: "up",
         });
       } else if (last.engagement_rate < first.engagement_rate && first.engagement_rate > 0) {
         result.push({
-          text: `Sprout engagement rate decreased from ${first.engagement_rate.toFixed(2)}% to ${last.engagement_rate.toFixed(2)}%`,
+          text: `Reported engagement rate decreased from ${first.engagement_rate.toFixed(2)}% to ${last.engagement_rate.toFixed(2)}%`,
           type: "down",
         });
       }
@@ -94,7 +96,7 @@ export function AIDeepInsights({ clientId, reports, chartData }: Props) {
     const bestImpr = chartData.reduce((best, d) => (d.impressions > best.impressions ? d : best));
     if (bestImpr.impressions > 0) {
       result.push({
-        text: `Peak impressions: ${bestImpr.impressions.toLocaleString()} on ${bestImpr.date}`,
+        text: `Peak impressions: ${formatCount(bestImpr.impressions)} on ${bestImpr.date}`,
         type: "neutral",
       });
     }
@@ -102,7 +104,7 @@ export function AIDeepInsights({ clientId, reports, chartData }: Props) {
     const bestEng = chartData.reduce((best, d) => (d.engagements > best.engagements ? d : best));
     if (bestEng.engagements > 0) {
       result.push({
-        text: `Peak engagement: ${bestEng.engagements.toLocaleString()} on ${bestEng.date}`,
+        text: `Peak engagement: ${formatCount(bestEng.engagements)} on ${bestEng.date}`,
         type: "neutral",
       });
     }
@@ -113,7 +115,7 @@ export function AIDeepInsights({ clientId, reports, chartData }: Props) {
     // The one definition: engagements divided by impressions.
     const avgEngRate = (engagementRate(totalEng, totalImpr) ?? 0) * 100;
     if (avgEngRate > 0) {
-      result.push({ text: `Average Sprout engagement rate across all reports: ${avgEngRate.toFixed(2)}%`, type: "neutral" });
+      result.push({ text: `Average reported engagement rate across all reports: ${avgEngRate.toFixed(2)}%`, type: "neutral" });
     }
 
     // What the reports produced and their trend coverage are counted in `facts` below, as each report page counts them.
@@ -141,19 +143,19 @@ export function AIDeepInsights({ clientId, reports, chartData }: Props) {
     const held = reportTrendRows.some((row) => row.trends.held);
     return { bestImpr, bestEng, avgRate: (engagementRate(totalEng, totalImpr) ?? 0) * 100, recs, industry, tiktok, ig, held };
   }, [reportTrendRows, chartData]);
-  const compact = (v: number) => (v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : v >= 10_000 ? `${(v / 1_000).toFixed(1)}K` : v.toLocaleString());
+  const compact = formatCount;
   const trends = insights.filter((x) => x.type !== "neutral").map((x) => x.text);
   if (!facts) return null;
   const n = reports.length;
   return (
     <Section
       title="Across the reports in this window"
-      description={`Computed from ${n} ${n === 1 ? "report" : "reports"}: peaks, the average Sprout engagement rate, and how much the reports produced.`}
+      description={`Peaks, average engagement and recommendations across the ${countOf(n, "report")} in this window.`}
     >
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="Peak impressions" icon={<Eye className="h-3.5 w-3.5" />} value={compact(facts.bestImpr.impressions)} sub={`on ${facts.bestImpr.date}`} />
         <StatCard label="Peak engagement" icon={<Heart className="h-3.5 w-3.5" />} value={compact(facts.bestEng.engagements)} sub={`on ${facts.bestEng.date}`} />
-        <StatCard label="Avg Sprout engagement rate" icon={<Percent className="h-3.5 w-3.5" />} value={`${facts.avgRate.toFixed(2)}%`} sub={SPROUT_RATE_NOTE} />
+        <StatCard label="Average reported engagement rate" icon={<Percent className="h-3.5 w-3.5" />} value={`${facts.avgRate.toFixed(2)}%`} sub={SPROUT_RATE_NOTE} />
         {facts.held ? (
           // Held until the themes are read, so the count never changes on screen; never printed while held.
           <div data-print="hide" className="contents">
@@ -169,10 +171,9 @@ export function AIDeepInsights({ clientId, reports, chartData }: Props) {
             {trends.length > 0 && <InsightGrid items={trends} numbered={false} />}
             {!facts.held && (facts.industry > 0 || facts.tiktok > 0 || facts.ig > 0) && (
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="t-subhead">Trends in</span>
-                {facts.industry > 0 && <Badge variant="outline">Industry trends · {facts.industry} {facts.industry === 1 ? "report" : "reports"}</Badge>}
-                {facts.tiktok > 0 && <Badge variant="outline">TikTok · {facts.tiktok} {facts.tiktok === 1 ? "report" : "reports"}</Badge>}
-                {facts.ig > 0 && <Badge variant="outline">Instagram · {facts.ig} {facts.ig === 1 ? "report" : "reports"}</Badge>}
+                {facts.industry > 0 && <Badge variant="outline">Industry trends in {countOf(facts.industry, "report")}</Badge>}
+                {facts.tiktok > 0 && <Badge variant="outline">TikTok trends in {countOf(facts.tiktok, "report")}</Badge>}
+                {facts.ig > 0 && <Badge variant="outline">Instagram trends in {countOf(facts.ig, "report")}</Badge>}
               </div>
             )}
           </CardContent>

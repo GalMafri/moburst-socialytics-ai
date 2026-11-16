@@ -97,6 +97,80 @@ export async function startTrendReplay(db: Db, fromRunId: string, now: Date): Pr
   return { weekId: from.real_id, ...started };
 }
 
+/** What a week's watched platforms say: all of them failed, and at least one was watched. */
+function everyWatchedPlatformFailed(platforms: unknown): boolean {
+  const states = Object.values((platforms ?? {}) as Record<string, { status?: string } | null>).map((p) => p?.status).filter((st) => st && st !== "not_watched");
+  return states.length > 0 && states.every((st) => st === "failed");
+}
+
+/**
+ * The client's current week when it was closed partial with nothing back: every
+ * watched platform failed, no post was kept, no theme was written. Only the
+ * code before this release saved such a week (with each platform's status).
+ * Since then a week in which every watched platform failed is never saved: its
+ * run stops and the close step leaves platforms empty, so this matches nothing
+ * new. It is for the weeks of 9 Nov 2026 saved that way, and is to be removed
+ * after Monday 16 Nov 2026, once no current week can match. It reads only the
+ * client's own week.
+ */
+async function emptyPartialWeek(db: Db, clientId: string, weekStart: string): Promise<string | null> {
+  const { data: week, error } = await db.from("trend_weeks").select("id, status, platforms").eq("client_id", clientId).eq("week_start", weekStart).maybeSingle();
+  if (error) throw new Error(`Could not read the client's trend week: ${error.message}`);
+  if (!week || week.status !== "partial" || !everyWatchedPlatformFailed(week.platforms)) return null;
+  const { data: kept } = await db.from("trend_posts").select("id").eq("week_id", week.id).eq("kept", true).limit(1);
+  if ((kept ?? []).length) return null;
+  const { data: themes } = await db.from("trend_themes").select("id").eq("week_id", week.id).limit(1);
+  if ((themes ?? []).length) return null;
+  return week.id as string;
+}
+
+/** A client the weekly enqueue would collect for: not archived, not excluded from reporting, not a demo (enqueue_trend_refresh_jobs). */
+async function isActiveClient(db: Db, clientId: string): Promise<boolean> {
+  const { data, error } = await db.from("clients").select("id, archived_at, exclude_from_reporting, demo_job_id").eq("id", clientId).maybeSingle();
+  if (error) throw new Error(`Could not read the client: ${error.message}`);
+  return !!data && !data.archived_at && !data.exclude_from_reporting && !data.demo_job_id;
+}
+
+/**
+ * An explicitly invoked action (harness mode trends_recollect), never queued by
+ * a schedule: this week's collection again for each client whose week was
+ * saved partial with nothing back by the code before this release (see
+ * emptyPartialWeek; to be removed after 16 Nov 2026). The week is opened
+ * again and trends_v1 starts on it through the same path as the weekly job, so
+ * it pays one week's Apify runs and model calls per client. With a client named
+ * it answers for that client alone; without one it covers every client whose
+ * week qualifies, read from the weeks themselves.
+ */
+export async function recollectEmptyWeeks(db: Db, now: Date, clientId?: string): Promise<Array<{ clientId: string; weekId: string; runId: string; started: boolean } | { clientId: string; skipped: string }>> {
+  const weekStart = weekStartOf(now);
+  let clients: string[];
+  if (clientId) clients = [clientId];
+  else {
+    const { data, error } = await db.from("trend_weeks").select("client_id").eq("week_start", weekStart).eq("status", "partial");
+    if (error) throw new Error(`Could not read this week's trend weeks: ${error.message}`);
+    clients = [...new Set(((data ?? []) as Array<{ client_id: string }>).map((w) => w.client_id))];
+  }
+  const out: Array<{ clientId: string; weekId: string; runId: string; started: boolean } | { clientId: string; skipped: string }> = [];
+  for (const id of clients) {
+    if (!(await isActiveClient(db, id))) {
+      if (clientId) out.push({ clientId: id, skipped: "This is not an active client, so nothing is collected." });
+      continue;
+    }
+    const weekId = await emptyPartialWeek(db, id, weekStart);
+    if (!weekId) {
+      if (clientId) out.push({ clientId: id, skipped: "This is not a week that brought nothing back, so it is not collected again." });
+      continue;
+    }
+    const { data: profile } = await db.from("trend_profiles").select("client_id").eq("client_id", id).maybeSingle();
+    if (!profile) { out.push({ clientId: id, skipped: "The client has no trend profile yet, so nothing is collected." }); continue; }
+    const { data: runs } = await db.from("report_pipeline_runs").select("id").eq("real_id", weekId);
+    const { error } = await db.from("trend_weeks").update({ status: "running", finished_at: null }).eq("id", weekId).eq("status", "partial");
+    if (error) throw new Error(`Could not open the client's trend week again: ${error.message}`);
+    out.push({ clientId: id, weekId, ...(await startOn(db, id, weekId, weekStart, `recollect-${((runs ?? []) as unknown[]).length + 1}`)) });
+  }
+  return out;
+}
+
 export async function runTrendJob(db: Db, job: ScheduledJob, now = new Date()): Promise<JobOutcome> {
   const r = await startTrendWeek(db, job.client_id, now);
   if ("skipped" in r) return { status: "skipped", reason: r.skipped };

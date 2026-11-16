@@ -166,9 +166,9 @@ export function HubCompanySync() {
 
         {/* ── Missing-in-Hub warning ── */}
         {missingInHub.length > 0 && hubCompanies && (
-          <div className="rounded-[12px] border border-[rgba(245,158,11,0.3)] bg-[rgba(245,158,11,0.05)] p-inner space-y-2">
+          <div className="rounded-[12px] border border-warning/30 bg-warning/5 p-inner space-y-2">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              <p className="t-h4 !text-[#fbbf24] flex items-center gap-2">
+              <p className="t-h4 !text-warning flex items-center gap-2">
                 <AlertCircle className="h-4 w-4" aria-hidden />
                 {missingInHub.length} client company name{missingInHub.length === 1 ? "" : "s"} not found in the Hub
               </p>
@@ -243,12 +243,12 @@ export function HubCompanySync() {
                             matchesHub ? (
                               <CheckCircle2 className="h-3.5 w-3.5 text-[#b9e045] shrink-0" aria-label="Found in the Hub" />
                             ) : hubCompanies ? (
-                              <AlertCircle className="h-3.5 w-3.5 text-[#fbbf24] shrink-0" aria-label="Not found in the Hub" />
+                              <AlertCircle className="h-3.5 w-3.5 text-warning shrink-0" aria-label="Not found in the Hub" />
                             ) : null
                           ) : null}
                           <span
                             className={`t-body ${
-                              c.hub_company_name ? "text-white" : "text-[#b1b7c1]"
+                              c.hub_company_name ? "text-white" : "text-white/70"
                             } truncate`}
                           >
                             {c.hub_company_name || "Not set"}

@@ -120,6 +120,22 @@ describe("TrendInsightsSection", () => {
     expect(screen.queryByText("1,250 engagements")).not.toBeInTheDocument();
   });
 
+  it("shows staff a whole-number score", async () => {
+    f.staff = true;
+    f.themes[0].posts[0].engagement = 497.706;
+    mount();
+    await screen.findByText("Captain POV skits");
+    expect(screen.getByText("Score: 498")).toBeInTheDocument();
+    expect(screen.queryByText(/497\.706/)).not.toBeInTheDocument();
+  });
+
+  it("words each post's link View original", async () => {
+    mount();
+    await screen.findByText("Captain POV skits");
+    expect(screen.getAllByRole("link", { name: "View original" }).length).toBe(4);
+    expect(screen.queryByRole("link", { name: "View" })).not.toBeInTheDocument();
+  });
+
   it("filters by platform: only themes and posts on the chosen platform stay", async () => {
     mount();
     await screen.findByText("Captain POV skits");

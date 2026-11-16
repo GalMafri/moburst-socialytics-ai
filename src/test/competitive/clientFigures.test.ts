@@ -52,6 +52,18 @@ describe("the client's figures from Sprout, counted from the report's own posts"
     expect([topdog, morgan, reyes].map((c) => c.post_count)).toEqual([50, 51, 33]);
   });
 
+  it("rebuilds the client's posting hours in the report's stored zone, as the competitors were counted", () => {
+    const zone = "America/New_York";
+    const inZone = clientFiguresFromStoredPosts({ ...BADER_REPORT, aggregates: { ...BADER_REPORT.aggregates, time_zone: zone } }, { socialPosts: BADER_POSTS });
+    const bader = inZone.report_data.aggregates.companies[0];
+    const period = inZone.report_data.period || inZone.report_data.aggregates.period;
+    const mine = postsInPeriod(BADER_POSTS.filter((p: { companyId?: unknown }) => String(p.companyId) === String(bader.company_id)), period.start, period.end);
+    const expected = companyPostSample(mine, 30, zone);
+    expect(bader.by_hour).toEqual(expected.by_hour);
+    expect(bader.by_hour).not.toEqual(repaired.report_data.aggregates.companies[0].by_hour);
+    expect(inZone.report_data.aggregates.time_zone).toBe(zone);
+  });
+
   it("rebuilds the client's post sample without the ad rows, so the report still passes its checks", () => {
     const bader = repaired.report_data.aggregates.companies[0];
     expect(bader.observed_post_count).toBe(65);

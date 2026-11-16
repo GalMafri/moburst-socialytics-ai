@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { CalendarKanban, visibleBoard } from '@/components/reports/calendar/CalendarKanban';
 import { CalendarFilters, type CalendarFilterState } from '@/components/reports/calendar/CalendarFilters';
+import { effectiveFilters } from '@/components/reports/calendar/effectiveFilters';
 import { ContentIdeasTab } from '@/components/reports/calendar/ContentIdeasTab';
 
 // The calendar's filters hide what they leave out (Lital, 3 Nov 2026): a
@@ -15,7 +16,6 @@ import { ContentIdeasTab } from '@/components/reports/calendar/ContentIdeasTab';
 
 vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ isMoburstStaff: true, isClient: false }) }));
-vi.mock('@/hooks/useRealtimePostIterations', () => ({ useRealtimePostIterations: () => {} }));
 vi.mock('@/integrations/supabase/client', () => ({ supabase: {
   auth: { getSession: async () => ({ data: { session: null } }), getUser: async () => ({ data: { user: null } }) },
   functions: { invoke: async () => ({ data: {}, error: null }) },
@@ -75,6 +75,15 @@ describe('the platform filter', () => {
     expect(monday.shown).toBe(2);
     expect(monday.total).toBe(4);
   });
+
+  it('matches a network by its one key, so a stored Twitter/X post shows under the X segment', () => {
+    const week = [{ day: 'Monday', date_label: 'Nov 2', posts: [
+      { platform: 'Twitter/X', copy: 'a' }, { platform: 'X', copy: 'b' }, { platform: 'LinkedIn', copy: 'c' },
+    ] }] as any;
+    const shown = visibleBoard(week, [], [], { ...ALL, platform: 'X' });
+    expect(shown.shown).toBe(2);
+    expect(shown.total).toBe(3);
+  });
 });
 
 describe('the count beside the filter', () => {
@@ -116,5 +125,23 @@ describe('the client calendar and a report\'s content ideas', () => {
     expect(screen.getByText('Monday on Instagram')).toBeTruthy();
     expect(screen.getByText('Showing 2 of 4 posts')).toBeTruthy();
     expect(within(day('Tuesday')).getByText('No posts')).toBeTruthy();
+  });
+});
+
+describe('a platform filter for a network the shown week does not have', () => {
+  const pressed = () => screen.getAllByRole('button').filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.getAttribute('aria-label') ?? b.textContent);
+
+  it('counts as All on the board and in the segments, so no segment looks chosen without a match', () => {
+    const chosen = { ...ALL, platform: 'TikTok' };
+    expect(effectiveFilters(chosen, ['Instagram', 'LinkedIn']).platform).toBe('all');
+    render(<CalendarFilters filters={chosen} onChange={() => {}} availablePlatforms={['Instagram', 'LinkedIn']} availableLanguages={[]} />);
+    const platformGroup = screen.getByRole('group', { name: 'Platform' });
+    expect(within(platformGroup).getAllByRole('button').filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.textContent)).toEqual(['All']);
+    expect(screen.queryByRole('button', { name: 'Clear filters' })).toBeNull();
+    expect(pressed()).toContain('All');
+  });
+
+  it('keeps a network the week does have, however the two spell it', () => {
+    expect(effectiveFilters({ ...ALL, platform: 'Twitter/X' }, ['X']).platform).toBe('Twitter/X');
   });
 });

@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { NotYet } from "@/components/ui/not-yet";
 import { DesignProgressCard } from "./DesignProgressCard";
 import { DesignNote } from "./DesignNote";
 import { NoteBox } from "./NoteBox";
@@ -42,7 +43,9 @@ interface Props {
   onUse: (iterationId: string) => void;
   usingId: string | null;
   /** Turn a design down with a reason the client's next designs learn from (and start a new one), or delete it. */
-  onFeedback: (iterationId: string, verdict: "rejected" | "deleted", reason?: string, note?: string, makeNew?: boolean) => Promise<void>;
+  onFeedback: (iterationId: string, verdict: "rejected" | "deleted", reason?: string, note?: string, makeNew?: boolean) => Promise<boolean>;
+  /** What Not right says inside its dialog when the feedback got no answer. */
+  feedbackLine?: string | null;
   /** The post has no copy yet (a trend post not yet written), so there is nothing to design. */
   waitingForCopy?: boolean;
   /** A video filmed with this person on camera: nothing is made here. */
@@ -62,7 +65,7 @@ interface Props {
   storyFileName?: string | null;
 }
 
-export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub, onCreate, onRegenerate, brand, creating, onUse, usingId, onFeedback, waitingForCopy, onCamera, textOnly, onUploadClip, uploadingClip, onMakeFromPosts, filmedReason, shotBrief, storyFileName }: Props) {
+export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub, onCreate, onRegenerate, brand, creating, onUse, usingId, onFeedback, feedbackLine, waitingForCopy, onCamera, textOnly, onUploadClip, uploadingClip, onMakeFromPosts, filmedReason, shotBrief, storyFileName }: Props) {
   const clipInput = useRef<HTMLInputElement>(null);
   const requests = useDesignRequests()?.requests;
   /** Regenerate's note box: open, its note, and whether the last press did not start. */
@@ -97,7 +100,7 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
           <div className="rounded-[12px] border border-dashed border-white/10 bg-[rgba(255,255,255,0.02)] p-8 text-center space-y-3">
             <Sparkles className="h-6 w-6 mx-auto text-muted-foreground/60" aria-hidden />
             {waitingForCopy ? (
-              <p className="t-secondary">This post is written shortly before its date from what's trending then. A design can be made once it's written.</p>
+              <p className="t-secondary">This post has no copy yet. Its design can be made once it does.</p>
             ) : onCamera ? (
               // Two ways to make this video, side by side: film it, or make it from the posts.
               <div className="grid gap-3 sm:grid-cols-2 text-left">
@@ -156,7 +159,7 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
 
       <div className="flex items-center gap-2 flex-wrap">
         {design.isSelected ? (
-          <span className="inline-flex items-center gap-1.5 h-9 px-3 rounded-[10px] bg-[rgba(185,224,69,0.10)] text-[#b9e045] text-sm font-medium">
+          <span className="inline-flex items-center gap-1.5 h-9 px-3 rounded-[12px] bg-[rgba(185,224,69,0.10)] text-[#b9e045] text-sm font-medium">
             <Check className="h-3.5 w-3.5" aria-hidden /> In use for this post
           </span>
         ) : (
@@ -251,8 +254,9 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
         open={!!rejecting}
         isCurrent={rejecting === design.iterationId}
         noun={noun}
+        line={feedbackLine}
         onOpenChange={(o) => !o && setRejecting(null)}
-        onSubmit={async (reason, note, makeNew) => { if (rejecting) await onFeedback(rejecting, "rejected", reason, note, makeNew); setRejecting(null); }}
+        onSubmit={async (reason, note, makeNew) => { if (rejecting && await onFeedback(rejecting, "rejected", reason, note, makeNew)) setRejecting(null); }}
       />
       <ConfirmDialog
         open={!!deleting}
@@ -266,11 +270,13 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
   );
 }
 
-/** What was wrong with a design, in a few clicks; the client's next designs learn from it. */
-function FeedbackDialog({ open, isCurrent, noun, onOpenChange, onSubmit }: {
+/** What was wrong with a design, in a few clicks; the client's next designs learn from it. One dialog and one reasons list for every design and older media tile. */
+export function FeedbackDialog({ open, isCurrent, noun, line, onOpenChange, onSubmit }: {
   open: boolean;
   isCurrent: boolean;
   noun: string;
+  /** The state line for a send that got no answer, shown above the button the person pressed. */
+  line?: string | null;
   onOpenChange: (open: boolean) => void;
   onSubmit: (reason: string, note: string, makeNew: boolean) => Promise<void>;
 }) {
@@ -278,9 +284,12 @@ function FeedbackDialog({ open, isCurrent, noun, onOpenChange, onSubmit }: {
   const [note, setNote] = useState("");
   const [makeNew, setMakeNew] = useState(true);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { if (open) { setReason("wrong_style"); setNote(""); setMakeNew(true); } }, [open]);
+  // The line belongs to the send made in this dialog, not to an earlier one.
+  const [sent, setSent] = useState(false);
+  useEffect(() => { if (open) { setReason("wrong_style"); setNote(""); setMakeNew(true); setSent(false); } }, [open]);
   const submit = async () => {
     setBusy(true);
+    setSent(true);
     try { await onSubmit(reason, note.trim(), isCurrent && makeNew); } finally { setBusy(false); }
   };
   return (
@@ -309,6 +318,7 @@ function FeedbackDialog({ open, isCurrent, noun, onOpenChange, onSubmit }: {
               <Switch id="design-feedback-new" checked={makeNew} onCheckedChange={setMakeNew} />
             </div>
           )}
+          {sent && !busy && line && <NotYet>{line}</NotYet>}
           <Button className="w-full" onClick={submit} disabled={busy}>
             {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ThumbsDown className="h-4 w-4 mr-2" />}
             Send feedback
@@ -384,7 +394,7 @@ function SlideViewer({ urls, aspect, onOpen }: { urls: string[]; aspect: string;
               aria-selected={i === index}
               aria-label={`Slide ${i + 1}`}
               onClick={() => setIndex(i)}
-              className={`relative shrink-0 w-14 ${ratio ? "" : aspect} rounded-[6px] overflow-hidden bg-black border transition-colors ${i === index ? "border-[#b9e045] ring-1 ring-[#b9e045]/60" : "border-white/10 opacity-70 hover:opacity-100"}`}
+              className={`relative shrink-0 w-14 ${ratio ? "" : aspect} rounded-[8px] overflow-hidden bg-black border transition-colors ${i === index ? "border-[#b9e045] ring-1 ring-[#b9e045]/60" : "border-white/10 opacity-70 hover:opacity-100"}`}
               style={ratio ? { aspectRatio: String(ratio) } : undefined}
             >
               <img src={u} alt="" className="w-full h-full object-cover" />
@@ -517,7 +527,7 @@ function ShotBriefCard({ brief }: { brief: ShotBrief | null }) {
   const [open, setOpen] = useState(false);
   if (!brief) return <p className="t-label inline-flex items-center gap-1.5"><Loader2 className="h-3 w-3 animate-spin" aria-hidden />Writing the shot brief</p>;
   return (
-    <div className="rounded-[10px] border border-white/10 p-3 space-y-2">
+    <div className="rounded-[12px] border border-white/10 p-3 space-y-2">
       <button type="button" className="flex w-full items-center justify-between text-left" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
         <span className="t-h4">Shot brief <span className="t-label font-normal">(Moburst only)</span></span>
         <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} aria-hidden />

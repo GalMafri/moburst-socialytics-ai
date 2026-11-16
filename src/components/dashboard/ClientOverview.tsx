@@ -10,22 +10,27 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, CalendarDays, CheckCircle2, CircleAlert, Crosshair, Info, TrendingUp } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Loading } from "@/components/ui/loading";
-import { compactNumber } from "@/components/ui/bars";
-import { formatPercentChange } from "@/components/ui/stat-card";
-import { firstRunSentence, formatRange } from "@/lib/display";
+import { LoadRetry } from "@/components/ui/load-error";
+import { compactNumber } from "@/lib/display";
+import { formatPercentChange, StatGrid } from "@/components/ui/stat-card";
+import { firstRunSentence, formatRange, NO_DATA, periodLabel } from "@/lib/display";
+import { readAll } from "@/lib/readAll";
 import { displayCompanyName } from "@/lib/companyName";
 import { thisWeek } from "@/lib/weekWindow";
 import { fetchOpenTopics } from "@/lib/openTopics";
 import { fetchNextRun } from "@/lib/nextRun";
 import { buildCompetitiveContext } from "@/components/competitive/CompetitiveSnapshot";
-import { competitiveReportQuality } from "../../../supabase/functions/_shared/competitive/reportEvidence";
+import { fetchNewestReadyCompetitive } from "@/lib/newestReadyCompetitive";
 import { readShownInsights } from "../../../supabase/functions/_shared/reports/shownFields";
 import { actionItems, competitiveStanding, contentWeek, reportHeadline, type PostMedia, type WeekPost } from "@/lib/clientOverview";
+
+/** Figures inside a tile wrap like the tiles do, so three never squeeze into a narrow column. */
+const FIGURES = { gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 84px), 1fr))" } as const;
 
 const andList = (xs: string[]) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
 
 export function ClientOverview({ clientId, isStaff }: { clientId: string; isStaff: boolean }) {
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["client-overview", clientId, isStaff],
     queryFn: async () => {
       const { data: client } = await supabase.from("clients").select("id, name, timezone").eq("id", clientId).maybeSingle();
@@ -34,23 +39,26 @@ export function ClientOverview({ clientId, isStaff }: { clientId: string; isStaf
       const week = thisWeek(timeZone);
       const [report, competitive, feedback, posts, media, topics, nextMonthly, nextCompetitive] = await Promise.all([
         supabase.from("reports").select("id, report_data, date_range_start, date_range_end, created_at").eq("client_id", clientId).eq("status", "completed").order("created_at", { ascending: false }).limit(1).maybeSingle(),
-        supabase.from("competitive_reports").select("id, created_at, report_data").eq("client_id", clientId).eq("status", "complete").order("created_at", { ascending: false }).limit(1).maybeSingle(),
+        // The newest ready one, a few rows at a time: a report's data is large, and only that one is used.
+        fetchNewestReadyCompetitive((from, to) => supabase.from("competitive_reports").select("id, created_at, report_data").eq("client_id", clientId).eq("status", "complete").order("created_at", { ascending: false }).order("id").range(from, to)),
         supabase.from("competitive_insight_feedback").select("insight_key, verdict, gap_text, edited").eq("client_id", clientId),
         // The calendar shows each week's plan in force, never the raw posts table.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (supabase.from("calendar_posts" as never) as any).select("id, post_key, post_date, platform, source, copy").eq("client_id", clientId).gte("post_date", week.start).order("post_date").limit(200),
-        supabase.from("post_iterations").select("calendar_post_key, is_selected, is_approved, media_urls").eq("client_id", clientId).is("rejected_at", null).is("archived_at", null).not("calendar_post_key", "is", null),
+        (supabase.from("calendar_posts" as never) as any).select("id, post_key, post_date, platform, source, copy, format").eq("client_id", clientId).gte("post_date", week.start).order("post_date").limit(200),
+        // Every design of the client, page by page: one request answers at most 1,000 rows.
+        readAll((from, to) => supabase.from("post_iterations").select("calendar_post_key, is_selected, is_approved, media_urls").eq("client_id", clientId).is("rejected_at", null).is("archived_at", null).not("calendar_post_key", "is", null).order("created_at", { ascending: false }).order("id").range(from, to)),
         // The one definition of open topics, shared with the feed page and the planner.
         isStaff ? fetchOpenTopics(clientId).catch(() => []) : Promise.resolve([]),
         fetchNextRun(clientId, "monthly").catch(() => null),
         fetchNextRun(clientId, "competitive").catch(() => null),
       ]);
-      const compRow = competitive.data && competitiveReportQuality(competitive.data.report_data).ready ? competitive.data : null;
+      // The newest report that passed its checks: a newer held one never hides an older ready one.
+      const compRow = competitive.row;
       // Read as every reader reads it: its insights where it has them, through the evidence limits (shownFields.ts).
       const compInsights = compRow ? await readShownInsights(supabase, "competitive_reports", compRow.id) : null;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const fb = (feedback.data || []) as any[];
-      const content = contentWeek((posts.data || []) as WeekPost[], (media.data || []) as PostMedia[], week);
+      const content = contentWeek((posts.data || []) as WeekPost[], (media || []) as PostMedia[], week);
       return {
         week,
         report: report.data,
@@ -60,7 +68,7 @@ export function ClientOverview({ clientId, isStaff }: { clientId: string; isStaf
         content,
         firstMonthly: firstRunSentence("monthly", nextMonthly, timeZone),
         // A run that was held back is not shown; the next one is a fact worth stating.
-        firstCompetitive: firstRunSentence("competitive", nextCompetitive, timeZone, { first: !competitive.data }),
+        firstCompetitive: firstRunSentence("competitive", nextCompetitive, timeZone, { first: !competitive.seen }),
         actions: actionItems({
           clientId, isStaff, week, content,
           openTopics: topics.length,
@@ -72,7 +80,9 @@ export function ClientOverview({ clientId, isStaff }: { clientId: string; isStaf
   });
 
   if (isLoading) return <Loading label="Loading the overview" />;
-  if (isError || !data) return null;
+  // A read that did not answer keeps loading and reads again; the overview fills in when a try answers.
+  if (isError) return <LoadRetry context="client overview" error={error} label="Loading the overview" onRetry={() => refetch()} />;
+  if (!data) return null;
   const { report, headline, competitive, standing, content, actions, firstMonthly, firstCompetitive } = data;
 
   return (
@@ -80,18 +90,18 @@ export function ClientOverview({ clientId, isStaff }: { clientId: string; isStaf
       {/* Three tiles on the card's own inner surface. They were cards inside
           the client's card, glass on glass, and a tile with nothing to say
           was left blank. */}
-      <div className="grid gap-inner md:grid-cols-3">
+      <StatGrid min={260}>
         {/* Performance: the last monthly report, three numbers and the direction. */}
         <section className="glass-inner p-inner flex flex-col gap-3 min-w-0">
             <p className="t-subhead flex items-center gap-1.5"><TrendingUp className="h-3.5 w-3.5" aria-hidden /> Performance</p>
             {headline && report ? (
               <>
-                <p className="t-secondary">{formatRange({ start: report.date_range_start, end: report.date_range_end }) || "Last month"} vs. the month before</p>
-                <div className="grid grid-cols-3 gap-2">
+                <p className="t-secondary">{periodLabel({ start: report.date_range_start, end: report.date_range_end }) || formatRange({ start: report.date_range_start, end: report.date_range_end }) || "Last month"} vs. the month before</p>
+                <div className="grid gap-2" style={FIGURES}>
                   {headline.metrics.map((m) => (
                     <div key={m.key} className="min-w-0">
                       <p className="t-h2 tabular-nums">{compactNumber(m.current)}</p>
-                      {m.percent != null && <p className={`t-label font-semibold ${m.percent > 0 ? "!text-success" : m.percent < 0 ? "!text-[#f87171]" : ""}`}>{formatPercentChange(m.percent)}</p>}
+                      {m.percent != null && <p className={`t-label font-semibold ${m.percent > 0 ? "!text-success" : m.percent < 0 ? "!text-destructive" : ""}`}>{formatPercentChange(m.percent)}</p>}
                       <p className="t-label truncate">{m.label}</p>
                     </div>
                   ))}
@@ -109,12 +119,10 @@ export function ClientOverview({ clientId, isStaff }: { clientId: string; isStaf
             <p className="t-subhead flex items-center gap-1.5"><Crosshair className="h-3.5 w-3.5" aria-hidden /> Competitors</p>
             {standing && competitive ? (
               <>
-                {standing.shareOfVoice != null && (
-                  <div>
-                    <p className="t-h2 tabular-nums">{standing.shareOfVoice}%</p>
-                    <p className="t-label">share of the posts in the field</p>
-                  </div>
-                )}
+                <div>
+                  <p className="t-h2 tabular-nums">{standing.shareOfVoice != null ? `${standing.shareOfVoice}%` : NO_DATA}</p>
+                  <p className="t-label">share of voice</p>
+                </div>
                 {standing.competitors.length > 0 && <p className="t-body">Compared with {andList(standing.competitors.map(displayCompanyName))}.</p>}
                 {(standing.ahead.length > 0 || standing.behind.length > 0) && (
                   <p className="t-body">
@@ -133,17 +141,19 @@ export function ClientOverview({ clientId, isStaff }: { clientId: string; isStaf
         <section className="glass-inner p-inner flex flex-col gap-3 min-w-0">
             <p className="t-subhead flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5" aria-hidden /> This week</p>
             {content.planned > 0 ? (
-              <div className="grid grid-cols-3 gap-2">
-                <div><p className="t-h2 tabular-nums">{content.planned}</p><p className="t-label">planned</p></div>
-                <div><p className="t-h2 tabular-nums">{content.designed}</p><p className="t-label">designed</p></div>
-                <div><p className="t-h2 tabular-nums">{content.approved}</p><p className="t-label">approved</p></div>
-              </div>
+              <>
+                <p className="t-body">{content.plannedLabel}</p>
+                <div className="grid gap-2" style={FIGURES}>
+                  <div><p className="t-h2 tabular-nums">{content.designed}</p><p className="t-label">designed</p></div>
+                  <div><p className="t-h2 tabular-nums">{content.approved}</p><p className="t-label">approved</p></div>
+                </div>
+              </>
             ) : (
               <p className="t-secondary">No posts are planned for this week.</p>
             )}
             <Link to={`/clients/${clientId}/calendar`} className="t-link inline-flex items-center gap-1 mt-auto">Open the calendar <ArrowRight className="h-3 w-3" aria-hidden /></Link>
         </section>
-      </div>
+      </StatGrid>
 
       {/* What needs doing, linked to where it is done. */}
       <section className="glass-inner p-inner space-y-2">
@@ -155,7 +165,7 @@ export function ClientOverview({ clientId, isStaff }: { clientId: string; isStaf
               {actions.map((a) => (
                 <li key={a.key}>
                   <Link to={a.href} className="flex items-center gap-3 py-2.5 group">
-                    {a.tone === "attention" ? <CircleAlert className="h-4 w-4 shrink-0 text-[#f5b942]" /> : <Info className="h-4 w-4 shrink-0 text-[#b1b7c1]" />}
+                    {a.tone === "attention" ? <CircleAlert className="h-4 w-4 shrink-0 text-warning" /> : <Info className="h-4 w-4 shrink-0 text-muted-foreground" />}
                     <span className="t-body flex-1">{a.text}</span>
                     <ArrowRight className="h-4 w-4 shrink-0 opacity-50 group-hover:opacity-100" />
                   </Link>

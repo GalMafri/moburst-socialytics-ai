@@ -41,7 +41,8 @@ import { LoadRetry } from "@/components/ui/load-error";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/hooks/use-toast";
 import { PlatformBadge, prettyPlatformName } from "@/lib/platform-config";
-import { profileName } from "@/lib/display";
+import { countOf, profileName } from "@/lib/display";
+import { portalUrl } from "@/utils/gosAuth";
 import { displayCompanyName } from "@/lib/companyName";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -155,7 +156,7 @@ function LandscapeRow({
 export default function CompetitorReview() {
   const { id: clientId } = useParams();
   const navigate = useNavigate();
-  const { canRunAnalysis, isGosSession } = useAuth();
+  const { canRunAnalysis } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [identifying, setIdentifying] = useState(false);
@@ -332,7 +333,7 @@ export default function CompetitorReview() {
     }
     toast({
       title: "Imported as a new draft",
-      description: `${data.competitors} competitors and ${data.handles} profiles from RivalIQ, with the top ${data.preselected} selected.`,
+      description: `${countOf(data.competitors, "competitor")} and ${countOf(data.handles, "profile")} from RivalIQ, with the top ${data.preselected} selected.`,
     });
     setImportOpen(false);
   };
@@ -359,7 +360,7 @@ export default function CompetitorReview() {
 
       // Detect handles ONE COMPETITOR PER CALL. A whole-set call scrapes up
       // to 12 third-party sites serially inside one edge request, and the
-      // platform kills requests at 150s — the tail of the list never ran.
+      // platform kills requests at 150s, so the tail of the list never ran.
       // Driving the loop from here keeps every call small, and handles
       // appear row by row as they land.
       setDetecting(true);
@@ -883,7 +884,7 @@ export default function CompetitorReview() {
             <CardContent className="flex flex-wrap items-center gap-x-4 gap-y-2">
               <p className="t-secondary">Profile lookups continue once you are signed in again from the Moburst portal.</p>
               <Button asChild variant="outline" size="sm">
-                <a href={isGosSession ? "https://moburst.ai" : "https://tools.moburst.com/dashboard"}>Open Moburst portal</a>
+                <a href={portalUrl()}>Open Moburst portal</a>
               </Button>
             </CardContent>
           </Card>
@@ -897,7 +898,7 @@ export default function CompetitorReview() {
             title={`${competitors!.length} proposed`}
             description={isDraft ? "The first three selected, in the order selected, are the ones analyzed." : "The confirmed selection, locked until it is reopened."}
             meta={unverifiedCount > 0 ? (
-              <p>{unverifiedCount} suggestions could not be verified and are excluded from selection. Your confirmed competitors have not changed.</p>
+              <p>{countOf(unverifiedCount, "suggestion")} {unverifiedCount === 1 ? "is" : "are"} unverified and left out of the selection. Your confirmed competitors have not changed.</p>
             ) : undefined}
             action={unverifiedCount > 0 ? (
               <Button variant="outline" size="sm" onClick={() => setShowUnverified(v => !v)}>{showUnverified ? "Hide unverified suggestions" : "Show unverified suggestions"}</Button>
@@ -984,7 +985,7 @@ export default function CompetitorReview() {
                             profileCheck?.state === "queued" ? "Profile search queued" :
                             profileCheck?.state === "searching" ? "Searching company pages…" :
                             ["stalled", "failed", "partial"].includes(profileCheck?.state || "") ? "Profiles are looked up again later" :
-                            profileCheck?.state === "unverified" ? "Company could not be verified" :
+                            profileCheck?.state === "unverified" ? "Company is unverified" :
                             profileCheck?.state === "missing_website" ? "No website on file for this company" :
                             profileCheck?.state === "not_found" ? "No profiles found on checked pages" : "Profile lookup will start automatically"}
                         </span>

@@ -74,3 +74,109 @@ export function isPubliclyFetchable(raw: string | null | undefined): boolean {
   if (isPrivateIPv6(host)) return false;
   return true;
 }
+
+/** True when the host is the domain itself or one of its subdomains, compared on the parsed host and never as a substring. */
+function hostIsOrUnder(host: string, domain: string): boolean {
+  return host === domain || host.endsWith(`.${domain}`);
+}
+
+function parsedHost(raw: string | null | undefined): string | null {
+  try {
+    const u = new URL(String(raw ?? ""));
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    return u.hostname.toLowerCase() || null;
+  } catch {
+    return null;
+  }
+}
+
+const SOCIAL_HOSTS: Array<[string, string[]]> = [
+  ["youtube", ["youtube.com", "youtu.be"]],
+  ["tiktok", ["tiktok.com"]],
+  ["instagram", ["instagram.com"]],
+  ["facebook", ["facebook.com", "fb.com", "fb.watch"]],
+  ["linkedin", ["linkedin.com"]],
+  ["x", ["x.com", "twitter.com"]],
+];
+
+/**
+ * The social network a post permalink belongs to, decided on the parsed host
+ * (the exact domain or a subdomain of it). A path or query that merely
+ * mentions a network, or a host such as netflix.com that ends in "x.com",
+ * is not a post of that network.
+ */
+export function socialPlatformOf(url: string | null | undefined): string | null {
+  if (!isPubliclyFetchable(url)) return null;
+  const host = parsedHost(url);
+  if (!host) return null;
+  for (const [platform, domains] of SOCIAL_HOSTS) {
+    if (domains.some((d) => hostIsOrUnder(host, d))) return platform;
+  }
+  return null;
+}
+
+const CDN_DOMAINS = ["cdninstagram.com", "fbcdn.net", "fbsbx.com", "licdn.com", "network-media.sproutsocial.com"];
+
+/**
+ * True for the media hosts whose links are signed and stop working after
+ * hours or days (the social networks' CDNs, and Sprout's media host, which
+ * redirects to them). Decided on the parsed host; a file name that happens to
+ * contain "scontent" on any other host does not count.
+ */
+export function isExpiringCdnUrl(url: string | null | undefined): boolean {
+  if (!isPubliclyFetchable(url)) return false;
+  const host = parsedHost(url);
+  if (!host) return false;
+  if (CDN_DOMAINS.some((d) => hostIsOrUnder(host, d))) return true;
+  return /(^|\.)tiktokcdn(-[a-z]+)?\.com$/.test(host);
+}
+
+/** Answers a hostname with the addresses it points at. */
+export type HostResolver = (host: string) => Promise<string[]>;
+
+/** The runtime's own DNS lookup (A and AAAA). A runtime without one answers nothing, and the fetch itself then decides. */
+const runtimeResolver: HostResolver = async (host) => {
+  const d = (globalThis as { Deno?: { resolveDns?: (name: string, type: "A" | "AAAA") => Promise<string[]> } }).Deno;
+  if (typeof d?.resolveDns !== "function") return [];
+  const answers = await Promise.all((["A", "AAAA"] as const).map((type) => d.resolveDns!(host, type).catch(() => [] as string[])));
+  return answers.flat();
+};
+
+/** True when any address the host points at is private, loopback or link-local. A literal address was already judged by isPubliclyFetchable. */
+async function resolvesToPrivate(raw: string, resolve: HostResolver): Promise<boolean> {
+  const host = new URL(raw).hostname.toLowerCase();
+  if (/^[\d.]+$/.test(host) || host.startsWith("[")) return false;
+  const addresses = await resolve(host);
+  return addresses.some((a) => isPrivateIPv4(a) || isPrivateIPv6(a));
+}
+
+/**
+ * fetch that follows redirects itself, so every hop is checked the way the
+ * first address was. A public host that redirects to a private address is
+ * refused before any request goes to the private address. Each hop's name is
+ * also resolved, so a public-looking name that points at a private address
+ * (a wildcard DNS name, or a record someone controls) is refused too.
+ *
+ * Open residual: the name is resolved here and again by the fetch itself, so a
+ * record that changes between the two lookups (DNS rebinding) is not caught.
+ * Where the runtime has no Deno.resolveDns, only literal addresses are checked.
+ */
+export async function fetchPublic(
+  raw: string,
+  init: RequestInit = {},
+  send: typeof fetch = fetch,
+  maxHops = 5,
+  resolve: HostResolver = runtimeResolver,
+): Promise<Response> {
+  let current = raw;
+  for (let hop = 0; hop <= maxHops; hop++) {
+    if (!isPubliclyFetchable(current) || (await resolvesToPrivate(current, resolve))) throw new Error("That address cannot be fetched.");
+    const response = await send(current, { ...init, redirect: "manual" });
+    if (![301, 302, 303, 307, 308].includes(response.status)) return response;
+    const location = response.headers.get("location");
+    await response.body?.cancel();
+    if (!location) return response;
+    current = new URL(location, current).href;
+  }
+  throw new Error("Too many redirects.");
+}

@@ -23,6 +23,7 @@ import { referenceFingerprint, sproutCandidates } from "./candidates.ts";
 import { defaultSproutCustomerId } from "../sprout/customer.ts";
 import { anthropicKeyFor, type CheckIO, liveCheckIO, reviewPosts } from "./discover.ts";
 import { type Choice, choicesKey, qualifiedPlatforms, relearnReason, type Review, reviewQueue, type Selection, selectLibrary, type StoredEntry } from "./corpus.ts";
+import { base64Bytes, brandBookFitsRequest } from "../brand/brandBookLimits.ts";
 import { StyleError } from "./errors.ts";
 import { anthropicFetch } from "../anthropic.ts";
 
@@ -463,13 +464,16 @@ export async function learnBrandStyle(db: Db, clientId: string, opts: { discover
   // deno-lint-ignore no-explicit-any
   const content: any[] = [{ type: "text", text: `Analyze these brand references for "${client.name}" and produce the JSON design-language descriptor.` }];
   let sourceCount = 0;
+  // What the request carries so far, as sent: the brand book is added only when it fits beside it.
+  let encodedBytes = 0;
   for (const refPath of designRefs.slice(0, 8)) {
     try {
       const { data: file } = await db.storage.from("design-references").download(refPath);
       if (!file) continue;
       const ab = await file.arrayBuffer();
-      if (ab.byteLength > 4 * 1024 * 1024) continue;
+      if (ab.byteLength > MAX_IMAGE_BYTES) continue;
       content.push({ type: "image", source: { type: "base64", media_type: mediaType(refPath), data: base64(new Uint8Array(ab)) } });
+      encodedBytes += base64Bytes(ab.byteLength);
       sourceCount++;
     } catch (e) {
       console.warn("[learn-style] skipping reference", refPath, e);
@@ -480,9 +484,10 @@ export async function learnBrandStyle(db: Db, clientId: string, opts: { discover
       const { data: file } = await db.storage.from("brand-books").download(brandBookPath);
       if (file) {
         const ab = await file.arrayBuffer();
-        if (ab.byteLength <= 4 * 1024 * 1024) {
-          const ext = brandBookPath.split(".").pop()?.toLowerCase();
-          const mt = ext === "pdf" ? "application/pdf" : ext === "png" ? "image/png" : "image/jpeg";
+        const ext = brandBookPath.split(".").pop()?.toLowerCase();
+        const mt = ext === "pdf" ? "application/pdf" : ext === "png" ? "image/png" : "image/jpeg";
+        // A book the model request cannot take (an image over the model's limit, or one that does not fit beside the references) is left out: the style is learned from the references.
+        if (brandBookFitsRequest({ bytes: ab.byteLength, imageLimited: mt !== "application/pdf" }, encodedBytes)) {
           const data = base64(new Uint8Array(ab));
           content.push(mt === "application/pdf"
             ? { type: "document", source: { type: "base64", media_type: mt, data } }

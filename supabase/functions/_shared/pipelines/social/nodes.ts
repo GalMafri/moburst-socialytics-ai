@@ -20,6 +20,10 @@
 //     2026), and states no false lines: the post counts behind a fall in
 //     reach, a fall only when impressions fell, an underrepresented pillar
 //     only when there is one. DECK_EDITS lists every change in the text.
+//   * Aggregate Sprout Social Data also stores top_posts_by_platform_impressions
+//     (the top 5 per network by impressions, beside n8n's top 5 by
+//     engagement), so the report page can rank a network's posts by reach.
+//     Parity tests compare everything else key for key.
 //   * The run summary's start time and duration are the run's own; n8n's
 //     summary node used its own finish time as the start.
 //   * Trends (Trends plan, Task 16): the report reads the weeks the weekly
@@ -30,7 +34,8 @@
 //     (prompt.ts TREND_EDITS, DECK_TREND_EDITS, generateRunSummary).
 
 import { REPORT_TREND_THEMES, strongestThemes, themeKey, trendsForModel, type IndustryTrends, type ReportTrendPost, type ReportTrendTheme } from "./storedTrends.ts";
-import { periodWords } from "../../reports/facts.ts";
+import { isWholeMonth, periodWords } from "../../reports/facts.ts";
+import { BRIEF_NOT_SUMMARIZED_WARNING, BRIEF_UNREAD_NO_TEXT, BRIEF_UNREAD_USED_SAVED, BRIEF_UNREAD_WARNING, DECK_INCOMPLETE_WARNING, DECK_TIMED_OUT_WARNING } from "../../reports/shownWarnings.ts";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -51,6 +56,22 @@ export function zonedDay(now: Date, timeZone = N8N_TIMEZONE): string {
 
 // ── Workflow Configuration ─────────────────────────────────────────────────
 
+/**
+ * The period a report compares against. A whole calendar month is compared
+ * with the whole calendar month before it; any other range with the range of
+ * the same length that ends the day before it starts.
+ */
+export function previousPeriod(start: unknown, end: unknown): { start: string; end: string } {
+  const s = dayMs(start);
+  const e = dayMs(end);
+  if (isWholeMonth(isoDay(s), isoDay(e))) {
+    const first = new Date(s);
+    return { start: isoDay(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() - 1, 1)), end: isoDay(s - DAY) };
+  }
+  const days = Math.max(1, Math.round((e - s) / DAY) + 1);
+  return { start: isoDay(s - days * DAY), end: isoDay(s - DAY) };
+}
+
 /** The Set node: the request (as body) and the periods, as strings. */
 export function workflowConfiguration(request: Any, now: Date): Any {
   const body = request && typeof request === "object" ? request : {};
@@ -61,9 +82,7 @@ export function workflowConfiguration(request: Any, now: Date): Any {
   let previousStart: string;
   let previousEnd: string;
   if (s && e) {
-    const days = Math.max(1, Math.round((dayMs(e) - dayMs(s)) / DAY) + 1);
-    previousStart = isoDay(dayMs(s) - days * DAY);
-    previousEnd = isoDay(dayMs(s) - DAY);
+    ({ start: previousStart, end: previousEnd } = previousPeriod(s, e));
   } else {
     previousStart = isoDay(Date.UTC(y, m - 2, 1));
     previousEnd = isoDay(Date.UTC(y, m - 1, 0));
@@ -91,11 +110,11 @@ export function prepareBriefText(config: Any, file: { text?: unknown } = {}): An
   const fallback = String(body.brief_text || config.brief_text || "").trim();
   const hasFile = !!(body.brief_file_id || config.brief_file_id);
   const text = typeof file.text === "string" ? file.text.trim() : "";
-  const warning = hasFile && !text ? "The linked brief could not be read." : "";
+  const warning = hasFile && !text ? BRIEF_UNREAD_WARNING : "";
   return {
     brief_text: text || fallback,
     brief_source: text ? "file" : fallback ? "client_setup" : "none",
-    brief_warning: warning ? warning + (fallback ? " The saved brief text was used instead." : " This analysis has no text from that brief.") : "",
+    brief_warning: warning ? warning + (fallback ? BRIEF_UNREAD_USED_SAVED : BRIEF_UNREAD_NO_TEXT) : "",
   };
 }
 
@@ -121,10 +140,9 @@ export function combineBrief(briefAnalysisIn: Any, config: Any, prepared: Any): 
     if (currentStart && currentEnd) {
       clientData.current_month_start = currentStart;
       clientData.current_month_end = currentEnd;
-      const daysDiff = Math.ceil((dayMs(currentEnd) - dayMs(currentStart)) / DAY);
-      const previousEnd = dayMs(currentStart) - DAY;
-      clientData.previous_month_start = isoDay(previousEnd - daysDiff * DAY);
-      clientData.previous_month_end = isoDay(previousEnd);
+      const previous = previousPeriod(currentStart, currentEnd);
+      clientData.previous_month_start = previous.start;
+      clientData.previous_month_end = previous.end;
     }
   }
   clientData.brief_text = prepared?.brief_text || clientData.brief_text || "";
@@ -176,7 +194,7 @@ export function combineBrief(briefAnalysisIn: Any, config: Any, prepared: Any): 
   };
   const analyzed = briefAnalysis.output || briefAnalysis;
   const hasBriefAnalysis = BRIEF_KEYS.some((key) => (Array.isArray(analyzed[key]) ? analyzed[key].length > 0 : typeof analyzed[key] === "string" && analyzed[key].trim().length > 0));
-  const briefWarning = prepared?.brief_warning || (!hasBriefAnalysis && clientData.brief_text ? "The brief could not be summarized; its original text was included in the analysis." : "");
+  const briefWarning = prepared?.brief_warning || (!hasBriefAnalysis && clientData.brief_text ? BRIEF_NOT_SUMMARIZED_WARNING : "");
   if (hasBriefAnalysis) {
     briefContext = {
       brand_voice: briefAnalysis.output?.brand_voice || briefAnalysis.brand_voice || null,
@@ -309,7 +327,12 @@ export function displayNetwork(s: unknown): string {
   return NETWORK_TO_DISPLAY[String(s).toLowerCase()] || String(s);
 }
 
-/** A metric by its flat key or a dotted path; 0 when absent. */
+/**
+ * A metric by its flat key or a dotted path; 0 when absent. Not clamped: a day
+ * of profile figures can hold a negative correction (+3 and -1 shares make 2
+ * for the month), so days are summed as Sprout answers and the total is
+ * clamped once, with floorAtZero.
+ */
 function getMetric(metricsObj: Any, ...keys: string[]): number {
   if (!metricsObj) return 0;
   for (const key of keys) {
@@ -327,12 +350,35 @@ function getMetric(metricsObj: Any, ...keys: string[]): number {
   return 0;
 }
 
+/** A count is never below zero, whatever Sprout's corrections add up to. */
+const floorAtZero = (n: number): number => Math.max(0, n);
+
 const METRIC_KEYS = ["impressions", "reactions", "link_clicks", "video_views", "comments", "shares", "engagements"] as const;
 
 /** Rounded to a tenth of a percent; null when the previous period was zero and this one is not. */
 export function calcChange(current: number, previous: number): number | null {
   if (previous === 0) return current > 0 ? null : 0;
   return Math.round(((current - previous) / previous) * 1000) / 10;
+}
+
+/** One metric's month-over-month change, as a report stores it. */
+export interface MetricChange { current: number; previous: number; absolute: number; percent: number | null }
+export function metricChange(current: number, previous: number): MetricChange {
+  return { current, previous, absolute: current - previous, percent: calcChange(current, previous) };
+}
+
+/** The comparison's summary line for one metric ("shares: ↓ 50% (-1)"). */
+export function changeSummaryLine(metric: string, change: MetricChange): string {
+  const pct = change.percent;
+  const dir = (pct as number) > 0 ? "↑" : (pct as number) < 0 ? "↓" : "→";
+  return `${metric.replace(/_/g, " ")}: ${pct === null ? "new activity (previous period was zero)" : dir + " " + Math.abs(pct) + "%"} (${change.absolute >= 0 ? "+" : ""}${change.absolute})`;
+}
+
+/** The metrics the run summary carries a change for, as metrics_summary.<metric>_change. */
+export const SUMMARY_CHANGE_METRICS = ["impressions", "reactions", "link_clicks", "video_views", "comments", "shares"] as const;
+/** The run summary's change figures, read from the comparison's changes. */
+export function metricsSummaryChanges(changes: Any): Record<string, number> {
+  return Object.fromEntries(SUMMARY_CHANGE_METRICS.map((m) => [`${m}_change`, changes?.[m]?.percent || 0]));
 }
 
 /** The period totals, per platform and overall, the month-over-month changes, and the top posts. Throws on an incomplete or out-of-period answer. */
@@ -412,6 +458,7 @@ export function aggregateSprout(a: { pages: SproutPages; combined: Any; config: 
       const m = extractProfileMetrics(item.metrics || item || {}, networkOf(item));
       for (const k of METRIC_KEYS) totals[k] += m[k];
     }
+    for (const k of METRIC_KEYS) totals[k] = floorAtZero(totals[k]);
     return totals;
   };
   const currentTotals = aggregateMetrics(currentMonthData);
@@ -452,6 +499,7 @@ export function aggregateSprout(a: { pages: SproutPages; combined: Any; config: 
       if (!dn) continue;
       ensure(dn);
     }
+    for (const entry of Object.values(pm)) for (const k of [...METRIC_KEYS, "post_count"]) entry[k] = floorAtZero(entry[k]);
     return pm;
   };
   const currentPlatform = buildPlatformMetrics(currentMonthData, postAnalyticsData);
@@ -484,9 +532,7 @@ export function aggregateSprout(a: { pages: SproutPages; combined: Any; config: 
     const prev = previousPlatform[dn] || {};
     const changes: Record<string, Any> = {};
     for (const metric of METRIC_KEYS) {
-      const c = cur[metric] || 0;
-      const p = prev[metric] || 0;
-      changes[metric] = { current: c, previous: p, absolute: c - p, percent: calcChange(c, p) };
+      changes[metric] = metricChange(cur[metric] || 0, prev[metric] || 0);
     }
     platformBreakdown.push({
       network: dn,
@@ -510,25 +556,22 @@ export function aggregateSprout(a: { pages: SproutPages; combined: Any; config: 
     data_quality: { has_previous_month: previousMonthData.length > 0, current_records: currentMonthData.length, previous_records: previousMonthData.length },
   };
   for (const metric of METRIC_KEYS) {
-    const current = currentTotals[metric] || 0;
-    const previous = previousTotals[metric] || 0;
-    const abs = current - previous;
-    const pct = calcChange(current, previous);
-    monthComparison.changes[metric] = { current, previous, absolute: abs, percent: pct };
-    const dir = (pct as number) > 0 ? "↑" : (pct as number) < 0 ? "↓" : "→";
-    monthComparison.summary.push(`${metric.replace(/_/g, " ")}: ${pct === null ? "new activity (previous period was zero)" : dir + " " + Math.abs(pct) + "%"} (${abs >= 0 ? "+" : ""}${abs})`);
+    const change = metricChange(currentTotals[metric] || 0, previousTotals[metric] || 0);
+    monthComparison.changes[metric] = change;
+    monthComparison.summary.push(changeSummaryLine(metric, change));
   }
 
   const mapPost = (post: Any) => {
-    const m = post.metrics || {};
-    const impressions = getMetric(m, "lifetime.impressions", "impressions");
-    const reactions = getMetric(m, "lifetime.reactions", "reactions", "likes");
-    const comments = getMetric(m, "lifetime.comments_count", "comments_count", "comments", "lifetime.comments");
-    const shares = getMetric(m, "lifetime.shares_count", "shares_count", "shares", "lifetime.shares");
-    const linkClicks = getMetric(m, "lifetime.post_link_clicks", "post_link_clicks", "link_clicks");
-    const videoViews = getMetric(m, "lifetime.video_views", "video_views");
-    const engagements = getMetric(m, "lifetime.engagements", "engagements");
-    const likes = getMetric(m, "lifetime.likes", "likes");
+    // A post's lifetime figures are one reading each, not a sum of days: a count below zero reads as zero.
+    const lifetime = (...keys: string[]) => floorAtZero(getMetric(post.metrics || {}, ...keys));
+    const impressions = lifetime("lifetime.impressions", "impressions");
+    const reactions = lifetime("lifetime.reactions", "reactions", "likes");
+    const comments = lifetime("lifetime.comments_count", "comments_count", "comments", "lifetime.comments");
+    const shares = lifetime("lifetime.shares_count", "shares_count", "shares", "lifetime.shares");
+    const linkClicks = lifetime("lifetime.post_link_clicks", "post_link_clicks", "link_clicks");
+    const videoViews = lifetime("lifetime.video_views", "video_views");
+    const engagements = lifetime("lifetime.engagements", "engagements");
+    const likes = lifetime("lifetime.likes", "likes");
     const pid = String((post.dimensions || {}).customer_profile_id || post.customer_profile_id || "");
     const networkFromPost = post.network_type || post.network || "";
     const dn = networkFromPost ? displayNetwork(networkFromPost) : (profileIdToNetwork[pid] || "Unknown");
@@ -544,7 +587,7 @@ export function aggregateSprout(a: { pages: SproutPages; combined: Any; config: 
       content_category: post.content_category || "",
       impressions, reactions, likes, comments, shares,
       link_clicks: linkClicks, video_views: videoViews, engagements,
-      engagement: getMetric(m, "lifetime.engagements") || (reactions + comments + shares + linkClicks),
+      engagement: lifetime("lifetime.engagements") || (reactions + comments + shares + linkClicks),
       metric_scope: "lifetime",
       posted_at: post.created_time || "",
     };
@@ -559,7 +602,12 @@ export function aggregateSprout(a: { pages: SproutPages; combined: Any; config: 
     (grouped[dn] ??= []).push(post);
   }
   const topPostsByPlatform: Record<string, Any[]> = {};
-  for (const dn of Object.keys(grouped)) topPostsByPlatform[dn] = grouped[dn].sort((x, y) => y.engagement - x.engagement).slice(0, TOP_N_PER_PLATFORM);
+  // The same posts ranked by impressions (ties by engagement): the report page's "by impressions" view reads this per network, so a network the overall top 10 does not reach still has its own best posts.
+  const topPostsByPlatformImpressions: Record<string, Any[]> = {};
+  for (const dn of Object.keys(grouped)) {
+    topPostsByPlatform[dn] = [...grouped[dn]].sort((x, y) => y.engagement - x.engagement).slice(0, TOP_N_PER_PLATFORM);
+    topPostsByPlatformImpressions[dn] = [...grouped[dn]].sort((x, y) => y.impressions - x.impressions || y.engagement - x.engagement).slice(0, TOP_N_PER_PLATFORM);
+  }
 
   return {
     profiles: profileMetadata.map((p) => ({
@@ -576,6 +624,7 @@ export function aggregateSprout(a: { pages: SproutPages; combined: Any; config: 
     top_post_metric_scope: "lifetime",
     top_posts: topPosts,
     top_posts_by_platform: topPostsByPlatform,
+    top_posts_by_platform_impressions: topPostsByPlatformImpressions,
     reporting_period: {
       current_month: { start: config.current_month_start, end: config.current_month_end },
       previous_month: { start: config.previous_month_start, end: config.previous_month_end },
@@ -1191,9 +1240,7 @@ export function generateRunSummary(a: SummaryInput): Any {
 
   const warnings: string[] = [];
   if (!gammaSuccess) {
-    warnings.push(gammaResult._gamma_timeout
-      ? "The analysis is available, but presentation generation timed out. No presentation link is available."
-      : "The analysis is available, but the presentation did not complete. No presentation link is available.");
+    warnings.push(gammaResult._gamma_timeout ? DECK_TIMED_OUT_WARNING : DECK_INCOMPLETE_WARNING);
   }
   if (a.prepared?.brief_warning) warnings.push(a.prepared.brief_warning);
   if (cbc.brief_warning && !warnings.includes(cbc.brief_warning)) warnings.push(cbc.brief_warning);
@@ -1236,6 +1283,8 @@ export function generateRunSummary(a: SummaryInput): Any {
       platform_breakdown: sproutData.platform_breakdown || [],
       platform_metrics: sproutData.platform_metrics || {},
       top_posts_by_platform: sproutData.top_posts_by_platform || {},
+      // Added 12 Nov 2026; an aggregate made without it (an older run replayed) stores none and the page falls back to the engagement lists.
+      ...(sproutData.top_posts_by_platform_impressions ? { top_posts_by_platform_impressions: sproutData.top_posts_by_platform_impressions } : {}),
     },
     industry_trends: industry,
     ai_analysis: analysis,
@@ -1265,13 +1314,6 @@ export function generateRunSummary(a: SummaryInput): Any {
       sprout_top_posts: (sproutData.top_posts || []).length,
       sprout_profiles: (sproutData.profiles || []).length,
     },
-    metrics_summary: {
-      impressions_change: sproutData.month_comparison?.changes?.impressions?.percent || 0,
-      reactions_change: sproutData.month_comparison?.changes?.reactions?.percent || 0,
-      link_clicks_change: sproutData.month_comparison?.changes?.link_clicks?.percent || 0,
-      video_views_change: sproutData.month_comparison?.changes?.video_views?.percent || 0,
-      comments_change: sproutData.month_comparison?.changes?.comments?.percent || 0,
-      shares_change: sproutData.month_comparison?.changes?.shares?.percent || 0,
-    },
+    metrics_summary: metricsSummaryChanges(sproutData.month_comparison?.changes),
   };
 }

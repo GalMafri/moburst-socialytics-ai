@@ -58,7 +58,7 @@ export function makeFakeStore(d: FakeData): Store {
     async getPost(id, scope) { const p = d.posts.find((x) => x.id === id) ?? null; return p && scope.allows(p.client_id) ? p : null; },
     async listMediaJobs(scope, f, page) { return keyset(inScope(byClient(d.mediaJobs, f.client_id), scope).filter((m) => !f.status || m.status === f.status), page); },
     async listSchedules(scope, f, page) { return keyset(inScope(byClient(d.schedules, f.client_id), scope), page); },
-    async listScheduledPosts(scope, f, page) { return keyset(inScope(byClient(d.scheduledPosts, f.client_id), scope).filter((s) => !f.status || s.status === f.status), page); },
+    async listScheduledPosts(scope, f, page) { return keyset(inScope(byClient(d.scheduledPosts, f.client_id), scope).filter((s) => f.status ? s.status === f.status : s.status !== "sending" && s.status !== "failed"), page); },
     async listAlerts(scope, f, page) { return keyset(inScope(byClient(d.alerts, f.client_id), scope).filter((a) => !f.status || a.status === f.status), page); },
     async listDesignSystems(scope, f, page) { return keyset(inScope(byClient(d.designSystems, f.client_id), scope), page); },
     // The client's rows and nothing narrower, so the serializer's own rule is what the route tests exercise.

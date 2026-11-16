@@ -20,6 +20,7 @@
 import { runActorStep, type ApifyFactory } from "../apifyStep.ts";
 import { linkedInSourceAnswer, LINKEDIN_ACTOR, prepareSourceRequest, verifyLinkedInRows } from "../linkedin/sources.ts";
 import { APIFY_API_TOKEN } from "../secrets.ts";
+import { runHoursHorizon } from "../runner.ts";
 import type { PipelineDefinition } from "../types.ts";
 
 export const LINKEDIN_SOURCE_PIPELINE = "linkedin_source_v1";
@@ -32,6 +33,9 @@ export function linkedInSourcePipeline(deps: { apify?: ApifyFactory } = {}): Pip
     appCapable: true,
     secrets: [],
     awaitedSecrets: [APIFY_API_TOKEN],
+    // The answer is for a refresh asked for now: a wait for the Apify token
+    // holds the run no longer than the run itself may take.
+    waitHorizon: (run) => runHoursHorizon(run),
     first: "collect",
     steps: {
       async collect(ctx) {

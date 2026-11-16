@@ -13,6 +13,7 @@
 import { type PostRequest, postInstant, weekDecision } from "./requestRules.ts";
 import { DESIGN_ANGLE } from "../canva/jobs.ts";
 import { isStoryPost } from "./story.ts";
+import { formatKind } from "../calendar/reasonText.ts";
 
 /**
  * Week posts being designed at once across the app: the pace the automatic
@@ -25,7 +26,7 @@ export type DesignKind = "single" | "carousel" | "video";
 
 /** A post with nothing to design: its format is words alone. */
 export function needsNoDesign(format: string | null | undefined): boolean {
-  return /^\s*text(\s*only)?\s*$|text[-\s]only/i.test(String(format || ""));
+  return formatKind(format) === "text";
 }
 
 /**
@@ -34,9 +35,9 @@ export function needsNoDesign(format: string | null | undefined): boolean {
  * TikTok is a video.
  */
 export function designKind(format: string | null | undefined, platform: string | null | undefined): DesignKind {
-  const f = String(format || "");
-  if (/carousel|document|pdf/i.test(f)) return "carousel";
-  if (/reel|video|short|tiktok/i.test(f) || /tiktok/i.test(String(platform || ""))) return "video";
+  const kind = formatKind(format, platform);
+  if (kind === "carousel" || kind === "document") return "carousel";
+  if (kind === "video" || kind === "short video" || /tiktok/i.test(String(platform || ""))) return "video";
   return "single";
 }
 
@@ -90,7 +91,7 @@ export function classifyPost(f: PostFacts, timeZone: string | null | undefined, 
   if (postAt && postAt.getTime() <= now.getTime()) return { in: false, why: "passed" };
   if (f.hasDesign) return { in: false, why: "designed" };
   if (f.otherMedia) return { in: false, why: "media_in_use" };
-  const d = weekDecision(f.requests);
+  const d = weekDecision(f.requests, f.hasDesign);
   if (!d.start) return { in: false, why: d.why === "ready" ? "designed" : d.why };
   const kind = designKind(f.post.format, f.post.platform);
   return { in: true, kind, story: isStoryPost(f.post), route: kind === "video" ? d.route : null, askFilming: kind === "video" && d.askFilming, postAt };
@@ -105,9 +106,10 @@ export function currentCopyOf(rows: Array<{ post_copy?: string | null; media_url
 }
 
 /** Whether a post has a finished design, and whether other media is in use for it, from its post_iterations rows. */
-export function mediaOf(rows: Array<{ variant_angle?: string | null; is_selected?: boolean | null; archived_at?: string | null }>): { hasDesign: boolean; otherMedia: boolean } {
+export function mediaOf(rows: Array<{ variant_angle?: string | null; is_selected?: boolean | null; archived_at?: string | null; rejected_at?: string | null }>): { hasDesign: boolean; otherMedia: boolean } {
   return {
-    hasDesign: rows.some((r) => DESIGN_ANGLE.test(r.variant_angle ?? "") && !r.archived_at),
+    // A design someone deleted (archived_at) or turned down with "Not right" (rejected_at) is not a design for the week.
+    hasDesign: rows.some((r) => DESIGN_ANGLE.test(r.variant_angle ?? "") && !r.archived_at && !r.rejected_at),
     // The same test a finished design makes before it takes over its post (canva/jobs.ts takeOverPost).
     otherMedia: rows.some((r) => r.is_selected === true && !DESIGN_ANGLE.test(r.variant_angle ?? "")),
   };

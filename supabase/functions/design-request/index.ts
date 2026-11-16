@@ -36,7 +36,7 @@ import { requireMember } from "../_shared/auth/requireMember.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
 import { BRIEFS_PLANNED, CAROUSEL_SLIDES, OPTIONS_WANTED, type RecentDesign, carouselPlannerPrompt, filmedNeed, parseBriefs, parseShotBrief, shotBriefPrompt, parseCarouselBriefs, parseVideoBriefs, plannerPrompt, recentLines, videoPlannerPrompt, withRefs } from "../_shared/canva/options.ts";
 import { type DesignRequest, type Settings, endRequest, startOption } from "../_shared/canva/jobs.ts";
-import { filmingOutcome, postInstant } from "../_shared/design/requestRules.ts";
+import { canFilm, filmingOutcome, postInstant } from "../_shared/design/requestRules.ts";
 import { currentCopyOf, designKind, type PassStart } from "../_shared/design/weekRules.ts";
 import { isStoryPost } from "../_shared/design/story.ts";
 import { wakeWorker, wakeVideoWorker } from "../_shared/canva/worker.ts";
@@ -51,6 +51,13 @@ import { needsClipPrice, quoteClip } from "../_shared/video/clip.ts";
 import { type WeekDeps, weekContinue, weekPreview, weekStart, weekStop } from "./week.ts";
 import { designStory } from "./story.ts";
 import { plannerLibrary } from "./library.ts";
+import { postTimeOf } from "./postTime.ts";
+import { type CreateDeps, createDesign } from "./create.ts";
+import { cancelRequest } from "./cancel.ts";
+import { footageFor } from "./footage.ts";
+import { shotBriefFor } from "./shotBrief.ts";
+import { designFeedback } from "./feedback.ts";
+import { putDesignInUse } from "./use.ts";
 import { type NoteDeps, type NoteLearned, learnDesignNote, noteLearnedOf, undoDesignNote } from "./note.ts";
 import { cleanNote } from "../_shared/notes/regenerateNote.ts";
 
@@ -73,36 +80,8 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
 
     if (body?.action === "create") {
-      const clientId = String(body.client_id || "");
-      const postKey = String(body.calendar_post_key || "");
-      const copy = String(body.post_copy || "").trim();
-      if (!clientId || !postKey || !copy) return json({ error: "client_id, calendar_post_key and post_copy are required." }, 400);
-      const userId = await requireMember(req, clientId);
-
-      const { data: settings } = await admin.from("design_brand_settings").select("*").eq("client_id", clientId).maybeSingle();
-      // Answered as a 200 so the screen can read the code (invoke() hides non-2xx bodies).
-      if (!settings?.confirmed_at) return json({ code: "not_set_up" });
-
-      const visual = typeof body.visual_direction === "string" ? body.visual_direction.trim().slice(0, 600) : "";
-      // A video whose idea is a real person on camera (the founder speaking,
-      // say) is filmed, never generated: no real or identifiable person is
-      // ever made up. The answer says so plainly instead of starting anything.
-      // Chosen in the Video tab instead of filming: a video in the look of the client's posts.
-      const route = body.route === "posts" ? "posts" : null;
-      if (designKind(body.format, body.platform) === "video" && !route) {
-        const filmed = await filmedReason(admin, clientId, copy, visual);
-        if (filmed) {
-          const request = await recordFilming(admin, { clientId, postKey, copy, reportId: body.report_id || null, platform: body.platform || null, format: body.format || null, requestedBy: userId, visual: visual || null }, filmed);
-          return json({ code: "needs_filming", who: filmed, request });
-        }
-      }
-      // A note left on Regenerate: every option follows it, and the design memory hears it.
-      const note = cleanNote(body.note);
-      const request = await startRequest(admin, settings as Settings, {
-        clientId, postKey, copy, reportId: body.report_id || null, platform: body.platform || null, format: body.format || null, requestedBy: userId, visual: visual || null, route,
-        note: note || null, learnNote: true,
-      });
-      return json({ request });
+      const answer = await createDesign(createDeps(admin, req), body);
+      return json(answer.body, answer.status ?? 200);
     }
 
     // "Add a Story": whoever can work on the client's posts, as create (story.ts).
@@ -120,49 +99,31 @@ Deno.serve(async (req) => {
     // nothing more on it; the post keeps the design it already had, and the
     // week's design button counts the post again next time it is pressed.
     if (body?.action === "cancel") {
-      const { data: request } = await admin.from("design_requests").select("id, client_id, status").eq("id", String(body.request_id || "")).maybeSingle();
-      if (!request) return json({ error: "That design is not being prepared." }, 404);
-      await requireMember(req, request.client_id);
-      if (request.status !== "preparing") return json({ request });
-      await admin.from("canva_finish_jobs").update({ status: "canceled", lease_until: null, updated_at: new Date().toISOString() })
-        .eq("design_request_id", request.id).in("status", ["queued", "running"]);
-      const { data: updated } = await admin.from("design_requests").update({ status: "canceled", updated_at: new Date().toISOString() })
-        .eq("id", request.id).select("*").single();
-      return json({ request: updated });
+      const answer = await cancelRequest({ db: admin, requireMember: (clientId) => requireMember(req, clientId), now: () => new Date() }, body);
+      return json(answer.body, answer.status ?? 200);
     }
 
     // A filmed clip for a video post with a real person on camera: the clip
     // is the footage, and the post's hook and the client's logo file go over
     // it, keeping its sound. Anyone who can work on the client's posts.
     if (body?.action === "footage") {
-      const clientId = String(body.client_id || "");
-      const postKey = String(body.calendar_post_key || "");
-      const path = String(body.path || "");
-      const copy = String(body.post_copy || "").trim();
-      if (!clientId || !postKey || !copy || !path) return json({ error: "client_id, calendar_post_key, post_copy and path are required." }, 400);
-      const userId = await requireMember(req, clientId);
-      if (!path.startsWith(`${clientId}/`) || path.includes("..")) return json({ error: "That clip does not belong to this client." }, 400);
-      const { data: settings } = await admin.from("design_brand_settings").select("*").eq("client_id", clientId).maybeSingle();
-      if (!settings?.confirmed_at) return json({ code: "not_set_up" });
-      const { data: filmed } = await admin.from("design_requests").select("on_camera").eq("client_id", clientId).eq("calendar_post_key", postKey).in("status", ["needs_filming", "closed"]).not("on_camera", "is", null).order("updated_at", { ascending: false }).limit(1).maybeSingle();
-      const visual = typeof body.visual_direction === "string" ? body.visual_direction.trim().slice(0, 600) : "";
-      const request = await startRequest(admin, settings as Settings, {
-        clientId, postKey, copy, reportId: body.report_id || null, platform: body.platform || null, format: body.format || "Video", requestedBy: userId,
-        visual: visual || null, footagePath: path, onCamera: filmed?.on_camera ?? "the speaker",
-      });
-      // The footage came: the post no longer waits to be filmed.
-      const { data: waiting } = await admin.from("design_requests").select("id").eq("client_id", clientId).eq("calendar_post_key", postKey).eq("status", "needs_filming");
-      for (const w of waiting ?? []) await endRequest(admin, w.id, "filmed");
-      return json({ request });
+      const answer = await footageFor({
+        db: admin,
+        requireMember: (clientId) => requireMember(req, clientId),
+        clipExists: (path) => footageClipExists(admin, path),
+        start: (settings, p) => startRequest(admin, settings as Settings, p as Parameters<typeof startRequest>[2]),
+      }, body);
+      return json(answer.body, answer.status ?? 200);
     }
 
     // The shot brief for a filmed video post, written (again) on request. Moburst staff only.
     if (body?.action === "shot_brief") {
-      const caller = await requireStaff(req);
-      const { data: request } = await admin.from("design_requests").select("id, client_id").eq("id", String(body.request_id || "")).maybeSingle();
-      if (!request) return json({ error: "That video post is not waiting to be filmed." }, 404);
-      void caller;
-      return json({ brief: await writeShotBrief(admin, request.id) });
+      const answer = await shotBriefFor({
+        db: admin,
+        requireStaff: (clientId) => requireStaff(req, clientId ? { writeClientId: clientId } : {}),
+        write: (requestId) => writeShotBrief(admin, requestId),
+      }, body);
+      return json(answer.body, answer.status ?? 200);
     }
 
     // A request planned again: a video that waited for the client's video
@@ -229,31 +190,13 @@ Deno.serve(async (req) => {
     // Turn a design down (with a reason the client's next designs learn from)
     // or delete it. Turning down the post's current design starts a new one.
     if (body?.action === "feedback") {
-      const verdict = body.verdict === "rejected" ? "rejected" : body.verdict === "deleted" ? "archived" : null;
-      if (!verdict) return json({ error: "verdict must be rejected or deleted." }, 400);
-      const { data: it } = await admin.from("post_iterations").select("id, client_id, calendar_post_key, report_id, platform, format, post_copy, visual_direction, variant_angle, concept, is_selected, variant_group_id").eq("id", String(body.iteration_id || "")).maybeSingle();
-      if (!it || !DESIGN_ANGLE.test(it.variant_angle ?? "")) return json({ error: "That design is no longer available." }, 404);
-      const userId = await requireMember(req, it.client_id);
-      const learnings = await recordFeedback(admin, it, verdict, body.reason, body.note, userId);
-
-      let request: DesignRequest | null = null;
-      if (verdict === "rejected" && body.make_new !== false && it.calendar_post_key) {
-        const { data: settings } = await admin.from("design_brand_settings").select("*").eq("client_id", it.client_id).maybeSingle();
-        if (settings?.confirmed_at) {
-          const copy = await currentCopy(admin, { client_id: it.client_id, post_key: it.calendar_post_key, copy: it.post_copy ?? "" });
-          if (copy) {
-            // Made again the way the turned-down one was made (from the client's posts, say).
-            const { data: madeBy } = it.variant_group_id ? await admin.from("design_requests").select("video_route").eq("id", it.variant_group_id).maybeSingle() : { data: null };
-            // The new design follows the note as Regenerate's does; what the feedback taught is already learned, and shown on it.
-            const note = cleanNote(body.note);
-            request = await startRequest(admin, settings as Settings, {
-              clientId: it.client_id, postKey: it.calendar_post_key, copy, reportId: it.report_id, platform: it.platform, format: it.format, requestedBy: userId, route: madeBy?.video_route ?? null,
-              note: note || null, noteLearned: note ? noteLearnedOf(learnings) : null,
-            });
-          }
-        }
-      }
-      return json({ ok: true, learnings: learnings.length, request });
+      const answer = await designFeedback({
+        db: admin,
+        requireMember: (clientId) => requireMember(req, clientId),
+        record: (it, verdict, reason, note, userId) => recordFeedback(admin, it as never, verdict, reason, note, userId),
+        start: (settings, p) => startRequest(admin, settings as Settings, p as Parameters<typeof startRequest>[2]),
+      }, body);
+      return json(answer.body, answer.status ?? 200);
     }
 
     // Take back what a note taught the brand's design memory (note.ts).
@@ -263,15 +206,8 @@ Deno.serve(async (req) => {
     }
 
     if (body?.action === "use") {
-      const { data: it } = await admin.from("post_iterations").select("id, client_id, calendar_post_key, variant_group_id").eq("id", String(body.iteration_id || "")).maybeSingle();
-      if (!it) return json({ error: "That design is no longer available." }, 404);
-      await requireMember(req, it.client_id);
-      if (it.calendar_post_key) {
-        await admin.from("post_iterations").update({ is_selected: false }).eq("client_id", it.client_id).eq("calendar_post_key", it.calendar_post_key).neq("id", it.id);
-      }
-      const { error } = await admin.from("post_iterations").update({ is_selected: true }).eq("id", it.id);
-      if (error) throw new Error(error.message);
-      return json({ ok: true });
+      const answer = await putDesignInUse({ db: admin, requireMember: (clientId) => requireMember(req, clientId) }, body);
+      return json(answer.body, answer.status ?? 200);
     }
 
     return json({ error: `Unknown action '${body?.action}'` }, 400);
@@ -314,6 +250,12 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
   // A video is planned from the client's own videos (14 Oct: "make videos in a
   // similar style to their VIDEOS, not statics"). Until their style has been
   // read, the request waits; the video worker plans it when the style is in.
+  // A video whose post can no longer wait for footage is made from the client's posts (12 Nov 2026).
+  if (request.kind === "video" && !request.footage_path && request.video_route !== "posts"
+    && !canFilm(await postTimeOf(admin, request.client_id, request.calendar_post_key), new Date())) {
+    await admin.from("design_requests").update({ video_route: "posts", updated_at: new Date().toISOString() }).eq("id", request.id);
+    request.video_route = "posts";
+  }
   // A video chosen to follow the client's posts is planned from the posts, like a design.
   const generatedVideo = request.kind === "video" && !request.footage_path && request.video_route !== "posts";
   const videoStyle = generatedVideo && Array.isArray(client?.video_style?.frames) && client.video_style.frames.length ? client.video_style : null;
@@ -377,7 +319,8 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
   // second copy of the first option (13 Oct: two of one design; for a video,
   // two clips paid for).
   const first = Math.min(request.options_wanted, briefs.length);
-  for (let i = 0; i < first; i++) await startOption(admin, planned, settings, brand, i, i);
+  let current = settings;
+  for (let i = 0; i < first; i++) current = await startOption(admin, planned, current, brand, i, i);
   await admin.from("design_requests").update({ briefs, stage: "designing", candidates_started: first, updated_at: new Date().toISOString() }).eq("id", request.id);
   await wakeWorker();
   // A video's footage starts now, on its own worker, while the cards are drawn.
@@ -664,6 +607,28 @@ function weekDeps(admin: any, req: Request): WeekDeps {
   return deps;
 }
 
+/** What create (create.ts) needs from this function. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function createDeps(admin: any, req: Request): CreateDeps {
+  return {
+    db: admin,
+    requireMember: (clientId) => requireMember(req, clientId),
+    now: () => new Date(),
+    filmedReason: (clientId, copy, visual) => filmedReason(admin, clientId, copy, visual),
+    recordFilming: (p, reason) => recordFilming(admin, p as Parameters<typeof recordFilming>[1], reason),
+    start: (settings, p) => startRequest(admin, settings as Settings, p as Parameters<typeof startRequest>[2]),
+  };
+}
+
+/** Whether a clip is in the footage bucket at this path. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function footageClipExists(admin: any, path: string): Promise<boolean> {
+  const slash = path.lastIndexOf("/");
+  const { data, error } = await admin.storage.from("post-footage").list(path.slice(0, slash), { search: path.slice(slash + 1), limit: 100 });
+  if (error) throw new Error(error.message);
+  return (data ?? []).some((f: { name: string }) => f.name === path.slice(slash + 1));
+}
+
 /** What the note's learning and Undo (note.ts) need from this function. */
 function noteDeps(admin: any, req?: Request): NoteDeps {
   return {
@@ -683,14 +648,6 @@ function background(work: Promise<unknown>): void {
   // deno-lint-ignore no-explicit-any
   const runtime = (globalThis as any).EdgeRuntime;
   if (runtime?.waitUntil) runtime.waitUntil(w);
-}
-
-/** A post's copy as it is now: its latest saved edit, or the copy it was planned with. */
-async function currentCopy(admin: any, post: { client_id: string; post_key: string; copy: string }): Promise<string> {
-  const { data: edits } = await admin.from("post_iterations").select("post_copy, media_urls, created_at, version")
-    .eq("client_id", post.client_id).eq("calendar_post_key", post.post_key)
-    .order("created_at", { ascending: false }).limit(20);
-  return currentCopyOf(edits ?? [], post.copy);
 }
 
 function json(body: unknown, status = 200) {

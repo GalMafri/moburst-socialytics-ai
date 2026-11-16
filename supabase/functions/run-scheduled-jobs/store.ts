@@ -155,6 +155,15 @@ export function makeDispatchStore(db: SupabaseClient): DispatchStore {
       const r = (await must(db.from("competitive_reports").insert(row).select("id").single())) as { id: string };
       return r.id;
     },
+    async recordRedo(id, redo) {
+      // report_data is the analysis the pipeline wrote; the decision is added beside it, on a complete row only.
+      const r = (await must(db.from("competitive_reports").select("report_data").eq("id", id).in("status", ["complete", "completed"]).maybeSingle())) as
+        { report_data: Record<string, unknown> | null } | null;
+      // No analysis to write beside (none stored, or not an object): nothing is written over it.
+      const rd = r?.report_data;
+      if (!rd || typeof rd !== "object" || Array.isArray(rd)) return;
+      await must(db.from("competitive_reports").update({ report_data: { ...rd, redo } }).eq("id", id).in("status", ["complete", "completed"]));
+    },
     async insertSocialReport(row) {
       const r = (await must(db.from("reports").insert(row).select("id").single())) as { id: string };
       return r.id;

@@ -41,7 +41,9 @@ export function weekPlanView(plan: CalendarPlanRow | null | undefined, today: st
   if (!plan) return null;
   const week = shortDate(plan.week_start);
   if (planInFlight(plan.status)) {
-    return { kind: "planning", line: `Planning the week of ${week}…`, steps: steps(plan.status === "planning", "Writing the posts") };
+    // A plan that already failed a try goes on trying: say so, never the error itself.
+    const line = plan.error ? `Planning the week of ${week} is taking longer than usual. It keeps trying.` : `Planning the week of ${week}…`;
+    return { kind: "planning", line, steps: steps(plan.status === "planning", "Writing the posts") };
   }
   if (plan.status === "ready" && plan.pending_revision) {
     return { kind: "revising", line: `Revising the week of ${week}…`, note: plan.pending_revision.note, steps: steps(!!plan.claimed_at, "Rewriting the posts") };

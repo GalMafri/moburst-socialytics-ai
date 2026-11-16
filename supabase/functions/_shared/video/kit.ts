@@ -18,6 +18,45 @@ export function kitPath(clientId: string, i: number): string {
   return `${clientId}/style/kit-${i}.jpg`;
 }
 
+/** Where the image model's paid edit of kit still i, in cleaning round n, is stored before the picture service makes its JPEG. */
+export function kitEditPath(clientId: string, i: number, n: number): string {
+  return `${clientId}/style/kit-${i}-edit-${n}.png`;
+}
+
+/**
+ * The paid edits of the stills in progress, kept on the job (state.kit_edits)
+ * by still and round ("i-n") until the still is done: a transcode the picture
+ * service could not finish is tried again from the stored edit, and the edit
+ * is never paid for twice.
+ */
+export type KitEdits = Record<string, string>;
+
+/** The stored edit of still i in round n, or null when that round has not been paid for. */
+export function kitEditKept(edits: unknown, i: number, n: number): string | null {
+  const path = (edits as Record<string, unknown> | null | undefined)?.[`${i}-${n}`];
+  return typeof path === "string" && path ? path : null;
+}
+
+/** The kept edits as stored, without any entry that is not a path. */
+function keptEdits(edits: unknown): KitEdits {
+  const out: KitEdits = {};
+  for (const [k, v] of Object.entries((edits as Record<string, unknown> | null | undefined) ?? {})) {
+    if (typeof v === "string" && v) out[k] = v;
+  }
+  return out;
+}
+
+/** The kept edits with still i's round n stored at path. */
+export function kitEditsWith(edits: unknown, i: number, n: number, path: string): KitEdits {
+  return { ...keptEdits(edits), [`${i}-${n}`]: path };
+}
+
+/** The kept edits without still i's, once that still is done; with a round, without that round's alone (an edit the picture service could not work with). */
+export function kitEditsWithout(edits: unknown, i: number, n?: number): KitEdits {
+  const gone = (k: string) => (n === undefined ? k.startsWith(`${i}-`) : k === `${i}-${n}`);
+  return Object.fromEntries(Object.entries(keptEdits(edits)).filter(([k]) => !gone(k)));
+}
+
 /** missing: no kit made yet; ready: at least KIT_MIN stills; none: a kit was made with fewer. */
 export type KitState = "missing" | "ready" | "none";
 
@@ -142,6 +181,34 @@ export function kitNext(videoStyle: unknown, now: number, jobId?: string, heldAt
   return "make";
 }
 
+/**
+ * The other job that holds a fresh claim on the kit (kit_started_at under
+ * KIT_MAKE_MS ago), or null. Whether that job is still alive is read from its
+ * own row (steps.ts endedHolder): a claim is only as good as its holder, so a
+ * holder that ended (failed, canceled, finished without storing the kit) frees
+ * it at once, with no 15 minute wait for the claim to lapse.
+ */
+export function kitHolderOf(videoStyle: unknown, now: number, jobId: string): string | null {
+  const vs = (videoStyle ?? {}) as { kit_started_at?: unknown; kit_job?: unknown };
+  const started = typeof vs.kit_started_at === "string" ? Date.parse(vs.kit_started_at) : NaN;
+  if (!Number.isFinite(started) || now - started >= KIT_MAKE_MS) return null;
+  return typeof vs.kit_job === "string" && vs.kit_job && vs.kit_job !== jobId ? vs.kit_job : null;
+}
+
+/**
+ * The job's state when it takes the kit over from a holder that ended: the
+ * pick, the outcomes and the paid edits the holder kept (their files are the
+ * client's own, by kitPath and kitEditPath), so nothing paid for is paid for
+ * again. Only for the same style (kit_of) and only when the job has no pick
+ * of its own yet; the tries are the job's own.
+ */
+export function kitTakenOver<T extends Record<string, unknown>>(state: T, holderState: unknown, madeAt: unknown): T {
+  const held = (holderState && typeof holderState === "object" && !Array.isArray(holderState) ? holderState : {}) as Record<string, unknown>;
+  const of = typeof madeAt === "string" ? madeAt : null;
+  if (Array.isArray(state.kit_pick) || !Array.isArray(held.kit_pick) || ((held.kit_of as string | null | undefined) ?? null) !== of) return state;
+  return { ...state, kit_pick: held.kit_pick, kit_done: kitDoneOf(held.kit_done), kit_edits: keptEdits(held.kit_edits) } as T;
+}
+
 /** The kit from each picked still's clean path (null when it was dropped): the clean ones in order, or none with fewer than KIT_MIN. */
 export function kitKept(cleaned: Array<string | null>): string[] {
   const kept = cleaned.filter((p): p is string => typeof p === "string" && p.length > 0);
@@ -197,15 +264,32 @@ export function kitKeptFrom(count: number, done: KitDone): string[] {
 }
 
 /**
- * The kit's tries at a new claim. A try is a claim that finished no still:
- * at each claim the stills done now are compared with those done at the
- * claim before (`seen`); none new since then costs that claim a try. The
- * first claim has nothing before it, so costs nothing.
+ * The kit's tries at a new claim. A try is a claim that finished no still
+ * for a reason about the stills: at each claim the stills done now are
+ * compared with those done at the claim before (`seen`); none new since
+ * then costs that claim a try, unless it is spared (`spared`: it ended for
+ * a reason outside its stills, the picture service unavailable, the image
+ * model busy, or a call the picture service refused, kept on the job by
+ * the cleaning, kitStep.ts). A wait is never a spent try, and a refused
+ * call spends a try of the job instead. The first claim has nothing before
+ * it, so costs nothing. A claim whose run died left no mark, so it is a try.
  */
-export function kitClaim(prev: { tries?: unknown; seen?: unknown }, doneNow: number): { tries: number; seen: number } {
+export function kitClaim(prev: { tries?: unknown; seen?: unknown; spared?: unknown }, doneNow: number): { tries: number; seen: number } {
   const tries = typeof prev.tries === "number" ? prev.tries : 0;
   if (typeof prev.seen !== "number") return { tries, seen: doneNow };
-  return { tries: doneNow > prev.seen ? tries : tries + 1, seen: doneNow };
+  const spent = doneNow <= prev.seen && prev.spared !== true;
+  return { tries: spent ? tries + 1 : tries, seen: doneNow };
+}
+
+/**
+ * The job's state at a new claim of the kit: the kit in progress for this
+ * style (kitForStyle), its tries counted (kitClaim), and the claim before's
+ * mark (kit_spared) forgotten, so only the claim that carried it is spared.
+ */
+export function kitClaimed<T extends Record<string, unknown>>(state: T, madeAt: unknown): T {
+  const { kit_spared: spared, ...st } = kitForStyle(state, madeAt) as Record<string, unknown>;
+  const claim = kitClaim({ tries: st.kit_tries, seen: st.kit_seen, spared }, kitDoneCount(kitDoneOf(st.kit_done)));
+  return { ...st, kit_tries: claim.tries, kit_seen: claim.seen } as unknown as T;
 }
 
 /**
@@ -228,12 +312,12 @@ export function kitWork(count: number | null, done: KitDone, tries: number): { k
 
 /**
  * A kit in progress belongs to the style it was picked from (its made_at):
- * when the style was learned again since, the pick and the outcomes start
- * over (the tries stay). Returns the job state to use.
+ * when the style was learned again since, the pick, the outcomes and the
+ * paid edits kept for the old pick start over (the tries stay). Returns the job state to use.
  */
 export function kitForStyle<T extends Record<string, unknown>>(state: T, madeAt: unknown): T {
   const of = typeof madeAt === "string" ? madeAt : null;
   if (state.kit_of === of) return state;
-  const { kit_pick: _pick, kit_done: _done, kit_seen: _seen, ...rest } = state;
+  const { kit_pick: _pick, kit_done: _done, kit_seen: _seen, kit_edits: _edits, ...rest } = state;
   return { ...rest, kit_of: of } as unknown as T;
 }

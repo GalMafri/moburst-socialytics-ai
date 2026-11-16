@@ -35,3 +35,7 @@ dist-ssr
 
 # Vercel CLI link and build output (the deploy workflow makes them on the runner)
 .vercel
+
+# The picture service build: one esbuild bundle, made on every deploy and
+# imported by the committed function entry api/picture.mjs.
+server/dist/

@@ -26,6 +26,7 @@
 // no public posts; the strategy is still written from everything else.
 
 import { clientCompanyId, companyKey, isBoosted, isClientPost, median, OWN_DAYS, platformName } from "../calendar/evidence.ts";
+import { latestCompetitorSet, selectedCompetitors } from "./competitorSet.ts";
 import { LINKEDIN_ACTOR, LINKEDIN_MAX_POSTS, linkedInProfile } from "../pipelines/linkedin/sources.ts";
 import { TREND_SOURCES } from "../trends/sources.ts";
 import { INSTAGRAM_PROFILE_ACTOR } from "../apify/instagramProfile.ts";
@@ -42,6 +43,17 @@ type Db = any;
 const DAY = 86_400_000;
 export const READ_DAYS = OWN_DAYS;
 export const REUSE_DAYS = 7;
+/**
+ * What a read is made of. A read stored under an older version is read again
+ * (stepRead), so a change in how posts are taken from an answer reaches every
+ * client's read the next time its strategy is due, with no run of its own.
+ * 2: a like count a profile hides is unknown (engagement null), not 0.
+ */
+export const READ_VERSION = 2;
+/** A competitor's read with fewer posts than this says too little about its pace to sit in a comparison. */
+export const COMPETITOR_MIN_POSTS = 8;
+/** Most of a company's posts must show their engagement for its median to stand. */
+const KNOWN_SHARE = 0.5;
 /** Posts asked for per TikTok profile: about nine a week over 90 days, more than a brand posts. */
 export const TIKTOK_MAX_PER_PROFILE = 120;
 /** How long to wait before looking at the runs again. */
@@ -62,7 +74,8 @@ export interface PublicPost {
   text: string;
   link: string | null;
   format: string;
-  engagement: number;
+  /** Likes, comments and shares; null where the platform hides them (Instagram's hidden like counts). */
+  engagement: number | null;
   views: number | null;
   /** The profile's followers when the post was read, if the source shows them. */
   followers: number | null;
@@ -94,6 +107,8 @@ const num = (v: unknown): number | null => {
   const n = Number(v);
   return Number.isFinite(n) && n >= 0 ? n : null;
 };
+/** A count the platform shows: none when it is missing or hidden (-1), where 0 means none was given. */
+const shown = (v: unknown): number | null => (v === null || v === undefined || v === "" ? null : num(v));
 const text = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 const iso = (v: unknown): string | null => {
   if (v === null || v === undefined || v === "") return null;
@@ -154,10 +169,12 @@ export const PUBLIC_READERS: Record<string, Reader> = {
         const link = text(p?.url) || (text(p?.shortCode) ? `https://www.instagram.com/p/${text(p.shortCode)}/` : "");
         if (!at || !/^https:\/\//.test(link)) return [];
         const kind = text(p?.type).toLowerCase();
+        // Hidden likes come as -1 or not at all: the post's engagement is unknown, never 0.
+        const likes = shown(p?.likesCount);
         return [{
           company: target.company, client: target.client, platform: "Instagram", id: `instagram:${text(p?.id) || text(p?.shortCode) || link}`, publishedAt: at,
           text: clipPost(text(p?.caption)), link, format: kind === "sidecar" ? "carousel" : kind === "video" ? "video" : "image",
-          engagement: (num(p?.likesCount) ?? 0) + (num(p?.commentsCount) ?? 0), views: num(p?.videoViewCount), followers, boosted: false, source: "apify", capped: INSTAGRAM_LATEST,
+          engagement: likes === null ? null : likes + (shown(p?.commentsCount) ?? 0), views: num(p?.videoViewCount), followers, boosted: false, source: "apify", capped: INSTAGRAM_LATEST,
         }];
       });
     },
@@ -202,7 +219,7 @@ export function feedPosts(snapshots: Array<{ payload: Any }>, clientName: string
       out.set(id, {
         company: client ? clientName : String(p?.companyName ?? ""), companyId: client ? null : String(p?.companyId ?? "").trim() || null, client, platform, id, publishedAt: at,
         text: clipPost(String(p?.message ?? "")), link: p?.postLink ?? null, format: String(p?.type || "unknown"),
-        engagement: Number(p?.engagementTotal) || 0, views: num(p?.tiktokViews ?? p?.youtubeViews ?? p?.views),
+        engagement: shown(p?.engagementTotal), views: num(p?.tiktokViews ?? p?.youtubeViews ?? p?.views),
         followers: num(p?.presenceReach), boosted: isBoosted(p?.facebookLikelyBoosted), source: "feed",
       });
     }
@@ -248,6 +265,8 @@ export const targetsKey = (targets: Target[]) => textHash(targets.map((t) => `${
 
 /** A read under way or done (content_strategies.public_read). */
 export interface PublicReadState {
+  /** READ_VERSION when the read was made; a read without one, or an older one, is read again. */
+  version?: number;
   key: string;
   status: "reading" | "done";
   started_at: string;
@@ -270,6 +289,8 @@ export interface CompanyFigures {
   /** Engagement per view, over posts that show views (TikTok, YouTube); null otherwise. */
   rate_per_view: number | null;
   followers: number | null;
+  /** The days the figures cover (YYYY-MM-DD). A read that reached its cap covers fewer than the 90 days, so a page can label or line up the windows. */
+  covers: { start: string; end: string };
 }
 
 /** Posts a week, median engagement, rate per view and the newest follower count per company and platform. Paid posts and posts under 48 hours old are left out of engagement. */
@@ -289,8 +310,10 @@ export function figures(posts: PublicPost[], now: Date, days = READ_DAYS): Compa
     const oldest = Math.min(...g.map((p) => Date.parse(p.publishedAt)));
     const span = cap && g.length >= cap ? Math.min(days, Math.max(7, (t - oldest) / DAY)) : days;
     const settled = g.filter((p) => !p.boosted && Date.parse(p.publishedAt) <= t - 48 * 3_600_000);
-    const mid = median(settled.map((p) => p.engagement));
-    const viewed = settled.filter((p) => (p.views ?? 0) > 0);
+    // A post that hides its engagement is left out of the median, and a company most of whose posts hide it has no median.
+    const counted = settled.filter((p) => p.engagement !== null) as Array<PublicPost & { engagement: number }>;
+    const mid = counted.length > 0 && counted.length >= settled.length * KNOWN_SHARE ? median(counted.map((p) => p.engagement)) : null;
+    const viewed = counted.filter((p) => (p.views ?? 0) > 0);
     const views = viewed.reduce((s, p) => s + (p.views as number), 0);
     const newest = [...g].filter((p) => p.followers !== null).sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))[0];
     return {
@@ -298,8 +321,14 @@ export function figures(posts: PublicPost[], now: Date, days = READ_DAYS): Compa
       median_engagement: mid === null ? null : round(mid, 1),
       rate_per_view: views > 0 && ["TikTok", "YouTube"].includes(g[0].platform) ? round(viewed.reduce((s, p) => s + p.engagement, 0) / views, 4) : null,
       followers: newest ? newest.followers : null,
+      covers: { start: new Date(t - span * DAY).toISOString().slice(0, 10), end: now.toISOString().slice(0, 10) },
     };
   });
+}
+
+/** The competitors whose read has enough posts to be compared with the brand and each other. */
+export function comparableCompetitors<T extends { posts: number }>(rows: T[]): T[] {
+  return rows.filter((r) => r.posts >= COMPETITOR_MIN_POSTS);
 }
 
 export type ApifyFactory = () => ApifyClient | null;
@@ -308,12 +337,12 @@ export type ApifyFactory = () => ApifyClient | null;
 export async function stepRead(state: PublicReadState | null, targets: Target[], apify: ApifyFactory, now: Date): Promise<PublicReadState> {
   const key = targetsKey(targets);
   const window = { start: new Date(now.getTime() - READ_DAYS * DAY).toISOString().slice(0, 10), end: now.toISOString().slice(0, 10) };
-  const fresh = (s: PublicReadState) => s.status === "done" && !!s.read_at && now.getTime() - Date.parse(s.read_at) < REUSE_DAYS * DAY;
+  const fresh = (s: PublicReadState) => s.status === "done" && s.version === READ_VERSION && !!s.read_at && now.getTime() - Date.parse(s.read_at) < REUSE_DAYS * DAY;
   if (state && state.key === key && (fresh(state) || state.status === "reading")) {
     if (state.status === "done") return state;
     return await look(state, apify, now);
   }
-  const base: PublicReadState = { key, status: "done", started_at: now.toISOString(), read_at: now.toISOString(), window, runs: [], posts: [] };
+  const base: PublicReadState = { version: READ_VERSION, key, status: "done", started_at: now.toISOString(), read_at: now.toISOString(), window, runs: [], posts: [] };
   if (!targets.length) return base;
   const client = apify();
   if (!client) return { ...base, skipped: "no_token" };
@@ -329,7 +358,7 @@ export async function stepRead(state: PublicReadState | null, targets: Target[],
     }
   }
   if (!runs.length) return base;
-  return { key, status: "reading", started_at: now.toISOString(), window, runs, posts: [] };
+  return { version: READ_VERSION, key, status: "reading", started_at: now.toISOString(), window, runs, posts: [] };
 }
 
 async function look(state: PublicReadState, apify: ApifyFactory, now: Date): Promise<PublicReadState> {
@@ -360,7 +389,7 @@ async function look(state: PublicReadState, apify: ApifyFactory, now: Date): Pro
     }
   }
   if (waiting) return { ...state, runs };
-  return { ...state, status: "done", read_at: now.toISOString(), runs, posts: [...state.posts, ...posts] };
+  return { ...state, version: READ_VERSION, status: "done", read_at: now.toISOString(), runs, posts: [...state.posts, ...posts] };
 }
 
 // ── What the read is made from, in the database ────────────────────────────
@@ -371,8 +400,7 @@ export async function readInputs(db: Db, client: Any, trackingResult: Any): Prom
   const [own, accounts, set] = await Promise.all([
     db.from("client_public_profiles").select("platform, handle, url, source").eq("client_id", client.id),
     db.from("sprout_profiles").select("network_type").eq("client_id", client.id).eq("is_active", true),
-    db.from("competitor_sets").select("id").eq("client_id", client.id).in("status", ["confirmed", "analyzing", "complete", "failed"])
-      .order("confirmed_at", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    latestCompetitorSet(db, client.id),
   ]);
   if (own.error) throw new Error(`Could not read the client's public profiles: ${own.error.message}`);
   if (accounts.error) throw new Error(`Could not read the client's social accounts: ${accounts.error.message}`);
@@ -382,7 +410,7 @@ export async function readInputs(db: Db, client: Any, trackingResult: Any): Prom
   const tracked = new Set<string>();
   for (const h of (trackingResult?.client_company?.handles ?? []) as Any[]) tracked.add(`${companyKey(name)}|${platformName(h.platform)}`);
   if (set.data?.id) {
-    const { data: comps, error } = await db.from("competitors").select("id, name").eq("set_id", set.data.id).eq("is_selected", true);
+    const { data: comps, error } = await selectedCompetitors(db, set.data.id, "id, name");
     if (error) throw new Error(`Could not read the competitors: ${error.message}`);
     const ids = (comps ?? []).map((c: Any) => c.id);
     const { data: handles, error: handlesError } = ids.length
@@ -406,7 +434,7 @@ export async function readInputs(db: Db, client: Any, trackingResult: Any): Prom
  * or look at those runs. The state is kept on the client's strategy row.
  */
 export async function advancePublicRead(
-  db: Db, client: { id: string; name: string }, results: { tracking?: Record<string, unknown> | null; brand_read?: Record<string, unknown> | null },
+  db: Db, client: { id: string; name: string }, results: { tracking?: Record<string, unknown> | null; brand_read?: Record<string, unknown> | null; accounts?: Record<string, unknown> | null },
   now: Date, io: { apify: ApifyFactory; feedSnapshots(db: Db, clientId: string): Promise<Array<{ payload: Any }>> },
 ): Promise<PublicReadState> {
   const pi = await profileInputs(db, client, results);

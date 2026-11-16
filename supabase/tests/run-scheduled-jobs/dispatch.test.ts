@@ -4,7 +4,7 @@ import { describe, it, expect, vi } from "vitest";
 import { ALERT_AFTER_MINUTES, HELD_REDO_MINUTES, LAST_RUN_LEAD_MINUTES, makePoster, MANUAL_RUN_DAYS, manualRun, NEEDS_TRACKING, nextRunOfOccurrence, PLAIN_REASONS, plainReason, retryWaitMinutes, runDispatch, type DispatchDeps, type DispatchStore, type ScheduleRow } from "../../functions/run-scheduled-jobs/dispatch";
 import { HELD_REDOS } from "../../functions/_shared/competitive/reportEvidence";
 import { LITAL_SLACK, postIssue } from "../../functions/_shared/alerts/slack";
-import { makeJobStore } from "../../functions/run-scheduled-jobs/store";
+import { makeDispatchStore, makeJobStore } from "../../functions/run-scheduled-jobs/store";
 import { RETRY_MINUTES } from "../../functions/run-scheduled-jobs/worker";
 import type { JobOutcome, ScheduledJob } from "../../functions/_shared/scheduled-jobs/types";
 import type { LandscapeCheck } from "../../functions/_shared/competitive/landscapeCheck";
@@ -20,7 +20,7 @@ const DUE = "2026-10-07T07:00:00.000Z";
 const NEXT = "2026-11-07T07:15:00.000Z";
 const at = (minutes: number) => new Date(NOW.getTime() + minutes * 60000);
 
-type Row = { id: string; client_id: string; status: string; date_range_start: string | null; date_range_end: string | null; set_id?: string; created_at?: string; error?: string; held?: boolean; created_by?: string | null };
+type Row = { id: string; client_id: string; status: string; date_range_start: string | null; date_range_end: string | null; set_id?: string; created_at?: string; error?: string; held?: boolean; created_by?: string | null; redo?: { queued: boolean; available_at?: string | null; decided_at: string } };
 
 function world(opts: { kinds?: Array<"competitive" | "social">; set?: boolean } = {}) {
   const kinds = opts.kinds ?? ["competitive", "social"];
@@ -91,6 +91,11 @@ function world(opts: { kinds?: Array<"competitive" | "social">; set?: boolean } 
         }
       }
       writes.push(`hold ${reportId}`);
+    },
+    async recordRedo(id, redo) {
+      const r = tables.competitive.find((x) => x.id === id);
+      if (r && (r.status === "complete" || r.status === "completed")) r.redo = redo;
+      writes.push(`redo ${id} ${redo.queued ? "queued" : "none"}`);
     },
     async setAnalyzing(setId) { tables.setStatus[setId] = "analyzing"; writes.push(`analyzing ${setId}`); },
     async dropReport(table, id) {
@@ -716,6 +721,131 @@ describe("a held competitive analysis", () => {
     w.tables.competitive.at(-1)!.status = "complete";
     expect((await h.run(job)).status).toBe("done");
     expect((job.result as { runs: Array<{ outcome: string }> }).runs.map((r) => r.outcome)).toEqual(["held", "ran"]);
+  });
+});
+
+describe("the dispatch writes its redo decision on the held row", () => {
+  it("writes queued with the redo's time on each held run it makes again, and none on the run whose redos are used up", async () => {
+    const w = world({ kinds: ["competitive"] });
+    const h = harness(w);
+    const job = jobFor("competitive");
+    for (let redo = 1; redo <= HELD_REDOS; redo++) {
+      await h.run(job);
+      const run = w.tables.competitive.at(-1)!;
+      Object.assign(run, { status: "complete", held: true });
+      await h.run(job);
+      expect(run.redo).toMatchObject({ queued: true, available_at: new Date(w.tables.clock.getTime() + HELD_REDO_MINUTES * 60000).toISOString(), decided_at: w.tables.clock.toISOString() });
+      w.tables.clock = new Date(w.tables.clock.getTime() + HELD_REDO_MINUTES * 60000);
+    }
+    await h.run(job);
+    const last = w.tables.competitive.at(-1)!;
+    Object.assign(last, { status: "complete", held: true });
+    expect((await h.run(job)).status).toBe("done");
+    expect(last.redo).toMatchObject({ queued: false, decided_at: w.tables.clock.toISOString() });
+    expect(last.redo?.available_at ?? null).toBeNull();
+  });
+
+  it("writes none on the held run whose redo passed, and nothing on a run that passed", async () => {
+    const w = world({ kinds: ["competitive"] });
+    const h = harness(w);
+    const job = jobFor("competitive");
+    await h.run(job);
+    const first = w.tables.competitive.at(-1)!;
+    Object.assign(first, { status: "complete", held: true });
+    await h.run(job);
+    expect(first.redo?.queued).toBe(true);
+    w.tables.clock = new Date(w.tables.clock.getTime() + HELD_REDO_MINUTES * 60000);
+    await h.run(job);
+    const second = w.tables.competitive.at(-1)!;
+    second.status = "complete";
+    expect((await h.run(job)).status).toBe("done");
+    expect(first.redo?.queued).toBe(false);
+    expect(second.redo).toBeUndefined();
+  });
+
+  it("writes none on every earlier held run still marked queued once a later run of the occurrence passes", async () => {
+    const w = world({ kinds: ["competitive"] });
+    const h = harness(w);
+    const job = jobFor("competitive");
+    const held: Array<ReturnType<typeof w.tables.competitive.at>> = [];
+    for (let n = 0; n < 2; n++) {
+      await h.run(job);
+      const run = w.tables.competitive.at(-1)!;
+      Object.assign(run, { status: "complete", held: true });
+      await h.run(job);
+      held.push(run);
+      w.tables.clock = new Date(w.tables.clock.getTime() + HELD_REDO_MINUTES * 60000);
+    }
+    await h.run(job);
+    const passed = w.tables.competitive.at(-1)!;
+    passed.status = "complete";
+    expect((await h.run(job)).status).toBe("done");
+    expect(held.map((r) => r?.redo?.queued)).toEqual([false, false]);
+    expect(passed.redo).toBeUndefined();
+  });
+
+  it("writes none on the queued held run when the schedule is turned off before its redo", async () => {
+    const w = world({ kinds: ["competitive"] });
+    const h = harness(w);
+    const job = jobFor("competitive");
+    await h.run(job);
+    const run = w.tables.competitive.at(-1)!;
+    Object.assign(run, { status: "complete", held: true });
+    await h.run(job);
+    expect(run.redo?.queued).toBe(true);
+    w.tables.schedules[0].is_active = false;
+    w.tables.clock = new Date(w.tables.clock.getTime() + HELD_REDO_MINUTES * 60000);
+    expect((await h.run(job)).status).toBe("skipped");
+    expect(run.redo?.queued).toBe(false);
+  });
+
+  it("adds the decision beside the stored analysis, on a complete row only", async () => {
+    const calls: Array<{ op: string; filters: string[]; patch?: Record<string, unknown> }> = [];
+    const stored = { report_data: { aggregates: { companies: [] }, ai_analysis: { summary: "x" } } };
+    const db = {
+      from: (table: string) => {
+        const call = { op: "select", filters: [table] as string[], patch: undefined as Record<string, unknown> | undefined };
+        calls.push(call);
+        const chain: Record<string, unknown> = {
+          select: () => chain,
+          update: (patch: Record<string, unknown>) => { call.op = "update"; call.patch = patch; return chain; },
+          eq: (k: string, v: string) => { call.filters.push(`${k}=${v}`); return chain; },
+          in: (k: string, v: string[]) => { call.filters.push(`${k} in ${v.join(",")}`); return chain; },
+          maybeSingle: async () => ({ data: stored, error: null }),
+          then: (ok: (r: unknown) => unknown) => Promise.resolve({ data: null, error: null }).then(ok),
+        };
+        return chain;
+      },
+    };
+    const redo = { queued: true, available_at: "2026-11-08T07:00:00.000Z", decided_at: "2026-11-07T07:00:00.000Z" };
+    await makeDispatchStore(db as never).recordRedo("comp-9", redo);
+    const update = calls.find((c) => c.op === "update")!;
+    expect(update.patch).toEqual({ report_data: { ...stored.report_data, redo } });
+    expect(update.filters).toEqual(["competitive_reports", "id=comp-9", "status in complete,completed"]);
+  });
+
+  it.each([[null], [[{ aggregates: {} }]]])("writes nothing when the stored analysis is not a plain object (%j)", async (stored) => {
+    const updates: unknown[] = [];
+    const chain: Record<string, unknown> = {
+      select: () => chain,
+      update: (patch: unknown) => { updates.push(patch); return chain; },
+      eq: () => chain,
+      in: () => chain,
+      maybeSingle: async () => ({ data: { report_data: stored }, error: null }),
+      then: (ok: (r: unknown) => unknown) => Promise.resolve({ data: null, error: null }).then(ok),
+    };
+    await makeDispatchStore({ from: () => chain } as never).recordRedo("comp-9", { queued: false, decided_at: "2026-11-07T07:00:00.000Z" });
+    expect(updates).toEqual([]);
+  });
+
+  it("writes nothing on a dry run", async () => {
+    const w = world({ kinds: ["competitive"] });
+    const job = jobFor("competitive");
+    await harness(w).run(job);
+    const run = w.tables.competitive.at(-1)!;
+    Object.assign(run, { status: "complete", held: true });
+    await harness(w, "accept", { dryRun: true }).run(job);
+    expect(run.redo).toBeUndefined();
   });
 });
 

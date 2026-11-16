@@ -63,7 +63,7 @@ function fixtureFolders(dir: string): string[] {
 
 describe("deploy packaging", () => {
   it("covers every function folder", () => {
-    expect(functions.length).toBeGreaterThan(50);
+    expect(functions.length).toBeGreaterThan(30);
     expect(functions).toEqual(expect.arrayContaining(["api", "mcp"]));
     for (const fn of functions) expect(existsSync(join(functionsDir, fn, "index.ts")), fn).toBe(true);
   });

@@ -1,9 +1,10 @@
 /**
- * 02 Where we start: per platform, today's numbers (followers, posts a week,
- * median engagement per post, and the rate the data allows: per impression
- * with Sprout, per view on public TikTok and YouTube), and the brand against
- * its tracked competitors from the same read, the brand in lime. How each
- * platform is measured sits behind a disclosure, which the PDF opens.
+ * 02 Where we start: per platform, today's numbers (followers, posts a week
+ * over the last 90 days, median engagement per post, and the rate the data
+ * allows: per impression on connected accounts, per view on public TikTok and
+ * YouTube; a number nobody has is left out), and the brand against the
+ * competitors we chose, the brand in lime. How each platform is measured sits
+ * behind a disclosure, which the PDF opens.
  */
 
 import { Badge } from "@/components/ui/badge";
@@ -11,7 +12,8 @@ import { RankedBars } from "@/components/ui/bars";
 import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PlatformBadge } from "@/lib/platform-config";
-import { basisChip, figure, percentOf, rateLabel, type PagePlatform } from "@/lib/strategyView";
+import { displayCompanyName } from "@/lib/companyName";
+import { basisChip, COMPARABLE_MIN_POSTS, figure, percentOf, rateLabel, type PagePlatform } from "@/lib/strategyView";
 import { metricWords, type Goal } from "../../../supabase/functions/_shared/strategy/sections";
 import type { PlatformFigures } from "../../../supabase/functions/_shared/strategy/basis";
 import { EditButton, EditedChip, useSectionEdit, type SectionProps } from "./StrategySection";
@@ -28,12 +30,13 @@ export function figuresOf(p: PagePlatform): (PlatformFigures & { known: boolean 
 }
 
 function Comparison({ client, p, f }: { client: string; p: PagePlatform; f: PlatformFigures }) {
-  const comps = p.competitors ?? [];
+  // A competitor read on a handful of posts says nothing about its pace, so it has no bar.
+  const comps = (p.competitors ?? []).filter((c) => (c.posts ?? 0) >= COMPARABLE_MIN_POSTS);
   if (!comps.length || f.basis === "none") return null;
   const bars = (title: string, mine: number | null, theirs: (c: (typeof comps)[number]) => number | null, legend: boolean) => {
     const rows = [
       ...(mine === null ? [] : [{ key: "brand", label: client, name: client, value: mine, emphasized: true }]),
-      ...comps.flatMap((c) => { const v = theirs(c); return v === null ? [] : [{ key: c.company, label: c.company, name: c.company, value: v }]; }),
+      ...comps.flatMap((c) => { const v = theirs(c); return v === null ? [] : [{ key: c.company, label: displayCompanyName(c.company), name: displayCompanyName(c.company), value: v }]; }),
     ];
     if (rows.length < 2) return null;
     return (
@@ -44,11 +47,13 @@ function Comparison({ client, p, f }: { client: string; p: PagePlatform; f: Plat
     );
   };
   const engagement = bars("Engagement per post", f.basis === "thin" ? null : f.median_engagement, (c) => c.median_engagement, true);
+  const posts = bars("Posts a week", f.posts_per_week, (c) => c.posts_per_week, !engagement);
   return (
     // One measure above the other, the legend once under both: side by side, the bars were too short to compare.
     <div className="space-y-5" data-testid={`strategy-compare-${p.key}`}>
-      {bars("Posts a week", f.posts_per_week, (c) => c.posts_per_week, !engagement)}
+      {posts}
       {engagement}
+      {(posts || engagement) && <p className="t-label">Competitor figures cover their latest public posts.</p>}
     </div>
   );
 }
@@ -62,19 +67,19 @@ export function PlatformStart({ client, p }: { client: string; p: PagePlatform }
         <PlatformBadge platform={p.platform} />
         {f.known && <Badge variant="outline">{basisChip(f.basis)}</Badge>}
       </div>
-      {/* Short labels with the measure under the figure, so a tile never cuts its own name off at phone width. */}
+      {/* Short labels with the measure under the figure, so a tile never cuts its own name off at phone width. A figure nobody has gets no tile. */}
       <StatGrid min={120}>
-        <StatCard size="compact" label="Followers" value={figure(f.followers)} />
-        <StatCard size="compact" label="Posts a week" value={figure(f.posts_per_week)} />
-        <StatCard size="compact" label="Engagement" value={f.basis === "thin" ? "Too few posts" : figure(f.median_engagement)} sub="median per post" />
-        {f.rate_kind && <StatCard size="compact" label="Rate" value={percentOf(f.rate)} sub={rateLabel(f.rate_kind)} />}
+        {f.followers !== null && Number.isFinite(f.followers) && <StatCard size="compact" label="Followers" value={figure(f.followers)} />}
+        <StatCard size="compact" label="Last 90 days a week" value={f.posts === 0 ? "No posts yet" : figure(f.posts_per_week)} />
+        {(f.basis === "thin" || f.median_engagement !== null) && <StatCard size="compact" label="Engagement" value={f.basis === "thin" ? "Not enough posts yet" : figure(f.median_engagement)} sub="median per post" />}
+        {f.rate_kind && f.rate !== null && <StatCard size="compact" label="Rate" value={percentOf(f.rate)} sub={rateLabel(f.rate_kind)} />}
       </StatGrid>
       <Comparison client={client} p={p} f={f} />
     </article>
   );
 }
 
-const MEASURED_BY: Record<string, string> = { measured: "Impressions, reach and engagement from Sprout", public: "Public posts and their engagement", thin: "A few public posts, so only posts a week and followers", none: "No public posts yet, so posts a week" };
+const MEASURED_BY: Record<string, string> = { measured: "Impressions, reach and engagement from connected accounts", public: "Public posts and their engagement", thin: "A few public posts, so only posts a week and followers", none: "No public posts yet, so posts a week" };
 
 /** How each platform is measured, from the goals and the data basis, and a 2 Nov measures section or a person's version of it. */
 export function Measures({ platforms, goals, ...props }: SectionProps & { platforms: PagePlatform[]; goals: Goal[] }) {

@@ -1,26 +1,24 @@
 /**
  * 01 The plan (spec: docs/superpowers/specs/2026-11-03-strategy-v2-design.md,
  * section 1): three tiles (platforms, posts a week, pillars) and a card per
- * goal, its figure today and the date it is for. One pencil edits the goals.
+ * goal, its figure today with what it measures and the target with its date. One pencil edits the goals.
  */
 
 import type { ReactNode } from "react";
 import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { platformName } from "@/lib/display";
-import { goalFigure, textLines, type PagePlatform } from "@/lib/strategyView";
+import { goalFigure, plannedTotal, textLines, type PagePlatform } from "@/lib/strategyView";
 import type { Goal } from "../../../supabase/functions/_shared/strategy/sections";
 import { EditButton, EditedChip, useSectionEdit, type SectionProps } from "./StrategySection";
 import { EditSheet } from "./EditSheet";
 
-const round1 = (n: number) => Math.round(n * 10) / 10;
-
 export function PlanTiles({ platforms, pillars }: { platforms: PagePlatform[]; pillars: number }) {
   const live = platforms.filter((p) => p.state !== "not_now");
-  const perWeek = round1(live.reduce((s, p) => s + (p.cadence && p.cadence.per_week > 0 ? p.cadence.per_week : 0), 0));
+  const perWeek = plannedTotal(platforms);
   return (
     <StatGrid min={180}>
       <StatCard label="Platforms" value={live.length} sub={`${live.filter((p) => p.state === "posting").length} posting now`} />
-      <StatCard label="Posts a week" value={perWeek} sub="across every platform" />
+      <StatCard label="Planned a week" value={perWeek} sub="posts across the platforms" />
       <StatCard label="Pillars" value={pillars} />
     </StatGrid>
   );
@@ -32,10 +30,12 @@ function GoalCard({ goal, children }: { goal: Goal; children?: ReactNode }) {
     <article className="glass-accent p-card space-y-3 min-w-0 break-inside-avoid">
       <h3 className="t-h3">{goal.title}</h3>
       <p className="t-label">{platformName(goal.platform)}</p>
-      <p className="flex flex-wrap items-baseline gap-x-2">
+      <p className="flex flex-wrap items-baseline gap-x-2" data-testid="goal-today">
         {f.figure && <span className="t-stat tabular-nums">{f.figure}</span>}
-        <span className="t-read">{f.line}</span>
+        {f.figure && " "}
+        <span className="t-read">{f.measure}</span>
       </p>
+      <p className="t-read">{f.target}</p>
       {goal.why && <p className="t-read">Why: {goal.why}</p>}
       {children}
     </article>

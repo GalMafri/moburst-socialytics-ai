@@ -1,9 +1,9 @@
 import { SPROUT_RATE_LABEL, SPROUT_RATE_NOTE } from "@/lib/rateLabels";
-import { DateRange, isValidRange, PRESET_LABELS, presetRange, rangeDays, rangesOverlap, reportPeriod, toISODate } from "@/lib/dateRange";
-import { cleanText, countryNames, firstRunSentence, formatDate, formatDateTime, formatNumbersInText, formatRange, languageNames } from "@/lib/display";
+import { chunkWindow, DateRange, isValidRange, localToday, PRESET_LABELS, presetRange, rangeDays, rangesOverlap, reportPeriod, toISODate, yesterdayIn } from "@/lib/dateRange";
+import { cleanText, countOf, countryNames, NO_DATA, firstRunSentence, formatDate, formatDateTime, formatNumbersInText, formatRange, languageNames } from "@/lib/display";
 import { useNextRun } from "@/lib/nextRun";
 import { sproutEngagementRate, sproutEngagements } from "@/lib/reportFigures";
-import { StatCard } from "@/components/ui/stat-card";
+import { describeChange, StatCard } from "@/components/ui/stat-card";
 import { Section, SectionNav } from "@/components/ui/section";
 import { PostVisual, postType, usePostPreviews } from "@/components/competitive/PostVisual";
 import { PlatformBadge } from "@/lib/platform-config";
@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useAuth } from "@/hooks/useAuth";
 import { Segment, SegmentedGroup } from "@/components/ui/segmented";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useMemo, useRef, useState } from "react";
@@ -45,9 +45,10 @@ import { CompetitiveSnapshot } from "@/components/competitive/CompetitiveSnapsho
 import { Loading } from "@/components/ui/loading";
 import { LoadRetry } from "@/components/ui/load-error";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
-import { reportsMeasure } from "@/lib/platformMeasures";
+import { coverageLine, formatCount, reportsMeasure } from "@/lib/platformMeasures";
 import { useReportInsights } from "@/hooks/useReportInsights";
 import { shownSocial } from "../../supabase/functions/_shared/reports/shownFields";
+import { withoutDashes } from "../../supabase/functions/_shared/trends/text";
 
 type TimeRange = "7d" | "30d" | "90d" | "all" | "custom";
 type AnalyticsView = "performance" | "trends";
@@ -60,7 +61,10 @@ export default function Analytics() {
   const navigate = useNavigate();
   const { isMoburstStaff } = useAuth();
   const [range, setRange] = useState<TimeRange>("30d");
-  const [custom, setCustom] = useState<DateRange>(() => presetRange("30d"));
+  // What is typed in the two date fields, and the last complete valid window it made. Only a
+  // complete valid window is applied, so a field emptied while typing keeps the last figures.
+  const [draft, setDraft] = useState<DateRange | null>(null);
+  const [applied, setApplied] = useState<DateRange | null>(null);
   const [view, setView] = useState<AnalyticsView>("performance");
 
   const { data: client } = useQuery({
@@ -72,6 +76,18 @@ export default function Analytics() {
     },
     enabled: !!id,
   });
+
+  // Days are the client's own: a preset ends on the client's yesterday, and no date past it can be asked for.
+  const zone = client?.timezone || undefined;
+  const lastDay = yesterdayIn(zone);
+  const defaultCustom = useMemo(() => presetRange("30d", new Date(), zone), [zone]);
+  const fields: DateRange = draft ?? applied ?? defaultCustom;
+  const customWindow: DateRange = applied ?? defaultCustom;
+  const changeField = (key: keyof DateRange, value: string) => {
+    const next = { ...fields, [key]: value };
+    setDraft(next);
+    if (isValidRange(next) && next.end <= lastDay) setApplied(next);
+  };
 
   const nextMonthly = useNextRun(id, "monthly");
   const { data: reports, isLoading, isError: reportsFailed, error: reportsError, refetch: refetchReports } = useQuery({
@@ -94,65 +110,50 @@ export default function Analytics() {
   // rather than whichever report happened to be generated inside them.
   const viewWindow = useMemo<DateRange | null>(() => {
     if (range === "all") return null;
-    if (range === "custom") return isValidRange(custom) ? custom : null;
-    return presetRange(range);
-  }, [range, custom]);
+    if (range === "custom") return customWindow;
+    return presetRange(range, new Date(), zone);
+  }, [range, customWindow, zone]);
   const filtered = useMemo(() => {
     if (!reports) return [];
     if (!viewWindow) return reports;
     return reports.filter((r: any) => rangesOverlap(reportPeriod(r), viewWindow));
   }, [reports, viewWindow]);
   // Weekly trends are stored by the Monday their week starts. The Trends tab asks
-  // for the weeks inside the same window as the rest of the page; "All time" (and
-  // a custom range that is not valid yet) asks for every week stored.
-  const trendsWindow = useMemo<DateRange>(() => viewWindow ?? { start: TRENDS_ALL_TIME_FROM, end: toISODate(new Date()) }, [viewWindow]);
-  const rangeLabel = range === "all" ? "All Time" : range === "custom" ? (viewWindow ? formatRange(viewWindow) : "Custom") : PRESET_LABELS[range];
+  // for the weeks inside the same window as the rest of the page; "All time" asks for every week stored.
+  const trendsWindow = useMemo<DateRange>(() => viewWindow ?? { start: TRENDS_ALL_TIME_FROM, end: localToday(zone) }, [viewWindow, zone]);
+  const rangeLabel = range === "all" ? "All time" : range === "custom" ? formatRange(customWindow) : PRESET_LABELS[range];
 
   // Live Sprout numbers for the selected window. Reports only hold month-level
-  // snapshots, so presets and custom ranges are answered by Sprout directly,
-  // with the equal-length period before the window for comparison.
+  // snapshots, so presets and custom ranges are answered by Sprout directly.
+  // A window the function answers in one call comes with the equal-length
+  // period before it for comparison; a longer one is asked for in year-sized
+  // calls without a comparison and combined (the same path All time takes).
   const liveQuery = useQuery({
     queryKey: ["sprout-analytics", id, viewWindow?.start, viewWindow?.end],
-    queryFn: async () => {
-      const { data, error } = await supabase.functions.invoke("sprout-analytics", { body: { client_id: id, start: viewWindow!.start, end: viewWindow!.end } });
-      // A client with no Sprout profiles has no live figures: that is its state, not a load to try again.
-      if (noSproutProfiles(error)) return null;
-      if (error) throw error;
-      if ((data as any)?.error) throw new Error((data as any).error);
-      return data as any;
-    },
+    queryFn: () => fetchSproutWindow(id!, viewWindow!),
     enabled: !!id && !!viewWindow,
     staleTime: 10 * 60 * 1000,
     retry: 1,
+    refetchInterval: askAgainWhileNetworkMissing,
   });
   const liveData = viewWindow ? liveQuery.data : null;
 
   // "All time" is answered live as well: every day from the first period we
-  // have tracked for this client through today, fetched in year-sized chunks
-  // (the function answers at most a year per call) and added up.
+  // have tracked for this client through today, in year-sized calls.
   const allTimeWindow = useMemo<DateRange | null>(() => {
     if (range !== "all" || !reports) return null;
-    const today = toISODate(new Date());
+    const today = localToday(zone);
     const starts = reports.map((r: any) => reportPeriod(r).start).filter(Boolean).sort();
     const start = starts[0] || toISODate(new Date(Date.now() - 365 * 86400000));
     return start <= today ? { start, end: today } : { start: today, end: today };
-  }, [range, reports]);
+  }, [range, reports, zone]);
   const allTimeQuery = useQuery({
     queryKey: ["sprout-analytics-all", id, allTimeWindow?.start, allTimeWindow?.end],
-    queryFn: async () => {
-      const chunks: any[] = [];
-      for (const w of chunkWindow(allTimeWindow!)) {
-        const { data, error } = await supabase.functions.invoke("sprout-analytics", { body: { client_id: id, start: w.start, end: w.end } });
-        if (noSproutProfiles(error)) return null;
-        if (error) throw error;
-        if ((data as any)?.error) throw new Error((data as any).error);
-        chunks.push(data);
-      }
-      return mergeSproutChunks(chunks, allTimeWindow!);
-    },
+    queryFn: () => fetchSproutWindow(id!, allTimeWindow!, true),
     enabled: !!id && !!allTimeWindow,
     staleTime: 10 * 60 * 1000,
     retry: 1,
+    refetchInterval: askAgainWhileNetworkMissing,
   });
 
   // Helper: extract totals from sprout_performance with flexible key lookup
@@ -205,7 +206,6 @@ export default function Analytics() {
       const engRate = (sproutEngagementRate(raw) ?? 0) * 100;
       return {
         date: formatDate(r.created_at, { year: false }),
-        fullDate: r.created_at,
         impressions: totals.impressions,
         reactions: totals.reactions,
         link_clicks: totals.link_clicks,
@@ -242,25 +242,42 @@ export default function Analytics() {
     return hasData ? t : null;
   }, [latestRd]);
 
-  // Platform profiles from latest report
-  const platformData = useMemo(() => {
-    if (!latestRd) return [];
-    const sp = latestRd.sprout_performance || {};
-    const profiles = sp.profiles || sp.by_profile || [];
-    if (!Array.isArray(profiles)) return [];
-    return profiles.map((p: any) => ({
-      name: p.name || p.native_name || p.profile_name || "Unknown",
-      network: p.network || p.network_type || "",
-    }));
-  }, [latestRd]);
+  // The client's connected profiles: the active ones as they are now, whatever window is shown.
+  const { data: profilesRows } = useQuery({
+    queryKey: ["analytics-profiles", id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("sprout_profiles")
+        .select("id, profile_name, native_name, network_type")
+        .eq("client_id", id!)
+        .eq("is_active", true);
+      if (error) throw error;
+      return data ?? [];
+    },
+    enabled: !!id,
+    staleTime: 5 * 60 * 1000,
+    // A read that did not answer is asked again, quietly; the card appears when it does.
+    retry: 3,
+    refetchInterval: (q) => (q.state.status === "error" ? 15_000 : false),
+  });
+  const platformData = useMemo(
+    () => (profilesRows ?? []).map((p: any) => ({ name: p.profile_name || p.native_name || "", network: p.network_type || "" })),
+    [profilesRows],
+  );
 
   // The latest report's insights, worked out from its figures (report_insights); its own fields otherwise (shownFields.ts).
   const { data: latestInsightsRow } = useReportInsights("reports", (latestReport as { id?: string } | null)?.id);
 
-  // Extract AI summary from latest report for "Key Takeaway" card
-  const latestAISummary = useMemo(() => {
+  // The latest report's analysis, read one way for both Takeaway lines.
+  const latestAnalysis = useMemo(() => {
     if (!latestRd) return null;
-    const ai = shownSocial(latestRd.ai_analysis, latestInsightsRow).analysis || {};
+    return shownSocial(latestRd.ai_analysis, latestInsightsRow).analysis || {};
+  }, [latestRd, latestInsightsRow]);
+
+  // Extract AI summary from latest report for the Takeaway card
+  const latestAISummary = useMemo(() => {
+    const ai = latestAnalysis;
+    if (!ai) return null;
     // Try multiple paths where the AI summary might live
     const summary =
       ai.sprout_performance_analysis?.month_over_month_summary ||
@@ -269,32 +286,27 @@ export default function Analytics() {
       ai.summary ||
       null;
     if (!summary || (typeof summary === "string" && summary.trim().length === 0)) return null;
-    return typeof summary === "string" ? summary : JSON.stringify(summary);
-  }, [latestRd, latestInsightsRow]);
+    return withoutDashes(typeof summary === "string" ? summary : JSON.stringify(summary));
+  }, [latestAnalysis]);
 
-  // Extract top-performing content insight
+  // The top-performing content line: the reports store a list of sentences; older ones a list of objects.
   const topContentInsight = useMemo(() => {
-    if (!latestRd) return null;
-    const ai = latestRd.ai_analysis || {};
+    const ai = latestAnalysis;
+    if (!ai) return null;
     const topContent = ai.sprout_performance_analysis?.top_performing_content || ai.top_content_summary || null;
     if (!topContent) return null;
-    if (typeof topContent === "string") return topContent;
-    if (Array.isArray(topContent) && topContent.length > 0) {
-      // If it's an array of posts, summarize the first one
-      const first = topContent[0];
-      return first.insight || first.summary || first.description || null;
-    }
-    return null;
-  }, [latestRd]);
+    const line = (x: any): string | null => {
+      if (typeof x === "string") return x.trim() || null;
+      return x?.insight || x?.summary || x?.description || null;
+    };
+    const text = Array.isArray(topContent) ? line(topContent[0]) : line(topContent);
+    return text ? withoutDashes(text) : null;
+  }, [latestAnalysis]);
 
   const title = client ? `Analytics: ${client.name}` : "Analytics";
 
   // Format large numbers for display
-  const fmtVal = (v: number) => {
-    if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
-    if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
-    return v.toLocaleString();
-  };
+  const fmtVal = formatCount;
 
   const exportRef = useRef<HTMLDivElement>(null);
   const pdfFilename = `${client?.name || "client"}_analytics_${range}_${new Date().toISOString().split("T")[0]}`;
@@ -306,7 +318,7 @@ export default function Analytics() {
       <SegmentedGroup label="Period">
         {(["7d", "30d", "90d", "all", "custom"] as TimeRange[]).map((r) => (
           <Segment key={r} active={range === r} onClick={() => setRange(r)}>
-            {r === "all" ? "All time" : r === "custom" ? "Custom" : r}
+            {r === "all" ? "All time" : PRESET_LABELS[r]}
           </Segment>
         ))}
       </SegmentedGroup>
@@ -315,18 +327,19 @@ export default function Analytics() {
           <Input
             type="date"
             aria-label="Start date"
-            value={custom.start}
-            max={custom.end}
-            onChange={(e) => setCustom((c) => ({ ...c, start: e.target.value }))}
+            value={fields.start}
+            max={fields.end || lastDay}
+            onChange={(e) => changeField("start", e.target.value)}
             className="h-9 w-40"
           />
           <span className="t-label">to</span>
           <Input
             type="date"
             aria-label="End date"
-            value={custom.end}
-            min={custom.start}
-            onChange={(e) => setCustom((c) => ({ ...c, end: e.target.value }))}
+            value={fields.end}
+            min={fields.start}
+            max={lastDay}
+            onChange={(e) => changeField("end", e.target.value)}
             className="h-9 w-40"
           />
         </div>
@@ -345,25 +358,21 @@ export default function Analytics() {
       ? [
           { id: "live-by-profile", label: "By profile" },
           { id: "live-top-posts", label: "Top posts" },
-          { id: "mom", label: "Month-over-month" },
+          { id: "mom", label: "Month over month" },
           { id: "over-time", label: "Performance over time" },
           { id: "engagement-rate", label: SPROUT_RATE_LABEL },
           { id: "profiles", label: "Connected profiles" },
-          { id: "insights", label: "AI insights" },
+          { id: "insights", label: "Across the reports in this window" },
           { id: "history", label: "Report history" },
         ]
       : view === "trends"
-        ? [
-            { id: "trends", label: "Trend insights" },
-            { id: "history", label: "Report history" },
-          ]
+        ? [{ id: "trends", label: "Trend insights" }]
         : [
             { id: "snapshot-numbers", label: "The numbers" },
             { id: "snapshot-summary", label: "Summary" },
             { id: "snapshot-takeaways", label: "What the report used" },
             { id: "snapshot-gaps", label: "Gaps to fill" },
             { id: "snapshot-airtime", label: "Empty airtime" },
-            { id: "history", label: "Report history" },
           ];
 
   // The view tabs. Trends are collected weekly and the competitive view has its own reports, so neither waits for a monthly report.
@@ -398,10 +407,11 @@ export default function Analytics() {
     <AppLayout
       nav={<SectionNav items={navItems} />}
       title={title}
-      description="Live Sprout performance for the selected window, weekly industry trends, and the competitive view."
+      description="Performance for the selected window, weekly industry trends, and the competitive view."
       back={
-        <Button variant="ghost" size="sm" className="-ml-2 border-0 bg-transparent" onClick={() => navigate(`/clients/${id}/setup`)}>
-          <ArrowLeft /> Back to client
+        // Client setup is the team's page; a client user goes back to their dashboard.
+        <Button variant="ghost" size="sm" className="-ml-2 border-0 bg-transparent" onClick={() => navigate(isMoburstStaff ? `/clients/${id}/setup` : "/")}>
+          <ArrowLeft /> {isMoburstStaff ? "Back to client" : "Back to dashboard"}
         </Button>
       }
       actions={toolbar}
@@ -466,51 +476,52 @@ export default function Analytics() {
                     onRetry={() => allTimeQuery.refetch()}
                     rangeLabel={`All time · ${formatRange(allTimeWindow)}`}
                     fmtVal={fmtVal}
+                    idPrefix="live"
                   />
                 )}
-                {/* Summary cards — latest report metrics (All Time view) */}
+                {/* Summary cards — latest report metrics (All time view) */}
                 {viewWindow ? null : latestTotals ? (
                   <div>
                     <p className="t-secondary mb-2 flex items-center gap-1.5">
                       <BarChart3 className="h-3 w-3" />
-                      Latest report snapshot{latestReport ? ` for ${formatRange(reportPeriod(latestReport as any))}` : ""}. The all-time totals above cover every tracked day.
+                      Latest report snapshot{latestReport ? ` for ${formatRange(reportPeriod(latestReport as any))}` : ""}
                     </p>
                     <StatGrid>
                       <SummaryCard
                         icon={<Eye className="h-3.5 w-3.5" />}
                         label="Impressions"
                         value={fmtVal(latestTotals.impressions)}
-                        change={comparison?.changes?.impressions?.percent}
+                        change={comparison?.changes?.impressions}
                       />
                       <SummaryCard
                         icon={<Heart className="h-3.5 w-3.5" />}
                         label="Reactions"
                         value={fmtVal(latestTotals.reactions)}
-                        change={comparison?.changes?.reactions?.percent}
+                        change={comparison?.changes?.reactions}
                       />
                       <SummaryCard
                         icon={<MousePointerClick className="h-3.5 w-3.5" />}
                         label="Link clicks"
                         value={fmtVal(latestTotals.link_clicks)}
-                        change={comparison?.changes?.link_clicks?.percent}
+                        change={comparison?.changes?.link_clicks}
                       />
                       <SummaryCard
                         icon={<Play className="h-3.5 w-3.5" />}
                         label="Video views"
                         value={fmtVal(latestTotals.video_views)}
-                        change={comparison?.changes?.video_views?.percent}
+                        change={comparison?.changes?.video_views}
                       />
                       <SummaryCard
                         icon={<MessageCircle className="h-3.5 w-3.5" />}
                         label="Comments"
                         value={fmtVal(latestTotals.comments)}
-                        change={comparison?.changes?.comments?.percent}
+                        change={comparison?.changes?.comments}
                       />
                       <SummaryCard
                         icon={<Share2 className="h-3.5 w-3.5" />}
                         label="Shares"
                         value={fmtVal(latestTotals.shares)}
-                        change={comparison?.changes?.shares?.percent}
+                        change={comparison?.changes?.shares}
                       />
                     </StatGrid>
                   </div>
@@ -518,7 +529,7 @@ export default function Analytics() {
                   <StatGrid>
                     <SummaryCard
                       icon={<BarChart3 className="h-3.5 w-3.5" />}
-                      label="Reports analyzed"
+                      label="Reports"
                       value={filtered.length.toString()}
                     />
                   </StatGrid>
@@ -534,7 +545,7 @@ export default function Analytics() {
                         </div>
                         <div className="space-y-1">
                           <p className="t-h4">Takeaway from the latest monthly report</p>
-                          {latestReport && <p className="t-label">Report period: {formatRange(reportPeriod(latestReport as any))}. This commentary describes that report, not the live Sprout window above.</p>}
+                          {latestReport && <p className="t-label">Written from the report for {formatRange(reportPeriod(latestReport as any))}.</p>}
                           <p className="t-secondary leading-relaxed">
                             {formatNumbersInText(latestAISummary)}
                           </p>
@@ -550,26 +561,26 @@ export default function Analytics() {
                   </Card>
                 )}
 
-                {/* Month-over-month comparison from latest report */}
+                {/* Month over month comparison from the latest report */}
                 {!viewWindow && comparison && Object.keys(comparison.changes).length > 0 && (
                   <Section id="mom" title="Month over month" meta="Latest report">
                   <Card>
                     <CardContent className="pt-5">
                       <div className="grid gap-inner [grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr))]">
                         {Object.entries(comparison.changes).map(([key, val]: [string, any]) => {
-                          const pct = typeof val?.percent === "number" ? val.percent : 0;
-                          const isUp = pct > 0;
-                          const isDown = pct < 0;
-                          const label = key.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
                           const current = val?.current ?? 0;
                           const previous = val?.previous ?? comparison.previous?.[key] ?? 0;
+                          // The one wording of a change: a percent, or "from 1 to 19" on a tiny base.
+                          const change = describeChange({ previous, current, percent: typeof val?.percent === "number" ? val.percent : null });
+                          const isUp = change?.direction === "up";
+                          const isDown = change?.direction === "down";
                           return (
                             <div key={key} className="glass-inner flex items-center gap-3 p-inner">
                               <div className="flex-1">
-                                <div className="t-secondary">{label}</div>
+                                <div className="t-secondary">{metricLabel(key)}</div>
                                 <div className="t-h3">{fmtVal(current)}</div>
                                 {previous > 0 && (
-                                  <div className="t-secondary">prev: {fmtVal(previous)}</div>
+                                  <div className="t-secondary">Previous: {fmtVal(previous)}</div>
                                 )}
                               </div>
                               <div className="text-right">
@@ -582,8 +593,7 @@ export default function Analytics() {
                                   ) : isDown ? (
                                     <TrendingDown className="h-3 w-3 mr-1 inline" />
                                   ) : null}
-                                  {isUp ? "+" : ""}
-                                  {pct}%
+                                  {change ? change.text : NO_DATA}
                                 </Badge>
                               </div>
                             </div>
@@ -597,7 +607,7 @@ export default function Analytics() {
 
                 {/* Performance over time — Per-metric line charts */}
                 {chartData.length >= 1 && chartData.some((d) => d.impressions > 0 || d.reactions > 0) && (
-                  <Section id="over-time" title="Performance over time" meta={`${filtered.length} report${filtered.length !== 1 ? "s" : ""}`} description={<>{chartData.length === 1 ? "The latest snapshot. Trend lines appear once there are two or more reports." : "Each data point represents one analysis run. Hover over points for exact values."}</>}>
+                  <Section id="over-time" title="Performance over time" meta={`${filtered.length} report${filtered.length !== 1 ? "s" : ""}`} description={chartData.length === 1 ? "The figures from the latest report." : "One point for each report. Hover over a point for its exact value."}>
                   <Card>
                     <CardContent className="pt-5 space-y-6">
                       {/* Impressions chart (separate — it dominates if combined) */}
@@ -648,25 +658,25 @@ export default function Analytics() {
                                 label="Reactions"
                                 value={chartData[0].reactions}
                                 fmtVal={fmtVal}
-                                color="#3987e5"
+                                color="hsl(var(--chart-2))"
                               />
                               <MetricBarSingle
                                 label="Link clicks"
                                 value={chartData[0].link_clicks}
                                 fmtVal={fmtVal}
-                                color="#d95926"
+                                color="hsl(var(--chart-3))"
                               />
                               <MetricBarSingle
                                 label="Comments"
                                 value={chartData[0].comments}
                                 fmtVal={fmtVal}
-                                color="#199e70"
+                                color="hsl(var(--chart-5))"
                               />
                               <MetricBarSingle
                                 label="Shares"
                                 value={chartData[0].shares}
                                 fmtVal={fmtVal}
-                                color="#c98500"
+                                color="hsl(var(--warning))"
                               />
                             </div>
                           ) : (
@@ -681,7 +691,7 @@ export default function Analytics() {
                                   <Line
                                     type="monotone"
                                     dataKey="reactions"
-                                    stroke="#3987e5"
+                                    stroke="hsl(var(--chart-2))"
                                     strokeWidth={2}
                                     dot={{ r: 4, strokeWidth: 2, stroke: "#0b0c10" }}
                                     name="Reactions"
@@ -689,7 +699,7 @@ export default function Analytics() {
                                   <Line
                                     type="monotone"
                                     dataKey="link_clicks"
-                                    stroke="#d95926"
+                                    stroke="hsl(var(--chart-3))"
                                     strokeWidth={2}
                                     dot={{ r: 4, strokeWidth: 2, stroke: "#0b0c10" }}
                                     name="Link clicks"
@@ -697,7 +707,7 @@ export default function Analytics() {
                                   <Line
                                     type="monotone"
                                     dataKey="comments"
-                                    stroke="#199e70"
+                                    stroke="hsl(var(--chart-5))"
                                     strokeWidth={2}
                                     dot={{ r: 4, strokeWidth: 2, stroke: "#0b0c10" }}
                                     name="Comments"
@@ -705,7 +715,7 @@ export default function Analytics() {
                                   <Line
                                     type="monotone"
                                     dataKey="shares"
-                                    stroke="#c98500"
+                                    stroke="hsl(var(--warning))"
                                     strokeWidth={2}
                                     dot={{ r: 4, strokeWidth: 2, stroke: "#0b0c10" }}
                                     name="Shares"
@@ -717,18 +727,18 @@ export default function Analytics() {
                         </div>
                       )}
 
-                      {/* Video Views (separate if significant) */}
+                      {/* Video views (separate if significant) */}
                       {chartData.some((d) => d.video_views > 0) && (
                         <div>
                           <p className="t-subhead mb-2 flex items-center gap-1.5">
-                            <Play className="h-3 w-3" /> Video Views
+                            <Play className="h-3 w-3" /> Video views
                           </p>
                           {chartData.length === 1 ? (
                             <MetricBarSingle
                               label="Video views"
                               value={chartData[0].video_views}
                               fmtVal={fmtVal}
-                              color="#199e70"
+                              color="hsl(var(--chart-5))"
                             />
                           ) : (
                             <div className="h-40">
@@ -741,7 +751,7 @@ export default function Analytics() {
                                   <Line
                                     type="monotone"
                                     dataKey="video_views"
-                                    stroke="#199e70"
+                                    stroke="hsl(var(--chart-5))"
                                     strokeWidth={2}
                                     dot={{ r: 4, strokeWidth: 2, stroke: "#0b0c10" }}
                                     name="Video views"
@@ -770,7 +780,7 @@ export default function Analytics() {
                               dataKey="date"
                               tick={{ fontSize: 12 }}
                               label={{
-                                value: "Report Date",
+                                value: "Report date",
                                 position: "insideBottom",
                                 offset: -5,
                                 fontSize: 11,
@@ -781,7 +791,7 @@ export default function Analytics() {
                               tick={{ fontSize: 12 }}
                               unit="%"
                               label={{
-                                value: "Eng. Rate %",
+                                value: "Engagement rate (%)",
                                 angle: -90,
                                 position: "insideLeft",
                                 fontSize: 11,
@@ -792,7 +802,7 @@ export default function Analytics() {
                             <Line
                               type="monotone"
                               dataKey="engagement_rate"
-                              stroke="#d95926"
+                              stroke="hsl(var(--chart-3))"
                               strokeWidth={2}
                               dot={{ r: 3 }}
                               name={SPROUT_RATE_LABEL}
@@ -814,49 +824,52 @@ export default function Analytics() {
                 <div id="insights" className="scroll-mt-[156px]">
                   <AIDeepInsights clientId={id!} reports={filtered} chartData={chartData} />
                 </div>
+
+                {/* Report history: part of Performance, and only when the window holds a report. */}
+                {filtered.length > 0 && (
+                <Section id="history" title="Report history" meta={countOf(filtered.length, "report")} description="Every report in the selected period, each with its full detail.">
+                <Card>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {[...filtered].reverse().map((r: any) => {
+                        const rawRd = r.report_data;
+                        const rd = Array.isArray(rawRd) ? rawRd[0] : rawRd;
+                        const sp = rd?.sprout_performance;
+                        const totals = extractTotals(sp);
+                        const hasMetrics = totals.impressions > 0 || totals.reactions > 0;
+                        const totalEng = sproutEngagements(sp?.overall_totals || sp?.totals || sp?.summary || sp?.month_comparison?.current_month) ?? 0;
+                        return (
+                          <button
+                            key={r.id}
+                            type="button"
+                            className="glass-inner w-full text-left flex flex-wrap items-center gap-x-3 gap-y-1 p-inner focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                            onClick={() => navigate(`/clients/${id}/reports/${r.id}`)}
+                            aria-label={`Open report from ${formatDateTime(r.created_at)}`}
+                          >
+                              <span className="t-body">{formatDateTime(r.created_at)}</span>
+                              {hasMetrics && (
+                                <span className="t-label">
+                                  {fmtVal(totals.impressions)} impressions · {fmtVal(totalEng)} engagements
+                                </span>
+                              )}
+                            {/* How long a run took is for the team, not the client. */}
+                            <span className="ml-auto flex items-center gap-3">
+                              {isMoburstStaff && r.duration_minutes ? <span className="t-label">{r.duration_minutes} min</span> : null}
+                              <span className="t-link">Open report</span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+                </Section>
+                )}
               </TabsContent>
 
               {reportFreeTabs}
             </Tabs>
 
-            {/* Recent reports table */}
-            <Section id="history" title="Report history" meta={`${filtered.length} report${filtered.length !== 1 ? "s" : ""}`} description="Every report in the selected period, each with its full detail.">
-            <Card>
-              <CardContent>
-                <div className="space-y-2">
-                  {[...filtered].reverse().map((r: any) => {
-                    const rawRd = r.report_data;
-                    const rd = Array.isArray(rawRd) ? rawRd[0] : rawRd;
-                    const sp = rd?.sprout_performance;
-                    const totals = extractTotals(sp);
-                    const hasMetrics = totals.impressions > 0 || totals.reactions > 0;
-                    const totalEng = sproutEngagements(sp?.overall_totals || sp?.totals || sp?.summary || sp?.month_comparison?.current_month) ?? 0;
-                    return (
-                      <button
-                        key={r.id}
-                        type="button"
-                        className="glass-inner w-full text-left flex flex-wrap items-center gap-x-3 gap-y-1 p-inner focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                        onClick={() => navigate(`/clients/${id}/reports/${r.id}`)}
-                        aria-label={`Open report from ${formatDateTime(r.created_at)}`}
-                      >
-                          <span className="t-body">{formatDateTime(r.created_at)}</span>
-                          {hasMetrics && (
-                            <span className="t-label">
-                              {fmtVal(totals.impressions)} impressions · {fmtVal(totalEng)} engagements
-                            </span>
-                          )}
-                        {/* How long a run took is for the team, not the client. */}
-                        <span className="ml-auto flex items-center gap-3">
-                          {isMoburstStaff && r.duration_minutes ? <span className="t-label">{r.duration_minutes} min</span> : null}
-                          <span className="t-link">Open report</span>
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-            </Section>
           </>
         )}
         </div>
@@ -864,23 +877,41 @@ export default function Analytics() {
   );
 }
 
-/* ─── All-time helpers: split a long window into ≤366-day chunks and add the answers up ─── */
+/* ─── Long windows: split into year-sized calls and combine the answers ─── */
 const SPROUT_METRIC_KEYS = ["impressions", "reactions", "post_link_clicks", "video_views", "comments", "shares"] as const;
 /** sprout-analytics answers 422 when no Sprout profile is assigned to the client (it has no live figures). */
 function noSproutProfiles(error: unknown): boolean {
   return (error as { context?: { status?: unknown } } | null)?.context?.status === 422;
 }
-function chunkWindow(w: DateRange, maxDays = 366): DateRange[] {
-  const out: DateRange[] = [];
-  let s = new Date(`${w.start}T00:00:00Z`);
-  const end = new Date(`${w.end}T00:00:00Z`);
-  while (s <= end) {
-    const e = new Date(Math.min(s.getTime() + (maxDays - 1) * 86400000, end.getTime()));
-    out.push({ start: toISODate(s), end: toISODate(e) });
-    s = new Date(e.getTime() + 86400000);
+/**
+ * A network whose posts did not answer leaves the other networks' posts on screen and is asked
+ * again, quietly, a few times (no note about it: a gap that fills itself needs no flag).
+ */
+const askAgainWhileNetworkMissing = (q: { state: { data?: unknown; dataUpdateCount: number } }) =>
+  ((q.state.data as { top_posts_failed_networks?: unknown[] } | null | undefined)?.top_posts_failed_networks?.length ?? 0) > 0 && q.state.dataUpdateCount < 4 ? 30_000 : false;
+
+/**
+ * The live figures for a window. One call answers up to a year; a longer window (or All time) is
+ * asked for year by year with no comparison read (the page does not show one) and combined.
+ */
+async function fetchSproutWindow(clientId: string, window: DateRange, combine = false) {
+  const parts = chunkWindow(window);
+  const chunked = combine || parts.length > 1;
+  const chunks: any[] = [];
+  for (const w of parts) {
+    const { data, error } = await supabase.functions.invoke("sprout-analytics", {
+      body: chunked ? { client_id: clientId, start: w.start, end: w.end, compare: false } : { client_id: clientId, start: w.start, end: w.end },
+    });
+    // A client with no Sprout profiles has no live figures: that is its state, not a load to try again.
+    if (noSproutProfiles(error)) return null;
+    if (error) throw error;
+    if ((data as any)?.error) throw new Error((data as any).error);
+    chunks.push(data);
   }
-  return out;
+  return chunked ? mergeSproutChunks(chunks, window) : chunks[0];
 }
+/** A post's reach as the function ranks it (views on YouTube, impressions elsewhere). */
+const postReach = (p: any) => Number(p?.reach ?? p?.impressions ?? 0);
 function mergeSproutChunks(chunks: any[], window: DateRange) {
   const zero = () => Object.fromEntries(SPROUT_METRIC_KEYS.map((k) => [k, 0])) as Record<string, number>;
   const totals = zero();
@@ -889,8 +920,10 @@ function mergeSproutChunks(chunks: any[], window: DateRange) {
   const daily: any[] = [];
   let profiles: any[] = [];
   let client: any = null;
+  const failedNetworks = new Set<string>();
   for (const c of chunks) {
     if (!c) continue;
+    for (const n of c.top_posts_failed_networks || []) failedNetworks.add(n);
     client = client || c.client;
     if (Array.isArray(c.profiles) && c.profiles.length) profiles = c.profiles;
     for (const k of SPROUT_METRIC_KEYS) totals[k] += Number(c.totals?.[k] || 0);
@@ -902,7 +935,7 @@ function mergeSproutChunks(chunks: any[], window: DateRange) {
     posts.push(...(c.top_posts || []));
     if (Array.isArray(c.daily)) daily.push(...c.daily);
   }
-  posts.sort((a, b) => Number(b.impressions || 0) - Number(a.impressions || 0));
+  posts.sort((a, b) => postReach(b) - postReach(a));
   return {
     client,
     range: { start: window.start, end: window.end, days: rangeDays(window) },
@@ -914,15 +947,43 @@ function mergeSproutChunks(chunks: any[], window: DateRange) {
     daily,
     by_profile: [...byProfile.values()],
     top_posts: posts.slice(0, 20),
+    top_posts_failed_networks: [...failedNetworks],
     chunks: chunks.length,
     fetched_at: new Date().toISOString(),
   };
 }
 
 /* ─── Summary Card with optional MoM change ─── */
-function SummaryCard({ icon, label, value, change }: { icon: React.ReactNode; label: string; value: string; change?: number }) {
-  return <StatCard icon={icon} label={label} value={value} delta={change != null ? { percent: change, label: "vs prev." } : undefined} />;
+/** The two period values of a change, as the stored reports and the live answer both carry them. */
+type MetricChange = { percent?: number | null; previous?: number | null; current?: number | null } | null | undefined;
+/** The comparison label every tile and the report page use. */
+const VS_PREVIOUS = "vs previous period";
+function SummaryCard({ icon, label, value, change, sub }: { icon: React.ReactNode; label: string; value: string; change?: MetricChange; sub?: string }) {
+  const hasChange = change != null && (typeof change.percent === "number" || (typeof change.previous === "number" && typeof change.current === "number"));
+  return (
+    <StatCard
+      icon={icon}
+      label={label}
+      value={value}
+      sub={sub}
+      delta={hasChange ? { percent: change?.percent ?? undefined, from: change?.previous ?? undefined, to: change?.current ?? undefined, label: VS_PREVIOUS } : undefined}
+    />
+  );
 }
+
+/** One sentence-case label per measure, for every place the page names one. */
+const METRIC_LABELS: Record<string, string> = {
+  impressions: "Impressions",
+  reactions: "Reactions",
+  link_clicks: "Link clicks",
+  post_link_clicks: "Link clicks",
+  video_views: "Video views",
+  comments: "Comments",
+  shares: "Shares",
+  engagements: "Engagements",
+  engagement_rate: "Engagement rate",
+};
+const metricLabel = (key: string) => METRIC_LABELS[key] ?? key.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
 
 /* ─── Single-value metric bar (for when there's only 1 report) ─── */
 function MetricBarSingle({
@@ -967,30 +1028,40 @@ function LiveSproutSection({
   idPrefix?: string;
 }) {
   const posts: any[] = data?.top_posts || [];
-  const { previews } = usePostPreviews(posts.map((p) => p.permalink));
-  if (isLoading) return <Loading label={`Loading Sprout data for ${rangeLabel}`} />;
-  if (error) return <LoadRetry context="live Sprout figures" error={error} label={`Loading Sprout data for ${rangeLabel}`} onRetry={onRetry} />;
+  // The top posts' own picture (from Sprout) and type are the hint that lets the preview be kept.
+  const { previews } = usePostPreviews(posts.map((p) => ({ url: p.permalink, image: p.thumbnail_url, mediaType: p.media_type })));
+  if (isLoading) return <Loading label={`Loading figures for ${rangeLabel}`} />;
+  if (error) return <LoadRetry context="live Sprout figures" error={error} label={`Loading figures for ${rangeLabel}`} onRetry={onRetry} />;
   if (!data) return null;
   const t = data.totals || {};
   const ch = data.changes || {};
-  const metric = (key: string) => fmtVal(Number(t[key] || 0));
-  const pct = (key: string) => (typeof ch[key]?.percent === "number" ? ch[key].percent : undefined);
+  // The networks the client has, so a total that leaves one out can say which it covers.
+  const networks: string[] = (Array.isArray(data.by_profile) && data.by_profile.length ? data.by_profile : data.profiles || []).map((p: any) => p.network).filter(Boolean);
+  const measureFor = (key: string) => (key === "post_link_clicks" ? "link_clicks" : key);
+  const metric = (key: string) => {
+    const measure = measureFor(key);
+    // A measure none of the client's networks report has no figure to show.
+    if (networks.length > 0 && !networks.some((n) => reportsMeasure(n, measure))) return NO_DATA;
+    return fmtVal(Number(t[key] || 0));
+  };
+  const note = (key: string) => coverageLine(networks, measureFor(key)) ?? undefined;
+  const change = (key: string) => ch[key] as MetricChange;
   return (
     <div className="space-y-section">
       <div className="space-y-3">
         <p className="t-secondary flex items-center gap-2">
           <BarChart3 className="h-4 w-4 text-[#b1b7c1]" aria-hidden />
           {data.previous_range
-            ? <>Sprout data for {rangeLabel} · compared with the {data.previous_range.days} days before ({formatRange(data.previous_range)})</>
-            : <>Live Sprout totals, {rangeLabel}: every day in the window added up</>}
+            ? <>{rangeLabel} · compared with the {data.previous_range.days} days before ({formatRange(data.previous_range)})</>
+            : <>{rangeLabel}</>}
         </p>
         <StatGrid>
-          <SummaryCard icon={<Eye className="h-3.5 w-3.5" />} label="Impressions" value={metric("impressions")} change={pct("impressions")} />
-          <SummaryCard icon={<Heart className="h-3.5 w-3.5" />} label="Reactions" value={metric("reactions")} change={pct("reactions")} />
-          <SummaryCard icon={<MousePointerClick className="h-3.5 w-3.5" />} label="Link clicks" value={metric("post_link_clicks")} change={pct("post_link_clicks")} />
-          <SummaryCard icon={<Play className="h-3.5 w-3.5" />} label="Video views" value={metric("video_views")} change={pct("video_views")} />
-          <SummaryCard icon={<MessageCircle className="h-3.5 w-3.5" />} label="Comments" value={metric("comments")} change={pct("comments")} />
-          <SummaryCard icon={<Share2 className="h-3.5 w-3.5" />} label="Shares" value={metric("shares")} change={pct("shares")} />
+          <SummaryCard icon={<Eye className="h-3.5 w-3.5" />} label={metricLabel("impressions")} value={metric("impressions")} change={change("impressions")} sub={note("impressions")} />
+          <SummaryCard icon={<Heart className="h-3.5 w-3.5" />} label={metricLabel("reactions")} value={metric("reactions")} change={change("reactions")} sub={note("reactions")} />
+          <SummaryCard icon={<MousePointerClick className="h-3.5 w-3.5" />} label={metricLabel("post_link_clicks")} value={metric("post_link_clicks")} change={change("post_link_clicks")} sub={note("post_link_clicks")} />
+          <SummaryCard icon={<Play className="h-3.5 w-3.5" />} label={metricLabel("video_views")} value={metric("video_views")} change={change("video_views")} sub={note("video_views")} />
+          <SummaryCard icon={<MessageCircle className="h-3.5 w-3.5" />} label={metricLabel("comments")} value={metric("comments")} change={change("comments")} sub={note("comments")} />
+          <SummaryCard icon={<Share2 className="h-3.5 w-3.5" />} label={metricLabel("shares")} value={metric("shares")} change={change("shares")} sub={note("shares")} />
         </StatGrid>
       </div>
 
@@ -1008,7 +1079,7 @@ function LiveSproutSection({
                   <div className="grid grid-cols-3 gap-2">
                     {reportsMeasure(p.network, "impressions") && <div><p className="t-h3 tabular-nums">{fmtVal(p.impressions || 0)}</p><p className="t-label">Impressions</p></div>}
                     <div><p className="t-h3 tabular-nums">{fmtVal(p.reactions || 0)}</p><p className="t-label">Reactions</p></div>
-                    <div><p className="t-h3 tabular-nums">{fmtVal(p.video_views || 0)}</p><p className="t-label">Views</p></div>
+                    <div><p className="t-h3 tabular-nums">{fmtVal(p.video_views || 0)}</p><p className="t-label">Video views</p></div>
                   </div>
                 </div>
               ))}
@@ -1019,13 +1090,13 @@ function LiveSproutSection({
       )}
 
       {posts.length > 0 && (
-        <Section id={idPrefix ? `${idPrefix}-top-posts` : undefined} title="Top posts" meta={`${rangeLabel}, by impressions`}>
+        <Section id={idPrefix ? `${idPrefix}-top-posts` : undefined} title="Top posts" meta={`${rangeLabel}, ranked by reach`} description="Totals to date for each post.">
         <Card>
           <CardContent>
             <div className="grid gap-inner md:grid-cols-2">
               {posts.slice(0, 6).map((p: any, i: number) => (
                 <div key={i} className="flex gap-4 glass-inner p-inner">
-                  <PostVisual url={p.permalink} preview={p.permalink ? previews[p.permalink] : null} mediaType={postType(p)} platform={p.network_type} className="w-28 shrink-0 self-start" compact />
+                  <PostVisual url={p.permalink} image={p.thumbnail_url} preview={p.permalink ? previews[p.permalink] : null} mediaType={p.media_type || postType(p)} platform={p.network_type} className="w-28 shrink-0 self-start" compact />
                   <div className="flex-1 min-w-0 space-y-2">
                     <div className="flex items-center justify-between gap-2">
                       {p.network_type ? <PlatformBadge platform={p.network_type} size="sm" /> : <span />}
@@ -1033,7 +1104,11 @@ function LiveSproutSection({
                     </div>
                     <p className="t-body line-clamp-3 whitespace-pre-line">{p.text ? cleanText(p.text) : "No caption."}</p>
                     <div className="flex items-center gap-4 t-secondary">
-                      {reportsMeasure(p.network_type, "impressions") && <span className="flex items-center gap-1"><Eye className="h-3 w-3" />{fmtVal(p.impressions || 0)}</span>}
+                      {(() => {
+                        // Views on YouTube, impressions where the network reports them.
+                        const reach = postReach(p);
+                        return (reportsMeasure(p.network_type, "impressions") || reach > 0) ? <span className="flex items-center gap-1"><Eye className="h-3 w-3" />{fmtVal(reach)}</span> : null;
+                      })()}
                       <span className="flex items-center gap-1"><Heart className="h-3 w-3" />{fmtVal(p.reactions || 0)}</span>
                       <span className="flex items-center gap-1"><MessageCircle className="h-3 w-3" />{fmtVal(p.comments || 0)}</span>
                       <span className="flex items-center gap-1"><Share2 className="h-3 w-3" />{fmtVal(p.shares || 0)}</span>

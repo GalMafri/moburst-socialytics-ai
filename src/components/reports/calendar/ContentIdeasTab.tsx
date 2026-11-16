@@ -2,18 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { sendQuietly, writeResendable } from "@/lib/quietSend";
-import { useToast } from "@/hooks/use-toast";
-import { useRealtimePostIterations } from "@/hooks/useRealtimePostIterations";
 import { CalendarFilters, type CalendarFilterState } from "./CalendarFilters";
+import { effectiveFilters } from "./effectiveFilters";
 import { CalendarKanban, findLatestSelectedIteration, visibleBoard } from "./CalendarKanban";
 import { LoadRetry } from "@/components/ui/load-error";
 import { Loading } from "@/components/ui/loading";
 import { PostPanel } from "./PostPanel";
 import { WeeklyHighlights } from "./WeeklyHighlights";
 import { NewPostDialog } from "@/components/calendar/NewPostDialog";
-import { GenerationProvider } from "./GenerationContext";
-import { GenerationProgress } from "./GenerationProgress";
 import { DesignRequestsProvider } from "./DesignRequestsContext";
+import { DesignRequestsDock } from "./DesignRequestsDock";
 import type { ClientContext } from "@/lib/clientContext";
 import type { ReportTrends } from "@/lib/reportFigures";
 import { applyCopyRevisions, calendarWithRevisions, iterationMatchesPost } from "@/lib/calendarRevision";
@@ -51,24 +49,18 @@ export function ContentIdeasTab({
   openPostKey,
   trends,
 }: Props) {
-  const [filters, setFilters] = useState<CalendarFilterState>({
+  const [chosenFilters, setFilters] = useState<CalendarFilterState>({
     day: "all",
     platform: "all",
     status: "all",
     language: "all",
   });
+  const filters = useMemo(() => effectiveFilters(chosenFilters, availablePlatforms), [chosenFilters, availablePlatforms]);
   const [activePost, setActivePost] = useState<any | null>(null);
-  /** When the user opens the panel via the floating GenerationProgress card,
-   *  we know the exact variant_group_id they want to see. Filtering by it is
-   *  bulletproof — no copy-slice heuristic, no realtime lag dependency. */
-  const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   /** The tab the panel opens on; "design" when arriving from a design progress card. */
   const [panelTab, setPanelTab] = useState<string | undefined>(undefined);
   const qc = useQueryClient();
   const { isMoburstStaff } = useAuth();
-  const { toast } = useToast();
-
-  useRealtimePostIterations(clientId);
 
   const { data: postIterations = [], isLoading: iterationsLoading, isError: iterationsFailed, refetch: reloadIterations } = useQuery({
     queryKey: ["post-iterations", clientId],
@@ -103,7 +95,7 @@ export function ContentIdeasTab({
       if (!clientId) return [];
       const { data, error } = await supabase
         .from("scheduled_posts")
-        .select("id, client_id, report_id, platform, post_content, status")
+        .select("id, client_id, report_id, platform, post_content, status, scheduled_time, calendar_post_key, sprout_post_id, created_at")
         .eq("client_id", clientId);
       if (error) throw error;
       return data || [];
@@ -164,10 +156,9 @@ export function ContentIdeasTab({
     ? findLatestSelectedIteration(postIterations as any, currentPost)
     : null;
 
-  // Force a fresh fetch when the panel opens for a new post. Defeats the
-  // case where realtime hasn't yet delivered the rows we just inserted from
-  // a parallel variant generation — without this, "View designs" can open
-  // an empty tab for a few seconds.
+  // Force a fresh fetch when the panel opens for a new post, so rows just
+  // inserted by a parallel variant generation are there: "View designs" would
+  // otherwise open an empty tab for a few seconds.
   useEffect(() => {
     if (activePost && clientId) {
       qc.invalidateQueries({ queryKey: ["post-iterations", clientId] });
@@ -176,26 +167,15 @@ export function ContentIdeasTab({
     // markers so we refetch when the active post truly changes.
   }, [activePost?.platform, activePost?.copy, activePost?.caption_angle, clientId, qc]);
 
-  // All iterations matching the active post. When a variant_group_id is
-  // provided (set by openPanel from the floating GenerationProgress card),
-  // filter to that exact group — no string-match heuristic, no surprises.
-  // Otherwise fall back to platform+copy matching as before so direct card
-  // clicks still surface every variant ever generated for the post.
+  // All iterations matching the active post by platform and copy, so every
+  // variant ever generated for the post shows.
   const activePostIterations = activePost
-    ? activeGroupId
-      ? (postIterations as any[]).filter(
-          (it) =>
-            (it as any).variant_group_id === activeGroupId &&
-            it.media_urls &&
-            it.media_urls.length > 0,
-        )
-      : (postIterations as any[]).filter((it) => {
-          return (
-            iterationMatchesPost(it, currentPost!) &&
-            it.media_urls &&
-            it.media_urls.length > 0
-          );
-        })
+    ? (postIterations as any[]).filter(
+        (it) =>
+          iterationMatchesPost(it, currentPost!) &&
+          it.media_urls &&
+          it.media_urls.length > 0,
+      )
     : [];
 
   // Arriving with a post to open: open it once, when the board has it.
@@ -206,7 +186,6 @@ export function ContentIdeasTab({
     if (!post) return;
     openedRef.current = openPostKey;
     setActivePost(post);
-    setActiveGroupId(null);
   }, [openPostKey, revisedCalendar, iterationsLoading]);
 
   // A design progress card names its post by key; find that post on the board.
@@ -214,26 +193,11 @@ export function ContentIdeasTab({
     const post = (revisedCalendar as any[]).flatMap((d: any) => (Array.isArray(d?.posts) ? d.posts : [d])).find((p: any) => p?._calendarPostKey === postKey);
     if (!post) return;
     setActivePost(post);
-    setActiveGroupId(null);
     setPanelTab("design");
   }, [revisedCalendar]);
 
   return (
     <DesignRequestsProvider clientId={clientId} onOpenPost={openDesignsFor}>
-    <GenerationProvider
-      onOpenPanel={(post, opts) => {
-        setActivePost(post);
-        setActiveGroupId(opts?.variantGroupId || null);
-      }}
-      onActivity={() => {
-        // Realtime for post_iterations isn't delivered (table not in the
-        // supabase_realtime publication), so refetch on generation activity
-        // to surface freshly generated designs/videos without a full reload.
-        if (clientId) {
-          qc.invalidateQueries({ queryKey: ["post-iterations", clientId] });
-        }
-      }}
-    >
       <div className="space-y-section">
         {/* A post added here goes to the Calendar, where every post now lives. */}
         {mode === "report" && isMoburstStaff && availablePlatforms.length > 0 && clientId && (
@@ -258,7 +222,7 @@ export function ContentIdeasTab({
         )}
 
         <CalendarFilters
-          filters={filters}
+          filters={chosenFilters}
           onChange={setFilters}
           availablePlatforms={availablePlatforms}
           availableLanguages={availableLanguages}
@@ -273,11 +237,7 @@ export function ContentIdeasTab({
             scheduledPosts={scheduledPosts as any}
             filters={filters}
             onCardClick={(post) => {
-              // Direct card clicks should show the most recent variant group
-              // (the heuristic path) — clear any group filter set by the
-              // floating "View" button.
               setActivePost(post);
-              setActiveGroupId(null);
               setPanelTab(undefined);
             }}
             onToggleApproved={(iterationId) => toggleApproved.mutate(iterationId)}
@@ -289,7 +249,6 @@ export function ContentIdeasTab({
           onOpenChange={(open) => {
             if (!open) {
               setActivePost(null);
-              setActiveGroupId(null);
               setPanelTab(undefined);
             }
           }}
@@ -306,39 +265,18 @@ export function ContentIdeasTab({
           clientTimezone={clientTimezone}
           initialTab={panelTab}
           onFeedback={async (iterationId, verdict, reason, note) => {
-            // Sent again only when it never reached the server. The board is
-            // read again either way, so a design that was not hidden stays on it.
+            // Sent again only when it never reached the server. The post panel
+            // shows the outcome; a send with no answer throws so it can say so.
             const { data, error } = await sendQuietly(() => supabase.functions.invoke("record-design-feedback", {
               body: { iteration_id: iterationId, verdict, reason, note },
             }));
             qc.invalidateQueries({ queryKey: ["post-iterations", clientId] });
-            if (error || data?.error) {
-              console.warn("[design feedback] not recorded yet", error ?? data?.error);
-              return;
-            }
-            const learned = Array.isArray(data?.learnings) ? data.learnings.length : 0;
-            toast({
-              title: verdict === "rejected" ? "Rejected" : "Archived",
-              description: verdict === "rejected"
-                ? (learned ? `Hidden. ${learned} rule${learned === 1 ? "" : "s"} added for this client's next designs.` : "Hidden.")
-                : "Hidden from the board.",
-            });
-          }}
-          onToggleSelected={(iterationId, nextSelected) => {
-            void sendQuietly(() => supabase
-              .from("post_iterations")
-              .update({ is_selected: nextSelected } as any)
-              .eq("id", iterationId), { again: writeResendable })
-              .then(() => {
-                qc.invalidateQueries({ queryKey: ["post-iterations", clientId] });
-              });
+            if (error || data?.error) throw new Error("feedback not recorded");
           }}
         />
 
-        {/* Floating progress + completion indicator (bottom-right) */}
-        <GenerationProgress />
+        <DesignRequestsDock />
       </div>
-    </GenerationProvider>
     </DesignRequestsProvider>
   );
 }

@@ -40,10 +40,10 @@ export function LogoFileField({ clientId, clientName, logoUrl, onChange }: { cli
   return (
     <div className="space-y-2">
       <Label className="t-secondary">Logo file</Label>
-      <p className="t-label">PNG, JPG or WebP under 5 MB; PNG with a transparent background is best. Designs place this file as it is. The product takes the logo from the client's website when none is here.</p>
+      <p className="t-label">PNG, JPG or WebP under 5 MB; PNG with a transparent background is best. Designs place this file as it is. When none is here, the logo is taken from the client's website.</p>
       {logoUrl ? (
         <div className="flex items-center gap-3 p-inner glass-inner">
-          <div className="h-12 w-28 rounded bg-[#0A1016] flex items-center justify-center overflow-hidden">
+          <div className="h-12 w-28 rounded bg-background flex items-center justify-center overflow-hidden">
             <img src={logoUrl} alt={`${clientName} logo`} className="max-h-10 max-w-24 object-contain" />
           </div>
           <span className="t-secondary flex-1 truncate">Logo on file</span>
@@ -69,7 +69,7 @@ export function LogoFileField({ clientId, clientName, logoUrl, onChange }: { cli
           <Button variant="outline" size="sm" onClick={() => void again()}>Upload</Button>
         </div>
       )}
-      <input ref={input} type="file" className="hidden" accept=".png,.jpg,.jpeg,.webp" data-testid="logo-file-input" onChange={(e) => { const f = e.target.files?.[0]; if (f) choose(f); e.target.value = ""; }} disabled={uploading} />
+      <input ref={input} type="file" aria-label="Logo file" className="hidden" accept=".png,.jpg,.jpeg,.webp" data-testid="logo-file-input" onChange={(e) => { const f = e.target.files?.[0]; if (f) choose(f); e.target.value = ""; }} disabled={uploading} />
     </div>
   );
 }

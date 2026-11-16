@@ -1,8 +1,8 @@
 // What a person reads when one of their own requests to an edge function did
 // not go through. supabase.functions.invoke() reports any non-2xx as "Edge
 // Function returned a non-2xx status code" and leaves the server's body on
-// error.context. That body is written for developers ("DB update failed",
-// "could not parse JSON from Claude output"), so it goes to the console only:
+// error.context. That body is written for developers (a database message, a
+// model's parse message), so it goes to the console only:
 // the screen gets one plain sentence chosen by the error code or the HTTP
 // status. Work the product does on its own never reaches a person this way.
 
@@ -15,8 +15,8 @@ const BY_CODE: Record<string, string> = {
   RIVALIQ_BUSY: "The competitor data source is busy right now. This runs again on its own shortly.",
 };
 
-const OFFLINE = "This could not be sent. Check your internet connection, then try again.";
-const UNKNOWN = "This did not go through, and nothing was changed. Try again in a minute.";
+const OFFLINE = "This was not sent. Check your internet connection.";
+const UNKNOWN = "This did not go through, and nothing was changed.";
 
 /** The plain sentence for an HTTP status. */
 export function statusSentence(status: number | null | undefined): string {
@@ -27,7 +27,7 @@ export function statusSentence(status: number | null | undefined): string {
     case 404: return "This is no longer available.";
     case 409: return "This is already in progress or changed since the page loaded. Reload the page to see where it stands.";
     case 422: return "This cannot be done with what is on file for this client yet.";
-    case 429: return "There were too many requests at once. Wait a minute, then try again.";
+    case 429: return "There were too many requests at once. Wait a minute.";
     case 504: return "This took longer than the server allows. It may still finish, so check back in a few minutes.";
     default: return UNKNOWN;
   }
@@ -42,6 +42,12 @@ async function readBody(ctx: InvokeContext | undefined): Promise<Record<string, 
   } catch {
     return null;
   }
+}
+
+/** The code the function sent with a non-2xx reply (its body's `code`), or null when the reply has none. */
+export async function invokeErrorCode(error: unknown): Promise<string | null> {
+  const body = await readBody((error as { context?: unknown } | null)?.context as InvokeContext | undefined);
+  return typeof body?.code === "string" ? body.code : null;
 }
 
 /**

@@ -100,6 +100,8 @@ async function one<T>(p: PromiseLike<{ data: unknown; error: { message: string }
   return (data as T | null) ?? null;
 }
 
+/** One row of the client_counts function: a client's counts and the id of its newest report. */
+interface ClientCountRow { client_id: string; reports: number | string; competitive_reports: number | string; posts: number | string; schedules: number | string; last_report_id: string | null }
 type LightReport = Omit<ReportRow, "report_data"> & { rd_period?: unknown; rd_counts?: unknown; rd_metrics?: unknown; rd_warnings?: unknown; rd_trend?: string | null; rd_gamma_status?: string | null; rd_gamma_url?: string | null; rd_completed?: string | null; rd_error?: string | null; rd_duration?: unknown };
 /** The light list row back into the row shape the serializer reads. */
 export function reportFromLight(r: LightReport): ReportRow {
@@ -139,32 +141,31 @@ export function makeStore(db: SupabaseClient): Store {
       const out: Record<string, ClientExtras> = {};
       if (!ids.length) return out;
       for (const id of ids) out[id] = { sproutProfiles: [], sets: [], designSystems: [], designSettings: null, designSteps: [], counts: { reports: 0, competitive_reports: 0, posts: 0, schedules: 0 }, lastReport: null };
-      const [profiles, sets, designs, settings, steps, reports, competitive, posts, schedules] = await Promise.all([
+      // The per-client counts come from one SQL function that groups by client (client_counts), so no read here is
+      // cut at the 1,000 rows one request answers. It also names each client's newest report, read once below.
+      const [profiles, sets, designs, settings, steps, counted] = await Promise.all([
         rows<SproutProfileRow>(db.from("sprout_profiles").select(SPROUT_PROFILE_COLUMNS).in("client_id", ids)),
         rows<CompetitorSetRow>(db.from("competitor_sets").select(SET_COLUMNS).in("client_id", ids).order("created_at", { ascending: false })),
         rows<DesignSystemRow>(db.from("client_design_systems").select(DESIGN_SYSTEM_COLUMNS).in("client_id", ids).neq("status", "retired").order("version", { ascending: false })),
         rows<DesignSettingsRow>(db.from("design_brand_settings").select("client_id, confirmed_at").in("client_id", ids)),
         rows<DesignStepRow & { client_id: string }>(db.from("client_lifecycle_steps").select("client_id, step, status, result").in("client_id", ids).in("step", [...DESIGN_SETUP_STEPS])),
-        rows<LightReport>(db.from("reports").select(REPORT_LIST_COLUMNS).in("client_id", ids).order("created_at", { ascending: false }).limit(5000)),
-        rows<{ client_id: string }>(db.from("competitive_reports").select("client_id").in("client_id", ids).limit(5000)),
-        rows<{ client_id: string }>(db.from("post_iterations").select("client_id").in("client_id", ids).is("archived_at", null).limit(20000)),
-        rows<{ client_id: string }>(db.from("report_schedules").select("client_id").in("client_id", ids).eq("is_active", true).limit(5000)),
+        rows<ClientCountRow>(db.rpc("client_counts", { client_ids: ids })),
       ]);
+      const lastIds = counted.map((c) => c.last_report_id).filter((v): v is string => !!v);
+      const lastReports = lastIds.length ? await rows<LightReport>(db.from("reports").select(REPORT_LIST_COLUMNS).in("id", lastIds)) : [];
       const full = await setsWithCompetitors(db, sets);
       for (const p of profiles) out[p.client_id]?.sproutProfiles.push(p);
       for (const s of full) out[s.client_id]?.sets.push(s);
       for (const d of designs) out[d.client_id]?.designSystems.push(d);
       for (const d of settings) if (out[d.client_id]) out[d.client_id].designSettings = d;
       for (const d of steps) out[d.client_id]?.designSteps.push(d);
-      for (const r of reports) {
-        const e = out[r.client_id];
+      for (const c of counted) {
+        const e = out[c.client_id];
         if (!e) continue;
-        e.counts.reports += 1;
-        if (!e.lastReport) e.lastReport = reportFromLight(r);
+        e.counts = { reports: Number(c.reports) || 0, competitive_reports: Number(c.competitive_reports) || 0, posts: Number(c.posts) || 0, schedules: Number(c.schedules) || 0 };
+        const last = lastReports.find((r) => r.id === c.last_report_id);
+        e.lastReport = last ? reportFromLight(last) : null;
       }
-      for (const r of competitive) if (out[r.client_id]) out[r.client_id].counts.competitive_reports += 1;
-      for (const r of posts) if (out[r.client_id]) out[r.client_id].counts.posts += 1;
-      for (const r of schedules) if (out[r.client_id]) out[r.client_id].counts.schedules += 1;
       return out;
     },
     async schedulesOf(clientId) {
@@ -246,7 +247,8 @@ export function makeStore(db: SupabaseClient): Store {
       if (f.client_id !== undefined && !isId(f.client_id)) return [];
       let q = db.from("scheduled_posts").select(SCHEDULED_POST_COLUMNS);
       if (f.client_id) q = q.eq("client_id", f.client_id);
-      if (f.status) q = q.eq("status", f.status);
+      // Posts scheduled to Sprout: a send still being made, or one that made no post or was closed and sent again, has no post in Sprout, so neither is listed unless asked for by status.
+      q = f.status ? q.eq("status", f.status) : q.not("status", "in", "(sending,failed)");
       return rows<ScheduledPostRow>(keyset(q, page, "client_id", scope));
     },
     async listAlerts(scope, f, page) {

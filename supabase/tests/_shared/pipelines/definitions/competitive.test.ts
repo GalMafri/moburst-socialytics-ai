@@ -65,6 +65,9 @@ function apify(o: { calls: string[] }) {
   return () => client;
 }
 
+// The stored analysis as a model wrote it, data source names and all: the pipeline mends the wording itself.
+const CLEAN_ANALYSIS = FX.real_analysis;
+
 function claude(answer: string, requests: Any[]) {
   return async (url: string, init?: RequestInit) => {
     if (init?.method === "POST") { requests.push(JSON.parse(String(init.body)).requests[0]); return new Response(JSON.stringify({ id: "batch-1" })); }
@@ -97,7 +100,7 @@ async function run(o: { mode: "shadow" | "app"; env?: (n: string) => string | un
     rivaliq: rivaliq({ calls: calls.rivaliq, failSummary: o.failSummary, busyOnce: o.busyOnce }),
     apify: apify({ calls: calls.apify }),
     owned: async () => { calls.sprout += 1; return owned(); },
-    claudeFetch: claude(JSON.stringify(FX.real_analysis), requests),
+    claudeFetch: claude(JSON.stringify(CLEAN_ANALYSIS), requests),
     ...o.deps,
   });
   const { run_id } = await startPipelineRun(db, { mode: o.mode, pipeline, clientId: FX.report.client_id, realTable: "competitive_reports", realId: reportId, input: { range: { start: "2026-09-01", end: "2026-09-30" }, set_id: FX.set.id, request }, dedupe: `${o.mode}:competitive:${reportId}` });
@@ -211,5 +214,12 @@ describe("the in-app competitive pipeline, live", () => {
     expect(r.result.outcome.status).toBe("done");
     expect(r.db.tables.competitive_reports[0]).toMatchObject({ status: "failed", report_data: {} });
     expect(r.db.tables.rivaliq_snapshots).toEqual([]);
+  });
+});
+
+describe("competitivePipeline: the horizon of an account wait", () => {
+  it("is the run's own hours from its start, so a wait for the Apify token never holds the run longer than the run may last", () => {
+    const run = { started_at: "2026-11-12T08:00:00.000Z", input: {} } as never;
+    expect(competitivePipeline().waitHorizon!(run)!.toISOString()).toBe("2026-11-12T20:00:00.000Z");
   });
 });

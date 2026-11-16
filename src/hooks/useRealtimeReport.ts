@@ -23,12 +23,13 @@ export function useRealtimeReports(clientId?: string) {
           filter: `client_id=eq.${clientId}`,
         },
         (payload) => {
-          console.log("Realtime report update:", payload);
           // Invalidate all report-related queries for this client
           queryClient.invalidateQueries({ queryKey: ["reports", clientId] });
           queryClient.invalidateQueries({ queryKey: ["reports-history", clientId] });
           queryClient.invalidateQueries({ queryKey: ["latest-report", clientId] });
           queryClient.invalidateQueries({ queryKey: ["clients"] });
+          // Each client's overview reads its latest report, so it is read again too.
+          queryClient.invalidateQueries({ queryKey: ["client-overview"] });
 
           // If it's a specific report update, also invalidate that report's query
           const newRecord = payload.new as any;

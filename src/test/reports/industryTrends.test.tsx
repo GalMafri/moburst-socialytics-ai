@@ -22,7 +22,6 @@ const f = vi.hoisted(() => ({ staff: false, report: null as any, themes: [] as a
 vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ isMoburstStaff: f.staff, isClient: !f.staff, canRunAnalysis: f.staff, canDelete: false }) }));
 vi.mock("@/hooks/useRealtimeReport", () => ({ useRealtimeReports: () => {} }));
-vi.mock("@/hooks/useRealtimePostIterations", () => ({ useRealtimePostIterations: () => {} }));
 vi.mock("@/hooks/useTrackView", () => ({ useTrackView: () => {} }));
 vi.mock("@/lib/telemetry", () => ({ track: vi.fn(), editDistancePct: () => 0 }));
 vi.mock("@/hooks/useInsightFeedback", () => ({ useInsightFeedback: () => ({ verdictFor: () => null }) }));
@@ -385,5 +384,25 @@ describe("report screen: trend recommendations come from the theme angles", () =
     expect(reportTrends(rd.ai_analysis, [{ ...themes[0], angle: "" }]).source).toBe("industry");
     // Same angle in two weeks: listed once.
     expect(reportTrends(rd.ai_analysis, [themes[0], { ...themes[0], id: "t9", week_start: "2026-10-12" }]).items).toEqual([{ text: "Show a captain chasing RSVPs the night before a game.", theme: "Captain POV skits" }]);
+  });
+
+  it("lists no trend count for a network the client has no trends on", async () => {
+    f.themes = [];
+    f.report = reportRow({
+      sprout_performance: { month_comparison: { changes: { impressions: { previous: 1000, current: 1100, percent: 10 } }, current_month: { impressions: 1100 }, previous_month: { impressions: 1000 } } },
+      ai_analysis: {},
+      data_counts: { tiktok_trends: 0, instagram_trends: 0, sprout_top_posts: 4 },
+    });
+    mount(); await settle();
+    const card = screen.getByText("In this report").closest("div")!.parentElement!;
+    expect(card.textContent).not.toMatch(/TikTok trends|Instagram trends/);
+  });
+
+  it("lists the count of a network that has trends", async () => {
+    f.themes = [];
+    mount(); await settle();
+    const card = screen.getByText("In this report").closest("div")!.parentElement!;
+    expect(card.textContent).toMatch(/TikTok trends\s*1/);
+    expect(card.textContent).toMatch(/Instagram trends\s*1/);
   });
 });

@@ -47,8 +47,9 @@ export function CalendarPostActions({ postId, clientId, date, onDone }: { postId
   };
   const remove = async () => {
     setNotDeleted(false);
+    // One server function takes the post and its Story off the calendar and archives their designs; asked again it finds the post gone.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await sendQuietly(() => (supabase.from("calendar_posts" as never) as any).delete().eq("id", postId), { again: writeResendable });
+    const { error } = await sendQuietly(() => (supabase.rpc as any)("calendar_delete_post", { p_post: postId }), { again: writeResendable });
     refresh();
     if (error) {
       // The dialog stays up and says the post is still on the calendar.
@@ -83,7 +84,7 @@ export function CalendarPostActions({ postId, clientId, date, onDone }: { postId
         title="Delete this post?"
         description={
           <>
-            <p>It is removed from the calendar. Anything already scheduled in Sprout is not affected.</p>
+            <p>It is removed from the calendar with its designs and any Story made from it. Anything already sent to Sprout is not affected.</p>
             {notDeleted && <p role="status" className="t-secondary">Not deleted yet. The post is still on the calendar.</p>}
           </>
         }

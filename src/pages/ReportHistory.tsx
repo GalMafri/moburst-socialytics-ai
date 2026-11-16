@@ -1,5 +1,6 @@
 import { useParams, useNavigate } from "react-router-dom";
-import { firstRunSentence, formatDate, formatRange, listedRuns } from "@/lib/display";
+import { firstRunSentence, formatDate, formatRange } from "@/lib/display";
+import { listedMonthlyReports } from "@/lib/reportRun";
 import { useNextRun } from "@/lib/nextRun";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -8,13 +9,15 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Eye, Loader2, ExternalLink, FileText } from "lucide-react";
+import { Eye, Loader2, FileText } from "lucide-react";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
-import { ReportActions } from "@/components/reports/ReportActions";
+import { OpenPresentationButton, ReportActions } from "@/components/reports/ReportActions";
 import { useAuth } from "@/hooks/useAuth";
 import { Loading } from "@/components/ui/loading";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadRetry } from "@/components/ui/load-error";
+
+type HistoryReport = { id: string; client_id: string | null; status: string | null; created_at: string | null; date_range_start: string | null; date_range_end: string | null; duration_minutes: number | null; gamma_url: string | null; report_period: unknown };
 
 export default function ReportHistory() {
   const { id } = useParams();
@@ -38,7 +41,7 @@ export default function ReportHistory() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("reports")
-        .select("*")
+        .select<string, HistoryReport>("id, client_id, status, created_at, date_range_start, date_range_end, duration_minutes, gamma_url, report_period:report_data->report_period")
         .eq("client_id", id!)
         .order("created_at", { ascending: false });
       if (error) throw error;
@@ -46,6 +49,8 @@ export default function ReportHistory() {
     },
     enabled: !!id,
   });
+
+  const listed = listedMonthlyReports(reports, { isStaff: isMoburstStaff });
 
   return (
     <AppLayout title={`Reports: ${client?.name ?? "Client"}`}
@@ -59,7 +64,7 @@ export default function ReportHistory() {
               // their work does not exist, on the strength of a request that
               // never answered.
               <LoadRetry context="reports" error={error} onRetry={() => refetch()} />
-            ) : listedRuns("monthly", reports, { isStaff: isMoburstStaff }).length > 0 ? (
+            ) : listed.length > 0 ? (
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -72,7 +77,7 @@ export default function ReportHistory() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {listedRuns("monthly", reports, { isStaff: isMoburstStaff }).map((r: any) => {
+                  {listed.map((r: any) => {
                     const isRunning = r.display.state === "running";
                     return (
                       <TableRow key={r.id} className={isRunning ? "animate-pulse" : ""}>
@@ -92,9 +97,7 @@ export default function ReportHistory() {
                         {!isClient && (
                           <TableCell>
                             {r.gamma_url ? (
-                              <Button size="sm" variant="outline" onClick={() => window.open(r.gamma_url, "_blank")}>
-                                <ExternalLink /> Open
-                              </Button>
+                              <OpenPresentationButton url={r.gamma_url} />
                             ) : null}
                           </TableCell>
                         )}

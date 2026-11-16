@@ -36,3 +36,9 @@ it('shows the logo on file with replace and remove', () => {
   fireEvent.click(screen.getByRole('button', { name: 'Remove logo file' }));
   expect(onChange).toHaveBeenCalledWith('');
 });
+
+it('says where the logo comes from when none is uploaded, without calling the app "the product"', () => {
+  render(<LogoFileField clientId="client-1" clientName="Moburst" logoUrl="" onChange={vi.fn()} />);
+  expect(document.body.textContent).not.toMatch(/the product/i);
+  expect(screen.getByText(/When none is here, the logo is taken from the client's website\./)).toBeInTheDocument();
+});

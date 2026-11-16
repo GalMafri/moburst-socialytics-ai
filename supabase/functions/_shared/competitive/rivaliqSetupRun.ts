@@ -4,12 +4,10 @@
 // 19 Oct 2026, decision 1: tracking connects automatically, using paid
 // company slots for the client and its three competitors). The sequence
 // itself is rivaliqSetup.ts (every non-idempotent request recorded before it
-// is sent, a lost answer reconciled by reads); this file holds what used to
-// live only in the setup-rivaliq-landscape function: the plan, the lease on
+// is sent, a lost answer reconciled by reads); this file holds the plan, the lease on
 // the rivaliq_setup_jobs row, the API with the key kept out of every
-// message, and linking the verified landscape to the set. The function still
-// answers the Competitors screen with one step per call; the client
-// lifecycle's tracking step advances the same row until it is complete.
+// message, and linking the verified landscape to the set. The client
+// lifecycle's tracking step advances the row until it is complete.
 // After tracking is linked, each tracked company's handles are taken from
 // RivalIQ's own record of it, the exact source.
 

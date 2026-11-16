@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { sendQuietly, writeResendable } from "@/lib/quietSend";
@@ -77,6 +78,25 @@ export function useTrendThemes(clientId: string, from: string, to: string, opts:
       return { collected: answer?.collected === true, themes: Array.isArray(answer?.themes) ? (answer.themes as unknown as TrendTheme[]) : [] } satisfies TrendThemesAnswer;
     },
   });
+}
+
+/** How long a report waits for its themes before it shows its own trends. */
+export const THEME_WAIT_MS = 15_000;
+
+/**
+ * True once `active` has held for `ms`, false again as soon as it stops. A
+ * report waiting on its themes uses it to stop waiting for good: the read
+ * goes on in the background (untilRead), and the themes replace what the
+ * report shows when a try answers.
+ */
+export function useWaitedOut(active: boolean, ms: number): boolean {
+  const [waited, setWaited] = useState(false);
+  useEffect(() => {
+    if (!active) { setWaited(false); return; }
+    const timer = window.setTimeout(() => setWaited(true), ms);
+    return () => window.clearTimeout(timer);
+  }, [active, ms]);
+  return waited;
 }
 
 /**

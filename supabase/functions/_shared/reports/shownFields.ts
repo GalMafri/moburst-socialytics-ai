@@ -87,6 +87,53 @@ export async function readShownInsights(db: Db, table: ReportTable, reportId: st
 const SOURCE_NAMES: Record<FactSource, string> = { sprout: "Sprout", rivaliq: "RivalIQ" };
 
 /**
+ * The data vendors' names as a writer spells them: the names SOURCE_NAMES lists, and "Rival IQ" / "Sprout Social".
+ * RivalIQ and "Sprout Social" match in any case; the single word Sprout only as "Sprout" or "SPROUT",
+ * so the ordinary word "sprout" in "ideas sprout" is left alone.
+ */
+export const DATA_VENDOR_PATTERN = /\b(?:[Rr][Ii][Vv][Aa][Ll] ?[Ii][Qq]|[Ss][Pp][Rr][Oo][Uu][Tt] [Ss][Oo][Cc][Ii][Aa][Ll]|Sprout|SPROUT)\b/g;
+const NEUTRAL_SOURCE = "the data source";
+/** Keys that hold a name, a link or a label rather than narrative: a company called "Sprout Social" stays called that. */
+const NOT_NARRATIVE = new Set(["name", "competitor", "company", "url", "example_post_urls", "platform", "based_on", "handle"]);
+
+const escaped = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** The pattern that finds a vendor's name, or a company name (in `keep`) that carries one, which is a name and stays. */
+function vendorOrKeptName(keep: readonly string[]): RegExp {
+  const kept = [...new Set(keep.filter((n) => typeof n === "string" && new RegExp(DATA_VENDOR_PATTERN.source).test(n)))].sort((x, y) => y.length - x.length);
+  return kept.length ? new RegExp(`(${kept.map(escaped).join("|")})|${DATA_VENDOR_PATTERN.source}`, "g") : new RegExp(DATA_VENDOR_PATTERN.source, "g");
+}
+
+/**
+ * A sentence with no data vendor named: each name becomes "the data source".
+ * A company in `keep` (the report's own companies) is a name, not a source.
+ */
+export function withoutDataVendors(text: string, keep: readonly string[] = []): string {
+  const pattern = vendorOrKeptName(keep);
+  const hasKept = keep.length > 0 && pattern.source.startsWith("(");
+  return text
+    .replace(pattern, (...args: Array<string | number | undefined>) => {
+      const m = String(args[0]);
+      if (hasKept && args[1]) return m;
+      const offset = Number(args[hasKept ? 2 : 1]);
+      const whole = String(args[hasKept ? 3 : 2]);
+      const before = whole.slice(0, offset);
+      // "the RivalIQ totals" reads "the data source totals", never "the the data source".
+      if (/\bthe\s+$/i.test(before)) return "data source";
+      return offset === 0 || /[.!?:]\s+$/.test(before) ? "The data source" : NEUTRAL_SOURCE;
+    })
+    .replace(/\b(the data source)(?:,? and the data source)+/gi, "$1");
+}
+
+/** Every narrative string of an analysis through withoutDataVendors; what is not a string, and the keys above, are left as they are. */
+export function withoutVendorsIn<T>(value: T, key = "", keep: readonly string[] = []): T {
+  if (typeof value === "string") return (NOT_NARRATIVE.has(key) ? value : withoutDataVendors(value, keep)) as T;
+  if (Array.isArray(value)) return value.map((v) => withoutVendorsIn(v, key, keep)) as T;
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, withoutVendorsIn(v, k, keep)])) as T;
+  return value;
+}
+
+/**
  * What a piece of text rests on: the basis of each fact it cites, in the
  * order cited, skipping an id it doesn't know. Staff also see where each
  * fact's figures come from; a client never does.
@@ -155,8 +202,9 @@ export interface ShownCompetitive {
 export function shownCompetitive(reportData: unknown, row: ShownInsightsRow | null | undefined, opts: { staff?: boolean } = {}): ShownCompetitive {
   const normalized: Any = normalizedCompetitiveMetrics(reportData);
   const fields = row?.fields?.kind === "competitive" ? row.fields : null;
+  const companyNames: string[] = (Array.isArray(normalized?.aggregates?.companies) ? normalized.aggregates.companies : []).map((c: Any) => c?.name).filter((n: unknown) => typeof n === "string");
   const paragraphs: ShownText[] = (fields?.summary ?? []).filter((c) => c?.text)
-    .map((c) => ({ text: c.text, basedOn: basedOn(row?.facts, c.facts, opts.staff) }));
+    .map((c) => ({ text: withoutDataVendors(c.text, companyNames), basedOn: basedOn(row?.facts, c.facts, opts.staff) }));
   const joined = paragraphs.map((p) => p.text).join("\n\n");
   const insightGaps: ShownGap[] | null = fields?.gaps
     ? fields.gaps.map((g) => ({ gap: g.gap, platform: g.platform, why_it_matters: g.why_it_matters, suggested_play: g.suggested_play, based_on: basedOn(row?.facts, g.facts, opts.staff) }))
@@ -170,10 +218,12 @@ export function shownCompetitive(reportData: unknown, row: ShownInsightsRow | nu
   // The insights' summary is worked out from the figures the report shows, so it
   // stands in place of the one the limits write from them; the limits still
   // withhold it when the client has no posts.
-  const report: Any = withCompetitiveEvidenceLimits(overlaid, { keepSummary: !!joined });
+  const limited: Any = withCompetitiveEvidenceLimits(overlaid, { keepSummary: !!joined });
+  // No narrative names a data vendor, for any reader: staff export the PDF the client receives.
+  const report: Any = limited?.ai_analysis ? { ...limited, ai_analysis: withoutVendorsIn(limited.ai_analysis, "", companyNames) } : limited;
   const ai: Any = report?.ai_analysis ?? {};
   const shownSummary = typeof ai.executive_summary === "string" ? ai.executive_summary : "";
-  const summary = joined && shownSummary === joined ? paragraphs : shownSummary ? [{ text: shownSummary, basedOn: "" }] : [];
+  const summary = joined && shownSummary === withoutDataVendors(joined, companyNames) ? paragraphs : shownSummary ? [{ text: shownSummary, basedOn: "" }] : [];
   const gaps: ShownGap[] = Array.isArray(ai.gaps_for_client) ? ai.gaps_for_client : [];
   return { report, summary, gaps };
 }

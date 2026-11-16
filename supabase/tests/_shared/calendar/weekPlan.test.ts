@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { buildReason, clientFit, headline, parseRevision, parseWeekPlan, revisePrompt, STRATEGY_PRECEDENCE, storyPlan, weekPrompt, withStories, type PlannedPost, type WeekContext } from "../../../functions/_shared/calendar/weekPlan";
 import { wordReason } from "../../../functions/_shared/calendar/reasonText";
-import { wordReason } from "../../../functions/_shared/calendar/reasonText";
 import type { EvidenceItem } from "../../../functions/_shared/calendar/evidence";
+import { imageAspectRatio, videoAspectRatio } from "../../../functions/_shared/design-prompts/aspect";
 
 const EVIDENCE: EvidenceItem[] = [
   { id: "P1", kind: "own", text: "Our playoff checklist", platform: "Instagram", format: "carousel", date: "2026-10-05", link: "https://x/p1", metric: "impressions", value: 3000, median: 1100, multiple: 2.7, sample: 12 },
@@ -172,6 +172,38 @@ describe("dated moments in the plan", () => {
 });
 
 describe("parseWeekPlan", () => {
+  it("stores a fixed kind for any format the planner writes, not the text cut at 40 characters", () => {
+    const formats: Array<[string, string]> = [
+      ["video (animated text on soft designed background)", "video"], ["short_video", "short video"], ["Reel", "short video"], ["Reel (designed text-and-motion video)", "short video"], ["Carousel (5 slides)", "carousel"],
+      ["Single Image", "image"], ["static image with quote", "image"], ["Text only", "text"], ["LinkedIn document", "document"],
+    ];
+    const text = JSON.stringify({ posts: formats.map(([format], i) => post({ format, date: "2026-10-27", platform: i % 2 ? "Facebook" : "Instagram" })) });
+    const got = parseWeekPlan(text, { ...CTX, rhythm: [] }).map((p) => p.format);
+    expect(got).toEqual(formats.map(([, kind]) => kind));
+  });
+
+  it("keeps a tall video tall: a planned Short or Reel is made 9:16, a plain video keeps the platform's shape", () => {
+    const text = JSON.stringify({ posts: [
+      post({ format: "Short", platform: "YouTube" }), post({ format: "reel", platform: "Facebook" }), post({ format: "short video", platform: "Facebook" }),
+      post({ format: "video", platform: "YouTube" }),
+    ] });
+    const got = parseWeekPlan(text, { ...CTX, rhythm: [] });
+    expect(got.map((p) => videoAspectRatio(p.platform, p.format))).toEqual(["9:16", "9:16", "9:16", "16:9"]);
+    expect(got.map((p) => imageAspectRatio(p.platform, p.format))).toEqual(["9:16", "9:16", "9:16", "16:9"]);
+  });
+
+  it("stores the posting time as HH:MM whatever form the planner sends", () => {
+    const times = ["6:45 PM", "18:45", "6 pm EST", "10:00 PM", "evening", ""];
+    const text = JSON.stringify({ posts: times.map((posting_time) => post({ posting_time })) });
+    expect(parseWeekPlan(text, { ...CTX, rhythm: [] }).map((p) => p.posting_time)).toEqual(["18:45", "18:45", "18:00", "22:00", null, null]);
+  });
+
+  it("asks the planner for one of the kinds and a 24-hour time", () => {
+    const prompt = weekPrompt(CTX);
+    expect(prompt).toContain('"format":"image|carousel|video|short video|text|document"');
+    expect(prompt).toContain('"posting_time":"HH:MM"');
+  });
+
   it("keeps a trend's theme on the post's reason and types the post as a trend", () => {
     const trend: EvidenceItem = { id: "N1", kind: "trend", text: "POV: you are the captain", theme: "Captain POV skits", company: "@benchpro", platform: "TikTok", format: "short_video", date: "2026-10-14", link: "https://t/1", metric: "engagement", value: 5400 };
     const [p] = parseWeekPlan(JSON.stringify({ posts: [post({ reason_type: "trend", evidence_ids: ["N1"] })] }), { ...CTX, evidence: [...EVIDENCE, trend] });
@@ -210,7 +242,7 @@ describe("parseWeekPlan", () => {
   it("keeps only the first test, and ignores evidence ids that don't exist", () => {
     const posts = parseWeekPlan(JSON.stringify({ posts: [post({ test: true, evidence_ids: ["Z9", "P1"] }), post({ date: "2026-10-29", test: true })] }), CTX);
     expect(posts[0].reasons[0].type).toBe("test");
-    expect(posts[0].reasons[0].label.startsWith("Test: Your Instagram carousel from Oct 5 got 2.7x your usual impressions.")).toBe(true);
+    expect(posts[0].reasons[0].label.startsWith("Your Instagram carousel from Oct 5 got 2.7x your usual impressions.")).toBe(true);
     expect(posts[0].reasons[0].evidence?.map((e) => e.id)).toEqual(["P1"]);
     expect(posts[1].reasons[0].type).toBe("competitor");
   });
@@ -268,9 +300,9 @@ describe("revising", () => {
 });
 
 describe("a week's Stories", () => {
-  it("saves a feed post the model set to Story as a single image", () => {
+  it("saves a feed post the model set to Story as an image", () => {
     const text = JSON.stringify({ posts: [post({ format: "Story" }), post({ format: "Instagram Story", date: "2026-10-29" })] });
-    expect(parseWeekPlan(text, CTX).map((p) => p.format)).toEqual(["Single Image", "Single Image"]);
+    expect(parseWeekPlan(text, CTX).map((p) => p.format)).toEqual(["image", "image"]);
   });
 
   const planned = (over: Partial<PlannedPost>): PlannedPost => ({

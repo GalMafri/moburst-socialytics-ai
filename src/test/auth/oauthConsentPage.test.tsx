@@ -7,17 +7,19 @@ const ID = "k7q2m4n6p3r5t7v2x4z6b3d5f7h2j4l6";
 const f = vi.hoisted(() => ({
   auth: { isLoading: false, isAuthenticated: true },
   session: true as boolean,
+  roles: vi.fn(async () => ({ data: [{ role: "moburst_user" }] as unknown, error: null as unknown })),
   details: null as unknown,
   detailsError: null as unknown,
+  detailsQueue: [] as Array<{ data: unknown; error: unknown }>,
   approve: vi.fn(async () => ({ data: { redirect_url: "https://claude.ai/api/mcp/auth_callback?code=c" }, error: null })),
   deny: vi.fn(async () => ({ data: { redirect_url: "https://claude.ai/api/mcp/auth_callback?error=access_denied" }, error: null })),
   get: vi.fn(),
 }));
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => f.auth }));
-vi.mock("@/integrations/supabase/client", () => ({ supabase: { auth: {
+vi.mock("@/integrations/supabase/client", () => ({ supabase: { from: () => ({ select: () => ({ eq: () => f.roles() }) }), auth: {
   getSession: async () => ({ data: { session: f.session ? { user: { id: "u" } } : null } }),
   oauth: {
-    getAuthorizationDetails: (id: string) => { f.get(id); return Promise.resolve({ data: f.details, error: f.detailsError }); },
+    getAuthorizationDetails: (id: string) => { f.get(id); return Promise.resolve(f.detailsQueue.shift() ?? { data: f.details, error: f.detailsError }); },
     approveAuthorization: f.approve,
     denyAuthorization: f.deny,
   },
@@ -25,6 +27,7 @@ vi.mock("@/integrations/supabase/client", () => ({ supabase: { auth: {
 
 import OAuthConsent from "@/pages/OAuthConsent";
 import { browser } from "@/utils/oauthConsent";
+import { QUIET_WAITS_MS } from "@/lib/quietSend";
 
 const claude = (redirect_uri = "https://claude.ai/api/mcp/auth_callback") => ({ authorization_id: ID, redirect_uri, client: { id: "c", name: "Claude", uri: "", logo_uri: "" }, user: { id: "u", email: "sinead@moburst.com" }, scope: "openid email profile" });
 
@@ -49,7 +52,11 @@ beforeEach(() => {
   f.session = true;
   f.details = claude();
   f.detailsError = null;
+  f.detailsQueue = [];
   f.approve.mockClear(); f.deny.mockClear(); f.get.mockClear();
+  f.roles.mockReset();
+  f.roles.mockResolvedValue({ data: [{ role: "moburst_user" }], error: null });
+  QUIET_WAITS_MS.splice(0, QUIET_WAITS_MS.length, 1, 1, 1);
   localStorage.clear();
   replace = vi.spyOn(browser, "replace").mockImplementation(() => {});
   assign = vi.spyOn(browser, "assign").mockImplementation(() => {});
@@ -106,6 +113,7 @@ describe("the consent page", () => {
 
   it("denies a signed-in person with no Socialytics role", async () => {
     f.auth = { isLoading: false, isAuthenticated: false };
+    f.roles.mockResolvedValue({ data: [], error: null });
     open();
     expect(await screen.findByText("Socialytics isn't available to your account")).toBeInTheDocument();
     await waitFor(() => expect(f.deny).toHaveBeenCalledWith(ID, { skipBrowserRedirect: true }));
@@ -133,5 +141,65 @@ describe("the consent page", () => {
     open();
     expect(await screen.findByText("This connection request has expired")).toBeInTheDocument();
     expect(screen.queryByText(/authorization not found/)).toBeNull();
+  });
+
+  it("has the page title as the one h1", async () => {
+    open();
+    expect(await screen.findByRole("heading", { level: 1, name: "Connect Claude to Socialytics" })).toBeInTheDocument();
+  });
+
+  it("says only that the account has no access, with no mention of a portal admin", async () => {
+    f.auth = { isLoading: false, isAuthenticated: false };
+    f.roles.mockResolvedValue({ data: [], error: null });
+    open();
+    expect(await screen.findByText("This account has no access to Socialytics, so Claude was not connected.")).toBeInTheDocument();
+    expect(screen.queryByText(/portal admin/i)).toBeNull();
+  });
+
+  it("treats a person whose only role is user as having no access, as the app and the connector do", async () => {
+    f.auth = { isLoading: false, isAuthenticated: false };
+    f.roles.mockResolvedValue({ data: [{ role: "user" }], error: null });
+    open();
+    expect(await screen.findByText("This account has no access to Socialytics, so Claude was not connected.")).toBeInTheDocument();
+    expect(f.deny).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Allow" })).toBeNull();
+  });
+
+  it("does not refuse a valid person while the role check is briefly failing", async () => {
+    f.auth = { isLoading: false, isAuthenticated: false };
+    f.roles
+      .mockResolvedValueOnce({ data: null, error: { message: "Failed to fetch" } })
+      .mockResolvedValueOnce({ data: null, error: { message: "Failed to fetch" } })
+      .mockResolvedValue({ data: [{ role: "moburst_user" }], error: null });
+    open();
+    expect(await screen.findByRole("button", { name: "Allow" })).toBeInTheDocument();
+    expect(f.deny).not.toHaveBeenCalled();
+  });
+
+  it("treats a permanent refusal of the role read as no role instead of waiting on it forever", async () => {
+    f.auth = { isLoading: false, isAuthenticated: false };
+    f.roles.mockResolvedValue({ data: null, error: { code: "42501", message: "permission denied for table user_roles" } });
+    open();
+    await waitFor(() => expect(f.deny).toHaveBeenCalled());
+    expect(f.roles).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Allow" })).toBeNull();
+  });
+
+  it("sends Allow again quietly after a brief error, and keeps the buttons if it still has not gone through", async () => {
+    open();
+    f.approve
+      .mockResolvedValueOnce({ data: null, error: { name: "AuthRetryableFetchError", status: 0, message: "Failed to fetch" } } as never)
+      .mockResolvedValueOnce({ data: { redirect_url: "https://claude.ai/api/mcp/auth_callback?code=c" }, error: null } as never);
+    fireEvent.click(await screen.findByRole("button", { name: "Allow" }));
+    await waitFor(() => expect(f.approve).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("This connection request has expired")).toBeNull();
+  });
+
+  it("asks again for the request's details after a brief error instead of calling it expired", async () => {
+    f.detailsQueue = [{ data: null, error: { name: "AuthRetryableFetchError", status: 0, message: "Failed to fetch" } }];
+    open();
+    expect(await screen.findByRole("button", { name: "Allow" })).toBeInTheDocument();
+    expect(f.get).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText("This connection request has expired")).toBeNull();
   });
 });

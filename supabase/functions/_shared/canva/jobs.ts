@@ -9,6 +9,8 @@ import { type Brief, candidatesFor, optionStates, requestProgress, type JobState
 import { REQUEST_MAX_MINUTES, requestOverdue, type EndReason } from "../design/requestRules.ts";
 import { STORY_PAGE, STORY_SURFACE, isStoryPost, storyLogoPlacement } from "../design/story.ts";
 import { videoRouteFor } from "../video/kit.ts";
+import { pngSize } from "../picture/headers.ts";
+import { settleLogo } from "../design/logoFit.ts";
 
 export const BUCKET = "generated-media";
 
@@ -18,6 +20,11 @@ export interface Settings {
   placement: { anchor: "left" | "center" | "right"; width: number; top: number; left?: number };
   background: string;
   reference_paths: string[];
+  /** Who set the row: a person (the card's save) or the lifecycle. A person's row is never changed automatically. */
+  source?: string | null;
+  // deno-lint-ignore no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  derived?: Record<string, any> | null;
 }
 
 export interface DesignRequest {
@@ -46,12 +53,7 @@ export interface DesignRequest {
   approved_credits?: number | null;
 }
 
-/** A PNG's pixel size from its header; `source` names the file in the error when it is not a PNG. */
-export function pngSize(bytes: Uint8Array, source = "The logo"): [number, number] {
-  const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  if (bytes.length < 24 || v.getUint32(0) !== 0x89504e47) throw new Error(`${source} must be a PNG file.`);
-  return [v.getUint32(16), v.getUint32(20)];
-}
+export { pngSize } from "../picture/headers.ts";
 
 async function logoSize(admin: any, path: string): Promise<[number, number]> {
   const { data, error } = await admin.storage.from(BUCKET).download(path);
@@ -60,14 +62,38 @@ async function logoSize(admin: any, path: string): Promise<[number, number]> {
 }
 
 /**
+ * Add an option's jobs, skipping any the request already has for that option
+ * and slide: a plan that died after inserting its jobs and before leaving
+ * planning runs again and must not draw the same slide twice. The unique index
+ * on (design_request_id, option_index, slide_index or -1) holds the same rule
+ * when two runs insert at once; its refusal of one row means that job is
+ * already there. Each row goes in on its own, so a refused row never keeps
+ * the others out (a carousel planned again with more slides).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function insertJobs(admin: any, requestId: string, optionIndex: number, rows: Array<{ slide_index: number | null }>, what: string): Promise<void> {
+  const { data: there } = await admin.from("canva_finish_jobs").select("slide_index").eq("design_request_id", requestId).eq("option_index", optionIndex);
+  const have = new Set((there ?? []).map((r: { slide_index: number | null }) => r.slide_index ?? -1));
+  const fresh = rows.filter((r) => !have.has(r.slide_index ?? -1));
+  if (!fresh.length) return;
+  for (const row of fresh) {
+    const { error } = await admin.from("canva_finish_jobs").insert(row);
+    if (error && error.code !== "23505") throw new Error(`Could not start ${what}: ${error.message}`);
+  }
+}
+
+/**
  * Start one option: a job that designs the post from a brief and finishes it
  * in Canva, or for a carousel one such job per slide (the slides after the
- * cover wait for it and follow its look).
+ * cover wait for it and follow its look). Answers the settings it used, so
+ * the next option of the same request starts from them.
  */
-export async function startOption(admin: any, req: DesignRequest, settings: Settings, brandName: string, briefIndex: number, optionIndex: number): Promise<void> {
+export async function startOption(admin: any, req: DesignRequest, given: Settings, brandName: string, briefIndex: number, optionIndex: number): Promise<Settings> {
   const brief = req.briefs[briefIndex % req.briefs.length];
+  // The logo is its ink alone before a design is built on it (a logo stored padded is trimmed here, once).
+  const settings = await settleLogo(admin, given, async () => (await import("../lifecycle/imaging.ts")).refitStoredLogo);
   const [lw, lh] = await logoSize(admin, settings.logo_path);
-  if (req.kind === "video") return startVideoOption(admin, req, settings, brandName, brief, optionIndex, [lw, lh]);
+  if (req.kind === "video") { await startVideoOption(admin, req, settings, brandName, brief, optionIndex, [lw, lh]); return settings; }
   const slides = req.kind === "carousel" && brief.slides?.length ? brief.slides : [brief];
   const carousel = req.kind === "carousel" && slides.length > 1;
   // A Story is drawn on its own 9:16 page, as a Story, with the client's logo spot moved into Meta's safe band.
@@ -97,8 +123,8 @@ export async function startOption(admin: any, req: DesignRequest, settings: Sett
       },
     },
   }));
-  const { error } = await admin.from("canva_finish_jobs").insert(rows);
-  if (error) throw new Error(`Could not start a design option: ${error.message}`);
+  await insertJobs(admin, req.id, optionIndex, rows, "a design option");
+  return settings;
 }
 
 /**
@@ -119,7 +145,7 @@ async function startVideoOption(admin: any, req: DesignRequest, settings: Settin
   const route = videoRouteFor(client?.video_style, req.video_route ?? null);
   const style = route === "posts" ? undefined : client?.video_style?.profile as { logo?: string; logo_at?: string; logo_width?: number; people?: string } | undefined;
   const title = `${brandName} ${req.platform ?? ""} video ${optionIndex + 1}`.replace(/\s+/g, " ");
-  const { error } = await admin.from("canva_finish_jobs").insert({
+  const row = {
     client_id: req.client_id,
     created_by: req.requested_by,
     design_request_id: req.id,
@@ -151,8 +177,8 @@ async function startVideoOption(admin: any, req: DesignRequest, settings: Settin
       filmed,
       end_card: endCard,
     },
-  });
-  if (error) throw new Error(`Could not start the video: ${error.message}`);
+  };
+  await insertJobs(admin, req.id, optionIndex, [{ ...row, slide_index: null }], "the video");
 }
 
 /** Designs made by design requests, as opposed to media from older generators or uploads. */
@@ -277,6 +303,8 @@ async function settleRequestNow(admin: any, requestId: string): Promise<void> {
     options_ready: progress.options_ready,
     candidates_started: started,
     updated_at: new Date().toISOString(),
+    // When the designs came back, so the post panel's usual time is measured from started_at to here.
+    ...(progress.status === "ready" ? { ended_at: new Date().toISOString() } : {}),
   }).eq("id", requestId).eq("status", "preparing");
 }
 
@@ -319,6 +347,36 @@ export async function endOverdueRequests(admin: any, now: Date = new Date()): Pr
 
 /** claimed: the job is this pass's for one lease; lost: another pass has it or it ended; failed: its last try was used up by runs that died. */
 export type Claim = "claimed" | "lost" | "failed";
+
+/**
+ * A job's lease renewed to now + ms as a step starts that calls the picture
+ * service: one call may take two timeouts and the retry pause between them,
+ * which outlasts a pass's own lease. Used by the design worker's picture
+ * steps and the video worker's title check. A job stopped meanwhile is left
+ * as it is.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function renewJobLease(admin: any, jobId: string, now: Date, ms: number): Promise<void> {
+  await admin.from("canva_finish_jobs").update({ lease_until: new Date(now.getTime() + ms).toISOString(), updated_at: now.toISOString() })
+    .eq("id", jobId).in("status", ["queued", "running"]);
+}
+
+/**
+ * A job's step and state saved to its row, together, while it is active.
+ * The rule for every picture the image model was paid for (a video's title,
+ * its opening frame, a kit still's edit, a design, a logo removal): stored,
+ * counted, saved to the job row, then used. A run that dies after the save,
+ * in a picture service call that hangs, leaves the picture on the row, so
+ * the next pass goes on from it instead of paying for another. Throws when
+ * the row could not be written, so nothing is used as if it were saved. A
+ * job stopped meanwhile is left as it is.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function saveJobProgress(admin: any, job: { id: string; step: string; state: unknown }): Promise<void> {
+  const { error } = await admin.from("canva_finish_jobs").update({ step: job.step, state: job.state, updated_at: new Date().toISOString() })
+    .eq("id", job.id).in("status", ["queued", "running"]);
+  if (error) throw new Error(`Could not save the job's progress: ${error.message}`);
+}
 
 /**
  * Take a due job for one lease. A job whose lease ran out while it was still

@@ -38,7 +38,7 @@ function capped(text: string, n: number): string {
 
 /** The block from a stored strategy and people's versions of its sections. */
 export function strategyBlock(s: StoredStrategy, edits: Array<{ section_key: string; text: string; value?: unknown }>): string {
-  const mine = new Map(edits.map((e) => [e.section_key, sectionLines(e.section_key, editShown(e))] as const).filter(([, lines]) => lines));
+  const mine = new Map(edits.map((e) => [e.section_key, sectionLines(e.section_key, editShown(e.section_key, e, s.sections?.[e.section_key]))] as const).filter(([, lines]) => lines));
   const text = (key: string) => mine.get(key) ?? sectionLines(key, s.sections?.[key]);
   const oneLine = (t: string) => t.replace(/\s*\n+\s*/g, " ");
   const part = (title: string, body: string) => (body ? `${title}:\n${body}` : "");

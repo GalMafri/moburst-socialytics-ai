@@ -11,8 +11,9 @@
 // real Supabase sessions), so requiring it here costs the frontend nothing.
 //
 // The role check runs through the SQL helpers (is_moburst_staff /
-// can_write_client) with the CALLER's token, so RLS semantics — including
-// company-scoped staff — apply exactly as they do to direct table access.
+// can_write_client) with the CALLER's token, so RLS semantics apply exactly
+// as they do to direct table access: admins reach every client, Moburst users
+// every non-demo client, and client users only their own companies.
 
 import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { createClient } from "../supabase.ts";
@@ -32,8 +33,8 @@ export interface StaffCaller {
 
 /**
  * Require a signed-in Moburst staff member. Optionally require write access to
- * one client (company-scoped staff fail this for companies outside their
- * allowlist).
+ * one client (can_write_client answers for the caller: admins and Moburst
+ * users pass for every client they can reach).
  */
 export async function requireStaff(
   req: Request,

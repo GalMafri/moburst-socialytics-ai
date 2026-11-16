@@ -4,6 +4,7 @@
 // Cadence is per week so periods of different lengths compare fairly.
 
 import { normalizePlatform, platformLabel } from "@/lib/platform";
+import { displayCompanyName } from "@/lib/companyName";
 import { engagementRate, isPublishedReportPost, normalizedCompetitiveMetrics, postReach } from "@/lib/competitiveMetrics";
 
 export type MixEntry = { key: string; count: number };
@@ -199,7 +200,8 @@ export function diffCompanies(prev: CompanyStats[], curr: CompanyStats[], max = 
   const out: Change[] = [];
   for (const c of curr) {
     const p = prevBy.get(lower(c.name));
-    const who = c.name;
+    // Matched by the stored name above; shown by the readable one.
+    const who = displayCompanyName(c.name) || c.name;
     const mine = c.is_client;
     if (!p) {
       if (c.post_count > 0) {

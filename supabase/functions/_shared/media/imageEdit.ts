@@ -6,11 +6,11 @@
 
 import { decode as base64Decode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { pngSize } from "../canva/jobs.ts";
+import { ModelBusy } from "./modelBusy.ts";
+
+export { ModelBusy };
 
 export const OPENAI_IMAGE_MODEL = "gpt-image-2.5-flare";
-
-/** The image model is at its rate limit or briefly down; the step is tried again on a later pass. */
-export class ModelBusy extends Error {}
 
 export async function imageEdit(apiKey: string, images: { bytes: Uint8Array; name: string }[], prompt: string, size: [number, number], mask?: Uint8Array): Promise<Uint8Array> {
   const form = new FormData();

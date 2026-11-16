@@ -117,14 +117,14 @@ describe('the decks on a report', () => {
 });
 
 describe('where a note, a section or a deck came from', () => {
-  it('says From Claude, by the person, for what was saved from Claude', () => {
+  it('says who saved what came from the connector: From Claude on notes and decks, From the connector on a strategy card', () => {
     expect(noteAddedLine({ added_by_name: 'Sinead', created_at: '2026-11-03T12:00:00Z', source: 'claude' }, 'America/New_York')).toBe('From Claude, by Sinead on Nov 3, 2026');
     expect(noteAddedLine({ added_by_name: null, created_at: '2026-11-03T12:00:00Z', source: 'claude' })).toBe('From Claude on Nov 3, 2026');
     expect(noteAddedLine({ added_by_name: 'Sinead', created_at: '2026-10-28T12:00:00Z', source: 'app' })).toBe('Added by Sinead on Oct 28, 2026');
     expect(noteAddedLine({ added_by_name: '', created_at: '2026-10-28T12:00:00Z' })).toBe('Added on Oct 28, 2026');
     expect(deckAddedLine({ added_by_name: 'Sinead', created_at: '2026-11-03T12:00:00Z', source: 'claude' }, { staff: true })).toBe('From Claude, by Sinead on Nov 3, 2026');
     expect(deckAddedLine({ added_by_name: 'Sinead', created_at: '2026-11-03T12:00:00Z', source: 'claude' }, { staff: false })).toBe('Added on Nov 3, 2026');
-    expect(editedChip({ editor_name: 'Sinead Cronin', edited_at: '2026-11-03T12:00:00Z', source: 'claude' })).toBe('From Claude, by Sinead, 3 Nov');
-    expect(editedChip({ editor_name: 'Neria', edited_at: '2026-11-03T12:00:00Z', source: 'app' })).toBe('Edited by Neria, 3 Nov');
+    expect(editedChip({ editor_name: 'Sinead Cronin', edited_at: '2026-11-03T12:00:00Z', source: 'claude' })).toBe('From the connector, by Sinead, Nov 3');
+    expect(editedChip({ editor_name: 'Neria', edited_at: '2026-11-03T12:00:00Z', source: 'app' })).toBe('Edited by Neria, Nov 3');
   });
 });

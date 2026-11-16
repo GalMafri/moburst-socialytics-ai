@@ -2,7 +2,7 @@
 // The social analyses' requests and checks, and the two provider clients.
 import { describe, expect, it } from "vitest";
 import { MOBURST, TRENDS } from "../../../../fixtures/pipelines/social";
-import { BRIEF_SCHEMA, briefAnswer, briefRequest, repairRequest, SYNTHESIS_SCHEMA, synthesisProblems, synthesisRequest } from "../../../../functions/_shared/pipelines/social/analysis";
+import { analysisExemptions, analysisNames, BRIEF_SCHEMA, briefAnswer, briefRequest, repairRequest, SYNTHESIS_SCHEMA, synthesisProblems, synthesisRequest } from "../../../../functions/_shared/pipelines/social/analysis";
 import { gammaClient, GAMMA_TEMPLATE_ID, sproutReader } from "../../../../functions/_shared/pipelines/social/providers";
 import { COMPARED_RATE, SPROUT_RATE, synthesisText } from "../../../../functions/_shared/pipelines/social/prompt";
 import { COMPARED_RATE_LABEL, SPROUT_RATE_LABEL } from "../../../../../src/lib/rateLabels";
@@ -51,6 +51,48 @@ describe("the synthesis", () => {
     expect(synthesisProblems({ sprout_performance_analysis: { platform_breakdown: [{ platform: "LinkedIn", insights: "x" }] } })).toEqual(["sprout_performance_analysis.platform_breakdown[0].insights must be a list of strings"]);
   });
 
+  it("sends the text a client reads back when it is spelled the British way, with the client's own names and quoted posts left alone", () => {
+    const text = (over: Any) => ({ sprout_performance_analysis: { key_insights: ["Reach is steady: behaviour held."], ...over } });
+    expect(synthesisProblems(text({}))).toEqual(['sprout_performance_analysis.key_insights[0] spells "behaviour" the British way; use American English.']);
+    expect(synthesisProblems({ sprout_performance_analysis: { month_over_month_summary: "Audience behavior held." }, competitive_takeaways: ["Peers organise weekly: recognisable themes."], industry_trends_analysis: { overview: "Optimised reels lead." } })).toEqual([
+      'industry_trends_analysis.overview spells "Optimised" the British way; use American English.',
+      'competitive_takeaways[0] spells "organise" the British way; use American English.',
+    ]);
+    expect(synthesisProblems(text({ key_insights: ["The analyses show growth: color leads."] }))).toEqual([]);
+    expect(synthesisProblems(text({ key_insights: ["Colour Pop leads: its colour posts won."] }), analysisExemptions({ client_name: "Colour Pop" }))).toEqual(['sprout_performance_analysis.key_insights[0] spells "colour" the British way; use American English.']);
+    expect(synthesisProblems(text({ key_insights: ['Colour Pop leads: "Our colour range" won.'] }), analysisExemptions({ client_name: "Colour Pop" }))).toEqual([]);
+    // The content calendar is post copy in the client's own language: not checked.
+    expect(synthesisProblems({ sprout_performance_analysis: {}, content_calendar: [{ caption: "Our colour range" }] })).toEqual([]);
+    // A format problem is reported alone, as before.
+    expect(synthesisProblems({ sprout_performance_analysis: { key_insights: "behaviour" } })).toEqual(["sprout_performance_analysis.key_insights must be a list of strings"]);
+  });
+
+  it("accepts a British word the input already holds, and still sends back one the model wrote on its own", () => {
+    const input = { client_name: "Acme", brief: { content_pillars: ["Human Behaviour Insights"] }, industry_trends: { themes: [{ title: "Colour Your Accessory Box", note: "favourite picks, organise early" }] } };
+    const exempt = analysisExemptions(input);
+    const text = (t: string) => ({ sprout_performance_analysis: { key_insights: [t] } });
+    expect(synthesisProblems(text("Our Human Behaviour Insights pillar led."), exempt)).toEqual([]);
+    expect(synthesisProblems(text("The Colour Your Accessory Box theme and favourite picks: organise early."), exempt)).toEqual([]);
+    expect(synthesisProblems(text("Audience behaviour held."), exempt)).toEqual(['sprout_performance_analysis.key_insights[0] spells "behaviour" the British way; use American English.']);
+    expect(synthesisProblems(text("Audience behavior held. Humour won."), exempt)).toEqual(['sprout_performance_analysis.key_insights[0] spells "Humour" the British way; use American English.']);
+    // The same pillar word is the model's own spelling for a client whose input does not hold it.
+    expect(synthesisProblems(text("Our Human Behaviour Insights pillar led."), analysisExemptions({ client_name: "Other" }))).toHaveLength(1);
+  });
+
+  it("accepts a source word that carries a possessive or a hyphen, as the input wrote it", () => {
+    const exempt = analysisExemptions({ client_name: "Acme", brief: { content_pillars: ["We love Under Armour's new line", "Our colour-coded planner"] } });
+    const text = (t: string) => ({ sprout_performance_analysis: { key_insights: [t] } });
+    expect(synthesisProblems(text("Under Armour's launch post led."), exempt)).toEqual([]);
+    expect(synthesisProblems(text("The colour-coded planner post won."), exempt)).toEqual([]);
+    // The model's own word next to them is still its spelling.
+    expect(synthesisProblems(text("The colour-coded planner post won; colour helped."), exempt)).toHaveLength(1);
+  });
+
+  it("names the client, its profiles and its competitors", () => {
+    expect(analysisNames({ client_name: "Acme", sprout: { profiles: [{ name: "Acme IG" }] }, competitive_context: { competitors: [{ name: "Rival Co" }] } })).toEqual(["Acme", "Acme IG", "Rival Co"]);
+    expect(analysisNames({})).toEqual([]);
+  });
+
   it("checks the industry trends analysis: an overview, themes with their platforms and a note, opportunities and takeaways", () => {
     const good = { overview: "o", themes: [{ title: "T", platforms: ["TikTok"], note: "n" }], opportunities_for_client: ["a"], key_takeaways: ["b"] };
     expect(synthesisProblems({ sprout_performance_analysis: {}, industry_trends_analysis: good })).toEqual([]);
@@ -82,7 +124,7 @@ describe("the synthesis", () => {
     expect(COMPARED_RATE).toBe(COMPARED_RATE_LABEL.toLowerCase());
     expect(SPROUT_RATE).toBe(SPROUT_RATE_LABEL);
     const text = synthesisText(json);
-    expect(text).toContain(`call that rate the ${COMPARED_RATE_LABEL.toLowerCase()}, and never give it the bare name of the client's ${SPROUT_RATE_LABEL}`);
+    expect(text).toContain(`call that rate the ${COMPARED_RATE_LABEL.toLowerCase()}, and never give it the bare name of the client's ${SPROUT_RATE_LABEL.toLowerCase()}`);
     // Without a competitive context there is no comparison to name.
     expect(synthesisText({ ...json, competitive_context: null })).not.toContain(COMPARED_RATE);
   });

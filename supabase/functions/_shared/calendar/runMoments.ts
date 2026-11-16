@@ -20,6 +20,7 @@ import { clipText } from "../text/clip.ts";
 import { collectOwnedCompetitive } from "../competitive/ownedSource.ts";
 import { activeTerms } from "../trends/profile.ts";
 import { strategyBlock } from "../strategy/prompt.ts";
+import { editShown, sectionLines } from "../strategy/sections.ts";
 import { learnFromSignal, loadClientVoice } from "../voice/load.ts";
 import { clientCompanyId, isClientPost, platformName, type OwnPost } from "./evidence.ts";
 import {
@@ -228,14 +229,18 @@ function briefOf(client: Any): string {
 }
 
 /** The strategy's sections: for the judge, audience, positioning and what to avoid; for the brand's own words, everything but what to avoid. */
-async function strategyOf(admin: Db, clientId: string): Promise<{ forJudge: string; ownWords: string }> {
+export async function strategyOf(admin: Db, clientId: string): Promise<{ forJudge: string; ownWords: string }> {
   const { data: s, error } = await admin.from("content_strategies").select("sections, written_at").eq("client_id", clientId).maybeSingle();
   if (error || !s?.written_at) return { forJudge: "", ownWords: "" };
-  const { data: edits } = await admin.from("content_strategy_edits").select("section_key, text").eq("client_id", clientId);
-  const mine = new Map(((edits ?? []) as Any[]).filter((e) => str(e.text)).map((e) => [String(e.section_key), String(e.text)]));
-  const sections = { ...(s.sections ?? {}) } as Record<string, string>;
-  for (const [k, v] of mine) sections[k] = v;
-  const pick = (keys: string[]) => Object.fromEntries(keys.map((k) => [k, String(sections[k] ?? "")]));
+  const { data: edits } = await admin.from("content_strategy_edits").select("section_key, text, value").eq("client_id", clientId);
+  // Each section as plain lines: a person's version (their words over the latest write's numbers and dates) where there is one, else the written one.
+  const product = (s.sections ?? {}) as Record<string, unknown>;
+  const sections: Record<string, string> = Object.fromEntries(Object.entries(product).map(([k, v]) => [k, sectionLines(k, v)]));
+  for (const e of (edits ?? []) as Any[]) {
+    const lines = sectionLines(String(e.section_key), editShown(String(e.section_key), e, product[String(e.section_key)]));
+    if (lines) sections[String(e.section_key)] = lines;
+  }
+  const pick = (keys: string[]) => Object.fromEntries(keys.map((k) => [k, sections[k] ?? ""]));
   return {
     forJudge: strategyBlock({ sections: pick(["audience", "positioning", "avoid"]), platforms: [], pillars: [] }, []),
     ownWords: Object.entries(sections).filter(([k]) => k !== "avoid").map(([, v]) => String(v ?? "")).join("\n"),

@@ -84,3 +84,10 @@ describe("the LinkedIn source pipeline, shadowing n8n", () => {
     expect(r.db.tables.shadow_linkedin_sources ?? []).toEqual([]);
   });
 });
+
+describe("linkedInSourcePipeline: the horizon of an account wait", () => {
+  it("is the run's own hours from its start, so a wait for the Apify token never holds the run longer than the run may last", () => {
+    const run = { started_at: "2026-11-12T08:00:00.000Z", input: {} } as never;
+    expect(linkedInSourcePipeline().waitHorizon!(run)!.toISOString()).toBe("2026-11-12T20:00:00.000Z");
+  });
+});

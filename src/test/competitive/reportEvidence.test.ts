@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { competitiveReportQuality, withCompetitiveEvidenceLimits } from '../../../supabase/functions/_shared/competitive/reportEvidence';
+import { competitiveReportQuality, newestReadyReport, withCompetitiveEvidenceLimits } from '../../../supabase/functions/_shared/competitive/reportEvidence';
 import { normalizedCompetitiveMetrics } from '../../../supabase/functions/_shared/competitive/reportMetrics';
 
 const fixture = () => ({schema_note:'Existing coverage note.', aggregates:{companies:[
@@ -121,4 +121,14 @@ it('limits suggested tests to observed client and competitor channels and withho
  expect(result.ai_analysis.posting_time_insights.empty_airtime).toBeNull();
  expect(result.aggregates).toEqual(input.aggregates);
  expect(withCompetitiveEvidenceLimits(result)).toEqual(result);
+});
+
+it('picks the newest ready report from a client\'s complete rows, behind any newer held one', () => {
+ const ready={aggregates:{companies:[{name:'A',post_count:3}]}};
+ const held={provider_status:2,aggregates:{companies:[{name:'A',post_count:3}]}};
+ const rows=[{id:'new-held',report_data:held},{id:'older-ready',report_data:ready},{id:'oldest-ready',report_data:ready}];
+ expect(newestReadyReport(rows)?.id).toBe('older-ready');
+ expect(newestReadyReport([rows[0]])).toBeNull();
+ expect(newestReadyReport([])).toBeNull();
+ expect(newestReadyReport(null)).toBeNull();
 });

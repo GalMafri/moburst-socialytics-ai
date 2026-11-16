@@ -73,4 +73,34 @@ describe("returnTo", () => {
       expect(consumeReturnTo()).toBeNull();
     },
   );
+
+  // Sign-in parameters are credentials. They are never kept for later, from
+  // any caller, so the address bar never gets a used token back.
+  it.each([
+    ["/?hubToken=abc", null],
+    ["/settings?hubToken=abc", "/settings"],
+    ["/reports?client=bader-law&hubToken=abc", "/reports?client=bader-law"],
+    ["/reports?token=abc&client=bader-law", "/reports?client=bader-law"],
+  ])("drops sign-in parameters from %s", (path, stored) => {
+    rememberReturnTo(path);
+    expect(consumeReturnTo()).toBe(stored);
+  });
+
+  // The landing page is where the journey ends anyway, so it never replaces a
+  // deep link stored a moment earlier.
+  it("keeps a stored deep link when the landing page is remembered", () => {
+    rememberReturnTo("/admin/usage");
+    rememberReturnTo("/");
+    expect(consumeReturnTo()).toBe("/admin/usage");
+  });
+
+  // A path with no sign-in parameter is stored byte for byte: rebuilding the
+  // query would turn %20 into + and "?flag" into "?flag=".
+  it.each(["/reports?q=a%20b", "/reports?flag", "/reports?q=a%20b&flag#top"])(
+    "stores %s unchanged",
+    (path) => {
+      rememberReturnTo(path);
+      expect(consumeReturnTo()).toBe(path);
+    },
+  );
 });

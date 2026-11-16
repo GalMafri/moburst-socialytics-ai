@@ -9,7 +9,17 @@
  * screen prints one of these values raw.
  */
 
-import { competitiveReportQuality, HELD_REDOS } from "../../supabase/functions/_shared/competitive/reportEvidence";
+import { competitiveReportQuality, heldRedo, redoCanStillCome } from "../../supabase/functions/_shared/competitive/reportEvidence";
+
+// ── Missing values and counts ──────────────────────────────────────────────
+
+/** The one word for a figure that is not there: a screen never prints a dash or a blank for it. "None yet" stays for lists that will fill. */
+export const NO_DATA = "No data";
+
+/** "1 competitor", "3 competitors": the word follows the number. The plural is the singular and an "s" unless given. */
+export function countOf(n: number, one: string, many: string = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
 
 // ── Platforms ──────────────────────────────────────────────────────────────
 
@@ -135,7 +145,7 @@ const STATUS: Record<RunState, Omit<RunStatus, "hidden">> = {
   held: { state: "held", label: "Being redone", variant: "outline" },
 };
 
-/** A held period whose redos are used up: it stays unshared until the next scheduled run. */
+/** A held run no redo can come for any more: it stays unshared until the next scheduled run. */
 const HELD_DONE_LABEL = "Not shared";
 
 function statusFor(state: RunState, viewer: Viewer): RunStatus {
@@ -156,14 +166,19 @@ export function monthlyReportStatus(row: { status?: string | null }, viewer: Vie
  * competitive_reports). It takes the whole row and works out whether the run
  * is held back itself, so no screen can show a held run as ready.
  */
-export function competitiveRunStatus(row: { status?: string | null; report_data?: unknown }, viewer: Viewer): RunStatus {
+export function competitiveRunStatus(row: { status?: string | null; report_data?: unknown; created_at?: string | null; duration_minutes?: number | null }, viewer: Viewer, now: number = Date.now(), heldRuns = 1, opts: { newerRow?: boolean } = {}): RunStatus {
   const s = String(row?.status ?? "").toLowerCase();
   if (RUNNING.includes(s)) return statusFor("running", viewer);
-  if (DONE.includes(s)) return statusFor(competitiveReportQuality(row.report_data).ready ? "ready" : "held", viewer);
+  if (DONE.includes(s)) {
+    if (competitiveReportQuality(row.report_data).ready) return statusFor("ready", viewer);
+    // "Being redone" only while a redo can still come, as the dispatch decided it on the row; after that the run is simply not shared.
+    const held = statusFor("held", viewer);
+    return redoCanStillCome(row.created_at, heldRuns, now, { durationMinutes: row.duration_minutes, newerRow: opts.newerRow, redo: heldRedo(row.report_data) }) ? held : { ...held, label: HELD_DONE_LABEL };
+  }
   return statusFor("scheduled", viewer);
 }
 
-type RunRow = { id?: string; client_id?: string | null; status?: string | null; report_data?: unknown; date_range_start?: string | null; date_range_end?: string | null; created_at?: string | null };
+type RunRow = { id?: string; client_id?: string | null; duration_minutes?: number | null; status?: string | null; report_data?: unknown; date_range_start?: string | null; date_range_end?: string | null; created_at?: string | null };
 
 function periodKey(row: RunRow): string {
   const rd = (Array.isArray(row.report_data) ? row.report_data[0] : row.report_data) as { period?: { start?: string; end?: string } } | null | undefined;
@@ -173,22 +188,48 @@ function periodKey(row: RunRow): string {
 }
 
 /**
+ * How many held runs each period has: its complete competitive rows that did
+ * not pass the checks. Only a row written before the dispatch recorded its
+ * redo decision (report_data.redo) is read by this count.
+ */
+export function heldRunCounts(rows: RunRow[] | null | undefined): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const r of rows ?? []) {
+    if (!DONE.includes(String(r?.status ?? "").toLowerCase()) || competitiveReportQuality(r.report_data).ready) continue;
+    counts.set(periodKey(r), (counts.get(periodKey(r)) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/** The held runs the period of `row` has among `rows`, `row` counted once: what the report page passes so it agrees with the list. */
+export function heldRunsOfPeriod(row: RunRow, rows: RunRow[] | null | undefined): number {
+  const others = (rows ?? []).filter((r) => r.id !== row.id);
+  return Math.max(1, heldRunCounts([row, ...others]).get(periodKey(row)) ?? 1);
+}
+
+/** Whether the period of `row` has a complete row made after it: its redo, or the next scheduled run, has already come. */
+export function newerRowOfPeriod(row: RunRow, rows: RunRow[] | null | undefined): boolean {
+  const key = periodKey(row);
+  return (rows ?? []).some((r) => r.id !== row.id && periodKey(r) === key && DONE.includes(String(r?.status ?? "").toLowerCase()) && String(r.created_at ?? "") > String(row.created_at ?? ""));
+}
+
+/**
  * The runs a list shows. Rows this viewer may not see are left out (a run
  * that did not finish is never listed). A held run is hidden behind a ready
  * or running run for the same client and period, and a period held more than
- * once shows its newest held run only, which reads "Not shared" once the
- * product has made it again HELD_REDOS times.
+ * once shows its newest held run only, which reads "Not shared" once no redo
+ * can come for it (the dispatch's decision on the row, reportEvidence.ts).
  */
-export function listedRuns<T extends RunRow>(kind: "monthly" | "competitive", rows: T[] | null | undefined, viewer: Viewer): Array<T & { display: RunStatus }> {
-  const status = (row: T) => (kind === "monthly" ? monthlyReportStatus(row, viewer) : competitiveRunStatus(row, viewer));
+export function listedRuns<T extends RunRow>(kind: "monthly" | "competitive", rows: T[] | null | undefined, viewer: Viewer, now: number = Date.now()): Array<T & { display: RunStatus }> {
+  const heldCounts = kind === "competitive" ? heldRunCounts(rows) : new Map<string, number>();
+  const status = (row: T) => (kind === "monthly" ? monthlyReportStatus(row, viewer) : competitiveRunStatus(row, viewer, now, heldCounts.get(periodKey(row)) ?? 1, { newerRow: newerRowOfPeriod(row, rows) }));
   const all = (rows ?? []).map((row) => ({ ...row, display: status(row) }));
   const covered = new Set(all.filter((r) => r.display.state === "ready" || r.display.state === "running").map((r) => periodKey(r)));
   const held = new Map<string, Array<T & { display: RunStatus }>>();
   for (const r of all) if (r.display.state === "held") held.set(periodKey(r), [...(held.get(periodKey(r)) ?? []), r]);
   const newestHeld = new Map([...held].map(([key, list]) => [key, [...list].sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")))[0]]));
   return all
-    .filter((r) => !r.display.hidden && (r.display.state === "ready" || r.display.state === "running" || (!covered.has(periodKey(r)) && newestHeld.get(periodKey(r)) === r)))
-    .map((r) => (r.display.state === "held" && (held.get(periodKey(r))?.length ?? 0) > HELD_REDOS ? { ...r, display: { ...r.display, label: HELD_DONE_LABEL } } : r));
+    .filter((r) => !r.display.hidden && (r.display.state === "ready" || r.display.state === "running" || (!covered.has(periodKey(r)) && newestHeld.get(periodKey(r)) === r)));
 }
 
 // ── Countries and languages ────────────────────────────────────────────────
@@ -389,6 +430,19 @@ export function formatNumbersInText(text: string): string {
   });
 }
 
+/**
+ * A figure in the short form the charts and tiles use: 1,969,952 reads 1.97M,
+ * 12,400 reads 12.4K, 5.357 reads 5.4. From a million up two decimals, so a
+ * large account does not round to a whole million.
+ */
+export function compactNumber(v: number): string {
+  if (!Number.isFinite(v)) return "0";
+  if (Math.abs(v) >= 1_000_000) return `${(v / 1_000_000).toFixed(2).replace(/\.?0+$/, "")}M`;
+  if (Math.abs(v) >= 10_000) return `${(v / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
+  // Below 100 one decimal is enough ("5.4 engagements / post", not "5.357"); above it, whole numbers.
+  return v.toLocaleString("en-US", { maximumFractionDigits: Math.abs(v) < 100 ? 1 : 0 });
+}
+
 // ── Schedules ──────────────────────────────────────────────────────────────
 
 /**
@@ -486,7 +540,7 @@ export interface OnboardingFacts {
   regions: string;
   languages: string;
   brief: string;
-  competitors: { names: string[]; tracking: string };
+  competitors: { tracking: string };
 }
 
 /** The value's record in field_sources: who set it, when, and where the lifecycle's value came from. */
@@ -589,13 +643,12 @@ export function onboardingFacts(client: Record<string, unknown> | null | undefin
   }
 
   // Competitors and tracking.
-  const picked = by("competitors")?.status === "done" && Array.isArray(result("competitors").selected) ? (result("competitors").selected as unknown[]).map(String) : [];
   const trackingWait = waitingFor("tracking");
   const tracking = trackingWait === "client_website" ? "RivalIQ follows companies by their website, so tracking starts once the client's website is found."
     : trackingWait === "rivaliq_full" ? "The RivalIQ plan is full. Tracking starts when a place opens."
     : trackingWait === "own_site" ? "RivalIQ follows companies by their website, and the client's website is a page on another client's site, so tracking starts once the client has a site of its own." : "";
 
-  return { website, logo, timezone, regions, languages, brief, competitors: { names: picked, tracking } };
+  return { website, logo, timezone, regions, languages, brief, competitors: { tracking } };
 }
 
 /** "America/New_York" as people say it: "Eastern Time (New York)". */

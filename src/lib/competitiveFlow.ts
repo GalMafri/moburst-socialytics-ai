@@ -1,4 +1,5 @@
 import { formatDate } from "@/lib/display";
+import { heldRedo, redoCanStillCome } from "../../supabase/functions/_shared/competitive/reportEvidence";
 
 /**
  * Plain language for the competitive flow.
@@ -125,18 +126,22 @@ export function describeReport(report: ReportRow | null): FlowState {
  * Why an analysis is being made again, as facts. Nothing here asks anyone
  * to act: the product makes a held analysis again once a day (HELD_REDOS
  * times, run-scheduled-jobs/dispatch.ts). Staff read the source's name; a
- * client (staff = false) reads the same fact with no vendor named.
+ * client (staff = false) reads the same fact with no vendor named. Once no
+ * redo can come (the dispatch decided none on the row, or a newer row exists;
+ * for an older row with no decision, the count and wait of reportEvidence.ts
+ * redoCanStillCome) it is "Not shared" and says nothing about being made again.
  */
-export function competitiveRecovery(data: any, staff = true): { title: string; detail: string } {
-  const title = "Being redone";
+export function competitiveRecovery(data: any, staff = true, madeAt?: string | null, heldRuns = 1, opts: { durationMinutes?: number | null; newerRow?: boolean } = {}): { title: string; detail: string } {
+  const redo = redoCanStillCome(madeAt, heldRuns, Date.now(), { ...opts, redo: heldRedo(data) });
+  const title = redo ? "Being redone" : "Not shared";
   const reasons = (data?.quality_check?.reasons || []).join(' ');
-  const again = "The product makes it again once a day, and it is shared when its figures pass.";
+  const again = redo ? " The product makes it again once a day, and it is shared when its figures pass." : "";
   if (data?.provider_status === 2 || /still collecting/i.test(reasons + ' ' + (data?.error || ''))) {
-    return { title, detail: `${staff ? "RivalIQ had" : "The source had"} not finished collecting these profiles when this analysis ran, so its figures are incomplete and it is not shared. ${again}` };
+    return { title, detail: `${staff ? "RivalIQ had" : "The source had"} not finished collecting these profiles when this analysis ran, so its figures are incomplete and it is not shared.${again}` };
   }
   const companies = data?.aggregates?.companies;
   if (Array.isArray(companies) && companies.length && companies.every((c: any) => c.post_count === 0 && (c.observed_post_count ?? c.post_count) === 0)) {
-    return { title, detail: `${staff ? "RivalIQ returned" : "The source returned"} no posts for the client or the selected competitors in this date range. This does not establish that these companies did not publish. ${again}` };
+    return { title, detail: `${staff ? "RivalIQ returned" : "The source returned"} no posts for the client or the selected competitors in this date range. This does not establish that these companies did not publish.${again}` };
   }
-  return { title, detail: `Its source figures did not pass the checks, so it is not shared. ${again}` };
+  return { title, detail: `Its source figures did not pass the checks, so it is not shared.${again}` };
 }

@@ -19,8 +19,8 @@ const TYPES = readFileSync(join(__dirname, "..", "integrations", "supabase", "ty
 const RUN_WEEK = readFileSync(join(__dirname, "..", "..", "supabase", "functions", "_shared", "calendar", "runWeek.ts"), "utf8");
 
 describe("calendar_post_worked keeps a person's posts out of every rewrite nobody asked for", () => {
-  it("is defined last by the client notes migration", () => {
-    expect(newest.file).toBe("20261109100000_client_notes.sql");
+  it("is defined last by the sent-only migration", () => {
+    expect(newest.file).toBe("20261113100730_calendar_post_worked_sent_only.sql");
   });
 
   it("answers yes for a post a person edited or moved (touched_at)", () => {
@@ -41,8 +41,8 @@ describe("calendar_post_worked keeps a person's posts out of every rewrite nobod
   });
 
   it("answers yes for a post scheduled to Sprout, by its key or by its copy", () => {
-    expect(newest.body).toContain("exists (select 1 from scheduled_posts sp where sp.client_id = p_client and sp.calendar_post_key = p_key)");
-    expect(newest.body).toMatch(/scheduled_posts sp where sp\.client_id = p_client and lower\(coalesce\(sp\.platform, ''\)\) = lower\(p_platform\) and left\(btrim\(coalesce\(sp\.post_content, ''\)\), 200\) = left\(btrim\(p_copy\), 200\)/);
+    expect(newest.body).toContain("exists (select 1 from scheduled_posts sp where sp.client_id = p_client and sp.calendar_post_key = p_key and sp.status in ('scheduled', 'sent_now', 'asked', 'unconfirmed', 'published'))");
+    expect(newest.body).toMatch(/scheduled_posts sp where sp\.client_id = p_client and lower\(coalesce\(sp\.platform, ''\)\) = lower\(p_platform\) and sp\.status in \('scheduled', 'sent_now', 'asked', 'unconfirmed', 'published'\) and left\(btrim\(coalesce\(sp\.post_content, ''\)\), 200\) = left\(btrim\(p_copy\), 200\)/);
   });
 
   it("is written only where nobody changed the copy or moved the post since it was read", () => {

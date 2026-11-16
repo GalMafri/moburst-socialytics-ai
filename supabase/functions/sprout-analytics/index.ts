@@ -4,13 +4,20 @@
 // Sprout directly, the same way the n8n workflow does, and also fetches the
 // equal-length period before the window for like-for-like comparison.
 //
-// Request:  { client_id, start: "yyyy-mm-dd", end: "yyyy-mm-dd" }  (Bearer JWT)
+// Request:  { client_id, start: "yyyy-mm-dd", end: "yyyy-mm-dd", compare?: boolean }  (Bearer JWT)
+//           compare false skips the previous-period read (a caller that adds
+//           several windows together and shows no comparison); the previous
+//           fields then come back null.
 // Response: { range, previous_range, profiles, totals, previous_totals, changes,
-//             daily: [{ date, ...metrics }], by_profile: [...], top_posts: [...] }
+//             daily: [{ date, ...metrics }], by_profile: [...], top_posts: [...],
+//             top_posts_failed_networks: [...] }
+// A top post carries its reach (impressions, or views on YouTube, the figure
+// the posts are ranked on) and its picture (thumbnail_url, media_type).
 
 import { secretEquals } from "../_shared/auth/secretEquals.ts";
 import { createClient } from "../_shared/supabase.ts";
 import { defaultSproutCustomerId } from "../_shared/sprout/customer.ts";
+import { readTopPosts } from "../_shared/sprout/topPosts.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -102,41 +109,6 @@ async function profileAnalytics(token: string, customerId: string, profileIds: n
   };
 }
 
-/** Posts published in the window, ranked by impressions, with their permalinks. */
-async function topPosts(token: string, customerId: string, profileIds: number[], start: string, end: string) {
-  try {
-    const resp = await sproutPost(token, customerId, "analytics/posts", {
-      timezone: "UTC",
-      filters: [`customer_profile_id.eq(${profileIds.join(", ")})`, `created_time.in(${start}T00:00:00...${end}T23:59:59)`],
-      metrics: ["lifetime.impressions", "lifetime.reactions", "lifetime.comments_count", "lifetime.shares_count", "lifetime.post_link_clicks", "lifetime.video_views"],
-      fields: ["created_time", "perma_link", "text", "post_type"],
-      sort: ["lifetime.impressions:desc"],
-      page: 1,
-      limit: 20,
-    });
-    const rows: any[] = Array.isArray(resp?.data) ? resp.data : [];
-    return rows
-      .map((r) => ({
-        permalink: r.perma_link || r.permalink || null,
-        text: r.text || "",
-        posted_at: r.created_time || null,
-        post_type: r.post_type || null,
-        profile_id: r.dimensions?.customer_profile_id ?? r.customer_profile_id ?? null,
-        impressions: num(r.metrics?.["lifetime.impressions"]),
-        reactions: num(r.metrics?.["lifetime.reactions"]),
-        comments: num(r.metrics?.["lifetime.comments_count"]),
-        shares: num(r.metrics?.["lifetime.shares_count"]),
-        link_clicks: num(r.metrics?.["lifetime.post_link_clicks"]),
-        video_views: num(r.metrics?.["lifetime.video_views"]),
-      }))
-      .sort((a, b) => b.impressions - a.impressions)
-      .slice(0, 10);
-  } catch (e) {
-    console.error("[sprout-analytics] posts query failed:", e instanceof Error ? e.message : e);
-    return [];
-  }
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
@@ -179,21 +151,25 @@ Deno.serve(async (req) => {
     const prevEnd = new Date(startD.getTime() - DAY);
     const prevStart = new Date(prevEnd.getTime() - (days - 1) * DAY);
     const token = await sproutToken();
-    const [current, previous, posts] = await Promise.all([
+    const compare = body.compare !== false;
+    const [current, previous, topRead] = await Promise.all([
       profileAnalytics(token, customerId, profileIds, start, end),
-      profileAnalytics(token, customerId, profileIds, iso(prevStart), iso(prevEnd)),
-      topPosts(token, customerId, profileIds, start, end),
+      compare ? profileAnalytics(token, customerId, profileIds, iso(prevStart), iso(prevEnd)) : Promise.resolve(null),
+      readTopPosts((path, req) => sproutPost(token, customerId, path, req), profiles || [], start, end),
     ]);
+    const posts = topRead.posts;
 
     const changes: Record<string, { current: number; previous: number; absolute: number; percent: number | null }> = {};
-    for (const m of METRICS) {
-      const c = current.totals[m], p = previous.totals[m];
-      changes[m] = { current: c, previous: p, absolute: c - p, percent: p > 0 ? Math.round(((c - p) / p) * 1000) / 10 : null };
+    if (previous) {
+      for (const m of METRICS) {
+        const c = current.totals[m], p = previous.totals[m];
+        changes[m] = { current: c, previous: p, absolute: c - p, percent: p > 0 ? Math.round(((c - p) / p) * 1000) / 10 : null };
+      }
     }
     const profileMeta = new Map((profiles || []).map((p: any) => [String(p.sprout_profile_id), p]));
     const byProfile = [...current.byProfile.entries()].map(([id, totals]) => {
       const meta: any = profileMeta.get(id) || {};
-      return { profile_id: id, name: meta.native_name || meta.profile_name || id, network: meta.network_type || null, ...totals, previous: previous.byProfile.get(id) || emptyTotals() };
+      return { profile_id: id, name: meta.native_name || meta.profile_name || id, network: meta.network_type || null, ...totals, previous: previous ? previous.byProfile.get(id) || emptyTotals() : null };
     });
     const topPostsOut = posts.map((p) => {
       const meta: any = profileMeta.get(String(p.profile_id)) || {};
@@ -203,14 +179,15 @@ Deno.serve(async (req) => {
     return json({
       client: { id: visible.id, name: visible.name },
       range: { start, end, days },
-      previous_range: { start: iso(prevStart), end: iso(prevEnd), days },
+      previous_range: compare ? { start: iso(prevStart), end: iso(prevEnd), days } : null,
       profiles: (profiles || []).map((p: any) => ({ id: String(p.sprout_profile_id), name: p.native_name || p.profile_name, network: p.network_type })),
       totals: current.totals,
-      previous_totals: previous.totals,
+      previous_totals: previous ? previous.totals : null,
       changes,
       daily: current.daily,
       by_profile: byProfile,
       top_posts: topPostsOut,
+      top_posts_failed_networks: topRead.failed,
       fetched_at: new Date().toISOString(),
     });
   } catch (err) {

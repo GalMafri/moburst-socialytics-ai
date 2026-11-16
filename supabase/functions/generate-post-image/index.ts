@@ -2,6 +2,7 @@ import {startImageWithHiggsfield} from "../_shared/higgsfield/startImage.ts";
 import { loadCreativePlan } from "../_shared/design-prompts/loadCreativePlan.ts";
 import { creativeImagePrompt, frameReferenceIndices} from '../_shared/design-prompts/creativePlan.ts';
 import { createClient } from "../_shared/supabase.ts";
+import { brandBookFitsRequest } from "../_shared/brand/brandBookLimits.ts";
 import { buildImagePrompt } from "../_shared/design-prompts/buildImagePrompt.ts";
 import { loadDesignLearnings } from "../_shared/design-prompts/learnings.ts";
 import { imageAspectRatio, platformDesignSpec} from '../_shared/design-prompts/aspect.ts';
@@ -305,6 +306,8 @@ Deno.serve(async (req) => {
 
     // ── Fetch design reference images for multimodal input ──
     const contentParts: any[] = [];
+    // What the request carries so far, as sent: the brand book is added only when it fits beside it.
+    let encodedBytes = 0;
 
     if (resolvedRefs && Array.isArray(resolvedRefs) && resolvedRefs.length > 0) {
       const storageClient = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
@@ -328,6 +331,7 @@ Deno.serve(async (req) => {
               binary += String.fromCharCode(uint8Array[i]);
             }
             const base64 = btoa(binary);
+            encodedBytes += base64.length;
             const ext = ref.split(".").pop()?.toLowerCase();
             const mimeType = ext === "png" ? "image/png" : "image/jpeg";
             contentParts.push({ inlineData: { mimeType, data: base64 } });
@@ -353,7 +357,7 @@ Deno.serve(async (req) => {
 
         if (fileData) {
           const arrayBuffer = await fileData.arrayBuffer();
-          if (arrayBuffer.byteLength <= 4 * 1024 * 1024) {
+          if (brandBookFitsRequest({ bytes: arrayBuffer.byteLength, imageLimited: false }, encodedBytes)) {
             const uint8Array = new Uint8Array(arrayBuffer);
             let binary = "";
             for (let i = 0; i < uint8Array.length; i++) {
@@ -372,7 +376,7 @@ Deno.serve(async (req) => {
             });
             contentParts.push({ inlineData: { mimeType, data: base64 } });
           } else {
-            console.warn("[generate-post-image] brand book exceeds 4MB, skipping");
+            console.warn("[generate-post-image] brand book does not fit the request, skipping");
           }
         }
       } catch (e) {

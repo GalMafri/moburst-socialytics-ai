@@ -38,8 +38,14 @@ export function desiredProfiles(i: { rows: ProfileRow[]; rivaliq: Array<{ platfo
       out.set(platform, { platform, handle, url: fromRivalIq.profile_url || canonicalProfileUrl(platform, handle), source: "rivaliq" });
       continue;
     }
-    const linked = [...new Set(i.site.filter((k) => k.startsWith(`${platform}:`)).map((k) => k.slice(platform.length + 1)).filter(Boolean))];
-    const handle = linked.length === 1 ? linked[0] : linked.find((h) => brand && h.replace(/[^a-z0-9]/g, "").includes(brand));
+    // One handle per lower-cased name, in the case a link wrote it (the list holds both).
+    const byLower = new Map<string, string>();
+    for (const h of i.site.filter((k) => k.startsWith(`${platform}:`)).map((k) => k.slice(platform.length + 1)).filter(Boolean)) {
+      const lower = h.toLowerCase();
+      if (!byLower.has(lower) || h !== lower) byLower.set(lower, h);
+    }
+    const linked = [...byLower.values()];
+    const handle = linked.length === 1 ? linked[0] : linked.find((h) => brand && h.toLowerCase().replace(/[^a-z0-9]/g, "").includes(brand));
     if (handle) out.set(platform, { platform, handle, url: canonicalProfileUrl(platform, handle), source: "website" });
   }
   return PROFILE_PLATFORMS.filter((p) => out.has(p)).map((p) => out.get(p)!);
@@ -49,12 +55,14 @@ export function desiredProfiles(i: { rows: ProfileRow[]; rivaliq: Array<{ platfo
 export const profilesKey = (rows: ProfileRow[]) => textHash(rows.filter((r) => r.source !== "removed").map((r) => `${r.platform}:${r.handle.toLowerCase()}`).join("|"));
 
 /** What the lifecycle reads to fill the table: the rows, RivalIQ's handles for the client company and the homepage's links. */
-export async function profileInputs(db: Db, client: { id: string; name: string }, results: { tracking?: Record<string, unknown> | null; brand_read?: Record<string, unknown> | null }) {
+export async function profileInputs(db: Db, client: { id: string; name: string }, results: { tracking?: Record<string, unknown> | null; brand_read?: Record<string, unknown> | null; accounts?: Record<string, unknown> | null }) {
   const { data, error } = await db.from("client_public_profiles").select("platform, handle, url, source").eq("client_id", client.id);
   if (error) throw new Error(`Could not read the client's public profiles: ${error.message}`);
   const rivaliq = ((results.tracking?.client_company as { handles?: unknown } | null | undefined)?.handles ?? []) as Array<{ platform: string; handle: string; profile_url?: string | null }>;
-  const site = (results.brand_read?.site_profiles ?? []) as string[];
-  return { rows: (data ?? []) as ProfileRow[], rivaliq: Array.isArray(rivaliq) ? rivaliq : [], site: Array.isArray(site) ? site : [], brand: client.name };
+  // The brand read's links (paid, read every 180 days) and the accounts step's (a free page fetch every run, so they hold a handle's own case).
+  const listed = (v: unknown) => (Array.isArray(v) ? v.map(String) : []);
+  const site = [...new Set([...listed(results.brand_read?.site_profiles), ...listed(results.accounts?.site_profiles)])];
+  return { rows: (data ?? []) as ProfileRow[], rivaliq: Array.isArray(rivaliq) ? rivaliq : [], site, brand: client.name };
 }
 
 /** Write what changed: only rows the lifecycle made, never a person's. */

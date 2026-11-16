@@ -114,6 +114,69 @@ export function withCompetitiveEvidenceLimits<T>(input: T, opts: { keepSummary?:
  */
 export const HELD_REDOS = 3;
 
+/** The wait between two redos of a held analysis: once a day (run-scheduled-jobs/dispatch.ts). */
+export const HELD_REDO_MINUTES = 24 * 60;
+
+/**
+ * How long after a run's end the dispatch may take to queue its redo: the
+ * dispatch ticks and leases a job some time after it sees the run end, so the
+ * redo row can start later than the wait alone.
+ */
+export const REDO_LEASE_ALLOWANCE_MINUTES = 60;
+
+/**
+ * What the dispatch decided for a held analysis, written on its row as
+ * report_data.redo when it saw the run end held (run-scheduled-jobs/dispatch.ts
+ * watch): queued, with the time the redo is due, or none. When an occurrence
+ * ends without making a queued redo, the dispatch writes none on that row.
+ */
+export interface HeldRedo {
+  queued: boolean;
+  /** When the redo is due; set only when one is queued. */
+  available_at?: string | null;
+  decided_at: string;
+}
+
+/** The dispatch's decision on a held row (report_data.redo), or null for a row written before the dispatch recorded it. */
+export function heldRedo(reportData: unknown): HeldRedo | null {
+  const rd = (Array.isArray(reportData) ? reportData[0] : reportData) as { redo?: unknown } | null | undefined;
+  const redo = rd && typeof rd === "object" ? rd.redo as Partial<HeldRedo> | null | undefined : null;
+  return redo && typeof redo === "object" && typeof redo.queued === "boolean" ? { queued: redo.queued, available_at: redo.available_at ?? null, decided_at: String(redo.decided_at ?? "") } : null;
+}
+
+/**
+ * Whether a redo of a held analysis can still come. `newerRow`: the period
+ * already has a newer complete row, so this run's redo has been made. Then
+ * the dispatch's own decision on the row (`redo`, heldRedo) answers.
+ *
+ * A row written before the dispatch recorded its decision has none, and is
+ * read from what the dispatch does: while a period's held runs number
+ * HELD_REDOS or fewer it queues a redo HELD_REDO_MINUTES after the run ends.
+ * `heldRuns` is the period's held complete rows, this one included; the wait
+ * counts from the run's end (created_at plus its duration) with the
+ * dispatch's lease allowance on top. An unknown or unreadable time counts as
+ * still inside.
+ */
+export function redoCanStillCome(createdAt: string | null | undefined, heldRuns = 1, now: number = Date.now(), opts: { durationMinutes?: number | null; newerRow?: boolean; redo?: HeldRedo | null } = {}): boolean {
+  if (opts.newerRow) return false;
+  if (opts.redo) return opts.redo.queued;
+  if (heldRuns > HELD_REDOS) return false;
+  const made = Date.parse(String(createdAt ?? ""));
+  if (!Number.isFinite(made)) return true;
+  const duration = Number.isFinite(opts.durationMinutes) && (opts.durationMinutes as number) > 0 ? (opts.durationMinutes as number) : 0;
+  return now < made + (duration + HELD_REDO_MINUTES + REDO_LEASE_ALLOWANCE_MINUTES) * 60000;
+}
+
+/**
+ * "The latest competitive report" for every reader (the dashboard tile, the
+ * Analytics tab, the content brief, client setup, the run page): the newest
+ * one that passed its checks, given a client's complete rows newest first. A
+ * newer held report never hides an older ready one, and never stands in for it.
+ */
+export function newestReadyReport<T extends { report_data?: unknown }>(rows: readonly T[] | null | undefined): T | null {
+  return (rows ?? []).find((r) => competitiveReportQuality(r.report_data).ready) ?? null;
+}
+
 /** An incomplete analysis must not be delivered, exported or reused as context. */
 export function competitiveReportQuality(input: unknown): { ready: boolean; reasons: string[] } {
   const report = input as Record<string, any> | null;

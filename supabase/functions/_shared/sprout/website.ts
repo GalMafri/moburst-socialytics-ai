@@ -44,6 +44,7 @@
 
 import { BROWSER_UA } from "../brand/research.ts";
 import { profileKeyOf, siteProfileLinks, type SproutProfile } from "../lifecycle/accounts.ts";
+import { linksTo, siteLinkSet } from "../lifecycle/siteLinks.ts";
 import { sameName } from "../lifecycle/names.ts";
 import { registrableDomain, sharedPlatformKind, siteKeyOf } from "../net/domains.ts";
 import { isPubliclyFetchable } from "../net/safeUrl.ts";
@@ -204,8 +205,8 @@ const namesOf = (brand: BrandLike) => [...new Set([brand.name, brand.group?.name
 
 /** True when a homepage links to one of the brand's own profiles. */
 function linksToBrand(brand: BrandLike, html: string): boolean {
-  const linked = new Set(siteProfileLinks(html));
-  return brand.profiles.some((p: SproutProfile) => { const k = profileKeyOf(p); return !!k && linked.has(k); });
+  const linked = siteLinkSet(siteProfileLinks(html));
+  return brand.profiles.some((p: SproutProfile) => { const k = profileKeyOf(p); return !!k && linksTo(linked, k); });
 }
 
 /** The exact fact that makes this domain the brand's website, or null. The domain-name fact needs no page. */
@@ -384,9 +385,9 @@ export function websiteJoins(found: Array<{ key: string; website: string | null;
     }
   }
   for (const f of withSite) {
-    const linked = new Set(f.site_profiles);
+    const linked = siteLinkSet(f.site_profiles);
     for (const b of brands) {
-      if (b.profiles.some((p) => { const k = profileKeyOf(p); return !!k && linked.has(k); })) add(f.key, b.key);
+      if (b.profiles.some((p) => { const k = profileKeyOf(p); return !!k && linksTo(linked, k); })) add(f.key, b.key);
     }
   }
   return pairs;

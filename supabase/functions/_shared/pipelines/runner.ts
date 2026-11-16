@@ -13,14 +13,17 @@
 // Nothing here fails in front of anyone. A step that throws is tried again
 // quietly after a growing wait; a step that keeps failing, an external job
 // that never ends, or a run that takes too long stops the run quietly, and
-// for a real report the dispatch that owns it makes the report again.
+// for a real report the dispatch that owns it makes the report again. A
+// step waiting for an account (a refused or missing token) spends no try,
+// but only until the pipeline's waitHorizon; then the run stops with that
+// reason. A step that throws StepStop ends the run at once.
 //
 // Each step writes a log row (step, started, finished, outcome, a small
 // detail): the run history n8n's executions list gave.
 
 import type { JobOutcome, ScheduledJob } from "../scheduled-jobs/types.ts";
 import type { Registry } from "./registry.ts";
-import { StepRestart, type OutputWriter, type PayloadStore, type PipelineDefinition, type PipelineJobPayload, type PipelineRun, type PollState, type StepContext, type StepResult } from "./types.ts";
+import { StepRestart, StepStop, type OutputWriter, type PayloadStore, type PipelineDefinition, type PipelineJobPayload, type PipelineRun, type PollState, type StepContext, type StepResult } from "./types.ts";
 
 /** One step's time, inside the 120 s every step must stay under. */
 export const STEP_BUDGET_MS = 110_000;
@@ -97,7 +100,21 @@ export function pipelinePayload(job: Pick<ScheduledJob, "payload">): PipelineJob
     run_id: p.run_id, pipeline: p.pipeline, step: p.step,
     state: p.state && typeof p.state === "object" ? p.state as Record<string, unknown> : {},
     poll: p.poll && typeof p.poll === "object" ? p.poll as PollState : null,
+    ...(Number(p.paused_ms) > 0 ? { paused_ms: Number(p.paused_ms) } : {}),
+    ...(typeof p.paused_at === "string" && Number.isFinite(Date.parse(p.paused_at)) ? { paused_at: p.paused_at } : {}),
+    ...(typeof p.paused_for === "string" && p.paused_for ? { paused_for: p.paused_for } : {}),
   };
+}
+
+/** The end of the run's own hours from its start: the horizon of an account wait in a pipeline that names none. */
+export function runHoursHorizon(run: Pick<PipelineRun, "started_at">, hours = MAX_RUN_HOURS): Date {
+  return new Date(Date.parse(run.started_at) + hours * 60 * MINUTE);
+}
+
+/** How long a wait for an account may hold the run (PipelineDefinition.waitHorizon). */
+function waitHorizonOf(def: PipelineDefinition, run: PipelineRun): Date {
+  const own = def.waitHorizon?.(run) ?? null;
+  return own && Number.isFinite(own.getTime()) ? own : runHoursHorizon(run, def.maxRunHours ?? MAX_RUN_HOURS);
 }
 
 const sameHandle = (a: Record<string, unknown> | undefined, b: Record<string, unknown>) => JSON.stringify(a ?? null) === JSON.stringify(b);
@@ -119,8 +136,27 @@ export async function runPipelineJob(job: ScheduledJob, d: RunnerDeps): Promise<
   if (!def) return stop(`Pipeline ${p.pipeline} is not in this deployment.`);
   const step = def.steps[p.step];
   if (!step) return stop(`Pipeline ${def.name} has no step ${p.step}.`);
+  // Time spent waiting for an account is not the run's time.
+  const pausedNow = p.paused_at ? Math.max(0, now.getTime() - Date.parse(p.paused_at)) : 0;
+  const pausedBefore = p.paused_ms ?? 0;
+  /** The pause the next payload carries: still waiting (the wait goes on from its first moment), or over (folded into the total). */
+  const pause = (waitingFor: string | null): Pick<PipelineJobPayload, "paused_ms" | "paused_at" | "paused_for"> => {
+    const total = waitingFor ? pausedBefore : pausedBefore + pausedNow;
+    return { ...(total > 0 ? { paused_ms: total } : {}), ...(waitingFor ? { paused_at: p.paused_at ?? at, paused_for: waitingFor } : {}) };
+  };
+  const withPause = (payload: PipelineJobPayload, waitingFor: string | null = null): Record<string, unknown> => {
+    const { paused_ms: _ms, paused_at: _at, paused_for: _for, ...rest } = payload;
+    return { ...rest, ...pause(waitingFor) };
+  };
+  // A wait for an account lasts at most until the run's horizon: past it the
+  // work the run was for is over (a trends week has ended), so the run stops
+  // here, before its step looks again, and records why.
+  const horizon = waitHorizonOf(def, run);
+  const pastHorizon = (waitingFor: string) =>
+    `The run waited for ${waitingFor} until ${horizon.toISOString()}, the latest its wait may last, so it stopped.`;
+  if (p.paused_at && now.getTime() >= horizon.getTime()) return stop(pastHorizon(p.paused_for ?? "an account"));
   const maxHours = def.maxRunHours ?? MAX_RUN_HOURS;
-  if (now.getTime() - Date.parse(run.started_at) > maxHours * 60 * MINUTE) return stop(`The run took longer than ${maxHours} hours.`);
+  if (now.getTime() - Date.parse(run.started_at) - pausedBefore - pausedNow > maxHours * 60 * MINUTE) return stop(`The run took longer than ${maxHours} hours.`);
   const maxAttempts = def.maxStepAttempts ?? MAX_STEP_ATTEMPTS;
   if (job.attempts > maxAttempts) return stop(`Step ${p.step} did not finish in ${maxAttempts} tries.`);
 
@@ -151,14 +187,18 @@ export async function runPipelineJob(job: ScheduledJob, d: RunnerDeps): Promise<
     await d.runs.touch(run.id, { step: p.step, at });
     return {
       status: "queued", reason: `Step ${p.step} is tried again in ${wait} minutes: ${why}`.slice(0, 500),
-      available_at: new Date(now.getTime() + wait * MINUTE).toISOString(), payload: { ...payload },
+      available_at: new Date(now.getTime() + wait * MINUTE).toISOString(), payload: withPause(payload),
     };
   };
 
   // An external job that has run too long counts as a failed try, and the
-  // step starts it again on the next one.
+  // step starts it again on the next one. A run in a wait for an account is
+  // not judged by it: its last look may be hours old (a worker outage), and
+  // the wait's own horizon bounds it. Spending a try there would drop the
+  // kept external run id and pay for a second run.
   const maxPoll = def.maxPollMinutes ?? MAX_POLL_MINUTES;
-  if (p.poll && now.getTime() - Date.parse(p.poll.since) > maxPoll * MINUTE) {
+  const inAccountWait = typeof p.paused_for === "string" && p.paused_for !== "";
+  if (p.poll && !inAccountWait && now.getTime() - Date.parse(p.poll.since) > maxPoll * MINUTE) {
     return failedTry(`the external job did not finish in ${maxPoll} minutes`, { ...p, poll: null });
   }
 
@@ -185,6 +225,11 @@ export async function runPipelineJob(job: ScheduledJob, d: RunnerDeps): Promise<
     work.catch(() => {});
     result = await Promise.race([work, timeUp]);
   } catch (e) {
+    // A step that knows another try cannot help ends the run now.
+    if (e instanceof StepStop) {
+      await logEnd("stopped", { error: e.message.slice(0, 500) });
+      return stop(e.message);
+    }
     // An external job that ended without its result is started again on the next try.
     return failedTry(message(e), e instanceof StepRestart ? { ...p, poll: null } : p);
   } finally {
@@ -209,20 +254,30 @@ export async function runPipelineJob(job: ScheduledJob, d: RunnerDeps): Promise<
     await d.runs.touch(run.id, { step: result.step, steps_done: run.steps_done + 1, at });
     return {
       status: "queued", reason: `Step ${p.step} done; ${result.step} is next.`, available_at: at, resetAttempts: true,
-      payload: { run_id: run.id, pipeline: def.name, step: result.step, state, poll: null },
+      payload: withPause({ run_id: run.id, pipeline: def.name, step: result.step, state, poll: null }),
     };
   }
 
   // poll
   const wait = Math.min(POLL_MAX_SECONDS, Math.max(POLL_MIN_SECONDS, Math.round(Number(result.waitSeconds) || 0)));
-  const poll: PollState = p.poll && sameHandle(p.poll.handle, result.handle)
-    ? { handle: result.handle, polls: p.poll.polls + 1, since: p.poll.since }
-    : { handle: result.handle, polls: 1, since: at };
+  // While the step waits for an account the job's clock does not run: each look restarts it.
+  const waitingFor = typeof result.waitingFor === "string" && result.waitingFor !== "" ? result.waitingFor : null;
+  const waiting = waitingFor !== null;
+  if (waitingFor && now.getTime() >= horizon.getTime()) {
+    await logEnd("stopped", { ...(result.detail ?? {}), horizon: horizon.toISOString() });
+    return stop(pastHorizon(waitingFor));
+  }
+  const poll: PollState = waiting
+    ? { handle: result.handle, polls: (p.poll?.polls ?? 0) + 1, since: at }
+    : p.poll && sameHandle(p.poll.handle, result.handle)
+      // The first look after an account wait starts the job's own poll clock, as every look of the wait did.
+      ? { handle: result.handle, polls: p.poll.polls + 1, since: inAccountWait ? at : p.poll.since }
+      : { handle: result.handle, polls: 1, since: at };
   await logEnd("poll", { ...(result.detail ?? {}), wait_seconds: wait, polls: poll.polls });
   await d.runs.touch(run.id, { step: p.step, at });
   // Looking at an external job is not a failed try.
   return {
     status: "queued", reason: `Step ${p.step} looks again in ${wait} s.`, available_at: new Date(now.getTime() + wait * 1000).toISOString(), deferred: true,
-    payload: { run_id: run.id, pipeline: def.name, step: p.step, state, poll },
+    payload: withPause({ run_id: run.id, pipeline: def.name, step: p.step, state, poll }, waitingFor),
   };
 }

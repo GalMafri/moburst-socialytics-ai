@@ -10,7 +10,73 @@ export type StatDelta = {
   label?: string;
   /** Formatted previous value, shown as "vs 12.3K". */
   previous?: string;
+  /** The raw values the percent was made from. With them, a change on a tiny base reads "from 1 to 19" (describeChange). */
+  from?: number;
+  to?: number;
 };
+
+/** A previous value under this is too small for a percent to mean anything. */
+export const DELTA_MIN_BASE = 10;
+/** A change above this percent reads as the two values instead. */
+export const DELTA_MAX_PERCENT = 500;
+
+export interface ChangeText {
+  text: string;
+  direction: "up" | "down" | "flat";
+}
+
+const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+/**
+ * The one way a change between two periods is worded, for the tiles, the
+ * At a glance line, the period section and the platform cards. A percent on
+ * a base under DELTA_MIN_BASE, or a change above DELTA_MAX_PERCENT, reads as
+ * "from 1 to 19"; something where there was nothing reads "New". Null when
+ * there is nothing to say.
+ */
+export function describeChange(c: { previous?: number | null; current?: number | null; percent?: number | null }): ChangeText | null {
+  const { previous, current } = c;
+  if (finite(previous) && finite(current)) {
+    if (previous === 0) return current > 0 ? { text: "New", direction: "up" } : null;
+    const direction = current > previous ? "up" : current < previous ? "down" : "flat";
+    const pct = finite(c.percent) ? c.percent : ((current - previous) / previous) * 100;
+    if (current !== previous && (previous < DELTA_MIN_BASE || Math.abs(pct) > DELTA_MAX_PERCENT)) {
+      return { text: `from ${previous.toLocaleString("en-US")} to ${current.toLocaleString("en-US")}`, direction };
+    }
+    return { text: formatPercentChange(pct), direction };
+  }
+  if (finite(c.percent)) return { text: formatPercentChange(c.percent), direction: c.percent > 0 ? "up" : c.percent < 0 ? "down" : "flat" };
+  return null;
+}
+
+/** The six metrics a report's tiles show, in their order. Every line that counts or ranks metrics counts these. */
+export const SHOWN_METRIC_KEYS = ["impressions", "reactions", "link_clicks", "video_views", "comments", "shares"] as const;
+
+export interface Move {
+  key: string;
+  label: string;
+  percent: number;
+  previous: number;
+  current: number;
+}
+
+/**
+ * The headline move of a period: the largest percent change among the six
+ * shown metrics, on a base of DELTA_MIN_BASE or more and not above the cap
+ * (those read as two values, never as a headline). Null when none qualifies.
+ */
+export function biggestMove(changes: Record<string, { previous?: unknown; current?: unknown; percent?: unknown } | null | undefined> | null | undefined): Move | null {
+  let best: Move | null = null;
+  for (const key of SHOWN_METRIC_KEYS) {
+    const v = changes?.[key];
+    const previous = Number(v?.previous), current = Number(v?.current);
+    if (!v || !Number.isFinite(previous) || !Number.isFinite(current) || previous < DELTA_MIN_BASE) continue;
+    const percent = finite(v.percent) ? v.percent : ((current - previous) / previous) * 100;
+    if (!Number.isFinite(percent) || Math.abs(percent) > DELTA_MAX_PERCENT) continue;
+    if (!best || Math.abs(percent) > Math.abs(best.percent)) best = { key, label: key.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()), percent, previous, current };
+  }
+  return best;
+}
 
 export function formatPercentChange(pct: number): string {
   const abs = Math.abs(pct);
@@ -45,9 +111,9 @@ export function StatCard({
   size?: "default" | "compact";
   className?: string;
 }) {
-  const pct = typeof delta?.percent === "number" && Number.isFinite(delta.percent) ? delta.percent : null;
-  const tone = pct == null ? "" : pct > 0 ? "text-success" : pct < 0 ? "text-[#f87171]" : "text-[#b1b7c1]";
-  const DeltaIcon = pct == null ? null : pct > 0 ? TrendingUp : pct < 0 ? TrendingDown : Minus;
+  const change = delta ? describeChange({ previous: delta.from, current: delta.to, percent: delta.percent }) : null;
+  const tone = !change ? "" : change.direction === "up" ? "text-success" : change.direction === "down" ? "text-destructive" : "text-muted-foreground";
+  const DeltaIcon = !change ? null : change.direction === "up" ? TrendingUp : change.direction === "down" ? TrendingDown : Minus;
   const compact = size === "compact";
   const body = (
     <>
@@ -56,12 +122,12 @@ export function StatCard({
           <span className="truncate">{label}</span>
         </p>
         <p className={compact ? "t-h2 tabular-nums" : "t-stat tabular-nums"}>{value}</p>
-        {(pct != null || delta?.previous || sub) && (
+        {(change || delta?.previous || sub) && (
           <div className="flex items-center gap-2 flex-wrap">
-            {pct != null && DeltaIcon && (
+            {change && DeltaIcon && (
               <span className={cn("inline-flex items-center gap-1 t-label font-semibold", tone)}>
                 <DeltaIcon className="h-3.5 w-3.5" />
-                {formatPercentChange(pct)}
+                {change.text}
                 {delta?.label ? ` ${delta.label}` : ""}
               </span>
             )}

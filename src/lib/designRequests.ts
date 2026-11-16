@@ -48,6 +48,8 @@ export interface DesignRequest {
   created_at: string;
   /** When the current preparation began (a request can prepare again). */
   started_at?: string;
+  /** When the request became ready or closed (stamped by the worker); the usual time is measured to it. */
+  ended_at?: string | null;
   updated_at: string;
 }
 
@@ -96,7 +98,9 @@ export function typicalMinutes(r: Pick<DesignRequest, "kind" | "footage_path">, 
   const filmed = !!r.footage_path;
   const took = history
     .filter((h) => h.status === "ready" && (h.kind ?? "single") === kind && !!h.footage_path === filmed && h.options_wanted === 1)
-    .map((h) => (new Date(h.updated_at).getTime() - new Date(h.started_at ?? h.created_at).getTime()) / 60000)
+    // Started to ended: updated_at moves whenever the row is touched (a note, an undo), so it is not when the design came back.
+    .filter((h) => !!h.ended_at)
+    .map((h) => (new Date(h.ended_at as string).getTime() - new Date(h.started_at ?? h.created_at).getTime()) / 60000)
     .filter((m) => m > 0 && m < 180)
     .sort((a, b) => a - b);
   if (took.length >= 3) return Math.max(1, Math.round(took[Math.floor(took.length / 2)]));
@@ -283,8 +287,14 @@ export function isVideoMedia(url: string): boolean {
   return /\.(mp4|mov|webm|m4v)(\?|#|$)/i.test(url);
 }
 
-/** Stop a design being prepared. The post keeps the design it already had. */
-export async function cancelDesign(requestId: string): Promise<void> {
-  const { data, error } = await supabase.functions.invoke("design-request", { body: { action: "cancel", request_id: requestId } });
-  if (error || data?.error) throw new Error(data?.error || error?.message || "Could not stop the design.");
+/**
+ * Stop a design being prepared. The post keeps the design it already had.
+ * Sent again quietly when it did not get through (stopping twice stops once);
+ * true once the server has stopped it.
+ */
+export async function cancelDesign(requestId: string): Promise<boolean> {
+  const { data, error } = await sendQuietly(() => supabase.functions.invoke("design-request", { body: { action: "cancel", request_id: requestId } }), {
+    again: (e) => invokeResendable(e, { idempotent: true }),
+  });
+  return !error && !data?.error;
 }

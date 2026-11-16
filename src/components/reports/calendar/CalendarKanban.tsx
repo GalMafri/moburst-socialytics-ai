@@ -1,10 +1,10 @@
 import { PostCard } from "./PostCard";
 import { resolvePostStatus } from "./postStatus";
-import type { PostStatus } from "./PostStatusChip";
+import type { PostStatus } from "./postStatus";
 import type { CalendarFilterState } from "./CalendarFilters";
-import { postCopyOf } from "@/lib/postCopy";
+import { scheduledFor, sendStateOf, useSendClock, type ScheduledRow, type SendState } from "@/components/reports/SchedulePostModal";
 import { iterationMatchesPost, type CalendarPost } from "@/lib/calendarRevision";
-import { isStoryPost } from "@/lib/platform";
+import { isStoryPost, normalizePlatform } from "@/lib/platform";
 import { dayCountLabel } from "@/lib/calendarPosts";
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -20,10 +20,8 @@ interface Iteration {
   created_at?: string | null;
 }
 
-interface ScheduledPostRef {
-  platform?: string | null;
-  post_content?: string | null;
-}
+/** A scheduled_posts row as the board reads it: the key and the status decide which post it is and whether it counts. */
+type ScheduledPostRef = ScheduledRow;
 
 interface Props {
   contentCalendar: Array<{
@@ -60,30 +58,12 @@ export function findLatestSelectedIteration(
   return sorted[0] || null;
 }
 
-/**
- * Check whether a calendar post has a matching scheduled_posts row.
- * Match by (platform, post_content first ~200 chars) — same heuristic as
- * findLatestSelectedIteration.
- */
-function hasMatchingScheduledPost(
-  scheduledPosts: Array<{ platform?: string | null; post_content?: string | null }>,
-  post: { platform?: string; copy?: string; caption_angle?: string },
-): boolean {
-  const matchingPlatform = (post.platform || "").toLowerCase();
-  const matchingCopy = postCopyOf(post).trim().slice(0, 200);
-  return scheduledPosts.some(
-    (s) =>
-      (s.platform || "").toLowerCase() === matchingPlatform &&
-      (s.post_content || "").trim().slice(0, 200) === matchingCopy,
-  );
-}
-
 function matchesFilters(
   post: any,
   status: PostStatus,
   filters: CalendarFilterState,
 ): boolean {
-  if (filters.platform !== "all" && post.platform !== filters.platform) return false;
+  if (filters.platform !== "all" && normalizePlatform(post.platform) !== normalizePlatform(filters.platform)) return false;
   if (filters.status !== "all" && status !== filters.status) return false;
   if (filters.language !== "all" && post.language !== filters.language) return false;
   return true;
@@ -93,6 +73,8 @@ export interface BoardCard {
   post: CalendarPost;
   iteration: Iteration | null;
   status: PostStatus;
+  /** Where the post's send stands, read from the same row and rule as its panel's Schedule tab. */
+  sendState: SendState;
 }
 
 /**
@@ -107,19 +89,22 @@ export function visibleBoard(
   postIterations: Iteration[],
   scheduledPosts: ScheduledPostRef[],
   filters: CalendarFilterState,
+  /** The clock a send's state is read at (useSendClock). */
+  now: number = Date.now(),
 ): { days: Array<{ day: string; date_label?: string; posts: BoardCard[] }>; shown: number; total: number } {
   const days = DAYS.filter((dayName) => filters.day === "all" || filters.day === dayName).map((dayName) => {
     const dayEntry = contentCalendar.find((d) => d.day === dayName);
     const cards = (dayEntry?.posts || []).map((post: CalendarPost): BoardCard => {
       const iteration = findLatestSelectedIteration(postIterations, post);
+      const sent = scheduledFor(scheduledPosts, post);
       const status = resolvePostStatus({
         mediaUrls: iteration?.media_urls || [],
         isSelectedAny: !!iteration?.is_selected,
         isApproved: !!iteration?.is_approved,
-        hasScheduledPost: hasMatchingScheduledPost(scheduledPosts, post),
+        hasScheduledPost: !!sent,
         story: isStoryPost(post),
       });
-      return { post, iteration, status };
+      return { post, iteration, status, sendState: status === "scheduled" ? sendStateOf(sent, now) : "none" };
     });
     return { day: dayName, date_label: dayEntry?.date_label, posts: cards.filter((c) => matchesFilters(c.post, c.status, filters)) };
   });
@@ -140,7 +125,10 @@ export function CalendarKanban({
   // band over a three-column grid, so a day with one post showed one card at
   // a third of the width and two thirds of empty page beside it, seven times.
   // A post the filters leave out is not drawn at all.
-  const { days } = visibleBoard(contentCalendar, postIterations, scheduledPosts, filters);
+  // A card whose send is out is drawn again when that send can no longer be running, at the clock the
+  // Schedule tab reads it at.
+  const now = useSendClock(scheduledPosts);
+  const { days } = visibleBoard(contentCalendar, postIterations, scheduledPosts, filters, now);
   return (
     <div className="grid gap-inner items-start [grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr))]">
       {days.map(({ day: dayName, date_label, posts }) => (
@@ -155,12 +143,13 @@ export function CalendarKanban({
 
           {posts.length > 0 && (
             <div className="space-y-3">
-              {posts.map(({ post, iteration, status }, postIdx) => (
+              {posts.map(({ post, iteration, status, sendState }, postIdx) => (
                 <PostCard
                   key={post._calendarPostKey ?? postIdx}
                   post={post}
                   iteration={iteration}
                   status={status}
+                  sendState={sendState}
                   onOpen={() => onCardClick(post)}
                   onToggleApproved={iteration?.id ? () => onToggleApproved(iteration.id) : undefined}
                 />

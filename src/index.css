@@ -267,6 +267,8 @@
   /* Type ramp. Four sizes on any page: stat 30, page title 24, section/card title 20/18, text 15. Labels 13.
      Colours are set through :where() so they have zero specificity: any Tailwind colour class
      (text-primary, text-destructive, text-[#10b981]) wins regardless of CSS order. */
+  /* The one big figure at the head of a report (the headline change). */
+  .t-hero { font-size: 48px; line-height: 52px; font-weight: 700; letter-spacing: -1px; }
   .t-stat { font-size: 30px; line-height: 36px; font-weight: 700; letter-spacing: -0.5px; }
   .t-h1 { font-size: 24px; line-height: 30px; font-weight: 700; letter-spacing: -0.5px; }
   .t-h2 { font-size: 20px; line-height: 26px; font-weight: 700; letter-spacing: -0.5px; }

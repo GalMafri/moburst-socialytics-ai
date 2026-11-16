@@ -50,7 +50,7 @@ export function EmptyState({ icon: Icon = Inbox, title, description, action, com
       <div className="h-12 w-12 rounded-full bg-[rgba(255,255,255,0.04)] flex items-center justify-center mb-3">
         <Icon className="h-6 w-6 text-[#b1b7c1]" aria-hidden="true" />
       </div>
-      <h3 className="t-h4">{title}</h3>
+      <h2 className="t-h4">{title}</h2>
       {description && <div className="t-secondary mt-1.5 max-w-md">{description}</div>}
       {action && <div className="mt-4 flex flex-wrap justify-center gap-2">{action}</div>}
     </div>

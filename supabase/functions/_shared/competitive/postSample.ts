@@ -49,13 +49,49 @@ export function postsInPeriod(rawPosts: AnyPost[], start: string, end: string, a
   });
 }
 
+/** A time zone name Intl knows ("America/New_York"), or null: a stored name that is not one counts in UTC and says nothing. */
+export function validTimeZone(zone: unknown): string | null {
+  const name = typeof zone === "string" ? zone.trim() : "";
+  if (!name) return null;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: name });
+    return name;
+  } catch {
+    return null;
+  }
+}
+
+const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+const FORMATTERS = new Map<string, Intl.DateTimeFormat>();
+/** One formatter per zone: building one per post is the slow part of counting a month of posts. */
+function formatterFor(timeZone: string): Intl.DateTimeFormat {
+  let f = FORMATTERS.get(timeZone);
+  if (!f) {
+    f = new Intl.DateTimeFormat("en-US", { timeZone, weekday: "short", hour: "numeric", hourCycle: "h23" });
+    FORMATTERS.set(timeZone, f);
+  }
+  return f;
+}
+
+/** The weekday and the hour (0 to 23, as text) a moment falls on in a zone; UTC when there is none. */
+export function weekdayAndHourIn(d: Date, timeZone?: string | null): { weekday: string; hour: string } {
+  if (!timeZone) return { weekday: WEEKDAY_NAMES[d.getUTCDay()], hour: String(d.getUTCHours()) };
+  const parts = formatterFor(timeZone).formatToParts(d);
+  const get = (type: string) => parts.find((x) => x.type === type)?.value ?? "";
+  return { weekday: get("weekday"), hour: String(Number(get("hour")) % 24) };
+}
+
 /** An empty sample bucket, for a company or one of its channels. */
 export function emptyPostSample(): AnySample {
   return { post_count: 0, likely_boosted_posts: 0, engagement_sum: 0, views_total: 0, views_observed: 0, impressions_total: 0, by_weekday: {}, by_hour: {}, hashtags: {}, media_types: {}, top_posts: [] };
 }
 
-/** Add one post to a bucket and return its channel. */
-export function addPostToSample(agg: AnySample, p: AnyPost): string {
+/**
+ * Add one post to a bucket and return its channel. Its weekday and hour are
+ * counted in `timeZone` (the client's), or in UTC when none is given.
+ */
+export function addPostToSample(agg: AnySample, p: AnyPost, timeZone?: string | null): string {
   const text = (s: unknown) => String(s || "").replace(/[\u0000-\u001f]+/g, " ").replace(/\s+/g, " ").trim();
   const amount = (v: unknown) => (typeof v === "number" && isFinite(v) ? v : (typeof v === "string" && v.trim() !== "" && isFinite(Number(v)) ? Number(v) : 0));
   // A missing provider observation is unknown, not a measured zero.
@@ -74,9 +110,8 @@ export function addPostToSample(agg: AnySample, p: AnyPost): string {
   if (created) {
     const d = new Date(created);
     if (!isNaN(d.getTime())) {
-      const wd = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getUTCDay()];
+      const { weekday: wd, hour: hr } = weekdayAndHourIn(d, timeZone);
       agg.by_weekday[wd] = (agg.by_weekday[wd] || 0) + 1;
-      const hr = String(d.getUTCHours());
       agg.by_hour[hr] = (agg.by_hour[hr] || 0) + 1;
     }
   }
@@ -118,15 +153,16 @@ export function finalizePostSample(b: AnySample, days: number): AnySample {
  * bucket, its channel mix, and a bucket per channel. Rows that are not
  * posts (Sprout's ads) are left out. observed_post_count is the sample's
  * own count; the period totals (post_count, cadence, rates) come from the
- * company's figures when the report is read.
+ * company's figures when the report is read. Hours and weekdays are in
+ * `timeZone` when one is given.
  */
-export function companyPostSample(posts: AnyPost[], days: number): AnySample {
+export function companyPostSample(posts: AnyPost[], days: number, timeZone?: string | null): AnySample {
   const company = { ...emptyPostSample(), channels: {} as Record<string, number>, by_channel: {} as Record<string, AnySample> };
   for (const p of posts) {
     if (!isPublishedReportPost(p)) continue;
-    const channel = addPostToSample(company, p);
+    const channel = addPostToSample(company, p, timeZone);
     if (!company.by_channel[channel]) company.by_channel[channel] = emptyPostSample();
-    addPostToSample(company.by_channel[channel], p);
+    addPostToSample(company.by_channel[channel], p, timeZone);
   }
   finalizePostSample(company, days);
   const channel_mix = topCounts(company.channels, 8);

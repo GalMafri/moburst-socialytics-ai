@@ -1,22 +1,13 @@
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
-
-export type PostStatus = "draft" | "designed" | "approved" | "scheduled" | "published";
-
-const STATUS_LABEL: Record<PostStatus, string> = {
-  draft: "Draft",
-  designed: "Designed",
-  approved: "Approved",
-  scheduled: "Scheduled",
-  published: "Published",
-};
+import { statusLabel, type PostStatus } from "./postStatus";
+import type { SendState } from "@/components/reports/SchedulePostModal";
 
 const STATUS_CLASS: Record<PostStatus, string> = {
   draft: "bg-muted text-muted-foreground",
   designed: "bg-secondary text-secondary-foreground",
   approved: "bg-accent text-accent-foreground",
   scheduled: "bg-primary text-primary-foreground",
-  published: "bg-success text-success-foreground",
 };
 
 interface Props {
@@ -26,10 +17,12 @@ interface Props {
    * the chip becomes a real clickable button to toggle the approved state.
    */
   onToggleApproved?: () => void;
+  /** For a sent post: where its send stands (sendStateOf), so the chip says what the post's panel says. */
+  sendState?: SendState;
 }
 
-export function PostStatusChip({ status, onToggleApproved }: Props) {
-  const { isClient } = useAuth();
+export function PostStatusChip({ status, onToggleApproved, sendState }: Props) {
+  const { isClient, isMoburstStaff } = useAuth();
   const clickable =
     !isClient &&
     (status === "designed" || status === "approved") &&
@@ -41,7 +34,7 @@ export function PostStatusChip({ status, onToggleApproved }: Props) {
         clickable ? "group-hover/chip:opacity-80 transition-opacity" : ""
       }`}
     >
-      {STATUS_LABEL[status]}
+      {statusLabel(status, !!isMoburstStaff, sendState)}
     </Badge>
   );
 
@@ -66,7 +59,7 @@ export function PostStatusChip({ status, onToggleApproved }: Props) {
           ? "Click to unmark as approved"
           : "Click to mark as approved"
       }
-      className="group/chip inline-flex items-center rounded-full
+      className="group/chip pointer-events-auto inline-flex items-center rounded-full
                  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
     >
       {badgeContent}

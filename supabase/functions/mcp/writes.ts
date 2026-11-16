@@ -221,7 +221,7 @@ export const WRITE_TOOLS: WriteSpec[] = [
       if (!sections.length) return refused(404, "not_found", "This client has no strategy yet");
       const section = sections.find((s) => s.key === key);
       if (!section) return refused(404, "not_found", "No section with that key in this client's strategy");
-      const version = await sectionVersion(section.text);
+      const version = await sectionVersion(section.stored);
       if (text === section.text.trim()) return answered({ status: "unchanged", section_key: key, version, message: "The section already says this. Nothing changed." });
       if (String(a.based_on ?? "").trim() !== version) {
         return stale("This section changed in Socialytics after you read it. Show the person the text below and ask again", { section_key: key, text: section.text, version });
@@ -370,7 +370,7 @@ export function makeServiceWriter(db: Db): ServiceWriter {
     strategy: async (clientId) => {
       const [row, edits] = await Promise.all([
         must<StrategyRows["row"]>(db.from("content_strategies").select("written_at, sections, section_texts, platforms, pillars").eq("client_id", clientId).maybeSingle(), "Could not read the strategy"),
-        must<StrategyRows["edits"] | null>(db.from("content_strategy_edits").select("section_key, text, editor_name, edited_at, source").eq("client_id", clientId), "Could not read the strategy"),
+        must<StrategyRows["edits"] | null>(db.from("content_strategy_edits").select("section_key, text, editor_name, edited_at, source, value").eq("client_id", clientId), "Could not read the strategy"),
       ]);
       return { row: row ?? null, edits: edits ?? [] };
     },

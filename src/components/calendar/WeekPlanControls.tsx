@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { NOT_YET, NotYet, useNotYet } from "@/components/ui/not-yet";
 import { canRemove, canRevise, canStop, shortDate, type CalendarPlanRow } from "@/lib/calendarPosts";
 import { weekPlanView, type PlanStep } from "@/lib/weekPlanStatus";
 
@@ -29,19 +30,25 @@ const answeredPlan = (data: Record<string, unknown> | null) => (data?.plan && ty
 /** onRequested gets the week being planned and its plan, or nulls when the request didn't go through (the page then shows what the server has). */
 export function PlanNextWeekButton({ clientId, week, onRequested }: { clientId: string; week: string | null; onRequested: (week: string | null, plan: CalendarPlanRow | null) => void }) {
   const [busy, setBusy] = useState(false);
+  const notYet = useNotYet();
   if (!week) return null;
   const plan = async () => {
     setBusy(true);
+    notYet.clear();
     const data = await queueCalendarWork({ action: "plan_next_week", client_id: clientId });
     setBusy(false);
+    if (!data) notYet.say(NOT_YET.start);
     // The week's band shows the planning from here on.
     onRequested(typeof data?.week === "string" ? data.week : null, answeredPlan(data));
   };
   return (
-    <Button size="sm" onClick={plan} disabled={busy}>
-      {busy ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5 mr-1.5" />}
-      Plan the week of {shortDate(week)}
-    </Button>
+    <>
+      <Button size="sm" onClick={plan} disabled={busy}>
+        {busy ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5 mr-1.5" />}
+        Plan the week of {shortDate(week)}
+      </Button>
+      {notYet.line && <NotYet>{notYet.line}</NotYet>}
+    </>
   );
 }
 
@@ -49,12 +56,14 @@ export function ReviseWeekButton({ plan, onRequested }: { plan: CalendarPlanRow;
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const notYet = useNotYet();
   const send = async () => {
     setBusy(true);
+    notYet.clear();
     const data = await queueCalendarWork({ action: "revise_week", plan_id: plan.id, note });
     setBusy(false);
     // Not sent: the dialog stays open with the note, ready to send again.
-    if (!data) return;
+    if (!data) return notYet.say(`${NOT_YET.sent} Your note is kept here.`);
     setOpen(false);
     setNote("");
     // The week's band shows the revision from here on.
@@ -66,7 +75,7 @@ export function ReviseWeekButton({ plan, onRequested }: { plan: CalendarPlanRow;
         <PenLine className="h-3.5 w-3.5 mr-1.5" />
         Revise this week
       </Button>
-      <Dialog open={open} onOpenChange={(o) => !busy && setOpen(o)}>
+      <Dialog open={open} onOpenChange={(o) => { if (busy) return; setOpen(o); if (!o) notYet.clear(); }}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Revise the week of {shortDate(plan.week_start)}</DialogTitle>
@@ -82,6 +91,7 @@ export function ReviseWeekButton({ plan, onRequested }: { plan: CalendarPlanRow;
             placeholder="For example: too formal, no emojis on LinkedIn, mention the free trial"
             aria-label="What should change"
           />
+          {notYet.line && <NotYet>{notYet.line}</NotYet>}
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>Cancel</Button>
             <Button onClick={send} disabled={busy || !note.trim()}>
@@ -124,13 +134,17 @@ export function WeekPlanBand({ plan, today, canAct, hasPosts, onChanged }: {
   onChanged: (plan: CalendarPlanRow | null) => void;
 }) {
   const [asking, setAsking] = useState<"stop" | "remove" | null>(null);
+  const notYet = useNotYet();
   const view = weekPlanView(plan, today);
   if (!view) return null;
   const week = shortDate(plan.week_start);
 
   const stop = async () => {
+    const removing = asking === "remove";
+    notYet.clear();
     const data = await queueCalendarWork({ action: "stop_plan", plan_id: plan.id });
     setAsking(null);
+    if (!data) notYet.say(removing ? NOT_YET.remove : NOT_YET.stop);
     onChanged(answeredPlan(data));
   };
   const question = (
@@ -159,6 +173,7 @@ export function WeekPlanBand({ plan, today, canAct, hasPosts, onChanged }: {
         {canAct && canStop(plan) && (
           <Button size="sm" variant="outline" onClick={() => setAsking("stop")}>Stop planning</Button>
         )}
+        {notYet.line && <NotYet>{notYet.line}</NotYet>}
         {question}
       </div>
     );
@@ -174,6 +189,7 @@ export function WeekPlanBand({ plan, today, canAct, hasPosts, onChanged }: {
         {canAct && canRemove(plan, today) && (
           <Button size="sm" variant="ghost" onClick={() => setAsking("remove")}>Remove this week's plan</Button>
         )}
+        {notYet.line && <NotYet>{notYet.line}</NotYet>}
         {question}
       </div>
     );

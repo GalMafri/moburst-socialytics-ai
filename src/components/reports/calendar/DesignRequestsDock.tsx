@@ -1,7 +1,7 @@
 /**
  * Design progress that stays on screen: one card per post whose designs are
- * being prepared, and a card for each that just finished, in the same
- * bottom-right column as the other generation cards. "Open" takes you to the
+ * being prepared, and a card for each that just finished, in the
+ * bottom-right column. "Open" takes you to the
  * post's Design tab. A week being designed (the week's design button) is one
  * card for the whole week, not one per post.
  *
@@ -35,6 +35,19 @@ function saveDismissed(ids: Set<string>) {
   } catch {
     // Storage can be unavailable (private window); dismissal then lasts for the visit.
   }
+}
+
+/**
+ * The fixed bottom-right column the cards sit in. The calendar mounts it once,
+ * inside the design requests provider, so progress shows on every client's
+ * calendar whatever panel is open.
+ */
+export function DesignRequestsDock() {
+  return (
+    <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-3 max-w-sm print:hidden">
+      <DesignRequestsDockItems />
+    </div>
+  );
 }
 
 export function DesignRequestsDockItems() {
@@ -96,15 +109,17 @@ function WeekDockCard({ requests, progress, onOpen, onDismiss }: { requests: Des
   // Open the post being designed now, else the latest one that is ready.
   const target = requests.find((r) => r.status === "preparing") ?? requests.find((r) => r.status === "ready") ?? requests[0];
   const done = !progress.active;
+  // The 'designed' sentence is for a week where every post is; otherwise the card says its count.
+  const all = progress.ready >= progress.total;
   return (
     <div role="status" aria-live="polite" className="glass-elevated rounded-[16px] p-4 w-80 animate-slide-up">
       <div className="flex items-start gap-3">
-        <div className={`shrink-0 rounded-full p-1.5 ${done ? "bg-[rgba(16,185,129,0.10)] text-[#10b981]" : "bg-[rgba(185,224,69,0.10)] text-[#b9e045]"}`}>
+        <div className={`shrink-0 rounded-full p-1.5 ${done ? "bg-success/10 text-success" : "bg-[rgba(185,224,69,0.10)] text-[#b9e045]"}`}>
           {done ? <CheckCircle2 className="h-4 w-4" /> : <Loader2 className="h-4 w-4 animate-spin" />}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="t-h4">{done ? "This week's posts are designed" : "Designing this week's posts"}</p>
-          <p className="t-label tracking-[-0.2px] truncate mt-0.5">{`${progress.ready} of ${progress.total} ready`}</p>
+          <p className="t-h4">{!done ? "Designing this week's posts" : all ? "This week's posts are designed" : `${progress.ready} of ${progress.total} posts designed`}</p>
+          <p className="t-label tracking-[-0.2px] truncate mt-0.5">{done && !all ? `${progress.total - progress.ready} not designed yet` : `${progress.ready} of ${progress.total} ready`}</p>
         </div>
         {done && (
           <button type="button" onClick={onDismiss} aria-label="Dismiss" className="shrink-0 rounded-full p-1 text-[#b1b7c1] hover:text-white hover:bg-[rgba(255,255,255,0.06)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
@@ -113,7 +128,7 @@ function WeekDockCard({ requests, progress, onOpen, onDismiss }: { requests: Des
         )}
       </div>
       <div className="mt-3 h-1.5 w-full rounded-full bg-[rgba(255,255,255,0.06)] overflow-hidden">
-        <div className={`h-full transition-[width] duration-500 ease-out ${done ? "bg-[#10b981]" : "bg-[#b9e045]"}`} style={{ width: `${pct}%` }} role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} />
+        <div className={`h-full transition-[width] duration-500 ease-out ${done ? "bg-success" : "bg-[#b9e045]"}`} style={{ width: `${pct}%` }} role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} />
       </div>
       {target && (
         <div className="mt-3 flex gap-2">
@@ -134,7 +149,7 @@ function DockCard({ request, isStaff, onOpen, onDismiss }: { request: DesignRequ
   return (
     <div role="status" aria-live="polite" className="glass-elevated rounded-[16px] p-4 w-80 animate-slide-up">
       <div className="flex items-start gap-3">
-        <div className={`shrink-0 rounded-full p-1.5 ${ready ? "bg-[rgba(16,185,129,0.10)] text-[#10b981]" : "bg-[rgba(185,224,69,0.10)] text-[#b9e045]"}`}>
+        <div className={`shrink-0 rounded-full p-1.5 ${ready ? "bg-success/10 text-success" : "bg-[rgba(185,224,69,0.10)] text-[#b9e045]"}`}>
           {ready ? <CheckCircle2 className="h-4 w-4" /> : preparing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
         </div>
         <div className="flex-1 min-w-0">
@@ -150,7 +165,7 @@ function DockCard({ request, isStaff, onOpen, onDismiss }: { request: DesignRequ
         )}
       </div>
       <div className="mt-3 h-1.5 w-full rounded-full bg-[rgba(255,255,255,0.06)] overflow-hidden">
-        <div className={`h-full transition-[width] duration-500 ease-out ${ready ? "bg-[#10b981]" : "bg-[#b9e045]"}`} style={{ width: `${pct}%` }} role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} />
+        <div className={`h-full transition-[width] duration-500 ease-out ${ready ? "bg-success" : "bg-[#b9e045]"}`} style={{ width: `${pct}%` }} role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} />
       </div>
       {preparing && <p className="mt-1.5 t-subhead">{stageLine(request, isStaff)}</p>}
       <div className="mt-3 flex gap-2">

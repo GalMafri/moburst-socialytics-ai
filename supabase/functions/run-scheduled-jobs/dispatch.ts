@@ -24,7 +24,9 @@
 // A competitive analysis that finishes but does not pass its checks
 // (competitiveReportQuality) is held: never shown to clients. The occurrence
 // then stays open and the analysis is made again once a day, up to
-// HELD_REDOS times; the held run stays for staff, read as being redone.
+// HELD_REDOS times; the held run stays for staff. Its decision is written on
+// the held row (report_data.redo: queued with the redo's time, or none), and
+// every screen reads "Being redone" or "Not shared" from it.
 //
 // Each dispatch is its own job with recorded phases:
 //
@@ -86,7 +88,9 @@ import { nextRun, rangeForSchedule, type ReportRange } from "../_shared/reports/
 import { madeReportText, reportsLink, stuckReportText } from "../_shared/alerts/slack.ts";
 import { STUCK_AFTER_MINUTES } from "../_shared/reports/payloads.ts";
 import { isTrackingProblem, LANDSCAPE_MISSING, type LandscapeCheck } from "../_shared/competitive/landscapeCheck.ts";
-import { HELD_REDOS } from "../_shared/competitive/reportEvidence.ts";
+import { HELD_REDO_MINUTES, HELD_REDOS, type HeldRedo } from "../_shared/competitive/reportEvidence.ts";
+// The wait before a held competitive analysis is made again is the one the screens read from (reportEvidence.ts).
+export { HELD_REDO_MINUTES };
 import type { JobOutcome, ScheduledJob } from "../_shared/scheduled-jobs/types.ts";
 import { RETRY_MINUTES } from "./worker.ts";
 import type { Engine, PipelineDefinition } from "../_shared/pipelines/types.ts";
@@ -108,8 +112,6 @@ export const RETRY_MAX_MINUTES = 24 * 60;
 export const LAST_RUN_LEAD_MINUTES = 180;
 /** How long a manual run keeps trying, from when it was asked for. */
 export const MANUAL_RUN_DAYS = 7;
-/** The wait before a held competitive analysis is made again. */
-export const HELD_REDO_MINUTES = 24 * 60;
 /** A report still not made this long after its occurrence's first run started gets one Slack alert. */
 export const ALERT_AFTER_MINUTES = 24 * 60;
 
@@ -229,6 +231,12 @@ export interface DispatchStore {
   releaseHeldSocial(clientId: string): Promise<void>;
   webhooks(): Promise<{ social: string | null; competitive: string | null }>;
   insertCompetitiveReport(row: NewReportRow & { created_at: string; set_id: string }): Promise<string>;
+  /**
+   * Write the dispatch's decision for a held analysis on its row
+   * (report_data.redo, reportEvidence.ts heldRedo): every screen reads its
+   * "Being redone" or "Not shared" from it. Only a complete row is written.
+   */
+  recordRedo(reportId: string, redo: HeldRedo): Promise<void>;
   insertSocialReport(row: NewReportRow): Promise<string>;
   /** Pin the client's due social schedules (none pinned yet) to this competitive report. */
   holdSocial(clientId: string, competitiveReportId: string, now: Date): Promise<void>;
@@ -288,6 +296,8 @@ export interface DispatchRun {
   engine?: "app";
   /** Why the run ended, as a code (PLAIN_REASONS). */
   end?: RunEnd;
+  /** A held run: the redo decision written on its report row (recordRedo). */
+  redo?: "queued" | "none";
 }
 
 /** What a dispatch job keeps between its leases (scheduled_jobs.result). */
@@ -355,13 +365,34 @@ export function followingRun(schedule: ScheduleRow, occurrence: string, now: Dat
 const finished = (status: string | null | undefined) => status === "complete" || status === "completed";
 const inProgress = (status: string | null | undefined) => status === "running" || status === "pending";
 
+/**
+ * Every held run of the occurrence still marked as having a redo queued is
+ * told no redo comes: its redo was made (a later run finished) or the
+ * occurrence ended without making it. No screen keeps reading "Being redone".
+ */
+async function noRedoComes(runs: DispatchRun[] | undefined, d: DispatchDeps): Promise<void> {
+  if (d.dryRun) return;
+  for (const run of (runs ?? []).filter((r) => r.outcome === "held" && r.redo === "queued")) {
+    await d.store.recordRedo(run.report_id, { queued: false, decided_at: d.now().toISOString() });
+    run.redo = "none";
+  }
+}
+
 export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<JobOutcome> {
   const now = d.now();
   const manual = manualRun(job);
   const schedule = manual ? null : job.schedule_id ? await d.store.schedule(job.schedule_id) : null;
-  if (!manual && (!schedule || !schedule.is_active)) return { status: "skipped", reason: "The schedule was deleted or turned off before it ran." };
+  /** The runs the job made before this lease, as its memory keeps them. */
+  const earlierRuns = (job.result as DispatchMemory | null)?.runs;
+  if (!manual && (!schedule || !schedule.is_active)) {
+    await noRedoComes(earlierRuns, d);
+    return { status: "skipped", reason: "The schedule was deleted or turned off before it ran." };
+  }
   const client = await d.store.client(manual ? job.client_id : schedule!.client_id);
-  if (!client || client.archived_at) return { status: "skipped", reason: "client archived or missing" };
+  if (!client || client.archived_at) {
+    await noRedoComes(earlierRuns, d);
+    return { status: "skipped", reason: "client archived or missing" };
+  }
   const competitive = (manual ? manual.kind : schedule!.report_kind) === "competitive";
   const kind = competitive ? "competitive" : "social";
   const table = competitive ? "competitive_reports" : "reports";
@@ -430,6 +461,9 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
     const open = reportId ? runs.find((r) => r.report_id === reportId && !r.ended_at) : undefined;
     if (open) Object.assign(open, { ended_at: now.toISOString(), outcome: "stopped" as const, end, note: (run?.error ? `${why}: ${run.error}` : why).slice(0, 300) });
     if (d.dryRun) return { status: "waiting", reason: `dry run: would run again (${why})`, result: keep() };
+    const next = nextRunOfOccurrence(runs.length, now, deadline);
+    // The occurrence closes: a redo it queued for a held run is not made.
+    if (!next) await noRedoComes(runs, d);
     if (reportId) {
       await d.store.dropReport(table, reportId);
       if (memory.set_id) await d.store.releaseSet(memory.set_id);
@@ -438,7 +472,6 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
     }
     // Posted right before the save that keeps alerted_at, so a later run never posts it again.
     await alertIfLate(end);
-    const next = nextRunOfOccurrence(runs.length, now, deadline);
     const kept = keep();
     const availableAt = next ? leaseAt(next, kept) : null;
     await d.saveJob({ phase: null, report_id: null, result: kept });
@@ -464,6 +497,8 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
     const run = await d.store.reportRun(table, reportId);
     if (run && finished(run.status)) {
       const open = runs.find((r) => r.report_id === reportId && !r.ended_at);
+      // A run of the occurrence finished, so the redo every earlier held run queued has been made.
+      await noRedoComes(runs, d);
       if (competitive && run.held) {
         // Held: kept for staff, never shown to clients, and made again tomorrow.
         if (open) Object.assign(open, { ended_at: now.toISOString(), outcome: "held" as const, end: "held" as const });
@@ -471,6 +506,9 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
         const at = Math.min(now.getTime() + HELD_REDO_MINUTES * MINUTE, Date.parse(deadline) - LAST_RUN_LEAD_MINUTES * MINUTE);
         if (held <= HELD_REDOS && at > now.getTime()) {
           if (d.dryRun) return { status: "waiting", reason: "dry run: would make the held analysis again", result: keep() };
+          // The decision goes on the row first, so every screen reads it from there.
+          await d.store.recordRedo(reportId, { queued: true, available_at: new Date(at).toISOString(), decided_at: now.toISOString() });
+          if (open) open.redo = "queued";
           if (memory.set_id) await d.store.releaseSet(memory.set_id);
           // Not shown to clients, so not made yet: held a day or more after the first run, it alerts once.
           await alertIfLate("held");
@@ -480,9 +518,14 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
           await note(null);
           return { status: "queued", reason: `The analysis did not pass its checks; it is made again (${held} of ${HELD_REDOS}).`, available_at: availableAt, deferred: true, result: kept };
         }
+        // Its redos are used up, or none fits before the next run: no redo comes for it.
+        if (!d.dryRun) await d.store.recordRedo(reportId, { queued: false, decided_at: now.toISOString() });
+        if (open) open.redo = "none";
       } else if (open) {
         Object.assign(open, { ended_at: now.toISOString(), outcome: "ran" as const });
       }
+      // A held run whose redo this was keeps no redo to come.
+      await noRedoComes(runs, d);
       if (!d.dryRun && schedule) await d.store.advance(schedule, moved ? schedule.next_run_at : followingRun(schedule, occurrence, now), "The report ran.");
       // Made after the alert: one short message says so. A held analysis whose redos ran out was never made.
       if (memory.alerted_at && !(competitive && run.held)) {
@@ -513,12 +556,14 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
   if (job.phase === "sent" && job.report_id) return watch(job.report_id);
 
   if (!job.report_id && job.occurrence && moved) {
+    await noRedoComes(runs, d);
     return { status: "skipped", reason: `The schedule moved to ${schedule!.next_run_at} before this run started.` };
   }
 
   // A manual run that could not start inside its window (tracking that never
   // came, for one) ends quietly; nothing was made, so nothing is shown.
   if (manual && !job.report_id && now.getTime() >= Date.parse(deadline)) {
+    await noRedoComes(runs, d);
     return { status: "skipped", reason: `The manual run was asked for ${MANUAL_RUN_DAYS} days ago and could not start.` };
   }
 

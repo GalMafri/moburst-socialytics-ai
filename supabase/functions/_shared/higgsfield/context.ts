@@ -9,9 +9,9 @@
 // The one thing that CANNOT cross this bridge is a PDF brand book: Higgsfield
 // accepts only jpeg/jpg/png/webp/gif image inputs. A PDF's influence must
 // arrive through the text prompt instead, via design_style_synthesis, which
-// buildImagePrompt() already embeds. synthesize-design-language exists to
-// produce exactly that synthesis, so clients with a PDF-only brand book and no
-// synthesis row lose brand grounding — the caller surfaces that as a warning.
+// buildImagePrompt() already embeds. The weekly design references step
+// (brand-references/learnStyle.ts) produces that synthesis, so a client with a
+// PDF-only brand book and no synthesis row loses brand grounding — the caller surfaces that as a warning.
 
 export const MAX_REFERENCE_IMAGES = 4; // the Gemini path attaches 4; both backends should see the same references
 const SIGNED_URL_TTL_SECONDS = 60 * 60; // Higgsfield fetches immediately; 1h is generous

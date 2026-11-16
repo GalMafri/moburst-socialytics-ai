@@ -15,11 +15,11 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/useAuth";
 import { useApiKeys, useCreateApiKey, useRevokeApiKey, type ApiKey, type CreatedKey } from "@/hooks/useApiKeys";
 import { cn } from "@/lib/utils";
-import { sendQuietly } from "@/lib/quietSend";
+import { invokeResendable, sendQuietly } from "@/lib/quietSend";
 
 const SCOPES: Array<{ id: "read" | "demo" | "admin"; label: string; hint: string }> = [
   { id: "read", label: "read", hint: "Every client, report, competitor set, post, schedule and alert the key may see." },
-  { id: "demo", label: "demo", hint: "Onboard a brand and run every feature for it." },
+  { id: "demo", label: "demo", hint: "Start demo jobs that onboard a brand and run each feature for it." },
   { id: "admin", label: "admin", hint: "Manage keys through the API." },
 ];
 
@@ -80,23 +80,29 @@ function KeyRow({ k, onRevoke }: { k: ApiKey; onRevoke: (k: ApiKey) => void }) {
 
 function OneTimeKey({ created, onDone }: { created: CreatedKey; onDone: () => void }) {
   const [copied, setCopied] = useState(false);
+  /** The clipboard refused; the key stays on screen to select. */
+  const [notCopied, setNotCopied] = useState(false);
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(created.key);
       setCopied(true);
-    } catch {
+      setNotCopied(false);
+    } catch (e) {
+      console.warn("[api key] copy to clipboard", e);
       setCopied(false);
+      setNotCopied(true);
     }
   };
   return (
     <div className="glass-accent space-y-3 p-4" data-testid="api-key-created">
       <p className="t-h4">{created.name} is ready.</p>
       <div className="flex items-center gap-2">
-        <code className="input-glass flex-1 truncate rounded-xl px-3 py-2 font-mono text-[13px] text-[#d7f07a]">{created.key}</code>
+        <code className="input-glass flex-1 truncate rounded-xl px-3 py-2 font-mono text-[13px] text-primary">{created.key}</code>
         <Button size="sm" variant="outline" onClick={copy} aria-label="Copy key">
           {copied ? <Check className="h-4 w-4" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />}
         </Button>
       </div>
+      {notCopied && <p role="status" className="t-secondary">Not copied. Select the key to copy it.</p>}
       <p className="t-label">Copy it now; it is not shown again.</p>
       <Button size="sm" variant="secondary" onClick={onDone}>Done</Button>
     </div>
@@ -167,7 +173,7 @@ function CreateKeyDialog({ open, onOpenChange, clientSlugs, onCreated }: { open:
                     type="button"
                     aria-pressed={on}
                     onClick={() => setSlugs(toggle(slugs, slug))}
-                    className={cn("rounded-full border px-2.5 py-0.5 t-label font-medium transition-colors", on ? "border-[rgba(185,224,69,0.45)] bg-[rgba(185,224,69,0.14)] text-[#d7f07a]" : "border-white/[0.12] text-white/70 hover:bg-white/[0.06]")}
+                    className={cn("rounded-full border px-2.5 py-0.5 t-label font-medium transition-colors", on ? "border-primary/45 bg-primary/15 text-primary" : "border-white/[0.12] text-white/70 hover:bg-white/[0.06]")}
                   >
                     {slug}
                   </button>
@@ -179,7 +185,7 @@ function CreateKeyDialog({ open, onOpenChange, clientSlugs, onCreated }: { open:
             <Label htmlFor="api-key-expires">Expires (optional)</Label>
             <Input id="api-key-expires" type="date" value={expires} onChange={(e) => setExpires(e.target.value)} className="max-w-[200px]" />
           </div>
-          {notCreated && <p role="status" className="t-secondary">No key yet. Everything above is kept as it is.</p>}
+          {notCreated && <p role="status" className="t-secondary">The key is not created yet. Your choices are kept.</p>}
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button onClick={submit} disabled={!name.trim() || scopes.length === 0 || create.isPending}>Create</Button>
@@ -198,8 +204,24 @@ export function ApiAccessCard({ clientSlugs }: { clientSlugs: string[] }) {
   const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState<CreatedKey | null>(null);
   const [toRevoke, setToRevoke] = useState<ApiKey | null>(null);
+  /** One quiet line over the list: a key that is not revoked yet. */
+  const [notice, setNotice] = useState<string | null>(null);
   if (!isAdmin) return null;
   const live = keys.filter((k) => !k.revoked_at);
+  const confirmRevoke = async (k: ApiKey) => {
+    setToRevoke(null);
+    setNotice(null);
+    // Revoking twice answers the first revoke, so a send that failed on the server is safe to repeat.
+    const { error: notDone } = await sendQuietly(
+      () => revoke.mutateAsync(k.id).then(() => ({ error: null }), (e: unknown) => ({ error: e })),
+      { again: (e) => invokeResendable(e, { idempotent: true }) },
+    );
+    if (notDone) {
+      console.warn("[api key] not revoked yet", notDone);
+      setNotice(`${k.name} is not revoked yet.`);
+      refetch();
+    }
+  };
   return (
     <Section
       layout="split"
@@ -219,6 +241,7 @@ export function ApiAccessCard({ clientSlugs }: { clientSlugs: string[] }) {
         </Button>
       }
     >
+        {notice && <p role="status" className="t-secondary">{notice}</p>}
         {created && <OneTimeKey created={created} onDone={() => setCreated(null)} />}
         {isLoading ? (
           <Loading label="Loading keys" />
@@ -243,7 +266,7 @@ export function ApiAccessCard({ clientSlugs }: { clientSlugs: string[] }) {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Keep it</AlertDialogCancel>
-            <AlertDialogAction onClick={() => { if (toRevoke) revoke.mutate(toRevoke.id); setToRevoke(null); }}>Yes, revoke</AlertDialogAction>
+            <AlertDialogAction onClick={() => { if (toRevoke) void confirmRevoke(toRevoke); }}>Yes, revoke</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

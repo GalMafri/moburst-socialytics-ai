@@ -106,7 +106,7 @@ export default function CompetitiveIndex() {
                       onClick={() => navigate(`/clients/${c.id}/competitive/run`)}
                       disabled={!c.runnable}
                     >
-                      <Play /> {c.report?.status === "running" ? "View running report" : "Run competitive report"}
+                      <Play /> {c.report?.status === "running" ? "View running report" : "Run competitive analysis"}
                     </Button>
                     {c.report && (
                       <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${c.id}/competitive/reports`)}><History /> All runs</Button>

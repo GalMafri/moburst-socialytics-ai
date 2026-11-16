@@ -8,25 +8,34 @@
 //   POST {action:"tick"}              one pass over the due jobs, then the next posts
 //                                     of any week being designed (operational secret)
 //   POST {action:"advance", job_id}   one job, in a request of its own (operational secret)
+//   POST {action:"picture_check", count}  the finish call for the newest done designs, answered
+//                                     at once with each call's time (operational secret)
+//
+// Every picture is made, read and resized by the picture service on Vercel
+// (_shared/picture/client.ts, 12 Nov 2026); this worker never decodes one.
 //
 // A pass hands every due job to its own request, so one design's image work
 // never spends another's CPU time, and slow image-model calls run in the
 // background under a longer lease.
 
 import { createClient } from "../_shared/supabase.ts";
-import { Image } from "https://deno.land/x/imagescript@1.3.0/mod.ts";
 import { encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { secretEquals } from "../_shared/auth/secretEquals.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
-import { ModelBusy, imageEdit } from "../_shared/media/imageEdit.ts";
+import { imageEdit } from "../_shared/media/imageEdit.ts";
 import { openaiKey } from "../_shared/openai/key.ts";
-import { claimJob, endOverdueRequests, endRequest, settleRequest, BUCKET } from "../_shared/canva/jobs.ts";
+import { claimJob, endOverdueRequests, endRequest, renewJobLease, saveJobProgress, settleRequest, BUCKET } from "../_shared/canva/jobs.ts";
 import { MAX_PLAN_ATTEMPTS, NO_PROGRESS_MINUTES, REQUEST_MAX_MINUTES } from "../_shared/design/requestRules.ts";
-import { type GenerateInput, canvasLogoRect, designPrompt, resampleRGBA } from "../_shared/canva/brief.ts";
+import { type GenerateInput, designPrompt } from "../_shared/canva/brief.ts";
 import { outputSize, pictureSize } from "../_shared/canva/finish.ts";
 import { copyMatches, logoCheckPrompt, marksPrompt, parseLogoCheck, parseMarks, parseRead, readPrompt, removePrompt } from "../_shared/design/pipeline.ts";
-import { LOGO_SCALES, findLogo, logoFound } from "../_shared/design/logoMatch.ts";
+import { LOGO_SCALES, logoFound } from "../_shared/design/logoMatch.ts";
 import { STORY_SURFACE, storyTextBand } from "../_shared/design/story.ts";
+import { callPicture, notePicture, pictureCheckCount, signedRead, signedWrite } from "../_shared/picture/client.ts";
+import { heldWork } from "../_shared/canva/hold.ts";
+import { DESIGN_LIMITS, MAX_DESIGN_ATTEMPTS, type StepResult, Stopped, advanceDesignJob } from "../_shared/design/advance.ts";
+import { type GenerateDeps, runGenerate, runUnlogo } from "../_shared/design/modelSteps.ts";
+import { logoAreaRect } from "../_shared/picture/geometry.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
@@ -38,10 +47,7 @@ const PASS_BUDGET_MS = 50_000;
 const LEASE_MS = 120_000;
 /** The image model can take minutes; its call is held under a longer lease. */
 const MODEL_LEASE_MS = 420_000;
-const MAX_ATTEMPTS = 4;
-/** Designs made for one option before it fails (a design with wrong words, or without the logo in its place, is made again). */
-const MAX_GENERATIONS = 3;
-const MAX_UNLOGO = 4;
+const MAX_ATTEMPTS = MAX_DESIGN_ATTEMPTS;
 /** Removals that name another brand's marks before the design is made again. */
 const MAX_MARK_CLEANS = 2;
 const DEFAULT_PAGE = { width: 1088, height: 1360 };
@@ -55,7 +61,7 @@ const CHECK_TOKENS = 2000;
 /** Times a check is asked again when its answer comes back unreadable, before the step counts a try. */
 const READ_TRIES = 3;
 const STEPS = new Set(["generate", "locate", "unlogo", "marks", "finish", "verify"]);
-/** A job is only ever moved on while it is active: a cancelled design stays cancelled. */
+/** A job is only ever moved on while it is active: a canceled design stays canceled. */
 const ACTIVE = ["queued", "running"];
 
 const db = () => createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
@@ -70,6 +76,7 @@ Deno.serve(async (req) => {
     }
     if (body?.action === "tick") return background(runPass(admin));
     if (body?.action === "advance" && typeof body.job_id === "string") return background(advanceOne(admin, body.job_id));
+    if (body?.action === "picture_check") return json(await pictureCheck(admin, pictureCheckCount(body.count)));
     return json({ error: "Unknown action." }, 400);
   } catch (err) {
     console.error("[design-worker]", err instanceof Error ? err.message : err);
@@ -84,10 +91,8 @@ function background(work: Promise<unknown>): Response {
   return json({ accepted: true }, 202);
 }
 
-type Job = { id: string; client_id: string; step: string; status: string; attempts: number; input: any; state: any; design_request_id: string | null; option_index: number | null; slide_index: number | null; slide_count: number | null };
-/** next: run the following step now; wait: a later pass; held: work continues in the background under its lease; done. */
-type StepResult = "next" | "wait" | "held" | "done";
-const JOB_COLUMNS = "id, client_id, step, status, attempts, input, state, design_request_id, option_index, slide_index, slide_count";
+type Job = { id: string; client_id: string; step: string; status: string; attempts: number; input: any; state: any; design_request_id: string | null; option_index: number | null; slide_index: number | null; slide_count: number | null; created_at: string };
+const JOB_COLUMNS = "id, client_id, step, status, attempts, input, state, design_request_id, option_index, slide_index, slide_count, created_at";
 
 // ── The pass ────────────────────────────────────────────────────────────────
 
@@ -192,64 +197,36 @@ async function handOut(admin: any, jobId: string): Promise<void> {
   }
 }
 
-/** One job: its steps until it waits, is held or is done; then its request is settled. */
+/** One job: its steps until it waits, is held or is done (_shared/design/advance.ts); then its request is settled. */
 async function advanceOne(admin: any, jobId: string) {
   const { data: job } = await admin.from("canva_finish_jobs").select(JOB_COLUMNS).eq("id", jobId).in("status", ["queued", "running"]).maybeSingle();
   if (!job) return;
   const started = Date.now();
-  try {
-    let result: StepResult = "next";
-    while (result === "next" && Date.now() - started < PASS_BUDGET_MS) {
-      result = await runStep(admin, job as Job);
-      if (result !== "held") {
-        await admin.from("canva_finish_jobs").update({ step: job.step, state: job.state, error: null, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE);
-      }
-    }
-    if (result === "done") {
-      await admin.from("canva_finish_jobs").update({ status: "done", step: "finished", output_path: job.state.final_path, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE);
-    } else if (result !== "held") {
-      await admin.from("canva_finish_jobs").update({ lease_until: null }).eq("id", job.id).in("status", ACTIVE);
-    }
-  } catch (e) {
-    if (e instanceof Stopped) {
-      await admin.from("canva_finish_jobs").update({ status: "canceled", error: null, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE);
-    } else {
-      await recordFailure(admin, job as Job, e);
-    }
-  }
+  await advanceDesignJob(admin, job as Job, () => runStep(admin, job as Job), () => Date.now() - started < PASS_BUDGET_MS);
   if (job.design_request_id) {
     await settleRequest(admin, job.design_request_id).catch((e) => console.error(`[design-worker] request ${job.design_request_id}:`, e instanceof Error ? e.message : e));
   }
 }
 
-async function recordFailure(admin: any, job: Job, e: unknown): Promise<void> {
-  const msg = e instanceof Error ? e.message : String(e);
-  const attempts = job.attempts + 1;
-  const failed = attempts >= MAX_ATTEMPTS || msg.startsWith("FINAL:");
-  console.error(`[design-worker] job ${job.id} step ${job.step}:`, msg);
-  await admin.from("canva_finish_jobs").update({
-    attempts, state: job.state, error: msg.replace(/^FINAL:\s*/, ""), status: failed ? "failed" : "running", lease_until: null, updated_at: new Date().toISOString(),
-  }).eq("id", job.id).in("status", ACTIVE);
-}
-
-/** Model work that runs past the request: the job is held under a longer lease and moves on when it ends. */
+/**
+ * Model work that runs past the request (canva/hold.ts, the video worker's
+ * too): the job is held under a longer lease and moves on when the work
+ * ends. The image model at its rate limit, or the picture service
+ * unavailable, is waited out without using a try (canva/stepError.ts).
+ */
 function hold(admin: any, job: Job, work: () => Promise<void>): StepResult {
-  const run = (async () => {
-    await admin.from("canva_finish_jobs").update({ lease_until: new Date(Date.now() + MODEL_LEASE_MS).toISOString(), state: job.state }).eq("id", job.id).in("status", ACTIVE);
-    try {
-      await work();
-      await admin.from("canva_finish_jobs").update({ step: job.step, state: job.state, error: null, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE);
-    } catch (e) {
-      // The image model at its rate limit, or briefly down, is waited out without using a try.
-      if (e instanceof ModelBusy) {
-        await admin.from("canva_finish_jobs").update({ state: job.state, error: e.message, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE);
-      } else {
-        await recordFailure(admin, job, e);
-      }
-    }
-  })();
+  const run = heldWork(admin, job, work, { ...DESIGN_LIMITS, leaseMs: MODEL_LEASE_MS });
   if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) EdgeRuntime.waitUntil(run);
   return "held";
+}
+
+/**
+ * A picture step's lease, renewed as it starts: one picture service call may
+ * wait up to two timeouts, and the lease must cover it. The edge request's own
+ * wall limit stays the bound; a run that dies spends a try as before.
+ */
+async function renewLease(admin: any, job: Job): Promise<void> {
+  await renewJobLease(admin, job.id, new Date(), MODEL_LEASE_MS);
 }
 
 // ── The steps ───────────────────────────────────────────────────────────────
@@ -270,21 +247,25 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
         if (!cover.state?.design_path) return "wait";
         s.cover_path = cover.state.design_path;
       }
-      s.generations = (s.generations ?? 0) + 1;
-      if (s.generations > MAX_GENERATIONS) throw new Error("FINAL: The design could not be made with the headline's exact words and the logo in its place.");
-      return hold(admin, job, async () => {
-        s.design_path = await generateDesign(admin, job, `${base}/design-${s.generations}.png`);
-        for (const k of ["logo_rect", "logo_frame", "logo_score", "nologo_path", "unlogos", "final_path", "read", "band_read", "marks_check", "marks_where", "mark_cleans"]) delete s[k];
-        job.step = "locate";
-      });
+      // The design is counted once the image model has made it (_shared/design/modelSteps.ts).
+      return runGenerate(generateDeps(admin, job), job, (work) => hold(admin, job, work));
     }
     case "locate": {
-      const design = await Image.decode(await download(admin, s.design_path));
-      const logo = await Image.decode(await download(admin, job.input.logo_path));
-      const W = design.width, H = design.height;
-      const usual = canvasLogoRect(job.input.placement, logo.width, logo.height, W, H);
+      await renewLease(admin, job);
       const g: GenerateInput = job.input.generate;
-      const found = findLogo(design.bitmap, W, H, logo.bitmap, logo.width, logo.height, usual, hexRgb(g.background), { scales: LOGO_SCALES });
+      // The service finds the logo on the design, near the client's usual spot for it (usual).
+      const { result: found, ms } = await callPicture(admin, "locate", {
+        job: job.id,
+        step: "locate",
+        design: await signedRead(admin, BUCKET, s.design_path),
+        logo: await signedRead(admin, BUCKET, job.input.logo_path),
+        placement: job.input.placement,
+        background: hexRgb(g.background),
+        scales: LOGO_SCALES,
+      });
+      notePicture(s, "locate", ms);
+      const [W, H] = found.frame;
+      const usual = found.usual;
       s.logo_score = Math.round(found.score * 1000) / 1000;
       if (!logoFound(found, usual.width)) {
         // No logo at the client's usual spot, or one at a size the client never
@@ -302,27 +283,33 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       return "next";
     }
     case "unlogo": {
-      s.unlogos = (s.unlogos ?? 0) + 1;
-      if (s.unlogos > MAX_UNLOGO) throw new Error("FINAL: The logo could not be taken out of the design.");
-      return hold(admin, job, async () => {
-        const g: GenerateInput = job.input.generate;
-        const page = pageOf(job);
-        const size = pictureSize([page.width, page.height]);
-        const bytes = await imageEdit(await openaiKey(db()), [{ bytes: await download(admin, s.design_path), name: "design.png" }], removePrompt(g.brand_name, s.marks_where), size);
-        const path = `${base}/nologo-${s.generations}-${s.unlogos}.png`;
-        await upload(admin, path, bytes, "image/png");
-        s.nologo_path = path;
-        job.step = "marks";
-      });
+      // The removal is counted once the image model has made it (_shared/design/modelSteps.ts).
+      return runUnlogo({
+        edit: async () => {
+          const g: GenerateInput = job.input.generate;
+          const page = pageOf(job);
+          const size = pictureSize([page.width, page.height]);
+          return imageEdit(await openaiKey(db()), [{ bytes: await download(admin, s.design_path), name: "design.png" }], removePrompt(g.brand_name, s.marks_where), size);
+        },
+        store: (path, png) => upload(admin, path, png, "image/png"),
+        save: () => saveJobProgress(admin, job),
+      }, job, (work) => hold(admin, job, work));
     }
     case "marks": {
+      await renewLease(admin, job);
       // No other brand's marks: read on the logo-free picture, at the page size.
-      const pic = await Image.decode(await download(admin, s.nologo_path));
       const page = pageOf(job);
-      const small = new Image(page.width, page.height);
-      small.bitmap.set(resampleRGBA(pic.bitmap, pic.width, pic.height, page.width, page.height));
+      const marksPath = `${base}/marks-${s.generations}-${s.unlogos}.jpg`;
+      const { ms } = await callPicture(admin, "read", {
+        job: job.id,
+        step: "marks",
+        picture: await signedRead(admin, BUCKET, s.nologo_path),
+        page,
+        out: { page: await signedWrite(admin, BUCKET, marksPath) },
+      });
+      notePicture(s, "read", ms);
       const g: GenerateInput = job.input.generate;
-      const image = base64Encode((await small.encodeJPEG(92)) as unknown as ArrayBuffer);
+      const image = base64Encode((await download(admin, marksPath)) as unknown as ArrayBuffer);
       const seen = await readCheck(() => askAbout("image/jpeg", image, marksPrompt(g.brand_name)), parseMarks, "The picture's other brand marks");
       s.marks_check = seen;
       if (!seen.marks) {
@@ -343,52 +330,55 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
     case "finish": {
       // A design from before the locate step is located first.
       if (!s.logo_rect) { job.step = "locate"; return "next"; }
-      const pic = await Image.decode(await download(admin, s.nologo_path));
-      const logo = await Image.decode(await download(admin, job.input.logo_path));
-      const W = pic.width, H = pic.height;
+      await renewLease(admin, job);
       // The logo file exactly where and at the size the model drew it, in the
-      // room the design left for it. The model's own drawing is gone (unlogo).
-      const k = W / s.logo_frame[0];
-      const r = { x: Math.round(s.logo_rect.x * k), y: Math.round(s.logo_rect.y * k), width: Math.round(s.logo_rect.width * k), height: Math.round(s.logo_rect.height * k) };
-      // The logo file blended in place, inside its own rectangle only (a
-      // full-size layer per design ran the worker out of memory on 13 Oct).
-      const lp = resampleRGBA(logo.bitmap, logo.width, logo.height, r.width, r.height);
-      const px = pic.bitmap;
-      for (let y = 0; y < r.height; y++) {
-        const ty = r.y + y;
-        if (ty < 0 || ty >= H) continue;
-        for (let x = 0; x < r.width; x++) {
-          const tx = r.x + x;
-          if (tx < 0 || tx >= W) continue;
-          const k = (y * r.width + x) * 4, a = lp[k + 3];
-          if (a === 0) continue;
-          const i = (ty * W + tx) * 4, f = a / 255;
-          px[i] = Math.round(lp[k] * f + px[i] * (1 - f));
-          px[i + 1] = Math.round(lp[k + 1] * f + px[i + 1] * (1 - f));
-          px[i + 2] = Math.round(lp[k + 2] * f + px[i + 2] * (1 - f));
-          px[i + 3] = 255;
-        }
-      }
+      // room the design left for it, then the picture at its delivered size.
+      // The model's own drawing is gone (unlogo).
       const page = pageOf(job);
       const [ow, oh] = outputSize([page.width, page.height]);
-      const out = new Image(ow, oh);
-      out.bitmap.set(resampleRGBA(pic.bitmap, W, H, ow, oh));
       // Each finished file has a name of its own, so a design made again is never shown from a cached copy.
       const path = `${base}/final-${Date.now().toString(36)}.png`;
-      await upload(admin, path, await out.encode(), "image/png");
+      const { ms } = await callPicture(admin, "finish", {
+        job: job.id,
+        step: "finish",
+        picture: await signedRead(admin, BUCKET, s.nologo_path),
+        logo: await signedRead(admin, BUCKET, job.input.logo_path),
+        rect: s.logo_rect,
+        frame: s.logo_frame,
+        output: { width: ow, height: oh },
+        out: await signedWrite(admin, BUCKET, path),
+      });
+      notePicture(s, "finish", ms);
       s.final_path = path;
       job.step = "verify";
       return "next";
     }
     case "verify": {
-      const final = await Image.decode(await download(admin, s.final_path));
+      await renewLease(admin, job);
       // Read at the page size as a JPEG: well under the model's image limit, and every letter legible.
+      // The Story's band (a crop of that page) and the area around the logo (at full size) come from the same call.
       const page = pageOf(job);
-      const small = new Image(page.width, page.height);
-      small.bitmap.set(resampleRGBA(final.bitmap, final.width, final.height, page.width, page.height));
-      const jpeg = await small.encodeJPEG(92);
       const g: GenerateInput = job.input.generate;
-      const lines = await readCheck(() => askAbout("image/jpeg", base64Encode(jpeg as unknown as ArrayBuffer), readPrompt(g.brand_name)), parseRead, "The words on the design");
+      const [ow, oh] = outputSize([page.width, page.height]);
+      const stem = `${base}/verify-${Date.now().toString(36)}`;
+      const band = g.surface === STORY_SURFACE ? storyTextBand(page.width, page.height) : null;
+      const area = s.logo_rect && s.logo_frame ? logoAreaRect(s.logo_rect, s.logo_frame, { width: ow, height: oh }) : null;
+      const { ms } = await callPicture(admin, "read", {
+        job: job.id,
+        step: "verify",
+        picture: await signedRead(admin, BUCKET, s.final_path),
+        page,
+        ...(band ? { band } : {}),
+        ...(area ? { area } : {}),
+        out: {
+          page: await signedWrite(admin, BUCKET, `${stem}.jpg`),
+          ...(band ? { band: await signedWrite(admin, BUCKET, `${stem}-band.jpg`) } : {}),
+          ...(area ? { area: await signedWrite(admin, BUCKET, `${stem}-area.png`) } : {}),
+        },
+      });
+      notePicture(s, "read", ms);
+      const jpeg = base64Encode((await download(admin, `${stem}.jpg`)) as unknown as ArrayBuffer);
+      const lines = await readCheck(() => askAbout("image/jpeg", jpeg, readPrompt(g.brand_name)), parseRead, "The words on the design");
       s.read = lines;
       if (!copyMatches(lines, job.input.copy)) {
         // Wrong words are never fixed by hand: the design is made again.
@@ -397,9 +387,8 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
         return "next";
       }
       // A Story's words all sit in Meta's band (_shared/design/story.ts): the band alone is read, and holds the whole copy.
-      if (g.surface === STORY_SURFACE) {
-        const band = storyTextBand(page.width, page.height);
-        const crop = base64Encode((await small.clone().crop(band.x, band.y, band.width, band.height).encodeJPEG(92)) as unknown as ArrayBuffer);
+      if (band) {
+        const crop = base64Encode((await download(admin, `${stem}-band.jpg`)) as unknown as ArrayBuffer);
         s.band_read = await readCheck(() => askAbout("image/jpeg", crop, readPrompt(g.brand_name)), parseRead, "The words in the Story's band");
         if (!copyMatches(s.band_read, job.input.copy)) {
           console.warn(`[design-worker] job ${job.id}: the Story's band read ${JSON.stringify(s.band_read)}, wanted ${JSON.stringify(job.input.copy)}`);
@@ -408,14 +397,8 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
         }
       }
       // Nothing may touch or cross the logo, seen at full size around its known place.
-      if (s.logo_rect && s.logo_frame) {
-        const k = final.width / s.logo_frame[0];
-        const r = s.logo_rect;
-        const mx = Math.round(r.height * k * 0.6), my = Math.round(r.height * k * 0.6);
-        const x0 = Math.max(0, Math.round(r.x * k) - mx), y0 = Math.max(0, Math.round(r.y * k) - my);
-        const x1 = Math.min(final.width, Math.round((r.x + r.width) * k) + mx), y1 = Math.min(final.height, Math.round((r.y + r.height) * k) + my);
-        const area = final.clone().crop(x0, y0, x1 - x0, y1 - y0);
-        const crop = base64Encode((await area.encode()) as unknown as ArrayBuffer);
+      if (area) {
+        const crop = base64Encode((await download(admin, `${stem}-area.png`)) as unknown as ArrayBuffer);
         const seen = await readCheck(() => askAbout("image/png", crop, logoCheckPrompt(g.brand_name)), parseLogoCheck, "The area around the logo");
         s.logo_check = seen;
         if (!seen.clear) {
@@ -458,56 +441,95 @@ function pageOf(job: Job): { width: number; height: number } {
 }
 
 /**
- * The image model designs the post: the client's background colour with its
- * logo file at the habitual spot (a mask shaped like the logo keeps it), the
- * client's own posts as references, and the brief (brief.ts), at twice the
- * page's size.
+ * The generate step's services (_shared/design/modelSteps.ts). The image
+ * model designs the post: the client's background color with its logo file
+ * at the habitual spot (a mask shaped like the logo keeps it), the client's
+ * own posts as references, and the brief (brief.ts), at twice the page's size.
  */
-async function generateDesign(admin: any, job: Job, path: string): Promise<string> {
+function generateDeps(admin: any, job: Job): GenerateDeps {
   const g: GenerateInput = job.input.generate;
   const page = pageOf(job);
-  // The canvas and its mask are at the page's size; the model draws at twice
-  // it. (2x canvases and masks, three designs at once, ran the worker out of
-  // memory on 13 Oct.)
-  const size = pictureSize([page.width, page.height]);
-  const W = page.width, H = page.height;
-  const file = await Image.decode(await download(admin, job.input.logo_path));
-  const rect = canvasLogoRect(job.input.placement, file.width, file.height, W, H);
-  const logo = new Image(rect.width, rect.height);
-  logo.bitmap.set(resampleRGBA(file.bitmap, file.width, file.height, rect.width, rect.height));
-  const [r, gr, b] = hexRgb(g.background);
-  const canvas = new Image(W, H).fill(Image.rgbaToColor(r, gr, b, 255));
-  canvas.composite(logo, rect.x, rect.y);
-  // OpenAI's mask: transparent pixels are redrawn, opaque ones are kept. Only
-  // the logo's own ink is opaque, so no box appears behind it.
-  const mask = new Image(W, H);
-  for (let y = 0; y < logo.height; y++) {
-    for (let x = 0; x < logo.width; x++) {
-      if (logo.bitmap[(y * logo.width + x) * 4 + 3] === 0) continue;
-      const tx = x + rect.x, ty = y + rect.y;
-      if (tx < 0 || ty < 0 || tx >= W || ty >= H) continue;
-      mask.bitmap.set([255, 255, 255, 255], (ty * W + tx) * 4);
+  return {
+    // The service draws the canvas (the background color with the logo at its
+    // spot) and OpenAI's mask: transparent pixels are redrawn, opaque ones are
+    // kept. Only the logo's own ink is opaque, so no box appears behind it.
+    // Both are at the page's size; the model draws at twice it. (2x canvases
+    // and masks, three designs at once, ran the worker out of memory on 13 Oct.)
+    canvas: async (canvasPath, maskPath) => {
+      const { ms } = await callPicture(admin, "canvas", {
+        job: job.id,
+        step: "generate",
+        logo: await signedRead(admin, BUCKET, job.input.logo_path),
+        page: { width: page.width, height: page.height },
+        placement: job.input.placement,
+        background: hexRgb(g.background),
+        out: { canvas: await signedWrite(admin, BUCKET, canvasPath), mask: await signedWrite(admin, BUCKET, maskPath) },
+      });
+      return ms;
+    },
+    draw: async (canvasPath, maskPath) => {
+      const slide = job.slide_count && job.slide_count > 1 && job.input?.kind !== "video_card"
+        ? { index: job.slide_index ?? 0, count: job.slide_count, withCover: !!job.state.cover_path }
+        : (job.input?.kind === "video_card" && job.state.cover_path ? { index: 1, count: 2, withCover: true } : undefined);
+      const images: { bytes: Uint8Array; name: string }[] = [{ bytes: await download(admin, canvasPath), name: "canvas.png" }];
+      if (job.state.cover_path) images.push({ bytes: await download(admin, job.state.cover_path), name: "cover.png" });
+      for (const [i, p] of g.refs.entries()) {
+        const { data, error } = await admin.storage.from("design-references").download(p);
+        if (error || !data) throw new Error(`Could not read the client post ${p}: ${error?.message ?? "missing"}`);
+        images.push({ bytes: new Uint8Array(await data.arrayBuffer()), name: `ref${i}${p.slice(p.lastIndexOf("."))}` });
+      }
+      return imageEdit(await openaiKey(db()), images, designPrompt(g, job.input.copy, g.refs.length, slide), pictureSize([page.width, page.height]), await download(admin, maskPath));
+    },
+    store: (path, png) => upload(admin, path, png, "image/png"),
+    save: () => saveJobProgress(admin, job),
+  };
+}
+
+/**
+ * The deployed picture service tried on real work: the finish call for the
+ * newest `count` done designs, all at once, each written to
+ * picture-check/<job>.png so no delivered picture changes. Answered at once,
+ * so the caller reads each call's time, or the reason it failed.
+ */
+async function pictureCheck(admin: any, count: number): Promise<{ elapsed_ms: number; results: Array<{ job: string; ms: number; ok: boolean; reason?: string }> }> {
+  const started = Date.now();
+  const { data: rows, error } = await admin.from("canva_finish_jobs").select("id, client_id, input, state")
+    .eq("status", "done")
+    .not("state->>nologo_path", "is", null).not("state->>final_path", "is", null)
+    .order("created_at", { ascending: false }).limit(count * 3);
+  if (error) throw new Error(`Could not read the finished designs: ${error.message}`);
+  // Video jobs are left out here, as runPass does: a static design has no kind, and SQL's <> drops a missing one.
+  const jobs = (rows ?? [])
+    .filter((r: any) => r.input?.kind !== "video" && r.state?.logo_rect && r.state?.logo_frame && r.input?.logo_path)
+    .slice(0, count);
+  const took: number[] = [];
+  const settled = await Promise.allSettled(jobs.map(async (r: any, i: number) => {
+    const t = Date.now();
+    try {
+      const page = pageOf(r as Job);
+      const [ow, oh] = outputSize([page.width, page.height]);
+      const { ms } = await callPicture(admin, "finish", {
+        job: r.id,
+        step: "picture_check",
+        picture: await signedRead(admin, BUCKET, r.state.nologo_path),
+        logo: await signedRead(admin, BUCKET, r.input.logo_path),
+        rect: r.state.logo_rect,
+        frame: r.state.logo_frame,
+        output: { width: ow, height: oh },
+        out: await signedWrite(admin, BUCKET, `picture-check/${r.id}.png`),
+      });
+      return ms;
+    } finally {
+      took[i] = Date.now() - t;
     }
-  }
-  const slide = job.slide_count && job.slide_count > 1 && job.input?.kind !== "video_card"
-    ? { index: job.slide_index ?? 0, count: job.slide_count, withCover: !!job.state.cover_path }
-    : (job.input?.kind === "video_card" && job.state.cover_path ? { index: 1, count: 2, withCover: true } : undefined);
-  const images: { bytes: Uint8Array; name: string }[] = [{ bytes: await canvas.encode(), name: "canvas.png" }];
-  if (job.state.cover_path) images.push({ bytes: await download(admin, job.state.cover_path), name: "cover.png" });
-  for (const [i, p] of g.refs.entries()) {
-    const { data, error } = await admin.storage.from("design-references").download(p);
-    if (error || !data) throw new Error(`Could not read the client post ${p}: ${error?.message ?? "missing"}`);
-    images.push({ bytes: new Uint8Array(await data.arrayBuffer()), name: `ref${i}${p.slice(p.lastIndexOf("."))}` });
-  }
-  const bytes = await imageEdit(await openaiKey(db()), images, designPrompt(g, job.input.copy, g.refs.length, slide), size, await mask.encode());
-  await upload(admin, path, bytes, "image/png");
-  return path;
+  }));
+  const results = settled.map((x, i) => x.status === "fulfilled"
+    ? { job: jobs[i].id as string, ms: x.value, ok: true }
+    : { job: jobs[i].id as string, ms: took[i], ok: false, reason: x.reason instanceof Error ? x.reason.message : String(x.reason) });
+  return { elapsed_ms: Date.now() - started, results };
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-
-/** A job that has nothing left to do because its option is over: it stops, which is not a failure of its own. */
-class Stopped extends Error {}
 
 /** One image and one question to the reading model; its answer as text. */
 async function askAbout(mediaType: "image/jpeg" | "image/png", data: string, question: string): Promise<string> {

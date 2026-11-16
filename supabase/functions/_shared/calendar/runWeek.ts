@@ -52,6 +52,8 @@ export interface WeekJob {
   /** What a job runs on, for the moments' jobs ({ country }, { removal_id }). */
   payload?: Record<string, unknown> | null;
   priority?: number;
+  /** When the job was queued (scheduled_jobs.created_at). */
+  created_at?: string | null;
 }
 
 export interface WeekJobOutcome {
@@ -355,19 +357,34 @@ const waitForMoments = (now: Date): WeekJobOutcome => ({ status: "queued", reaso
 /**
  * The week's dated moments are judged before it is planned (week_moments,
  * runMoments.ts): queued here once per week, and waited for while queued or
- * running. A week whose moments job ended without them, or a queue that
- * won't take the job, is planned with no moments rather than held.
+ * running. A moments job that failed before this planning job was created
+ * (an earlier week's plan, or a failure the code has since outgrown) is put
+ * back in the queue once and waited for. One that fails during this planning
+ * job's own wait, or a queue that won't take the job, means the week is
+ * planned with no moments rather than held, so nothing loops.
  */
 async function momentsPending(admin: Db, job: WeekJob, plan: { moments?: unknown }, week: string, now: Date): Promise<boolean> {
   if (plan.moments) return false;
   const key = `week_moments:${job.client_id}:${week}`;
-  const { data, error } = await admin.from("scheduled_jobs").select("dedupe_key, status").eq("dedupe_key", key);
+  const { data, error } = await admin.from("scheduled_jobs").select("dedupe_key, status, finished_at").eq("dedupe_key", key);
   if (error) {
     console.warn("[calendar] the week's moments were left out:", error.message);
     return false;
   }
   const row = (data ?? []).find((r: { dedupe_key?: string }) => r.dedupe_key === key);
-  if (row) return row.status === "queued" || row.status === "running";
+  if (row) {
+    if (row.status === "queued" || row.status === "running") return true;
+    const failedBefore = row.status === "failed" && !!job.created_at && !!row.finished_at && Date.parse(row.finished_at) < Date.parse(job.created_at);
+    if (!failedBefore) return false;
+    const { error: requeueError } = await admin.from("scheduled_jobs")
+      .update({ status: "queued", attempts: 0, available_at: now.toISOString(), lease_until: null, reason: null, finished_at: null })
+      .eq("dedupe_key", key).eq("status", "failed");
+    if (requeueError) {
+      console.warn("[calendar] the week's moments were left out:", requeueError.message);
+      return false;
+    }
+    return true;
+  }
   const { error: queueError } = await admin.from("scheduled_jobs").upsert({
     kind: "week_moments", client_id: job.client_id, occurrence: `${week}T00:00:00Z`, dedupe_key: key, priority: job.priority ?? 40, available_at: now.toISOString(),
   }, { onConflict: "dedupe_key", ignoreDuplicates: true });

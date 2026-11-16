@@ -117,6 +117,16 @@ describe("matchBrand", () => {
     const [agency] = groupBrands([p("5489335", "Mobile-First Digital Agency", "moburst.agency", "fb_instagram_account")]);
     expect(matchBrand(agency, index([moburstClient]))).toMatchObject({ by: "site_link", clients: [{ id: "m" }] });
   });
+  it("matches a homepage link to a profile whatever the case either was written in", () => {
+    const written = client({ id: "w", name: "Someone", site_profiles: ["facebook:BaderLawLLC", "youtube:UCtyXEjQ6RqDX7mNn1Zb3k9A"] });
+    const [fb] = groupBrands([p("1", "Mobile-First Digital Agency", "baderlawllc", "facebook")]);
+    expect(matchBrand(fb, index([written]))).toMatchObject({ by: "site_link", clients: [{ id: "w" }] });
+    const [yt] = groupBrands([p("2", "Mobile-First Digital Agency", "uctyxejq6rqdx7mnn1zb3k9a", "youtube")]);
+    expect(matchBrand(yt, index([written]))).toMatchObject({ by: "site_link" });
+    const lower = client({ id: "l", name: "Someone", site_profiles: ["facebook:baderlawllc"] });
+    const [cased] = groupBrands([p("3", "Mobile-First Digital Agency", "BaderLawLLC", "facebook")]);
+    expect(matchBrand(cased, index([lower]))).toMatchObject({ by: "site_link" });
+  });
   it("leaves an archived client's brand alone and never brings the client back", () => {
     const m = matchBrand(bader, index([client({ id: "c1", name: "Bader Law", archived_at: "2026-09-30T00:00:00Z" })]));
     expect(matchOutcome(m!)).toMatchObject({ decision: "archived" });

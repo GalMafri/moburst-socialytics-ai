@@ -12,24 +12,29 @@ import { WATCH_LIMIT_MINUTES } from '@/lib/runWatch';
 // What a client sees on the competitive screens: no vendor or landscape
 // names, no raw statuses or errors, no internal wording, and a page that
 // stops polling a run that outlived the sweep.
-const fixture = vi.hoisted(() => ({ staff: false, status: 'complete', createdAt: '', data: null as any, fail: false, reads: 0, insights: null as any }));
+const fixture = vi.hoisted(() => ({ staff: false, status: 'complete', createdAt: '', data: null as any, fail: false, reads: 0, insights: null as any, reportClient: 'client', prior: [] as Array<Record<string, unknown>>, verdict: null as string | null, hideAll: false, periodReads: 0 }));
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ isMoburstStaff: fixture.staff, canRunAnalysis: fixture.staff, canDelete: false }) }));
-vi.mock('@/hooks/useInsightFeedback', () => ({ useInsightFeedback: () => ({ rows: [], verdictFor: () => null, vote: vi.fn(), editFor: () => null, saveEdit: vi.fn(), resetEdit: vi.fn() }), useCompetitiveLearnings: () => ({ learnings: [], remove: vi.fn() }), partitionGaps: (gaps: any[]) => ({ visible: gaps, hidden: [] }) }));
+vi.mock('@/hooks/useInsightFeedback', () => ({ useInsightFeedback: () => ({ rows: [], verdictFor: () => fixture.verdict, vote: vi.fn(), editFor: () => null, saveEdit: vi.fn(), resetEdit: vi.fn() }), useCompetitiveLearnings: () => ({ learnings: [], remove: vi.fn() }), partitionGaps: (gaps: unknown[]) => (fixture.hideAll ? { visible: [], hidden: gaps } : { visible: gaps, hidden: [] }) }));
 vi.mock('@/components/competitive/PostVisual', () => ({ usePostPreviews: () => ({ previews: {} }), PostVisual: () => null, normalizePlatform: (x: string) => x, platformLabel: (x: string) => x }));
 vi.mock('@/components/layout/AppLayout', () => ({ AppLayout: ({ children }: any) => <main>{children}</main> }));
 vi.mock('@/components/reports/ReportActions', () => ({ ReportActions: () => null }));
 vi.mock('@/components/reports/ExportPdfButton', () => ({ ExportPdfButton: () => <button>Export PDF</button> }));
 vi.mock('@/integrations/supabase/client', () => ({ supabase: { from: (table: string) => {
   let single = false;
-  const row = () => ({ id: 'report', status: fixture.status, created_at: fixture.createdAt, date_range_start: '2026-09-01', date_range_end: '2026-09-30', duration_minutes: 12, report_data: fixture.data });
-  const query: any = { select: () => query, eq: () => query, neq: () => query, order: () => query, limit: () => query,
+  const filters: Array<['eq' | 'neq', string, unknown]> = [];
+  const row = () => ({ id: 'report', client_id: fixture.reportClient, status: fixture.status, created_at: fixture.createdAt, date_range_start: '2026-09-01', date_range_end: '2026-09-30', duration_minutes: 12, report_data: fixture.data });
+  // The rows a question about competitive_reports matches: its eq and neq filters are applied to the columns the rows have.
+  const matching = () => [row(), ...fixture.prior].filter((r: Record<string, unknown>) => filters.every(([op, col, val]) => !(col in r) || (op === 'eq' ? r[col] === val : r[col] !== val)));
+  let win: [number, number] | null = null;
+  const query: any = { select: () => query, eq: (col: string, val: unknown) => { filters.push(['eq', col, val]); return query; }, neq: (col: string, val: unknown) => { filters.push(['neq', col, val]); return query; }, order: () => query, limit: (n: number) => { win = [0, n - 1]; return query; }, range: (from: number, to: number) => { win = [from, to]; return query; },
     maybeSingle() { single = true; return query; },
     then(resolve: any) {
       if (table === 'clients') return Promise.resolve({ data: { id: 'client', name: 'QA client' }, error: null }).then(resolve);
       if (table === 'report_insights') return Promise.resolve({ data: fixture.insights, error: null }).then(resolve);
       fixture.reads++;
+      if (filters.some(([, col]) => col === 'date_range_start')) fixture.periodReads++;
       if (fixture.fail) return Promise.resolve({ data: null, error: Object.assign(new Error('permission denied for table competitive_reports (42501)'), { code: '42501' }) }).then(resolve);
-      return Promise.resolve({ data: single ? row() : [row()], error: null }).then(resolve);
+      return Promise.resolve({ data: single ? (matching()[0] ?? null) : (win ? matching().slice(win[0], win[1] + 1) : matching()), error: null }).then(resolve);
     },
   }; return query;
 } } }));
@@ -50,7 +55,7 @@ const complete = () => ({
 let client: QueryClient;
 beforeEach(() => {
   vi.useFakeTimers();
-  Object.assign(fixture, { staff: false, status: 'complete', createdAt: new Date().toISOString(), data: complete(), fail: false, reads: 0, insights: null });
+  Object.assign(fixture, { staff: false, status: 'complete', createdAt: new Date().toISOString(), data: complete(), fail: false, reads: 0, insights: null, reportClient: 'client', prior: [], verdict: null, hideAll: false, periodReads: 0 });
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
 });
 afterEach(() => { cleanup(); client.clear(); vi.useRealTimers(); });
@@ -120,12 +125,12 @@ it('names no data vendor to a client, even where the figures come from one', asy
 
 it('shows a client no held report at all, and staff the fact with its source named', async () => {
   fixture.data = { ...complete(), provider_status: 2 };
-  mount(<CompetitiveReportView />); await tick(20);
+  mount(<CompetitiveReportView />); await tick(20); await tick(20);
   expect(screen.getByText('Report not available')).toBeInTheDocument();
   expect(document.body.textContent).not.toMatch(/still being collected|held/i);
   expect(document.body.textContent).not.toMatch(banned);
   cleanup(); fixture.staff = true;
-  mount(<CompetitiveReportView />); await tick(20);
+  mount(<CompetitiveReportView />); await tick(20); await tick(20);
   expect(screen.getByText(/RivalIQ had not finished collecting/)).toBeInTheDocument();
 });
 
@@ -133,7 +138,7 @@ it('still shows staff the landscape and sources', async () => {
   fixture.staff = true;
   mount(<CompetitiveReportView />); await tick(20);
   expect(screen.getByText(/RivalIQ · QA client$/)).toBeInTheDocument();
-  expect(screen.getByText('LinkedIn · Apify')).toBeInTheDocument();
+  expect(screen.getByText('LinkedIn collected')).toBeInTheDocument();
 });
 
 it('a report that did not load keeps loading quietly and tries again, instead of looking empty or failed', async () => {
@@ -209,4 +214,145 @@ it('LoadRetry shows only the loading state, never an error or a failure, and tri
   } finally {
     vi.useRealTimers();
   }
+});
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// What a client's page says in its own words: what a figure is, never the pipeline that made it.
+const PIPELINE_WORDS = /source totals|historical counts are unavailable|Dated audience snapshots|collected LinkedIn activity|source snapshots|from September 2, 2026 onward|have been corrected|on this landscape|hidden by the team|tracked accounts|calendar brief|Gaps to fill|landscape/i;
+const earlier = () => ({ id: 'earlier', client_id: 'client', status: 'complete', created_at: '2026-09-01T00:00:00Z', date_range_start: '2026-08-01', date_range_end: '2026-08-31', report_data: { ...complete(), period: { start: '2026-08-01', end: '2026-08-31' } } });
+
+it('a client reads a report with no pipeline, developer or internal-rule wording', async () => {
+  fixture.prior = [earlier()]; fixture.insights = INSIGHTS; fixture.hideAll = true;
+  mount(<CompetitiveReportView />); await tick(20); await tick(20);
+  expect(screen.getByText('Since the last report')).toBeInTheDocument();
+  expect(document.body.textContent).not.toMatch(PIPELINE_WORDS);
+  expect(document.body.textContent).toContain('QA client and 1 competitor');
+  // The figures' description says what they are, in one short sentence.
+  expect(document.body.textContent).toMatch(/Totals for the period[^.]*\. Followers are the latest count\./);
+  expect(document.body.textContent).not.toMatch(/tracked accounts|competitors\b.*\bcompetitor\b/);
+  // The empty list says there is nothing to show, not who hid what.
+  expect(screen.getByText('No suggestions to show')).toBeInTheDocument();
+});
+
+it('a report with no per-platform data shows no note about when per-platform data began', async () => {
+  mount(<CompetitiveReportView />); await tick(20);
+  expect(document.body.textContent).not.toMatch(/September 2|per-platform breakdowns/i);
+  cleanup(); fixture.staff = true;
+  mount(<CompetitiveReportView />); await tick(20);
+  expect(document.body.textContent).not.toMatch(/September 2|Run the analysis again/i);
+});
+
+it('a suggestion the team is implementing reads "In the content plan", on the report and on the snapshot', async () => {
+  fixture.insights = INSIGHTS; fixture.verdict = 'up';
+  mount(<CompetitiveReportView />); await tick(20); await tick(20);
+  expect(screen.getByText('In the content plan')).toBeInTheDocument();
+  expect(document.body.textContent).not.toMatch(/calendar brief/i);
+  cleanup();
+  mount(<CompetitiveSnapshot clientId="client" />, '/x', '/x'); await tick(20); await tick(20);
+  expect(screen.getByText('In the content plan')).toBeInTheDocument();
+  expect(screen.getByText('Suggested tests')).toBeInTheDocument();
+  expect(screen.getByText(/Proposed test:/)).toBeInTheDocument();
+  expect(document.body.textContent).not.toMatch(/Gaps to fill|calendar brief|Play:/);
+});
+
+it('a figure that is not there reads "No data", never a dash', async () => {
+  fixture.data = { ...complete(), aggregates: { companies: complete().aggregates.companies.map((c: any) => ({ ...c, engagement_avg: null, engagement_rate_avg: null, rivaliq_metrics: undefined })) } };
+  mount(<CompetitiveSnapshot clientId="client" />, '/x', '/x'); await tick(20);
+  expect(document.body.textContent).toContain('No data');
+  expect(document.body.textContent).not.toMatch(/[\u2013\u2014]/);
+});
+
+it('says "1 competitor" for one competitor, on the snapshot and on the report', async () => {
+  mount(<CompetitiveSnapshot clientId="client" />, '/x', '/x'); await tick(20);
+  expect(document.body.textContent).toContain('1 competitor');
+  expect(document.body.textContent).not.toContain('1 competitors');
+  cleanup();
+  mount(<CompetitiveReportView />); await tick(20);
+  expect(document.body.textContent).not.toContain('1 competitors');
+  cleanup();
+  const three = complete();
+  three.aggregates.companies.push({ ...three.aggregates.companies[1], company_id: 'c3', name: 'Other' }, { ...three.aggregates.companies[1], company_id: 'c4', name: 'Third' });
+  fixture.data = three;
+  mount(<CompetitiveSnapshot clientId="client" />, '/x', '/x'); await tick(20);
+  expect(document.body.textContent).toContain('3 competitors');
+});
+
+it('names the client of the page in the report question: a report of another client is not available', async () => {
+  fixture.reportClient = 'someone-else';
+  mount(<CompetitiveReportView />, '/clients/client/competitive/reports/report', '/clients/:id/competitive/reports/:reportId'); await tick(20);
+  expect(screen.getByText('Report not available')).toBeInTheDocument();
+  expect(screen.queryByText('QA client vs. the field')).toBeNull();
+});
+
+it('labels posting hours with the zone stored on the report, and with UTC only for a report with none', async () => {
+  const withZone = complete(); (withZone.aggregates as any).time_zone = 'America/New_York';
+  fixture.data = withZone;
+  mount(<CompetitiveReportView />); await tick(20);
+  expect(document.body.textContent).toMatch(/Hour, Eastern Time \(New York\)/);
+  expect(document.body.textContent).not.toMatch(/UTC/);
+  cleanup(); fixture.data = complete();
+  mount(<CompetitiveReportView />); await tick(20);
+  expect(document.body.textContent).toMatch(/Hour, UTC/);
+});
+
+it('a staff page names the network that was collected, not the vendor that collected it', async () => {
+  fixture.staff = true;
+  mount(<CompetitiveReportView />); await tick(20);
+  expect(screen.getByText('LinkedIn collected')).toBeInTheDocument();
+  expect(document.body.textContent).not.toMatch(/Apify/);
+});
+
+it('a held run made long ago reads "Not shared" to staff and says nothing about being redone', async () => {
+  fixture.staff = true; fixture.data = { ...complete(), provider_status: 2 };
+  fixture.createdAt = new Date(Date.now() - 30 * 86400000).toISOString();
+  mount(<CompetitiveReportView />); await tick(20); await tick(20);
+  expect(document.body.textContent).toMatch(/it is not shared\./);
+  expect(document.body.textContent).not.toMatch(/once a day|redone/i);
+});
+it('a staff page prints no data vendor: no vendor name outside what the export hides', async () => {
+  fixture.staff = true;
+  mount(<CompetitiveReportView />); await tick(20);
+  const printed = document.body.cloneNode(true) as HTMLElement;
+  printed.querySelectorAll('[data-print="hide"]').forEach((el) => el.remove());
+  printed.querySelectorAll('[title]').forEach((el) => el.removeAttribute('title'));
+  expect(printed.textContent).not.toMatch(/Rival ?IQ|Sprout|Apify/i);
+});
+
+it('a held run a day and a few minutes old, whose redo has not started, still reads "Being redone"', async () => {
+  fixture.staff = true; fixture.data = { ...complete(), provider_status: 2 };
+  fixture.createdAt = new Date(Date.now() - (24 * 60 + 5) * 60000).toISOString();
+  mount(<CompetitiveReportView />); await tick(20); await tick(20);
+  expect(document.body.textContent).toMatch(/once a day/);
+  expect(document.body.textContent).not.toMatch(/it is not shared\.\s*$/);
+});
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+it('the snapshot with no competitor reads "No data" in place of the whole cadence average', async () => {
+  const data = complete();
+  fixture.data = { ...data, aggregates: { ...data.aggregates, companies: [data.aggregates.companies[0]] } };
+  mount(<CompetitiveSnapshot clientId="client" />, '/x', '/x'); await tick(20);
+  const text = document.body.textContent ?? '';
+  expect(text).toContain('competitor average No data');
+  expect(text).not.toMatch(/No data\/wk/);
+  expect(text).toContain('6 of 6 posts');
+});
+
+// The snapshot reads like every other competitive screen: the newest ready analysis, however many newer held ones sit in front of it.
+it('the snapshot shows the newest ready analysis behind a long run of newer held ones', async () => {
+  const held = (i: number) => ({ id: `held${i}`, client_id: 'client', status: 'complete', created_at: `2026-09-${String(28 - i).padStart(2, '0')}T00:00:00Z`, date_range_start: '2026-08-01', date_range_end: '2026-08-31', report_data: { provider_status: 0, aggregates: { companies: [] } } });
+  fixture.data = { provider_status: 0, aggregates: { companies: [] } };
+  fixture.prior = [...Array.from({ length: 14 }, (_, i) => held(i)), { ...earlier(), id: 'ready', report_data: complete() }];
+  mount(<CompetitiveSnapshot clientId="client" />, '/x', '/x'); await tick(20); await tick(20); await tick(20);
+  expect(document.body.textContent).toContain('Full competitive report');
+  expect(document.body.textContent).toContain('Avg engagement');
+});
+
+// Only a held report reads its period's other runs (it needs them to say whether a redo came): a ready one makes no such read.
+it('a ready report makes no period-runs read, and a held one does', async () => {
+  mount(<CompetitiveReportView />); await tick(20); await tick(20);
+  expect(fixture.periodReads).toBe(0);
+  cleanup(); client.clear();
+  fixture.data = { provider_status: 0, aggregates: { companies: [] } };
+  mount(<CompetitiveReportView />); await tick(20); await tick(20);
+  expect(fixture.periodReads).toBeGreaterThan(0);
 });

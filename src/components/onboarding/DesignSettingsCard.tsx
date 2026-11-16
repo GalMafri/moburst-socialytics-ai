@@ -15,7 +15,7 @@
  * 20 Oct 2026). Designs are made only when a person asks for one on a post.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ImageUp, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -31,7 +31,9 @@ import { formatDate } from "@/lib/display";
 import { Loading } from "@/components/ui/loading";
 import { sendQuietly, writeResendable } from "@/lib/quietSend";
 import { fileKey, useQuietUpload } from "@/hooks/useQuietUpload";
+import { DEFAULT_DESIGN_BACKGROUND } from "@/lib/designReferences";
 import { referencesFor } from "../../../supabase/functions/_shared/design-prompts/designRefs";
+import { logoStorePlan } from "../../../supabase/functions/_shared/lifecycle/designSettings";
 
 type Anchor = "left" | "center" | "right";
 type Spot = `${"top" | "bottom"}-${Anchor}`;
@@ -71,17 +73,32 @@ function fromPlacement(p: Placement, logoAspect: number): { spot: Spot; widthPct
   };
 }
 
-/** Any image as a PNG: designs place a PNG, so a JPG or WebP logo is turned into one here. */
+/**
+ * Any image as a PNG trimmed to its ink, its long side at most 1,200 pixels
+ * (the same rule the lifecycle stores a logo by): designs place a PNG, and a
+ * mark drawn on a big canvas with wide empty padding would otherwise be placed
+ * at the canvas's width. A PNG that needs neither is kept as it is.
+ */
 async function asPng(file: File): Promise<File> {
-  if (file.type === "image/png") return file;
   const url = URL.createObjectURL(file);
   try {
     const img = await new Promise<HTMLImageElement>((resolve, reject) => { const i = new Image(); i.onload = () => resolve(i); i.onerror = reject; i.src = url; });
+    const w = img.naturalWidth, h = img.naturalHeight;
     const canvas = document.createElement("canvas");
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
-    canvas.getContext("2d")!.drawImage(img, 0, 0);
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return file;
+    ctx.drawImage(img, 0, 0);
+    const plan = logoStorePlan(ctx.getImageData(0, 0, w, h).data, w, h, file.type === "image/png");
+    if (!plan) return file;
+    const out = document.createElement("canvas");
+    const [ow, oh] = plan.size;
+    out.width = ow;
+    out.height = oh;
+    const box = plan.box;
+    out.getContext("2d")!.drawImage(canvas, box.x, box.y, box.width, box.height, 0, 0, ow, oh);
+    const blob = await new Promise<Blob | null>((resolve) => out.toBlob(resolve, "image/png"));
     return blob ? new File([blob], file.name.replace(/\.[^.]+$/, "") + ".png", { type: "image/png", lastModified: file.lastModified }) : file;
   } finally {
     URL.revokeObjectURL(url);
@@ -105,7 +122,7 @@ function originSentence(settings: { source?: string; derived?: Record<string, un
     return `Worked out automatically${on ? ` on ${on}` : ""}: ${parts.join(", ")}. You can change any of them here.`;
   }
   const on = formatDate(settings.updated_at ?? settings.confirmed_at ?? "");
-  return `Set by your team${on ? ` on ${on}` : ""}. The product keeps these as they are.`;
+  return `Set by your team${on ? ` on ${on}` : ""}. Automatic updates leave these as they are.`;
 }
 
 export function DesignSettingsCard({ clientId }: { clientId: string }) {
@@ -133,7 +150,7 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
   const [spot, setSpot] = useState<Spot>("top-center");
   const [widthPct, setWidthPct] = useState(25);
   const [edgePct, setEdgePct] = useState(4);
-  const [background, setBackground] = useState("#0B0E1A");
+  const [background, setBackground] = useState(DEFAULT_DESIGN_BACKGROUND);
   const [saving, setSaving] = useState(false);
   const [notSaved, setNotSaved] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -161,15 +178,18 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
   }, [data?.settings]);
 
   const pathFor = (file: File) => `${clientId}/design-settings/logo-${fileKey(file).replace(/\.[^.]+$/, "")}.png`;
+  // The file as stored (trimmed): its proportions are the logo's.
+  const stored = useRef<File | null>(null);
   const uploadLogo = useCallback(async (file: File) => {
     const png = await asPng(file);
+    stored.current = png;
     return supabase.storage.from("generated-media").upload(pathFor(file), png, { contentType: "image/png", upsert: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);
   const logoUploaded = useCallback((file: File) => {
     const img = new Image();
     img.onload = () => setLogoAspect(img.naturalWidth / Math.max(1, img.naturalHeight));
-    img.src = URL.createObjectURL(file);
+    img.src = URL.createObjectURL(stored.current ?? file);
     setLogoPath(pathFor(file));
     setDirty(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps

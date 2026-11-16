@@ -14,8 +14,10 @@ import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { dateInputOf, scheduledInstant, timeInputOf } from "@/lib/calendarDate";
 import { sendQuietly } from "@/lib/quietSend";
+import { invokeErrorCode } from "@/lib/invokeError";
 import { postCopyOf } from "@/lib/postCopy";
 import { publishProblems } from "../../../supabase/functions/_shared/sprout/publishRules";
+import { SEND_RUN_LIMIT_MS, sendCanStillBeRunning } from "../../../supabase/functions/_shared/sprout/sendWindow";
 
 interface SchedulePostModalProps {
   open: boolean;
@@ -40,20 +42,94 @@ const platformToNetworkTypes: Record<string, string[]> = {
   threads: ["threads"],
 };
 
-export interface ScheduledRow { id: string; platform?: string | null; post_content?: string | null; scheduled_time?: string | null; status?: string | null; calendar_post_key?: string | null }
+export interface ScheduledRow { id: string; platform?: string | null; post_content?: string | null; scheduled_time?: string | null; status?: string | null; calendar_post_key?: string | null; sprout_post_id?: string | null; created_at?: string | null }
 
-/** A post sent to Sprout: "scheduled" for a set time, or "sent_now" for the earliest minute (schedule-sprout-post/send.ts). */
-const SENT = ["scheduled", "sent_now"];
+/**
+ * A post sent to Sprout: "scheduled" for a set time, or "sent_now" for the earliest minute (schedule-sprout-post/send.ts).
+ * "asked" (Sprout is being asked) and "unconfirmed" (the send ended without Sprout's answer) may have a post in
+ * Sprout, so they read as sent, never as not sent.
+ */
+const SENT = ["scheduled", "sent_now", "asked", "unconfirmed"];
+
+/** A send that holds its post: Sprout was asked and no post id was written. The table allows one per post. */
+const holdsPost = (r: ScheduledRow) => (r.status === "asked" || r.status === "unconfirmed") && !r.sprout_post_id;
+
+/**
+ * Where a post's send stands, decided here once for every screen that shows it (the post panel's Schedule tab
+ * and this dialog):
+ * - "none": not sent.
+ * - "being_sent": Sprout is being asked, no post id is written yet, and the send can still be running, so its
+ *   answer may still come (sendWindow.ts, the edge function's own time limit from the row's created_at).
+ * - "unconfirmed": the send is over and no post id was ever written: it ended without Sprout's answer
+ *   ("unconfirmed"), or it stopped before it wrote anything ("asked" past its run). Sprout's API retrieves a post
+ *   by its id only, so nothing can look it up; sending again closes that row.
+ * - "sent": a draft is in Sprout for its time.
+ */
+export type SendState = "none" | "being_sent" | "unconfirmed" | "sent";
+
+export function sendStateOf(row: ScheduledRow | null | undefined, now: number = Date.now()): SendState {
+  if (!row) return "none";
+  if (!holdsPost(row)) return "sent";
+  if (row.status === "unconfirmed") return "unconfirmed";
+  return sendCanStillBeRunning(row.created_at, now) ? "being_sent" : "unconfirmed";
+}
+
+/** The one line that says a post's send state, for staff. */
+export function sendStateLine(row: ScheduledRow | null | undefined, timeZone?: string, now: number = Date.now()): string {
+  const state = sendStateOf(row, now);
+  if (state === "being_sent") return "This post is being sent to Sprout.";
+  if (state === "unconfirmed") return "Sprout did not confirm this post. Send it again to be sure it is there.";
+  return sproutDraftLine(row?.scheduled_time, timeZone);
+}
+
+/**
+ * The clock a send state is read at, for a screen that shows one post's send (a row) or several (the calendar
+ * board's rows): the screen draws again the moment the next send shown can no longer be running, so "being
+ * sent" turns to "not confirmed" by itself, and then again for the one after it.
+ */
+export function useSendClock(rows: ScheduledRow | ScheduledRow[] | null | undefined): number {
+  const [, redraw] = useState(0);
+  const now = Date.now();
+  const ends = (Array.isArray(rows) ? rows : rows ? [rows] : [])
+    .filter((r) => r.status === "asked" && !r.sprout_post_id)
+    .map((r) => Date.parse(r.created_at ?? "") + SEND_RUN_LIMIT_MS)
+    .filter((end) => Number.isFinite(end) && end >= now);
+  const endsAt = ends.length ? Math.min(...ends) : NaN;
+  useEffect(() => {
+    const wait = endsAt - Date.now();
+    if (!Number.isFinite(wait) || wait < 0) return;
+    const timer = setTimeout(() => redraw((n) => n + 1), wait + 1);
+    return () => clearTimeout(timer);
+  }, [endsAt]);
+  return Date.now();
+}
+
+/** What identifies a send row as it stands: it changes when the row is settled, closed or replaced. */
+const rowKey = (r: ScheduledRow | null | undefined) => (r ? JSON.stringify([r.id, r.status ?? null, r.sprout_post_id ?? null, r.created_at ?? null]) : "none");
+
+/** The row that says where a post's send stands: the one holding it if any, else the newest sent one. */
+function standingRow(rows: ScheduledRow[]): ScheduledRow | null {
+  if (!rows.length) return null;
+  const held = rows.find(holdsPost);
+  if (held) return held;
+  return rows.reduce((a, b) => (Date.parse(b.created_at ?? "") > Date.parse(a.created_at ?? "") ? b : a));
+}
 
 /** This post's Sprout post, if it has one: by the calendar post's key, else by platform and the start of the copy. */
 export function scheduledFor(rows: ScheduledRow[] | null | undefined, post: { _calendarPostKey?: string; platform?: string; copy?: string } | null): ScheduledRow | null {
   if (!post) return null;
   const live = (rows ?? []).filter((r) => SENT.includes(r.status ?? "scheduled"));
-  const byKey = post._calendarPostKey ? live.find((r) => r.calendar_post_key === post._calendarPostKey) : undefined;
+  const byKey = post._calendarPostKey ? standingRow(live.filter((r) => r.calendar_post_key === post._calendarPostKey)) : null;
   if (byKey) return byKey;
   const platform = (post.platform || "").toLowerCase();
   const copy = postCopyOf(post).trim().slice(0, 200);
-  return live.find((r) => !r.calendar_post_key && (r.platform || "").toLowerCase() === platform && copy && (r.post_content || "").trim().slice(0, 200) === copy) ?? null;
+  return standingRow(live.filter((r) => !r.calendar_post_key && (r.platform || "").toLowerCase() === platform && copy && (r.post_content || "").trim().slice(0, 200) === copy));
+}
+
+async function readScheduledPosts(clientId: string): Promise<ScheduledRow[]> {
+  const { data, error } = await supabase.from("scheduled_posts").select("*").eq("client_id", clientId);
+  if (error) throw error;
+  return (data || []) as ScheduledRow[];
 }
 
 /** The client's Sprout posts, as the post panel and this dialog read them. */
@@ -62,11 +138,7 @@ export function useScheduledPosts(clientId: string | undefined, enabled = true) 
     queryKey: ["scheduled-posts-full", clientId],
     enabled: !!clientId && enabled,
     retry: true,
-    queryFn: async () => {
-      const { data, error } = await supabase.from("scheduled_posts").select("*").eq("client_id", clientId!);
-      if (error) throw error;
-      return (data || []) as ScheduledRow[];
-    },
+    queryFn: () => readScheduledPosts(clientId!),
   });
 }
 
@@ -99,7 +171,13 @@ export function SchedulePostModal({
   const [mediaUrls, setMediaUrls] = useState<string[]>([]);
   const [scheduling, setScheduling] = useState(false);
   const [notScheduled, setNotScheduled] = useState(false);
-  const [justSent, setJustSent] = useState<ScheduledRow | null>(null);
+  /**
+   * The server held the last press because another send of this post holds it (code send_in_progress): the key
+   * of the row that holds the post then. Said on screen only, for as long as that row is the one holding it.
+   */
+  const [heldOn, setHeldOn] = useState<string | null>(null);
+  /** The row this press made, as the server said it, with the answer of the rows query that stood when it was set. */
+  const [justSent, setJustSent] = useState<{ row: ScheduledRow; answeredAt: number } | null>(null);
   /** "schedule": the set date and time. "now": the earliest minute Sprout takes. */
   const [mode, setMode] = useState<"schedule" | "now">("schedule");
   const mediaSignature = JSON.stringify(generatedMediaUrls);
@@ -131,9 +209,13 @@ export function SchedulePostModal({
     retry: true,
   });
 
-  const { data: scheduledRows } = useScheduledPosts(clientId, open);
+  const { data: scheduledRows, dataUpdatedAt } = useScheduledPosts(clientId, open);
   const scheduled = scheduledFor(scheduledRows, post);
-  const sentState = justSent ?? scheduled;
+  // The press's own row stands in only until the rows query answers again: from then on the rows say where the
+  // post stands, so a change made elsewhere (another person's send, confirmed) shows here.
+  const sentState = justSent && justSent.answeredAt === dataUpdatedAt ? justSent.row : scheduled;
+  const sendState = sendStateOf(sentState, useSendClock(sentState));
+  const heldOnPress = heldOn !== null && rowKey(scheduled) === heldOn;
 
   const assignedForPlatform = (dbProfiles || []).filter((p: any) => matchingNetworkTypes.includes((p.network_type || "").toLowerCase()));
   const displayProfiles = assignedForPlatform.map((dbP: any) => {
@@ -143,7 +225,7 @@ export function SchedulePostModal({
   const autoSelected = displayProfiles.length === 1;
 
   useEffect(() => {
-    if (!open) { setSelectedProfileId(""); setNotScheduled(false); setJustSent(null); setMode("schedule"); return; }
+    if (!open) { setSelectedProfileId(""); setNotScheduled(false); setHeldOn(null); setJustSent(null); setMode("schedule"); return; }
     if (displayProfiles.length === 1) setSelectedProfileId(String(displayProfiles[0].id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, displayProfiles.length]);
@@ -196,10 +278,23 @@ export function SchedulePostModal({
   ];
   const ready = !!selectedProfile && (mode === "now" || !!sendAt) && problems.length === 0;
 
+  const rememberSent = (row: ScheduledRow) =>
+    setJustSent({ row, answeredAt: queryClient.getQueryState(["scheduled-posts-full", clientId])?.dataUpdatedAt ?? 0 });
+
   const handleSend = async () => {
     if (!ready || (mode === "schedule" && !sendAt)) return;
     setScheduling(true);
     setNotScheduled(false);
+    setHeldOn(null);
+    setJustSent(null);
+    // Where the post's send stands now, read from the rows as they are and the clock at this press: only a send
+    // that is over and was never confirmed is closed by this one.
+    let rows = scheduledRows;
+    try {
+      rows = await queryClient.fetchQuery({ queryKey: ["scheduled-posts-full", clientId], queryFn: () => readScheduledPosts(clientId), staleTime: 0, retry: false });
+    } catch { /* the rows on screen */ }
+    const holder = scheduledFor(rows, post);
+    const supersede = sendStateOf(holder, Date.now()) === "unconfirmed" ? holder?.id : undefined;
     // Sent again only when it never reached the server; the server retries Sprout itself.
     const { data, error } = await sendQuietly(() => supabase.functions.invoke("schedule-sprout-post", {
       body: {
@@ -209,6 +304,8 @@ export function SchedulePostModal({
         sprout_profile_id: Number(selectedProfileId),
         platform: post.platform,
         ...(mode === "now" ? { send_now: true } : { scheduled_time: sendAt }),
+        // Sending again a post Sprout never confirmed: that one earlier send is closed and this one goes.
+        ...(supersede ? { supersede } : {}),
         post_content: postContent,
         media_urls: mediaUrls.length > 0 ? mediaUrls : undefined,
       },
@@ -220,11 +317,22 @@ export function SchedulePostModal({
     setScheduling(false);
     if (error || !(data as any)?.success) {
       console.warn("[schedule] not sent yet", error ?? (data as any)?.error);
-      setNotScheduled(true);
+      const replied = (data as { code?: unknown } | null)?.code;
+      const code = error ? await invokeErrorCode(error) : typeof replied === "string" ? replied : null;
+      // Another send of this post is going: the server says so by its code (a 409 can also be a profile in no
+      // Sprout group, where nothing is being sent). The line stays while the refetched row that holds the post
+      // is the one that held it, and goes when that row changes.
+      if (code === "send_in_progress") setHeldOn(rowKey(scheduledFor(queryClient.getQueryData<ScheduledRow[]>(["scheduled-posts-full", clientId]), post)));
+      // The send ended without Sprout's answer: the post may be there, and the row says so in the description
+      // ("Sprout did not confirm this post"). "This send did not go through" would say it is not. The dialog reads
+      // the state from this local row until the rows query answers again, so it says so even when the refetch
+      // did not.
+      else if (code === "post_not_confirmed") { rememberSent({ id: "just-sent", status: "unconfirmed", scheduled_time: sendAt }); return; }
+      else setNotScheduled(true);
       return;
     }
     const sent: ScheduledRow = { id: "just-sent", status: (data as any).status ?? (mode === "now" ? "sent_now" : "scheduled"), scheduled_time: (data as any).scheduled_time ?? sendAt };
-    setJustSent(sent);
+    rememberSent(sent);
     toast.success(sproutDraftLine(sent.scheduled_time, clientTimezone));
     onOpenChange(false);
   };
@@ -234,18 +342,22 @@ export function SchedulePostModal({
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Send className="h-4 w-4" /> Send to Sprout Social
+            <Send className="h-4 w-4" /> Send to Sprout
           </DialogTitle>
           <DialogDescription>
-            {sentState?.scheduled_time
-              ? sproutDraftLine(sentState.scheduled_time, clientTimezone)
-              : "The copy and media go to the client's Sprout profile."}
+            {sendState === "unconfirmed"
+              ? sendStateLine(sentState, clientTimezone, Date.now())
+              : heldOnPress
+              ? "This post is already being sent."
+              : sendState === "none"
+              ? "The copy and media go to the client's Sprout profile."
+              : sendStateLine(sentState, clientTimezone, Date.now())}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="schedule-profile">Sprout Profile</Label>
+            <Label htmlFor="schedule-profile">Sprout profile</Label>
 
             {!dbProfiles && (
               <div className="flex items-center gap-2 t-secondary py-2">
@@ -312,7 +424,7 @@ export function SchedulePostModal({
           {mediaUrls.length > 0 && (
             <div className="space-y-2">
               <Label className="flex items-center gap-1">
-                <ImageIcon className="h-3 w-3" /> Attached Media ({mediaUrls.length} {mediaUrls.length === 1 ? "file" : "files"})
+                <ImageIcon className="h-3 w-3" /> Attached media ({mediaUrls.length} {mediaUrls.length === 1 ? "file" : "files"})
               </Label>
               <div className={mediaUrls.length > 1 ? "grid grid-cols-2 gap-2" : ""}>
                 {mediaUrls.map((url, i) => {
@@ -334,7 +446,12 @@ export function SchedulePostModal({
               {waitingFor.map((p) => <li key={p} className="t-secondary">{p}</li>)}
             </ul>
           )}
-          {notScheduled && <p role="status" className="t-secondary">Not sent to Sprout yet. Everything above is kept as it is.</p>}
+          {/* The outcome of this press. With no earlier send, the post is not in Sprout; with one, only this press failed. */}
+          {notScheduled && (
+            <p role="status" className="t-secondary">
+              {sendState === "none" ? "Not sent to Sprout yet. Everything above is kept as it is." : "This send did not go through. Everything above is kept as it is."}
+            </p>
+          )}
         </div>
 
         <DialogFooter>

@@ -4,6 +4,7 @@
  * and customer ids, RivalIQ landscape and company ids, media provider
  * request ids) never appear in any output.
  */
+import { shownWarnings } from "../reports/shownWarnings.ts";
 import { shownCompetitive, shownSocial, type ShownInsightsRow } from "../reports/shownFields.ts";
 import { FINISHED_TREND_WEEKS } from "../trends/reportWeeks.ts";
 import { designWaitingFor, designWaitingLine, type DesignStepRow, type DesignWaitingFor } from "../design/setup.ts";
@@ -90,7 +91,7 @@ export interface IndustryTrendsOut { themes: IndustryThemeOut[] }
 export interface CompetitiveReportOut {
   id: string; client_id: string; set_id: string | null; status: string; period: { start: string | null; end: string | null; days: number | null }; created_at: string; completed_at: string | null; duration_minutes: number | null;
   deck: { url: string | null }; totals: Record<string, unknown> | null; quality_check: unknown; provider_status: string | null; demo_job_id: string | null; links: Links;
-  analysis?: Record<string, unknown> | null; aggregates?: { client_name: string | null; metrics_available: boolean | null; companies: Array<Record<string, unknown>> } | null;
+  analysis?: Record<string, unknown> | null; aggregates?: { client_name: string | null; metrics_available: boolean | null; /** The zone the posting hours (by_hour, by_weekday, the advised schedule) are in; null for a report that names none (UTC). */ time_zone: string | null; companies: Array<Record<string, unknown>> } | null;
 }
 export interface PostOut {
   id: string; client_id: string; report_id: string | null; source: string | null; platform: string; format: string | null; copy: string | null; hashtags: string[]; cta: string | null; concept: string | null; visual_direction: string | null;
@@ -255,7 +256,7 @@ export function reportOut(row: ReportRow, opts: { detail?: boolean; trendRows?: 
     period: { start: row.date_range_start ?? str(cur.start), end: row.date_range_end ?? str(cur.end) }, previous_period: str(prev.start) || str(prev.end) ? { start: str(prev.start), end: str(prev.end) } : null,
     created_at: row.created_at, completed_at: str(rd.completed_at), duration_minutes: row.duration_minutes ?? num(rd.duration_minutes),
     deck: { url: row.gamma_url ?? str(rd.gamma_url), status: str(rd.gamma_status) }, counts, metrics_summary: rd.metrics_summary && typeof rd.metrics_summary === "object" ? (rd.metrics_summary as Record<string, unknown>) : null,
-    warnings: strs(rd.warnings), trend_status: str(rd.trend_status), error: str(rd.error), demo_job_id: row.demo_job_id,
+    warnings: shownWarnings(rd.warnings), trend_status: str(rd.trend_status), error: str(rd.error), demo_job_id: row.demo_job_id,
     links: { app: `${APP_URL}/clients/${row.client_id}/reports/${row.id}`, api: `/v1/reports/${row.id}` },
   };
   if (opts.detail) {
@@ -287,7 +288,7 @@ export function competitiveReportOut(row: CompetitiveReportRow, opts: { detail?:
   if (opts.detail) {
     out.analysis = rd.ai_analysis && typeof rd.ai_analysis === "object" ? omitDeep(rd.ai_analysis as Record<string, unknown>, INTERNAL_KEYS) : null;
     const agg = obj(rd.aggregates);
-    out.aggregates = rd.aggregates ? { client_name: str(agg.client_name), metrics_available: typeof agg.metrics_available === "boolean" ? agg.metrics_available : null, companies: Array.isArray(agg.companies) ? agg.companies.map((c) => omitDeep(obj(c), [...INTERNAL_KEYS, ...COMPANY_INTERNAL_KEYS])) : [] } : null;
+    out.aggregates = rd.aggregates ? { client_name: str(agg.client_name), metrics_available: typeof agg.metrics_available === "boolean" ? agg.metrics_available : null, time_zone: str(agg.time_zone), companies: Array.isArray(agg.companies) ? agg.companies.map((c) => omitDeep(obj(c), [...INTERNAL_KEYS, ...COMPANY_INTERNAL_KEYS])) : [] } : null;
   }
   return out;
 }

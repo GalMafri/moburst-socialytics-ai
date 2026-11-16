@@ -12,6 +12,7 @@ import { z } from "npm:zod@4.6.7";
 import { ApiError } from "../_shared/api/errors.ts";
 import { wordReason, type StoredReason } from "../_shared/calendar/reasonText.ts";
 import { pointsInUse, pointStates, readNoteRows, selectForPrompt, todayIn, type LinkRow, type NoteRow, type PointRow } from "../_shared/notes/notes.ts";
+import { editShown, sectionLines } from "../_shared/strategy/sections.ts";
 import type { Person } from "./access.ts";
 import { capItems } from "./limits.ts";
 import { failure, type ToolResult } from "./tools.ts";
@@ -45,6 +46,8 @@ export interface StrategyEditRow {
   editor_name: string;
   edited_at: string;
   source: string;
+  /** A person's fields (null for a version that is only text). Their words only: numbers and dates are read from the latest write. */
+  value?: unknown;
 }
 
 export interface WrittenPlatformRow {
@@ -143,7 +146,10 @@ const FIXED_TITLES: Record<string, string> = { goals: "Goals", audience: "Audien
 export interface ShownSection {
   key: string;
   title: string;
+  /** The text as the page shows it: a person's words over the latest write's numbers and dates. */
   text: string;
+  /** The text the section's version is the hash of: what is stored, as strategy_section_save_as reads it. */
+  stored: string;
   product: string;
   edit: StrategyEditRow | null;
 }
@@ -172,7 +178,10 @@ export function strategySections(rows: StrategyRows): ShownSection[] {
     const own = sections[key];
     const product = typeof own === "string" ? own : String(row.section_texts?.[key] ?? "");
     const edit = edits.get(key) ?? null;
-    out.push({ key, title, text: edit?.text ?? product, product, edit });
+    const stored = edit?.text ?? product;
+    // A version saved with fields shows the current numbers and dates, as the page does.
+    const shown = edit?.value && typeof edit.value === "object" ? sectionLines(key, editShown(key, edit, own)) : "";
+    out.push({ key, title, text: shown || stored, stored, product, edit });
   }
   return out;
 }
@@ -227,7 +236,7 @@ export const READ_TOOLS: ReadSpec[] = [
       const shown = strategySections(rows);
       if (!shown.length) return { data: { written_at: null, sections: [], platforms: [] } };
       const sections = await Promise.all(shown.map(async (s) => ({
-        key: s.key, title: s.title, text: s.text, edited_by: s.edit?.editor_name || null, edited_at: s.edit?.edited_at ?? null, from_claude: s.edit?.source === "claude", version: await sectionVersion(s.text),
+        key: s.key, title: s.title, text: s.text, edited_by: s.edit?.editor_name || null, edited_at: s.edit?.edited_at ?? null, from_claude: s.edit?.source === "claude", version: await sectionVersion(s.stored),
       })));
       const platforms = (rows.row!.platforms ?? []).map((p) => ({ platform: p.platform, state: p.state, handle: p.handle ?? null, posts_per_week: p.cadence?.per_week ?? null, reason: p.reason ?? null }));
       return { data: { written_at: rows.row!.written_at, sections, platforms } };
@@ -302,7 +311,7 @@ export function personReads(db: Db): PersonReads {
     strategy: async (clientId) => {
       const [row, edits] = await Promise.all([
         must<StrategyRows["row"]>(db.from("content_strategies").select("written_at, sections, section_texts, platforms, pillars").eq("client_id", clientId).maybeSingle()),
-        must<StrategyEditRow[] | null>(db.from("content_strategy_edits").select("section_key, text, editor_name, edited_at, source").eq("client_id", clientId)),
+        must<StrategyEditRow[] | null>(db.from("content_strategy_edits").select("section_key, text, editor_name, edited_at, source, value").eq("client_id", clientId)),
       ]);
       return { row: row ?? null, edits: edits ?? [] };
     },

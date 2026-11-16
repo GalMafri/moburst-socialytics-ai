@@ -9,18 +9,10 @@ import { googleAccessToken, googleConfig } from "../google/oauth.ts";
 import { fontBytes } from "../render/fonts.ts";
 import * as opentype from "https://esm.sh/opentype.js@1.3.4";
 import { svgToPng } from "../render/resvg.ts";
-import { DECK_BUCKET, SIGNED_SECONDS, TEMPLATE_PATH, type DeckJobDeps } from "./deckJob.ts";
+import { DECK_BUCKET, fetchLogo, SIGNED_SECONDS, TEMPLATE_PATH, type DeckJobDeps } from "./deckJob.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
-
-/** PNG, JPEG or GIF, from the first bytes: the image types Slides takes. */
-export function imageType(b: Uint8Array): string | null {
-  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return "image/png";
-  if (b[0] === 0xff && b[1] === 0xd8) return "image/jpeg";
-  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) return "image/gif";
-  return null;
-}
 
 export function liveDeckDeps(env: (k: string) => string | undefined): DeckJobDeps {
   const config = googleConfig(env);
@@ -40,14 +32,7 @@ export function liveDeckDeps(env: (k: string) => string | undefined): DeckJobDep
       const fonts = await Promise.all([300, 400, 500].map((w) => fontBytes(db, "Geist", w)));
       return svgToPng(db, svg, width, fonts, "Geist");
     },
-    async logo(url) {
-      if (!url || !/^https:\/\//.test(url)) return null;
-      const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
-      if (!res.ok) return null;
-      const bytes = new Uint8Array(await res.arrayBuffer());
-      const type = imageType(bytes);
-      return type && bytes.byteLength < 20_000_000 ? { bytes, type } : null;
-    },
+    logo: (url) => fetchLogo(url),
     async template(db) {
       const { data } = await db.storage.from(DECK_BUCKET).download(TEMPLATE_PATH);
       return data ? new Uint8Array(await data.arrayBuffer()) : null;

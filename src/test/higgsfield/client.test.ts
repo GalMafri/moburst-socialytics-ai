@@ -87,7 +87,7 @@ describe("submit", () => {
     await submit("/m", { prompt: "x" }, {
       credentials: CREDS,
       fetchImpl: fetchImpl as unknown as typeof fetch,
-      webhookUrl: "https://x.supabase.co/functions/v1/higgsfield-webhook?t=abc",
+      webhookUrl: "https://hooks.example.com/higgsfield?t=abc",
     });
     const [url] = fetchImpl.mock.calls[0];
     expect(url).toContain("hf_webhook=");

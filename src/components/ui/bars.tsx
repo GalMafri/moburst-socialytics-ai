@@ -1,22 +1,14 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { compactNumber } from "@/lib/display";
 
 /** Emphasis palette: the subject in the accent, context in the de-emphasis gray. Text never wears the data colour. */
 export const SERIES = { accent: "#b9e045", muted: "rgba(255,255,255,0.18)" } as const;
 
-export function compactNumber(v: number): string {
-  if (!Number.isFinite(v)) return "0";
-  if (Math.abs(v) >= 1_000_000) return `${(v / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
-  if (Math.abs(v) >= 10_000) return `${(v / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
-  // Below 100 one decimal is enough ("5.4 engagements / post", not "5.357");
-  // above it, whole numbers.
-  return v.toLocaleString(undefined, { maximumFractionDigits: Math.abs(v) < 100 ? 1 : 0 });
-}
-
 function Bar({ value, max, color, label, title }: { value: number; max: number; color: string; label: string; title: string }) {
   const w = max > 0 ? Math.max((value / max) * 100, value > 0 ? 1.5 : 0) : 0;
   return (
-    <div className="flex items-center gap-3" title={title} tabIndex={0} aria-label={title}>
+    <div className="flex items-center gap-3" title={title}>
       <div className="relative flex-1 h-[14px]">
         <div className="absolute inset-y-0 left-0 w-px bg-[rgba(255,255,255,0.14)]" aria-hidden />
         <div className="absolute inset-y-0 left-0 rounded-r-[4px] transition-[width] duration-500 ease-out hover:brightness-110" style={{ width: `${w}%`, backgroundColor: color }} />
@@ -41,24 +33,28 @@ export function Legend({ items }: { items: { label: string; color: string }[] })
 /**
  * Before/after per item as small multiples: every metric gets its own scale, the current
  * period in the accent and the previous period in gray. Values are labelled at the tip.
+ * With `max`, every item shares that one scale (shares of one whole, 0 to 100).
  */
 export function CompareBars({
   items,
   currentLabel,
   previousLabel,
   columns = "grid-cols-1 md:grid-cols-2 xl:grid-cols-3",
+  max: sharedMax,
 }: {
   items: { key: string; label: string; current: number; previous: number; format?: (v: number) => string }[];
   currentLabel: string;
   previousLabel: string;
   columns?: string;
+  /** One maximum for every item, for values that are parts of one whole; each item scales alone without it. */
+  max?: number;
 }) {
   return (
     <div className="space-y-5">
       <div className={cn("grid gap-x-8 gap-y-5", columns)}>
         {items.map((it) => {
           const f = it.format || compactNumber;
-          const max = Math.max(it.current, it.previous, 0);
+          const max = sharedMax ?? Math.max(it.current, it.previous, 0);
           return (
             <div key={it.key} className="space-y-1.5 min-w-0">
               <p className="t-subhead">{it.label}</p>
@@ -84,15 +80,18 @@ export function RankedBars({
   format = compactNumber,
   emphasis,
   legend,
+  max: sharedMax,
 }: {
   rows: { key: string; label: ReactNode; name: string; value: number; emphasized?: boolean }[];
   format?: (v: number) => string;
   /** When set, emphasized rows use the accent and the others gray; otherwise every bar is the accent. */
   emphasis?: boolean;
   legend?: { subject: string; others: string };
+  /** One maximum for every bar, for values that are parts of one whole; the largest value without it. */
+  max?: number;
 }) {
   const sorted = [...rows].sort((a, b) => b.value - a.value);
-  const max = Math.max(...sorted.map((r) => r.value), 0);
+  const max = sharedMax ?? Math.max(...sorted.map((r) => r.value), 0);
   return (
     <div className="space-y-4">
       <div className="space-y-2.5">
@@ -102,8 +101,9 @@ export function RankedBars({
                 which one it is, but only if you have read the legend, and the
                 name is what the eye lands on first. */}
             <div
+              title={r.name}
               className={cn(
-                "t-body truncate flex items-center gap-2 min-w-0",
+                "t-body flex items-center gap-2 min-w-0 break-words leading-snug",
                 emphasis && r.emphasized ? "font-semibold !text-white" : "!text-[#d1d5db]",
               )}
             >

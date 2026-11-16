@@ -1,8 +1,8 @@
 /**
  * The client's own public profiles (spec: docs/superpowers/specs/2026-11-03-
  * strategy-v2-design.md, section 3): what its strategy reads where Sprout has
- * no account. Filled from data (RivalIQ's record of the company, the links on
- * its homepage), so nobody has to; a person may add or change one, and a
+ * no account. Filled from data (competitor tracking's record of the company,
+ * the links on its homepage), so nobody has to; a person may add or change one, and a
  * profile a person removes stays removed. Saves are sent again quietly.
  */
 
@@ -18,11 +18,11 @@ import { Loading } from "@/components/ui/loading";
 import { LoadRetry } from "@/components/ui/load-error";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PlatformIcon } from "@/lib/platform-config";
-import { platformName } from "@/lib/display";
+import { isRawProfileId, platformName } from "@/lib/display";
 import { sendQuietly, writeResendable } from "@/lib/quietSend";
 
 const PLATFORMS = ["instagram", "tiktok", "facebook", "linkedin", "youtube", "x"];
-const SOURCE: Record<string, string> = { rivaliq: "From RivalIQ", website: "From the website", person: "Added by the team" };
+const SOURCE: Record<string, string> = { rivaliq: "From competitor tracking", website: "From the website", person: "Added by the team" };
 
 interface Row { platform: string; handle: string; url: string | null; source: string }
 
@@ -71,7 +71,8 @@ export function PublicProfiles({ clientId }: { clientId: string }) {
             <li key={r.platform} className="flex flex-wrap items-center gap-2 min-w-0">
               <PlatformIcon platform={r.platform} className="h-4 w-4 shrink-0" />
               <span className="t-body">{platformName(r.platform)}</span>
-              <span className="t-label truncate">@{r.handle}</span>
+              {/* A provider's id is no name: the platform alone names the profile. */}
+              {!isRawProfileId(r.handle) && <span className="t-label truncate">@{r.handle}</span>}
               <Badge variant="outline">{SOURCE[r.source] ?? ""}</Badge>
               <span className="ml-auto flex items-center gap-1">
                 {r.url && <a href={r.url} target="_blank" rel="noopener noreferrer" className="t-link inline-flex items-center gap-1">Open <ExternalLink className="h-3 w-3" aria-hidden /></a>}
@@ -84,7 +85,7 @@ export function PublicProfiles({ clientId }: { clientId: string }) {
           ))}
         </ul>
       ) : (
-        <p className="t-secondary">None found yet. They are read from RivalIQ and the client's website within a day.</p>
+        <p className="t-secondary">None are on file. They come from competitor tracking and the client's website.</p>
       )}
       <div className="flex flex-wrap items-end gap-2">
         <div className="space-y-1.5">

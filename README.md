@@ -50,6 +50,16 @@ npm run dev
 - Click on "New codespace" to launch a new Codespace environment.
 - Edit files directly within the Codespace and commit and push your changes once you're done.
 
+## The picture service (`server/`)
+
+The picture service is a Node 22 function that does all picture work for the design and video workers. It runs in the app's own Vercel project, `moburst-socialytics`, at `https://moburst-socialytics.vercel.app/api/picture/*`, and `GET /api/health` there says it is up.
+
+`server/` is an npm workspace of this repository, so `npm ci` at the root installs it. To work on it, run `npm run typecheck --workspace server` and `npm run build --workspace server`. Its tests run with the rest (`npx vitest run server`), and `npx tsc -b --force` type-checks it.
+
+It deploys with the site, through the `vercel` job in `.github/workflows/deploy.yml` on every push to main. Layout: `server/README.md`.
+
+It has no secret and no environment variable. A worker opens a call in the database before each attempt and the service claims it once (`supabase/migrations/20261116100000_picture_calls.sql`).
+
 ## What technologies are used for this project?
 
 This project is built with:

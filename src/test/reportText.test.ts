@@ -7,8 +7,10 @@ import { describe, expect, it, vi } from "vitest";
 import {
   applyCorrections, checkCorrection, competitiveFigures, CORRECTION_SYSTEM, correctionPrompt, parseCorrection, quotedFigures, sentences, socialFigures, staleReportText,
 } from "../../supabase/functions/_shared/reports/reportText";
-import { runReportText } from "../../supabase/functions/_shared/reports/correctText";
+import { reportTextCheck, runReportText } from "../../supabase/functions/_shared/reports/correctText";
+import { floorStoredFigures } from "../../supabase/functions/_shared/reports/repairStored";
 import { clientFiguresFromStoredPosts } from "../../supabase/functions/_shared/competitive/storedFigures";
+import { SPROUT_RATE_LABEL } from "@/lib/rateLabels";
 import { BADER_POSTS, BADER_REPORT } from "./competitive/fixtures/bader20260930";
 
 const repaired = clientFiguresFromStoredPosts(BADER_REPORT, { socialPosts: BADER_POSTS }).report_data;
@@ -82,6 +84,19 @@ describe("a monthly report: Sprout's own figures, and the competitive figures be
   } };
   // The competitive report the monthly report shows: Bader's September report, as written and as shown now.
   const beside = { stored: competitiveFigures(BADER_REPORT, "stored", "competitive|"), shown: competitiveFigures(repaired, "shown", "competitive|") };
+
+  it("names the client's own rate as the app does, in the figure labels and in the correction prompt", () => {
+    const own = socialFigures(rd);
+    const rates = own.filter((f) => f.key.endsWith("|engagement_rate"));
+    expect(rates.length).toBeGreaterThan(0);
+    for (const f of rates) {
+      expect(f.label.endsWith(`, ${SPROUT_RATE_LABEL}`), f.label).toBe(true);
+      expect(f.label).not.toMatch(/Sprout engagement rate/i);
+    }
+    const prompt = correctionPrompt({ client: "Bench", kind: "social" }, [], own);
+    expect(prompt).toContain(`the ${SPROUT_RATE_LABEL.toLowerCase()} is Sprout's engagements over Sprout's impressions`);
+    expect(prompt).not.toMatch(/Sprout engagement rate/i);
+  });
 
   it("never flags the report's own Sprout figures, and finds the competitive figures that changed", () => {
     const own = socialFigures(rd);
@@ -218,5 +233,53 @@ describe("the report_text job", () => {
     expect((await runReportText(archived.db, job(), { now, complete: async () => "" })).status).toBe("skipped");
     const running = fakeDb("competitive_reports", { ...row(), status: "running" });
     expect((await runReportText(running.db, job(), { now, complete: async () => "" })).status).toBe("skipped");
+  });
+});
+
+describe("a monthly report whose figures were repaired after its text was written (REPORTS-20)", () => {
+  const written = () => ({
+    sprout_performance: {
+      month_comparison: {
+        current_month: { reactions: 823 }, previous_month: { reactions: -6 },
+        changes: { reactions: { absolute: 829, current: 823, percent: -13817, previous: -6 } },
+        summary: ["reactions: ↓ 13817% (+829)"],
+      },
+    },
+    metrics_summary: { reactions_change: -13817 },
+    ai_analysis: { sprout_performance_analysis: { summary: "Reactions are listed in the report summary as ↓ 13817% (+829), which indicates a data inconsistency." } },
+  });
+
+  it("finds the sentence quoting the old change by reading the figures the text was written from in correction_audit", async () => {
+    const before = written();
+    const after = floorStoredFigures(before).report_data;
+    const row = { id: "r1", client_id: "c1", status: "completed", created_at: "2026-06-03T07:20:15Z", report_data: after, correction_audit: { original: { sprout_performance: before.sprout_performance, metrics_summary: before.metrics_summary } }, clients: { name: "Bench Law", archived_at: null } };
+    const check = await reportTextCheck(fakeDb("reports", row).db, "reports", "r1");
+    expect(check!.stale.map((s) => s.sentence)).toEqual(["Reactions are listed in the report summary as ↓ 13817% (+829), which indicates a data inconsistency."]);
+    // A report never repaired has nothing stale of its own.
+    const plain = { ...row, report_data: before, correction_audit: null };
+    expect((await reportTextCheck(fakeDb("reports", plain).db, "reports", "r1"))!.stale).toEqual([]);
+  });
+
+  it("flags the old count of the change next to the old percent, gives the model the count shown now, and accepts it", async () => {
+    const before = written();
+    const after = floorStoredFigures(before).report_data;
+    const row = { id: "r1", client_id: "c1", status: "completed", created_at: "2026-06-03T07:20:15Z", report_data: after, correction_audit: { original: { sprout_performance: before.sprout_performance, metrics_summary: before.metrics_summary } }, clients: { name: "Bench Law", archived_at: null } };
+    const check = (await reportTextCheck(fakeDb("reports", row).db, "reports", "r1"))!;
+    const [sentence] = check.stale;
+    expect(sentence.numbers.map((n) => n.text)).toEqual(["13817%", "829"]);
+    expect(sentence.numbers[1].now.map((f) => f.value)).toEqual([823]);
+    const prompt = correctionPrompt({ client: "Bench Law", kind: "social" }, check.stale, check.shown);
+    expect(prompt).toContain('"829" was All platforms, reactions change in count. Now: All platforms, reactions change in count 823.');
+    const answer = new Map([["s1", "Reactions rose by 823 against a previous period with no reactions."]]);
+    expect(checkCorrection(check.stale, answer, check.shown)).toBeNull();
+    // A count the report does not show is still refused.
+    expect(checkCorrection(check.stale, new Map([["s1", "Reactions rose by 900 against a previous period with no reactions."]]), check.shown)).toMatch(/900/);
+  });
+});
+
+describe("the count of a change a summary line quotes", () => {
+  it("reads a signed count in brackets after a percent as a change count, and nothing else as one", () => {
+    expect(quotedFigures("reactions: ↓ 13817% (+829)").map((c) => [c.text, c.kind])).toEqual([["13817%", "percent"], ["829", "change"]]);
+    expect(quotedFigures("shares: ↑ 100% (-12) and 47 shares (12)").map((c) => [c.text, c.kind])).toEqual([["100%", "percent"], ["12", "change"]]);
   });
 });

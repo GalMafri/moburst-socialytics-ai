@@ -1,6 +1,6 @@
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { learnFromNote, recordFeedback } from "../../../functions/_shared/design-prompts/feedback";
-import { loadDesignLearnings } from "../../../functions/_shared/design-prompts/learnings";
+import { DESIGN_LEARNINGS_LIMIT, loadDesignLearnings } from "../../../functions/_shared/design-prompts/learnings";
 import { fakeDb, type FakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
 
 // What a client's design memory learns: from a design turned down with Not
@@ -76,10 +76,57 @@ describe("recordFeedback", () => {
     expect(db.tables.design_learnings.map((r) => [r.pattern_description, r.source])).toEqual([["Avoid designs where the colors were off-brand.", "feedback"]]);
   });
 
+  it("stores no rule for Something else when the learner returns none: no empty rule", async () => {
+    for (const mock of [() => rules([]), () => anthropic.mockRejectedValue(new Error("busy"))]) {
+      const db = world();
+      mock();
+      expect(await recordFeedback(db, it1, "rejected", "other", undefined, "person-1")).toEqual([]);
+      expect(db.tables.design_learnings).toEqual([]);
+      anthropic.mockReset();
+    }
+  });
+
+  it("treats a reason that is not one offered as Something else: no rule without one from the note", async () => {
+    for (const reason of ["mystery", "toString", ""]) {
+      const db = world();
+      rules([]);
+      expect(await recordFeedback(db, it1, "rejected", reason, undefined, "person-1")).toEqual([]);
+      expect(db.tables.design_learnings).toEqual([]);
+      anthropic.mockReset();
+    }
+  });
+
+  it("keeps a lasting rule from Something else when the learner finds one in the note", async () => {
+    const db = world();
+    rules([{ type: "avoid", text: "Never show people." }]);
+    await recordFeedback(db, it1, "rejected", "other", "Never show people", "person-1");
+    expect(db.tables.design_learnings.map((r) => r.pattern_description)).toEqual(["Never show people."]);
+  });
+
   it("teaches nothing when a design is only deleted", async () => {
     const db = world();
     expect(await recordFeedback(db, it1, "archived", undefined, undefined, "person-1")).toEqual([]);
     expect(anthropic).not.toHaveBeenCalled();
     expect(db.tables.design_learnings).toEqual([]);
+  });
+});
+
+describe("loadDesignLearnings", () => {
+  it("reads every rule the settings card lists, not the newest few", async () => {
+    const rows = Array.from({ length: 12 }, (_, i) => ({ id: `r${i}`, client_id: "c1", pattern_type: "avoid", pattern_description: `Rule ${i}`, created_at: `2026-11-${String(i + 1).padStart(2, "0")}` }));
+    const db = fakeDb({ design_learnings: rows });
+    expect((await loadDesignLearnings(db, "c1"))?.avoid).toHaveLength(12);
+  });
+});
+
+describe("loadDesignLearnings", () => {
+  it("reads as many rules as the settings card lists", async () => {
+    const asked: number[] = [];
+    const chain: Record<string, unknown> = {};
+    for (const m of ["select", "eq", "order"]) chain[m] = () => chain;
+    chain.limit = (n: number) => { asked.push(n); return Promise.resolve({ data: [{ pattern_type: "avoid", pattern_description: "No crowds." }] }); };
+    const db = { from: () => chain };
+    expect(await loadDesignLearnings(db, "c1")).toEqual({ avoid: ["No crowds."], prefer: [] });
+    expect(asked).toEqual([DESIGN_LEARNINGS_LIMIT]);
   });
 });

@@ -298,7 +298,7 @@ describe("a new key whose reply is lost, rate limited, or shown once", () => {
     const readsBefore = reads();
     await create("Reporting script");
 
-    expect(await screen.findByText("We couldn't confirm the new key. Check your keys below before making another.")).toBeInTheDocument();
+    expect(await screen.findByText("The new key is not confirmed yet. Check your keys below before making another.")).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     // The key the server did make is in the list, by its prefix only.
     const row = (await screen.findByText("Reporting script")).closest("li")!;

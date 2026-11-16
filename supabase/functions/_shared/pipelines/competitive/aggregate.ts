@@ -16,7 +16,7 @@
 // A test runs the repo mirror next to this function on the same inputs.
 
 import { engagementRate, isVideoNetwork, normalizedCompetitiveMetrics } from "../../competitive/reportMetrics.ts";
-import { addPostToSample, emptyPostSample, finalizePostSample, postsInPeriod, topCounts } from "../../competitive/postSample.ts";
+import { addPostToSample, emptyPostSample, finalizePostSample, postsInPeriod, topCounts, validTimeZone } from "../../competitive/postSample.ts";
 import type { RunConfig } from "./nodes.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -43,6 +43,8 @@ const objectOr = (v: Any) => (v && typeof v === "object" ? v : {});
 
 export function aggregateCompetitive(i: AggregateInputs): Any {
   const cfg = i.cfg;
+  // Posting hours and weekdays are counted in the client's own zone, and the zone is stored with them.
+  const zone = validTimeZone(cfg.time_zone);
   const landscape = i.landscape;
   const companiesResp = objectOr(i.companiesResp);
   const postsResp = objectOr(i.postsResp);
@@ -144,9 +146,9 @@ export function aggregateCompetitive(i: AggregateInputs): Any {
     const key = String(p.companyId ?? p.company_id ?? (p.company && p.company.id) ?? "unknown");
     if (!byCompany[key]) byCompany[key] = blank(key, clean(p.companyName || p.company_name || "Unknown " + key), null);
     const agg = byCompany[key];
-    const channel = addPostToSample(agg, p);
+    const channel = addPostToSample(agg, p, zone);
     if (!agg.by_channel[channel]) agg.by_channel[channel] = emptyPostSample();
-    addPostToSample(agg.by_channel[channel], p);
+    addPostToSample(agg.by_channel[channel], p, zone);
   }
   const days = Math.max(1, Math.round((new Date(cfg.range_end).getTime() - new Date(cfg.range_start).getTime()) / 86400000) + 1);
   const finalize = (b: Any) => finalizePostSample(b, days);
@@ -192,6 +194,6 @@ export function aggregateCompetitive(i: AggregateInputs): Any {
   const allTop = companiesOut.flatMap((c: Any) => c.top_posts.map((p: Any) => ({ company: c.name, ...p })));
   const note = posts.length === 0 ? "RivalIQ returned zero posts for this landscape and period." : (truncatedPages > 0 ? (truncatedPages + " weekly window" + (truncatedPages === 1 ? "" : "s") + " hit RivalIQ's 500-post page limit, so some posts in the period may be missing.") : "");
   const metricsAvailable = mRows.length > 0;
-  const result = { metric_semantics_version: 4, metric_scope: "rivaliq_period_totals_with_separate_post_sample", client_name: cfg.client_name, landscape: { id: landscape.landscape_id, name: landscape.landscape_name, matched_by: landscape.matched_by }, period: { start: cfg.range_start, end: cfg.range_end, days }, total_posts_analyzed: posts.length, metrics_available: metricsAvailable, metrics_note: metricsAvailable ? "" : "RivalIQ period metrics (followers, engagement, impressions) were not returned for this run.", companies: companiesOut, example_post_pool: allTop.map((p: Any) => ({ company: p.company, url: p.url, channel: p.channel, engagement: p.engagement })), suppressed_insights: suppressed, schema_note: note };
+  const result = { ...(zone ? { time_zone: zone } : {}), metric_semantics_version: 4, metric_scope: "rivaliq_period_totals_with_separate_post_sample", client_name: cfg.client_name, landscape: { id: landscape.landscape_id, name: landscape.landscape_name, matched_by: landscape.matched_by }, period: { start: cfg.range_start, end: cfg.range_end, days }, total_posts_analyzed: posts.length, metrics_available: metricsAvailable, metrics_note: metricsAvailable ? "" : "RivalIQ period metrics (followers, engagement, impressions) were not returned for this run.", companies: companiesOut, example_post_pool: allTop.map((p: Any) => ({ company: p.company, url: p.url, channel: p.channel, engagement: p.engagement })), suppressed_insights: suppressed, schema_note: note };
   return normalizedCompetitiveMetrics({ aggregates: result }).aggregates;
 }

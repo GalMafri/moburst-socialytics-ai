@@ -87,7 +87,7 @@ function wrapWords(ctx:CanvasRenderingContext2D,words:Word[],maxWidth:number,fon
 
 /**
  * The brand system, set in code: a frosted headline card in the measured
- * surface colour, the headline in the brand typeface with its emphasis phrase
+ * surface color, the headline in the brand typeface with its emphasis phrase
  * in the measured accent, and the authentic logo where the brand keeps it.
  * The model painted only the artwork behind it.
  */

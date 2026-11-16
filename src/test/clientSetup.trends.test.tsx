@@ -174,10 +174,10 @@ describe('Trends we track on the Content strategy tab', () => {
     expect(f.reads.find((r) => r.table === 'trend_profiles').filters).toEqual({ client_id: 'c1' });
   });
 
-  it('says what the product will do once the brand details are read, when there is no profile yet', async () => {
+  it('says suggestions will appear here, when there is no profile yet', async () => {
     f.profile = false; f.terms = [];
     mount();
-    expect(await screen.findByText('Suggestions appear here once the brand details are read.')).toBeInTheDocument();
+    expect(await screen.findByText('Suggested topics and hashtags appear here.')).toBeInTheDocument();
     expect(screen.queryByRole('group', { name: 'Topics' })).toBeNull();
     expect(screen.queryByRole('textbox', { name: /^New / })).toBeNull();
   });
@@ -356,7 +356,7 @@ describe('Trends we track on the Content strategy tab', () => {
     f.readFails = true;
     mount();
     expect(await screen.findByText(/Loading trends we track/)).toBeInTheDocument();
-    expect(screen.queryByText('Suggestions appear here once the brand details are read.')).toBeNull();
+    expect(screen.queryByText('Suggested topics and hashtags appear here.')).toBeNull();
     expect(screen.queryByRole('group', { name: 'Topics' })).toBeNull();
     expect(screen.queryByText(/connection failure|did not load|could not/i)).toBeNull();
   });
@@ -365,17 +365,26 @@ describe('Trends we track on the Content strategy tab', () => {
     mount();
     const heading = await screen.findByRole('heading', { name: 'Trends we track' });
     const section = within(heading.closest('section') as HTMLElement);
-    expect(section.getByText("What the weekly trends collection searches for and leaves out, and the hashtags suggested for the calendar. Your team's additions always come first.")).toBeInTheDocument();
+    expect(section.getByText("What the weekly trends collection searches for and leaves out, and the hashtags suggested for the calendar.")).toBeInTheDocument();
     const helps: Array<[string, string]> = [
-      ['Topics', "Searched every week on each platform except Instagram, up to 8 a week. Your team's come first; the rest take turns."],
-      ['Instagram hashtags', "Searched every week on Instagram, up to 8 a week. Your team's come first; the rest take turns."],
-      ['TikTok hashtags', 'Suggested for TikTok posts in the weekly calendar. Trends on TikTok are searched by topic.'],
-      ['LinkedIn hashtags', 'Suggested for LinkedIn posts in the weekly calendar. Trends on LinkedIn are searched by topic.'],
-      ['Exclusions', 'The filter never keeps posts about these.'],
+      ['Topics', "Searched every week on each platform except Instagram."],
+      ['Instagram hashtags', "Searched every week on Instagram."],
+      ['TikTok hashtags', 'Suggested for TikTok posts in the weekly calendar.'],
+      ['LinkedIn hashtags', 'Suggested for LinkedIn posts in the weekly calendar.'],
+      ['Exclusions', 'Posts about these are left out.'],
     ];
     for (const [name, help] of helps) expect((await group(name)).getByText(help)).toBeInTheDocument();
     // The old wording is gone.
     expect(section.queryByText(/Instagram searches its hashtags instead|What the weekly trend search looks for/)).toBeNull();
+  });
+
+  it('says what each group is for and nothing about how the weekly run picks or why it searched', async () => {
+    f.overrides = { linkedin: ['injury claim tips'], instagram: ['#claimhelp'] };
+    mount();
+    const heading = await screen.findByRole('heading', { name: 'Trends we track' });
+    await screen.findByRole('button', { name: 'Go back to the hashtags' });
+    const text = (heading.closest('section') as HTMLElement).textContent ?? '';
+    for (const gone of ['up to 8 a week', 'take turns', 'found too little', 'brand details are read']) expect(text).not.toContain(gone);
   });
 
   it('words the section in plain American English, with no dash punctuation and nothing from the database', async () => {
@@ -387,12 +396,12 @@ describe('Trends we track on the Content strategy tab', () => {
     const section = heading.closest('section') as HTMLElement;
     expect(section.textContent).not.toMatch(/[—–]| - /);
     expect(section.textContent).not.toMatch(/trend_terms|trend_profiles|trend_term_|lifecycle|dismissal|undefined|null/i);
-    expect(within(section).getByText(/The filter never keeps posts about these\./)).toBeInTheDocument();
+    expect(within(section).getByText(/Posts about these are left out\./)).toBeInTheDocument();
   });
 
   describe('searches a coverage rewrite gave a platform', () => {
-    const tiktokLine = 'Trends on TikTok are searched with these terms this week, because the topics found too little:';
-    const instagramLine = 'Trends on Instagram are searched with these terms this week, because the hashtags found too little:';
+    const tiktokLine = 'Trends on TikTok are searched with these terms this week:';
+    const instagramLine = 'Trends on Instagram are searched with these terms this week:';
 
     it('shows nothing about rewrites when no platform has one', async () => {
       f.overrides = { tiktok: [], youtube: [3, ' '] };

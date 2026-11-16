@@ -10,6 +10,7 @@
 // difference.
 
 import { REPORT_TREND_THEMES } from "./storedTrends.ts";
+import { SPROUT_RATE_LABEL } from "../../reports/rateNames.ts";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -18,11 +19,11 @@ type Any = any;
  * How the two engagement rates are named (src/lib/rateLabels.ts, owner's
  * decision of 20 Oct 2026; a test checks the wording is the app's): the
  * competitors' figures are compared on likes, comments and shares, the
- * client's own are Sprout's.
+ * client's own are the rate as the platforms report it.
  */
 export const COMPARED_RATE = "engagement rate, compared on likes, comments and shares";
-export const SPROUT_RATE = "Sprout engagement rate";
-const RATE_NAMING = `The competitive context's engagement rates count likes, comments and shares the same way for every company: call that rate the ${COMPARED_RATE}, and never give it the bare name of the client's ${SPROUT_RATE}, which counts clicks and is reported separately.`;
+export const SPROUT_RATE = SPROUT_RATE_LABEL;
+const RATE_NAMING = `The competitive context's engagement rates count likes, comments and shares the same way for every company: call that rate the ${COMPARED_RATE}, and never give it the bare name of the client's ${SPROUT_RATE.toLowerCase()}, which counts clicks and is reported separately.`;
 
 /** Every change from n8n's prompt text, [n8n's text, the port's text]. */
 export const PROMPT_EDITS: ReadonlyArray<readonly [string, string]> = [

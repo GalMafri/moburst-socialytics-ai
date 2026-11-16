@@ -3594,6 +3594,7 @@ export type Database = {
           scheduled_time: string | null
           sprout_post_id: string | null
           status: string | null
+          supersedes: string | null
         }
         Insert: {
           calendar_post_key?: string | null
@@ -3609,6 +3610,7 @@ export type Database = {
           scheduled_time?: string | null
           sprout_post_id?: string | null
           status?: string | null
+          supersedes?: string | null
         }
         Update: {
           calendar_post_key?: string | null
@@ -3624,6 +3626,7 @@ export type Database = {
           scheduled_time?: string | null
           sprout_post_id?: string | null
           status?: string | null
+          supersedes?: string | null
         }
         Relationships: [
           {
@@ -4955,6 +4958,10 @@ export type Database = {
       }
       video_style_claim_kit: {
         Args: { p_client: string; p_job: string; p_stale: string }
+        Returns: boolean
+      }
+      video_style_take_kit: {
+        Args: { p_client: string; p_ended: string; p_job: string }
         Returns: boolean
       }
       video_style_merge: {

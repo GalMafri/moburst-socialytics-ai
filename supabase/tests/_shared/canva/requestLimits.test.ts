@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
-import { claimJob, endOverdueRequests } from "../../../functions/_shared/canva/jobs";
+import { claimJob, endOverdueRequests, renewJobLease, saveJobProgress } from "../../../functions/_shared/canva/jobs";
+import { jobRow } from "./jobRow";
 
 // What keeps a design request from running for days (10 Nov 2026: Pay The Pyper's
 // request stayed "preparing" for almost six days because a step was cut off
@@ -192,5 +193,45 @@ describe("a request whose worker dies on every try", () => {
     expect(db.tables.design_requests[0].status).toBe("closed");
     expect(db.tables.design_requests[0].end_reason).toBe("no_progress");
     expect(db.tables.canva_finish_jobs[0].status).toBe("canceled");
+  });
+});
+
+describe("renewJobLease", () => {
+  it("holds an active job until now plus the given time, before a picture call that may outlast the pass's lease", async () => {
+    const db = fakeDb({ canva_finish_jobs: [job({ lease_until: ago(-2) })] });
+    const [row] = db.tables.canva_finish_jobs;
+    await renewJobLease(db, "job-1", NOW, 420_000);
+    expect(new Date(row.lease_until).getTime()).toBe(NOW.getTime() + 420_000);
+    expect(row.updated_at).toBe(NOW.toISOString());
+    expect(row.attempts).toBe(0);
+  });
+
+  it("leaves a job stopped meanwhile as it is", async () => {
+    const db = fakeDb({ canva_finish_jobs: [job({ status: "canceled", lease_until: null })] });
+    const [row] = db.tables.canva_finish_jobs;
+    await renewJobLease(db, "job-1", NOW, 420_000);
+    expect(row.lease_until).toBeNull();
+  });
+});
+
+describe("saveJobProgress", () => {
+  it("saves an active job's step and state together, and nothing else", async () => {
+    const r = jobRow({ step: "title", attempts: 2, error: "The picture service did not answer: 503.", lease_until: ago(-5) });
+    const lease = r.row.lease_until;
+    await saveJobProgress(r.admin, { id: "job-1", step: "title_check", state: { hooks: 1, hook_path: "c1/canva-finish/job-1/hook-1.png" } });
+    expect(r.row).toMatchObject({ status: "running", step: "title_check", state: { hooks: 1, hook_path: "c1/canva-finish/job-1/hook-1.png" }, attempts: 2, error: "The picture service did not answer: 503.", lease_until: lease });
+    expect(Object.keys(r.updates[0]).sort()).toEqual(["state", "step", "updated_at"]);
+  });
+
+  it("leaves a job stopped meanwhile as it is", async () => {
+    const r = jobRow({ status: "canceled", step: "title" });
+    await saveJobProgress(r.admin, { id: "job-1", step: "title_check", state: { hooks: 1 } });
+    expect(r.row).toMatchObject({ status: "canceled", step: "title", state: {} });
+  });
+
+  it("says so when the row could not be written, so the step does not go on as if it were saved", async () => {
+    const chain = { eq: () => chain, in: async () => ({ error: { message: "connection reset" } }) };
+    const admin = { from: () => ({ update: () => chain }) };
+    await expect(saveJobProgress(admin, { id: "job-1", step: "frame", state: {} })).rejects.toThrow("Could not save the job's progress: connection reset");
   });
 });

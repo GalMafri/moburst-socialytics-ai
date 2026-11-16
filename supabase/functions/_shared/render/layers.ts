@@ -3,7 +3,7 @@
 // and colour, logo and glyph assets, hairlines, gradient frames. The spec is
 // what the template reader produces from a client's real post and what the
 // per-post composer fills with new copy; nothing here decides a layout.
-import opentype from 'https://esm.sh/opentype.js@1.3.4';
+import { opentype } from './opentype.ts';
 import { ensureResvg } from './resvg.ts';
 import { Resvg } from 'https://esm.sh/@resvg/resvg-wasm@2.6.2';
 

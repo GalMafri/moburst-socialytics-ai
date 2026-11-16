@@ -142,6 +142,20 @@ describe("socialytics_strategy_get", () => {
     expect(JSON.stringify(shown)).not.toContain("[object Object]");
   });
 
+  it("shows a goals edit holding only typed words with the current target, and versions the stored text", async () => {
+    const goals = { items: [{ title: "Grow leads", why: "Calls.", platform: "Instagram", metric: "posts_per_week", direction: "above", baseline: 2, by: "2027-02-01" }] };
+    const typed = { items: [{ title: "Win more leads", why: "Phone calls.", platform: "Instagram", metric: "posts_per_week", direction: "above" }] };
+    const rows: StrategyRows = {
+      row: { written_at: "2026-11-03T08:00:00+00:00", sections: { goals }, section_texts: { goals: "- Grow leads. Why: Calls." }, platforms: [], pillars: [] },
+      edits: [{ section_key: "goals", text: "- Win more leads. Why: Phone calls.", editor_name: "Neria", edited_at: "2026-11-03T09:00:00+00:00", source: "app", value: typed }],
+    };
+    const goal = strategySections(rows)[0];
+    expect(goal.text).toContain("Win more leads");
+    expect(goal.text).toContain("Feb 1, 2027");
+    expect(goal.text).not.toContain("[object Object]");
+    expect(goal.stored).toBe("- Win more leads. Why: Phone calls.");
+  });
+
   it("makes a version that changes with the text and nothing else", async () => {
     expect(await sectionVersion("a")).toMatch(/^[0-9a-f]{16}$/);
     expect(await sectionVersion("a")).toBe(await sectionVersion("a"));

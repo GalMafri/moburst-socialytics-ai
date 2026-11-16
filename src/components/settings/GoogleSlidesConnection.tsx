@@ -9,9 +9,23 @@ import { LoadRetry } from "@/components/ui/load-error";
 import { formatDate } from "@/lib/display";
 import { invokeResendable, sendQuietly } from "@/lib/quietSend";
 import { openSignIn } from "@/lib/signInTab";
+import { useAuth } from "@/hooks/useAuth";
 
 /** The one account strategy decks are made in and shared from. */
 const DECK_ACCOUNT = "ai@moburst.com";
+
+/** Why a sign-in that came back did not connect, in words (the short reason google-auth puts on the way back). */
+const SIGN_IN_WORDS: Record<string, string> = {
+  refused: "Google did not allow the sign-in.",
+  bad_state: "A newer sign-in replaced this one.",
+  expired: "The sign-in took too long to finish.",
+  no_refresh_token: "Google did not give lasting access.",
+  wrong_account: `That was not ${DECK_ACCOUNT}.`,
+};
+const SIGN_IN_UNFINISHED = "The sign-in did not finish.";
+
+/** A sign-in that came back without connecting; a new object each time, so a later one shows again. */
+export type SignInResult = { reason: string };
 
 type Status = { ready: boolean; connected: boolean; account_email: string | null; connected_at: string | null };
 
@@ -21,10 +35,15 @@ type Status = { ready: boolean; connected: boolean; account_email: string | null
  * Cloud steps are in 2026-11-03-strategy-v2-google-setup.md). An admin signs
  * in as ai@moburst.com and allows access; each deck is then a new copy in
  * that account's Drive, shared with whoever asked. The sign-in is kept on the
- * server and is never shown here.
+ * server and is never shown here. Only an admin sees Connect; everyone else
+ * is told Slides is unavailable. When a sign-in comes back without
+ * connecting, Settings passes why and this card says it in words.
  */
-export function GoogleSlidesConnection() {
+export function GoogleSlidesConnection({ signInResult = null }: { signInResult?: SignInResult | null }) {
+  const { isAdmin } = useAuth();
   const [busy, setBusy] = useState(false);
+  /** The failed sign-in line is hidden once a new sign-in is started. */
+  const [hiddenResult, setHiddenResult] = useState<SignInResult | null>(null);
   /** A sign-in that has not opened yet; the connection below is as it was. */
   const [notStarted, setNotStarted] = useState(false);
   /** The sign-in is open in its own tab (signInTab.ts). */
@@ -40,6 +59,7 @@ export function GoogleSlidesConnection() {
 
   const connect = async () => {
     setBusy(true);
+    setHiddenResult(signInResult);
     setNotStarted(false);
     setOpened(false);
     // Each start replaces the one before, so asking again is harmless.
@@ -67,7 +87,7 @@ export function GoogleSlidesConnection() {
       eyebrow="Strategy decks"
       title="Google Slides"
       description="Each client's strategy can be made into a Moburst-branded Google Slides deck, a new copy in ai@moburst.com's Drive shared with the person who asks."
-      action={data?.ready ? (
+      action={isAdmin && data?.ready ? (
         <Button onClick={connect} disabled={busy} variant={connected ? "outline" : "default"} size="sm">
           {busy ? <Loader2 className="animate-spin" aria-hidden="true" /> : <LinkIcon aria-hidden="true" />}
           {connected ? "Sign in again" : "Connect Google Slides"}
@@ -90,13 +110,21 @@ export function GoogleSlidesConnection() {
         <div className="glass-inner p-inner space-y-1.5">
           <p className="t-h4">Not connected yet</p>
           <p className="t-secondary">
-            {data?.ready
-              ? `Connect, sign in as ${DECK_ACCOUNT} and allow access. Strategy PDFs work without it.`
-              : "The one-time Google Cloud setup for ai@moburst.com comes first; Connect appears here once it is done. Strategy PDFs work without it."}
+            {!isAdmin
+              ? "Slides is unavailable right now. Strategy PDFs work without it."
+              : data?.ready
+                ? `Sign in as ${DECK_ACCOUNT} to make Slides decks. Strategy PDFs work without them.`
+                : "Slides decks are not available yet. Strategy PDFs work without them."}
           </p>
         </div>
       )}
       {notStarted && <p role="status" className="t-secondary">The sign-in has not opened yet. The connection above is unchanged.</p>}
+      {signInResult && signInResult !== hiddenResult && !opened && (
+        <p role="status" className="t-secondary">
+          {SIGN_IN_WORDS[signInResult.reason] ?? SIGN_IN_UNFINISHED}
+          {connected && " The connection above is unchanged."}
+        </p>
+      )}
       {opened && !connected && <p role="status" className="t-secondary">Google's sign-in is open in a new tab. Sign in as {DECK_ACCOUNT} there; this panel updates when you come back.</p>}
     </Section>
   );

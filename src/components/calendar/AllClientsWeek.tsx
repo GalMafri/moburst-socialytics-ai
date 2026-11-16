@@ -14,9 +14,11 @@ import { useQuery } from "@tanstack/react-query";
 import { Clock, ImageOff } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { PlatformBadge } from "@/lib/platform-config";
+import { readAll } from "@/lib/readAll";
+import { byPostingTime, postingTimeText } from "@/lib/calendarDate";
 import { DAYS, addDays, shortDate, storiesAfterTheirPosts, type CalendarPostRow } from "@/lib/calendarPosts";
 
-export type ClientPost = CalendarPostRow & { client_name: string };
+export type ClientPost = CalendarPostRow & { client_name: string; /** The client's timezone, shown beside a post's time. */ client_timezone: string | null };
 
 export function AllClientsWeek({ posts, week }: { posts: ClientPost[]; week: string }) {
   const navigate = useNavigate();
@@ -29,7 +31,8 @@ export function AllClientsWeek({ posts, week }: { posts: ClientPost[]; week: str
     queryKey: ["calendar-week-designs", week, keys.size, clientIds.join(",")],
     enabled: keys.size > 0,
     queryFn: async () => {
-      const { data, error } = await supabase.from("post_iterations")
+      // Every design of these clients, page by page: one request answers at most 1,000 rows.
+      const data = await readAll((from, to) => supabase.from("post_iterations")
         .select("calendar_post_key, media_urls, is_selected, created_at")
         .in("client_id", clientIds)
         .not("calendar_post_key", "is", null)
@@ -37,10 +40,10 @@ export function AllClientsWeek({ posts, week }: { posts: ClientPost[]; week: str
         .is("rejected_at", null)
         .is("archived_at", null)
         .order("created_at", { ascending: false })
-        .limit(5000);
-      if (error) throw error;
+        .order("id")
+        .range(from, to));
       const out: Record<string, string> = {};
-      for (const r of data || []) {
+      for (const r of data) {
         // A still if the post has one, else its video.
         const media: string[] = r.media_urls || [];
         const url = media.find((u) => !isVideoMedia(u)) ?? media[0];
@@ -63,25 +66,13 @@ export function AllClientsWeek({ posts, week }: { posts: ClientPost[]; week: str
     },
   });
 
-  // Clients whose social accounts are connected in Sprout; the others have no
-  // posts or videos of their own for designs to learn from.
-  const { data: connected } = useQuery({
-    queryKey: ["calendar-week-connected", clientIds.join(",")],
-    enabled: clientIds.length > 0,
-    queryFn: async () => {
-      const { data, error } = await supabase.from("sprout_profiles").select("client_id").in("client_id", clientIds).eq("is_active", true).limit(5000);
-      if (error) throw error;
-      return new Set<string>((data || []).map((r: { client_id: string }) => r.client_id));
-    },
-  });
-
   return (
     // The same day columns as a client's own board, compact enough for seven
     // across on a wide screen.
     <div className="grid gap-3 items-start grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
       {DAYS.map((day, i) => {
         const date = addDays(week, i);
-        const dayPosts = storiesAfterTheirPosts(posts.filter((p) => p.post_date === date).sort((a, b) => a.client_name.localeCompare(b.client_name) || (a.posting_time || "").localeCompare(b.posting_time || "")));
+        const dayPosts = storiesAfterTheirPosts(posts.filter((p) => p.post_date === date).sort((a, b) => a.client_name.localeCompare(b.client_name) || byPostingTime(a.posting_time, b.posting_time)));
         return (
           <section key={day} className="glass p-2.5 space-y-2 min-w-0" aria-label={`${day} ${shortDate(date)}`}>
             <header className="flex items-baseline justify-between gap-1 px-1">
@@ -111,8 +102,6 @@ export function AllClientsWeek({ posts, week }: { posts: ClientPost[]; week: str
                   <p className="t-label">Text post</p>
                 ) : filmed.has(p.post_key) ? (
                   <p className="t-label">Filmed video</p>
-                ) : connected && !connected.has(p.client_id) ? (
-                  <p className="t-label inline-flex items-center gap-1 !text-[#f5b14c]"><ImageOff className="h-3 w-3" aria-hidden />Accounts not connected</p>
                 ) : (
                   <p className="t-label inline-flex items-center gap-1"><ImageOff className="h-3 w-3" aria-hidden />No design yet</p>
                 )}
@@ -120,7 +109,7 @@ export function AllClientsWeek({ posts, week }: { posts: ClientPost[]; week: str
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <PlatformBadge platform={p.platform} size="sm" />
                   {story && <span className="inline-flex items-center px-1.5 py-0.5 rounded-full border border-white/15 t-badge text-white">Story</span>}
-                  {p.posting_time && <span className="t-label inline-flex items-center gap-1"><Clock className="h-3 w-3" aria-hidden />{p.posting_time}</span>}
+                  {p.posting_time && <span className="t-label inline-flex items-center gap-1"><Clock className="h-3 w-3" aria-hidden />{postingTimeText(p.posting_time, p.client_timezone, p.post_date)}</span>}
                 </div>
                 <p className="t-label line-clamp-2 !text-[#b1b7c1]">{p.copy.split("\n")[0]}</p>
               </button>

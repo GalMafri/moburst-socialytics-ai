@@ -16,13 +16,12 @@ import { ContentIdeasTab } from '@/components/reports/calendar/ContentIdeasTab';
 import { applyCopyRevisions } from '@/lib/calendarRevision';
 import { FunnelCard } from '@/components/usage/UsageSections';
 
-const f=vi.hoisted(()=>({role:'staff',insertError:null as any,assignedError:null as any,iterationsError:null as any,reportRows:null as any[] | null,detailedReport:null as any,rows:[] as any[],reads:[] as string[],invokes:[] as any[],success:vi.fn(),error:vi.fn(),warning:vi.fn()}));
+const f=vi.hoisted(()=>({clientRows:null as any[] | null,role:'staff',insertError:null as any,assignedError:null as any,iterationsError:null as any,reportRows:null as any[] | null,detailedReport:null as any,rows:[] as any[],reads:[] as string[],invokes:[] as any[],success:vi.fn(),error:vi.fn(),warning:vi.fn()}));
 vi.stubGlobal('ResizeObserver',class {observe(){} unobserve(){} disconnect(){}});
 vi.stubGlobal('fetch',vi.fn(()=>Promise.reject(new Error('Unexpected outbound request'))));
 vi.mock('@/hooks/useAuth',()=>({useAuth:()=>({isLoading:false,isAuthenticated:true,isMoburstStaff:f.role==='staff',isClient:f.role==='client',isAdmin:false,isGosSession:true,canRunAnalysis:f.role==='staff',canDelete:false,user:{_id:'fixture-user',name:'Fixture user',company:null}})}));
 vi.mock('@/lib/telemetry',()=>({track:vi.fn(),editDistancePct:()=>25}));
 vi.mock('sonner',()=>({toast:{success:f.success,error:f.error,warning:f.warning}}));
-vi.mock('@/hooks/useRealtimePostIterations',()=>({useRealtimePostIterations:()=>{}}));
 vi.mock('@/hooks/useRealtimeReport',()=>({useRealtimeReports:()=>{}}));
 vi.mock('@/components/layout/AppLayout',()=>({AppLayout:({children,title}:any)=><main><h1>{title}</h1>{children}</main>}));
 vi.mock('@/integrations/supabase/client',()=>({supabase:{
@@ -44,7 +43,7 @@ vi.mock('@/integrations/supabase/client',()=>({supabase:{
     const q:any={select(){return q},is(){return q},range(start:number,end:number){range=[start,end];return q},eq(){return q},neq(){return q},order(){return q},limit(){return q},in(){return q},
       insert:async(row:any)=>{if(!f.insertError)f.rows.push({...row});return{data:null,error:f.insertError}},
       maybeSingle:async()=>{f.reads.push(table);return{data:table==='clients'?{id:'fixture-client',name:'Fixture company',hub_company_name:'Legacy name',media_backend:'higgsfield'}:table==='reports'&&f.detailedReport?f.detailedReport:fixtureReport(),error:null}},
-      then:(resolve:any,reject:any)=>{f.reads.push(table);const value=table==='client_users'?[]:table==='clients'?[{id:'fixture-client',name:'Fixture company',hub_company_name:'Legacy name'}]:table==='reports'?(range?(f.reportRows||[fixtureReport()]).slice(range[0],range[1]+1):f.reportRows||[fixtureReport()]):table==='sprout_profiles'?[{sprout_profile_id:1,network_type:'linkedin_company'}]:[...f.rows];return Promise.resolve({data:value,error:table==='sprout_profiles'?f.assignedError:table==='post_iterations'?f.iterationsError:null}).then(resolve,reject)}
+      then:(resolve:any,reject:any)=>{f.reads.push(table);const value=table==='client_users'?[]:table==='clients'?(f.clientRows||[{id:'fixture-client',name:'Fixture company',hub_company_name:'Legacy name'}]):table==='reports'?(range?(f.reportRows||[fixtureReport()]).slice(range[0],range[1]+1):f.reportRows||[fixtureReport()]):table==='sprout_profiles'?[{sprout_profile_id:1,network_type:'linkedin_company'}]:[...f.rows];return Promise.resolve({data:value,error:table==='sprout_profiles'?f.assignedError:table==='post_iterations'?f.iterationsError:null}).then(resolve,reject)}
     };return q;
   }
 }}));
@@ -57,7 +56,7 @@ function mount(node:React.ReactNode,path='/'){
  const client=new QueryClient({defaultOptions:{queries:{retry:false,gcTime:0},mutations:{retry:false}}});clients.push(client);
  return render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[path]}>{node}</MemoryRouter></QueryClientProvider>);
 }
-beforeEach(()=>{f.role='staff';f.detailedReport=null;f.iterationsError=null;f.reportRows=null;f.insertError=null;f.assignedError=null;f.rows=[];f.reads=[];f.invokes=[];f.success.mockClear();f.error.mockClear();f.warning.mockClear();});
+beforeEach(()=>{f.clientRows=null;f.role='staff';f.detailedReport=null;f.iterationsError=null;f.reportRows=null;f.insertError=null;f.assignedError=null;f.rows=[];f.reads=[];f.invokes=[];f.success.mockClear();f.error.mockClear();f.warning.mockClear();});
 afterEach(()=>{cleanup();clients.splice(0).forEach(c=>c.clear());});
 async function edit(text='Reviewed fixture copy',success=true){
  fireEvent.click(screen.getByRole('button',{name:'Edit'}));
@@ -107,6 +106,17 @@ describe('QA-03 counterexamples through actual permitted client routes',()=>{
  it('control: gOS client dashboard loads its RLS-visible company without client_users',async()=>{
   f.role='client';mount(<ClientDashboard/>);expect(await screen.findByRole('button',{name:'Open the latest report'})).toBeInTheDocument();expect(f.reads).not.toContain('client_users');
  });
+ it('a client session with two clients shows both names, and switching shows the second client\'s overview',async()=>{
+  f.role='client';f.clientRows=[{id:'fixture-client',name:'Fixture company',hub_company_name:'Legacy name'},{id:'second-client',name:'Second company',hub_company_name:'Legacy name'}];
+  mount(<Routes><Route path="/" element={<ClientDashboard/>}/><Route path="*" element={<div>elsewhere</div>}/></Routes>);
+  expect(await screen.findByRole('button',{name:'Fixture company',pressed:true})).toBeInTheDocument();expect(screen.getByRole('button',{name:'Second company'})).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'Second company'}));
+  expect(screen.getByRole('button',{name:'Second company',pressed:true})).toBeInTheDocument();expect(screen.getByRole('heading',{level:1,name:'Legacy name'})).toBeInTheDocument();
+ });
+ it('a client session with no client shows what appears once the account is connected, with no instruction to contact anyone',async()=>{
+  f.role='client';f.clientRows=[];mount(<ClientDashboard/>);
+  expect(await screen.findByText('Your dashboard is being set up')).toBeInTheDocument();expect(screen.queryByText(/contact/i)).toBeNull();
+ });
  it('control: actual client history displays its report without client_users',async()=>{
   f.role='client';mount(<Routes><Route path="/clients/:id/reports" element={<ReportHistory/>}/></Routes>,'/clients/fixture-client/reports');
   expect(await screen.findByText('Ready')).toBeInTheDocument();expect(screen.queryByText('completed')).toBeNull();expect(screen.getByRole('button',{name:'View'})).toBeInTheDocument();expect(f.reads).not.toContain('client_users');
@@ -149,7 +159,7 @@ describe('QA-13 and QA-15 actual UI branches',()=>{
   f.role='client';mount(panels());expect(screen.getByRole('button',{name:'Regenerate'})).toBeInTheDocument();expect(screen.queryByRole('tab',{name:'Schedule'})).toBeNull();
  });
  it('shows independent activity counts without invented conversion',()=>{
-  mount(<FunnelCard rows={[{step:'Analysis finished',step_order:1,users:1,events:1},{step:'Opened the report',step_order:2,users:5,events:5}]}/>);
+  mount(<FunnelCard rows={[{step:'Analysis finished',step_order:1,users:1,events:1},{step:'Opened the report',step_order:2,users:5,events:5}]} windowDays={90}/>);
   expect(screen.queryByText('500%')).toBeNull();expect(screen.getByText('People by activity')).toBeInTheDocument();expect(screen.getByText('5 people')).toBeInTheDocument();
  });
 });
@@ -173,7 +183,7 @@ describe('whole calendar persistence and history paging',()=>{
   expect(screen.queryByRole('button',{name:'Open post: Original fixture copy'})).not.toBeInTheDocument();
  });
  it('opens the second page and returns to the first with 51 reports',async()=>{
-  f.reportRows=Array.from({length:51},(_,i)=>({...fixtureReport(),id:'report-'+i,clients:{id:'client-'+i,name:'Brand '+String(i+1).padStart(3,'0')}}));
+  f.reportRows=Array.from({length:51},(_,i)=>({...fixtureReport(),id:'report-'+i,client_id:'client-'+i,clients:{id:'client-'+i,name:'Brand '+String(i+1).padStart(3,'0')}}));
   mount(<AllReports/>);
   expect(await screen.findByText('Brand 050')).toBeInTheDocument();
   expect(screen.queryByText('Brand 051')).not.toBeInTheDocument();

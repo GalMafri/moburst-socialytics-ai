@@ -32,11 +32,10 @@ import { ClientPicker, WeekNav } from "@/components/calendar/CalendarHeaderContr
 import { PlanNextWeekButton, WeekPlanBand } from "@/components/calendar/WeekPlanControls";
 import { DesignWeekBand } from "@/components/calendar/DesignWeekButton";
 import { CLIENT_CONTEXT_COLUMNS, buildClientContext } from "@/lib/clientContext";
-import { addDays, mergePlan, mondayOf, nextPlannableWeek, shortDate, weekBoard, type CalendarPlanRow, type CalendarPostRow } from "@/lib/calendarPosts";
+import { addDays, calendarPlatforms, mergePlan, mondayOf, nextPlannableWeek, postedPlatforms, shortDate, weekBoard, type CalendarPlanRow, type CalendarPostRow } from "@/lib/calendarPosts";
+import { readAll } from "@/lib/readAll";
 import { weekPlanView } from "@/lib/weekPlanStatus";
-import { thisWeek as thisWeekWindow, weekOf } from "@/lib/weekWindow";
-
-const DEFAULT_PLATFORMS = ["Instagram", "LinkedIn", "TikTok", "Facebook", "X"];
+import { thisWeek as thisWeekWindow, weekFromParam } from "@/lib/weekWindow";
 
 const inFlight = (p: CalendarPlanRow) => p.status === "queued" || p.status === "planning" || !!p.pending_revision;
 
@@ -75,15 +74,24 @@ export default function ClientCalendar() {
     queryKey: ["calendar-posts", id],
     enabled: !!id,
     refetchInterval: busy ? 10_000 : false,
-    queryFn: async () => {
+    // Every post, page by page until a short page comes back: one read answers at most 1,000 rows.
+    queryFn: () => readAll<CalendarPostRow>((from, to) =>
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data, error } = await (supabase.from("calendar_posts" as never) as any)
+      (supabase.from("calendar_posts" as never) as any)
         .select("*")
         .eq("client_id", id)
         .order("post_date")
-        .limit(2000);
+        .order("id")
+        .range(from, to)),
+  });
+  // The client's connected networks, for the networks its calendar offers.
+  const profiles = useQuery({
+    queryKey: ["calendar-sprout-profiles", id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase.from("sprout_profiles").select("network_type").eq("client_id", id!).eq("is_active", true);
       if (error) throw error;
-      return (data || []) as CalendarPostRow[];
+      return (data ?? []).map((p) => p.network_type as string).filter(Boolean);
     },
   });
 
@@ -100,14 +108,17 @@ export default function ClientCalendar() {
   // definition the dashboard counts too (src/lib/weekWindow.ts).
   const current = thisWeekWindow(clientContext.timezone);
   const today = current.today;
-  const week = weekOf(params.get("week") || today).start;
+  const week = weekFromParam(params.get("week"), today);
   const thisWeek = current.start;
   const all = posts.data ?? [];
   const inWeek = all.filter((p) => p.post_date >= week && p.post_date <= addDays(week, 6));
   const board = useMemo(() => weekBoard(inWeek, week), [inWeek, week]);
   const nextPlanned = all.find((p) => p.post_date > addDays(week, 6));
   const prevPlanned = [...all].reverse().find((p) => p.post_date < week);
-  const platforms = [...new Set([...all.map((p) => p.platform), ...DEFAULT_PLATFORMS])];
+  // The networks come from the client's own data: what it is set up for, its connected profiles and what is already on its calendar.
+  // The filter offers only the networks that have posts this week.
+  const platforms = calendarPlatforms({ primary: clientContext.primary_platforms, profiles: profiles.data, posted: all.map((p) => p.platform) });
+  const filterPlatforms = postedPlatforms(inWeek);
   const languages = [...new Set(all.map((p) => p.language).filter(Boolean))] as string[];
   const goTo = (monday: string) => setParams((prev) => { const next = new URLSearchParams(prev); next.set("week", monday); return next; }, { replace: false });
 
@@ -136,7 +147,7 @@ export default function ClientCalendar() {
   // The week's posts can be designed with one press once its plan is ready.
   const designable = !!id && active && weekPlan?.status === "ready";
   // A look again that did not answer keeps what the page already shows; only a first read that did not answer waits on it.
-  const unread = [client, posts, plans].find((q) => q.isError && q.data === undefined);
+  const unread = [client, posts, plans, profiles].find((q) => q.isError && q.data === undefined);
 
   return (
     <AppLayout
@@ -146,17 +157,20 @@ export default function ClientCalendar() {
         <>
           {isMoburstStaff && <ClientPicker value={id} week={week} />}
           {planButton}
-          {isMoburstStaff && <NewPostDialog clientId={id} platforms={platforms} defaultDate={week > today ? week : today} onCreated={(d) => goTo(mondayOf(d))} />}
+          {isMoburstStaff && !!client.data && <NewPostDialog clientId={id} platforms={platforms} defaultDate={week > today ? week : today} onCreated={(d) => goTo(mondayOf(d))} />}
         </>
       ) : undefined}
     >
-      {client.isLoading || posts.isLoading || plans.isLoading ? (
+      {client.isLoading || posts.isLoading || plans.isLoading || profiles.isLoading ? (
         <Loading label="Loading the calendar" />
       ) : unread ? (
-        <LoadRetry context="calendar" error={unread.error} onRetry={() => { void client.refetch(); refresh(); }} />
+        <LoadRetry context="calendar" error={unread.error} onRetry={() => { void client.refetch(); void profiles.refetch(); refresh(); }} />
+      ) : !client.data ? (
+        // The read answered with no row: a client that does not exist or that this viewer cannot see. No week is drawn for it.
+        <EmptyState icon={CalendarDays} title="That client is not available" description="It may have been deleted, or your account may not have access to it." />
       ) : (
         <div className="space-y-section">
-          <WeekNav week={week} thisWeek={thisWeek} count={inWeek.length} onGo={goTo}>
+          <WeekNav week={week} thisWeek={thisWeek} posts={inWeek} onGo={goTo}>
             {(showPlanBand || designable || elsewhere.length > 0) && (
               <>
                 {showPlanBand && <WeekPlanBand plan={weekPlan!} today={today} canAct={active} hasPosts={inWeek.length > 0} onChanged={planChanged} />}
@@ -180,8 +194,8 @@ export default function ClientCalendar() {
                 : stoppedLine
                   ? `${stoppedLine}${nextWeek === week && planButton ? " You can plan it again now." : ""}`
                   : nextWeek === week && planButton
-                    ? "Each week is planned on the Monday before it. You can plan this one now."
-                    : nextPlanned ? "The next planned posts are in a later week." : "Each week is planned on the Monday before it."}
+                    ? "This week has no plan yet."
+                    : nextPlanned ? "The next planned posts are in a later week." : "Posts appear here once this week is planned."}
               action={!planOnItsWay && nextWeek === week && planButton ? planButton : nextPlanned ? (
                 <Button size="sm" variant="outline" onClick={() => goTo(mondayOf(nextPlanned.post_date))}>
                   Go to the week of {shortDate(mondayOf(nextPlanned.post_date))}
@@ -200,7 +214,7 @@ export default function ClientCalendar() {
               clientContext={clientContext}
               clientId={id}
               clientTimezone={clientContext.timezone}
-              availablePlatforms={platforms}
+              availablePlatforms={filterPlatforms}
               availableLanguages={languages}
               openPostKey={openPostKey}
             />

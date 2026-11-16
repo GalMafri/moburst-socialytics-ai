@@ -4,7 +4,12 @@
   "installCommand": "npm ci --no-audit --no-fund",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "functions": {
+    "api/picture.mjs": { "maxDuration": 90 }
+  },
   "rewrites": [
+    { "source": "/api/health", "destination": "/api/picture" },
+    { "source": "/api/picture/(.*)", "destination": "/api/picture" },
     { "source": "/((?!assets/).*)", "destination": "/index.html" }
   ],
   "headers": [

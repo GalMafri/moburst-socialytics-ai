@@ -94,6 +94,39 @@ it('distinguishes pending collection from a completed collection with no returne
  expect(competitiveRecovery({...empty,provider_status:2},false).detail).not.toMatch(/RivalIQ/);
 });
 
+it('says a held analysis is not shared, and nothing about being made again, once no redo can come', () => {
+ const held={provider_status:2,aggregates:{companies:[{name:'Client',post_count:0,observed_post_count:0}]}};
+ const old=new Date(Date.now()-30*86400000).toISOString();
+ const today=new Date().toISOString();
+ for (const staff of [true,false]) {
+   const gone=competitiveRecovery(held,staff,old);
+   expect(gone.title).toBe('Not shared');
+   expect(gone.detail).not.toMatch(/once a day|made again|redone/i);
+   expect(gone.detail).toMatch(/it is not shared/);
+   const coming=competitiveRecovery(held,staff,today);
+   expect(coming.title).toBe('Being redone');
+   expect(coming.detail).toContain('once a day');
+ }
+ // The last allowed redo's row, made today, has no redo coming.
+ expect(competitiveRecovery(held,true,today,4)).toMatchObject({title:'Not shared'});
+ expect(competitiveRecovery(held,true,today,4).detail).not.toMatch(/once a day|made again/);
+ expect(competitiveRecovery(held,true,today,3).title).toBe('Being redone');
+ expect(competitiveRecovery({aggregates:{companies:[{name:'Client',post_count:0,observed_post_count:0}]}},true,old).detail).not.toContain('once a day');
+ expect(competitiveRecovery({quality_check:{reasons:['x']}},true,old).detail).not.toContain('once a day');
+});
+
+it('reads the dispatch decision on the held row before any clock', () => {
+ const base={provider_status:2,aggregates:{companies:[{name:'Client',post_count:0,observed_post_count:0}]}};
+ const old=new Date(Date.now()-30*86400000).toISOString();
+ const today=new Date().toISOString();
+ const queued=competitiveRecovery({...base,redo:{queued:true,available_at:today,decided_at:old}},false,old,4);
+ expect(queued.title).toBe('Being redone');
+ expect(queued.detail).toContain('once a day');
+ const none=competitiveRecovery({...base,redo:{queued:false,decided_at:today}},false,today,1);
+ expect(none.title).toBe('Not shared');
+ expect(none.detail).not.toMatch(/once a day|made again/);
+});
+
 describe("stateLine", () => {
   it("ends the headline as a sentence before the detail", () => {
     expect(stateLine({ headline: "Tracked since Sep 23, 2026", detail: "Reports use this selection.", ready: true })).toBe("Tracked since Sep 23, 2026. Reports use this selection.");

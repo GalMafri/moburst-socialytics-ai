@@ -1,32 +1,37 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Loading } from "@/components/ui/loading";
-import { Navigate } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
-import { PORTAL_URL } from "@/utils/gosAuth";
+import { portalUrl } from "@/utils/gosAuth";
+import { authMessage, isAuthErrorCode, isTransient, type AuthErrorCode } from "@/lib/authMessages";
 import { BarChart3, TrendingUp, Zap, AlertCircle } from "lucide-react";
 
 export default function Auth() {
   const { isAuthenticated, isLoading, authError } = useAuth();
 
-  // Why sign-in did not happen, in plain terms. Without this the page is a
-  // dead end that looks identical whether there is no session at all, a
-  // session with no role for this tool, or a genuine bridge failure — and
-  // those need three different fixes.
-  const [reason, setReason] = useState<"checking" | "no-session" | "no-role" | "ready">("checking");
+  // Why sign-in did not happen, as a reason code. It comes from the sign-in
+  // itself, or from the address when a moburst.ai handoff failed and sent the
+  // person here. With no code, a stored sign-in that has no access, or one
+  // that could not be restored, is told apart from no sign-in at all.
+  const [params] = useSearchParams();
+  const fromAddress = params.get("reason");
+  const [found, setFound] = useState<AuthErrorCode | "none" | "checking">("checking");
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const { data } = await supabase.auth.getSession();
+        const { data, error } = await supabase.auth.getSession();
+        // The auth server did not answer: the person may well be signed in.
+        if (error && isTransient(error)) { if (!cancelled) setFound("unreachable"); return; }
         const su = data.session?.user;
-        if (!su) { if (!cancelled) setReason("no-session"); return; }
+        if (!su) { if (!cancelled) setFound("none"); return; }
         const { data: roles } = await supabase
           .from("user_roles").select("role").eq("user_id", su.id);
-        if (!cancelled) setReason(roles && roles.length ? "ready" : "no-role");
+        if (!cancelled) setFound(roles && roles.length ? "restore_failed" : "no_access");
       } catch {
-        if (!cancelled) setReason("no-session");
+        if (!cancelled) setFound("none");
       }
     })();
     return () => { cancelled = true; };
@@ -41,7 +46,9 @@ export default function Auth() {
   }
   if (isAuthenticated) return <Navigate to="/" />;
 
-  const hasError = !!authError;
+  const code: AuthErrorCode | null =
+    authError ?? (isAuthErrorCode(fromAddress) ? fromAddress : found !== "none" && found !== "checking" ? found : null);
+  const hasError = code !== null;
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-[#0b0c10] intercept-bg p-page">
@@ -55,51 +62,33 @@ export default function Auth() {
             <>
               <div className="flex justify-center">
                 <div className="p-3 rounded-full bg-[rgba(239,68,68,0.1)]">
-                  <AlertCircle className="h-6 w-6 text-[#ef4444]" />
+                  <AlertCircle className="h-6 w-6 text-destructive" />
                 </div>
               </div>
-              <h2 className="t-h1 text-white">Sign-in failed</h2>
-              <p className="t-secondary">{authError}</p>
-              <p className="t-label pt-2">
-                Open this tool from the Moburst portal. If you're already there,
-                ask a portal admin to confirm your access to it.
-              </p>
+              <h2 className="t-h1 text-white">Sign-in did not finish</h2>
+              <p className="t-secondary">{authMessage(code)}</p>
             </>
           ) : (
             <>
               <h2 className="t-h1 text-white">Sign in to continue</h2>
               <p className="t-secondary">
-                This tool signs you in through the Moburst portal. Open it there and you
+                Socialytics signs you in through the Moburst portal. Open it there and you
                 will come straight back to the page you were trying to reach.
               </p>
-              <div className="pt-2">
-                <Button asChild>
-                  <a href={PORTAL_URL}>Open the Moburst portal</a>
-                </Button>
-              </div>
-            {reason === "no-role" && (
-              <p className="t-label !text-warning pt-2">
-                You are signed in, but this tool has no role assigned to your account.
-                A portal admin needs to grant you access to it.
-              </p>
-            )}
-            {reason === "ready" && (
-              <p className="t-label !text-warning pt-2">
-                A session was found but could not be restored. Reload the page, and if
-                it persists, open the tool from the portal once.
-              </p>
-            )}
             </>
           )}
+          <div className="pt-2">
+            <Button asChild>
+              <a href={portalUrl()}>Open the Moburst portal</a>
+            </Button>
+          </div>
         </div>
 
         {!hasError && (
           <div className="space-y-3 text-left">
             {[
-              // Say what the product does. "in real-time" described a feature
-              // that does not exist: trends come from a completed monthly
-              // report, not from anything that polls or streams.
-              { icon: TrendingUp, title: "Trend analysis", desc: "TikTok and Instagram trends, read out in each monthly report" },
+              // Say what the product does, in words a client would use.
+              { icon: TrendingUp, title: "Trends", desc: "Each week's industry themes on the platforms the client posts on." },
               { icon: BarChart3, title: "Performance analytics", desc: "Every connected platform's numbers in one place" },
               { icon: Zap, title: "Content calendar", desc: "A week of posts at a time, written from the client's own brand and results" },
             ].map((f) => (

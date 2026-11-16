@@ -17,6 +17,7 @@
 
 import { parseAnswer } from "../competitive/analysis.ts";
 import { BRIEF_SYSTEM, synthesisSystem, synthesisText } from "./prompt.ts";
+import { britishSpelling, exemptPattern, type SpellingExempt } from "../../reports/reportText.ts";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -146,8 +147,54 @@ export function briefAnswer(text: string | null | undefined): Any {
   return { output: v };
 }
 
-/** What in a parsed synthesis does not match its schema; empty when it does. Fields the schema does not name are kept. */
-export function synthesisProblems(v: Any): string[] {
+/** The analysis fields a client reads as written text. The content calendar holds post copy, which follows the client's own language. */
+export const SHOWN_TEXT_FIELDS = ["sprout_performance_analysis", "industry_trends_analysis", "competitive_takeaways"] as const;
+
+/** The text in a value, each string with where it sits. */
+function textsIn(v: unknown, path: string, out: Array<{ path: string; text: string }> = []): Array<{ path: string; text: string }> {
+  if (typeof v === "string") out.push({ path, text: v });
+  else if (Array.isArray(v)) v.forEach((x, i) => textsIn(x, `${path}[${i}]`, out));
+  else if (isObj(v)) for (const [k, x] of Object.entries(v as Record<string, unknown>)) textsIn(x, `${path}.${k}`, out);
+  return out;
+}
+
+/**
+ * What in a parsed synthesis does not match its schema, or spells the text a
+ * client reads the British way; empty when it does not. Fields the schema does
+ * not name are kept. `exempt`: the words the analysis may repeat as they are
+ * (see analysisExemptions).
+ */
+export function synthesisProblems(v: Any, exempt: SpellingExempt = null): string[] {
+  const out = formatProblems(v);
+  if (out.length || !isObj(v)) return out;
+  for (const field of SHOWN_TEXT_FIELDS) {
+    for (const { path, text } of textsIn(v[field], field)) {
+      const word = britishSpelling(text, exempt);
+      if (word) out.push(`${path} spells "${word}" the British way; use American English.`);
+    }
+  }
+  return out;
+}
+
+/** The companies the analysis names: the client, its profiles and the competitors, from the normalized client object the synthesis reads. */
+export function analysisNames(json: Any): string[] {
+  const profiles: Any[] = Array.isArray(json?.sprout?.profiles) ? json.sprout.profiles : [];
+  const rivals: Any[] = Array.isArray(json?.competitive_context?.competitors) ? json.competitive_context.competitors : [];
+  return [json?.client_name, ...profiles.map((p) => p?.name), ...rivals.map((c) => c?.name)].filter((n): n is string => typeof n === "string");
+}
+
+/**
+ * The words the analysis may spell as they stand: the names above and every
+ * British word already in the normalized input the analysis read (brief,
+ * pillars, keywords, trend titles, captions, hashtags). Those are the source's
+ * own words, not the model's spelling. Null when there are none.
+ */
+export function analysisExemptions(json: Any): SpellingExempt {
+  return exemptPattern(analysisNames(json), textsIn(json, "input").map((t) => t.text));
+}
+
+/** What in a parsed synthesis does not match its schema. */
+function formatProblems(v: Any): string[] {
   const out: string[] = [];
   if (!isObj(v)) return ["The answer must be a JSON object."];
   const s = v.sprout_performance_analysis;

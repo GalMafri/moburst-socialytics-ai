@@ -29,10 +29,38 @@ function isSafeInAppPath(path: string): boolean {
   return true;
 }
 
+/**
+ * Query parameters that carry a sign-in credential. The legacy hub sends
+ * ?hubToken and the gOS handoff sends ?token. hubAuth.ts strips hubToken from
+ * the address bar on purpose, and the router can still report the address it
+ * saw before that strip, so every stored path drops these here. No caller can
+ * then keep a token in localStorage or put a used one back in the address bar.
+ */
+const SIGN_IN_PARAMS = ["hubToken", "token"];
+
+function withoutSignInParams(path: string): string {
+  const q = path.indexOf("?");
+  if (q < 0) return path;
+  const hash = path.indexOf("#", q);
+  const raw = path.slice(q + 1, hash < 0 ? undefined : hash);
+  const query = new URLSearchParams(raw);
+  // Nothing to drop: hand the path back exactly as it came, so its query text
+  // (%20, a bare ?flag) is not rewritten.
+  if (!SIGN_IN_PARAMS.some((name) => query.has(name))) return path;
+  for (const name of SIGN_IN_PARAMS) query.delete(name);
+  const rest = query.toString();
+  return path.slice(0, q) + (rest ? `?${rest}` : "") + (hash < 0 ? "" : path.slice(hash));
+}
+
 export function rememberReturnTo(path: string, now: number = Date.now()): void {
   try {
     if (!isSafeInAppPath(path)) return;
-    localStorage.setItem(KEY, JSON.stringify({ path, at: now } satisfies Entry));
+    const clean = withoutSignInParams(path);
+    // The landing page is where every portal journey ends anyway, so there is
+    // nothing to remember, and it must not replace a deep link stored a moment
+    // earlier.
+    if (clean === "/") return;
+    localStorage.setItem(KEY, JSON.stringify({ path: clean, at: now } satisfies Entry));
   } catch {
     /* storage disabled; deep links just fall back to the dashboard */
   }

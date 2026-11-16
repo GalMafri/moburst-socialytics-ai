@@ -35,6 +35,8 @@ export interface CopyPost {
   cta: string | null;
   platform: string | null;
   format?: string | null;
+  /** When someone last worked on it; read so a revision that fails to save can put it back. */
+  touched_at?: string | null;
   updated_at: string;
 }
 
@@ -102,6 +104,8 @@ export type SaveCopyResult =
 export const COPY_MAX = 10_000;
 export const HASHTAGS_MAX = 30;
 export const CTA_MAX = 300;
+/** A calendar row's key starts with this; a report's own post has a key of another shape and no calendar row. */
+export const CALENDAR_KEY_PREFIX = "post:";
 
 /** A timestamp as one comparable value, to the microsecond; null when it is not one. */
 function instant(v: unknown): string | null {
@@ -120,27 +124,54 @@ export function sameInstant(a: unknown, b: unknown): boolean {
   return x !== null && x === instant(b);
 }
 
+/**
+ * The revision is written after the post. When it cannot be, the post goes
+ * back to the copy it had, so a save that answers an error has changed nothing
+ * a reader can see; the error is the one the revision raised.
+ */
+async function writeRevision(w: CopyWrites, clientId: string, key: string, row: IterationRow, before: CopyPost | null): Promise<void> {
+  try {
+    await w.insertIteration(row);
+  } catch (e) {
+    if (before) {
+      try {
+        await w.updatePost(clientId, key, { copy: before.copy, hashtags: before.hashtags, cta: before.cta, ..."touched_at" in before ? { touched_at: before.touched_at ?? null } : {} });
+      } catch (back) {
+        console.warn("[saveCopy] could not put the copy back after a failed revision:", back instanceof Error ? back.message : back);
+      }
+    }
+    throw e;
+  }
+}
+
 const sameList = (a: string[] | null, b: string[] | null) => JSON.stringify(a ?? []) === JSON.stringify(b ?? []);
 
 export async function saveCopy(w: CopyWrites, a: SaveCopy, memory?: CopyMemory): Promise<SaveCopyResult> {
   const copy = String(a.copy ?? "").trim();
+  // The three limits hold for every source.
+  if (copy.length > COPY_MAX) return { ok: false, status: 400, error: `Copy holds at most ${COPY_MAX.toLocaleString("en-US")} characters.` };
   if (a.source !== "claude") {
     // The calendar's Save and Regenerate, exactly as calendar-posts wrote them.
     if (!a.clientId || !a.key || !copy) return { ok: false, status: 400, error: "client_id, calendar_post_key and post_copy are required." };
     const regeneration = a.source === "regeneration";
-    const hashtags = Array.isArray(a.hashtags) ? a.hashtags.map(String).slice(0, HASHTAGS_MAX) : null;
+    const listed = Array.isArray(a.hashtags) ? a.hashtags.map(String) : null;
+    if (listed && listed.length > HASHTAGS_MAX) return { ok: false, status: 400, error: `hashtags must be a list of at most ${HASHTAGS_MAX} hashtags.` };
+    if (a.cta && String(a.cta).length > CTA_MAX) return { ok: false, status: 400, error: `The call to action holds at most ${CTA_MAX} characters.` };
+    const hashtags = listed;
     const before = await w.post(a.clientId, a.key);
     const previous = String(before?.copy || "").trim();
     const platform = before?.platform ?? ((a.platform as string) || null);
     const format = before?.format ?? ((a.format as string) || null);
-    await w.insertIteration({
+    // The calendar post holds the current copy too, for every view that reads it directly. It is written
+    // first: a post the calendar does not have (a post: key) is answered 404 before any revision exists.
+    const updatedAt = await w.updatePost(a.clientId, a.key, { copy, touched_at: a.now.toISOString(), ...(hashtags ? { hashtags } : {}), ...(a.cta ? { cta: String(a.cta) } : {}) });
+    if (!updatedAt && a.key.startsWith(CALENDAR_KEY_PREFIX)) return { ok: false, status: 404, error: "No post with that key in this client's calendar." };
+    await writeRevision(w, a.clientId, a.key, {
       client_id: a.clientId, report_id: (a.reportId as string) || null, calendar_post_key: a.key,
       version: Number(a.version) || 1, platform: (a.platform as string) || null, post_copy: copy,
       hashtags, cta: (a.cta as string) || null, concept: (a.concept as string) || null, visual_direction: (a.visualDirection as string) || null,
       format: (a.format as string) || null, source: regeneration ? "regeneration" : "calendar", created_by: a.userId,
-    });
-    // The calendar post holds the current copy too, for every view that reads it directly.
-    const updatedAt = await w.updatePost(a.clientId, a.key, { copy, touched_at: a.now.toISOString(), ...(hashtags ? { hashtags } : {}), ...(a.cta ? { cta: String(a.cta) } : {}) });
+    }, updatedAt ? before : null);
     const saved: SaveCopyResult = { ok: true, changed: true, updatedAt };
     if (!memory) return saved;
     if (!regeneration) {
@@ -164,7 +195,6 @@ export async function saveCopy(w: CopyWrites, a: SaveCopy, memory?: CopyMemory):
   }
 
   if (!copy) return { ok: false, status: 400, error: "The copy is empty." };
-  if (copy.length > COPY_MAX) return { ok: false, status: 400, error: `Copy holds at most ${COPY_MAX.toLocaleString("en-US")} characters.` };
   let hashtags: string[] | null = null;
   if (a.hashtags !== undefined && a.hashtags !== null) {
     if (!Array.isArray(a.hashtags) || a.hashtags.length > HASHTAGS_MAX || a.hashtags.some((h) => typeof h !== "string")) return { ok: false, status: 400, error: `hashtags must be a list of at most ${HASHTAGS_MAX} hashtags.` };
@@ -189,11 +219,11 @@ export async function saveCopy(w: CopyWrites, a: SaveCopy, memory?: CopyMemory):
   const fields = { copy, touched_at: a.now.toISOString(), ...(hashtags ? { hashtags } : {}), ...(cta ? { cta } : {}) };
   const updatedAt = await w.updatePost(a.clientId, a.key, fields, post.updated_at);
   if (!updatedAt) return stale();
-  await w.insertIteration({
+  await writeRevision(w, a.clientId, a.key, {
     client_id: a.clientId, report_id: null, calendar_post_key: a.key, version: (await w.lastVersion(a.clientId, a.key)) + 1,
     platform: post.platform, post_copy: copy, hashtags: hashtags ?? post.hashtags, cta: cta || post.cta, concept: null, visual_direction: null, format: null,
     source: "claude", created_by: a.userId,
-  });
+  }, post);
   // The approved copy teaches the memory as a person's edit in the app does.
   const previous = String(post.copy ?? "").trim();
   if (memory && previous && previous !== copy) memory.background(memory.learn({ kind: "copy_edit", before: previous, after: copy, platform: post.platform }), "memory");
@@ -207,7 +237,7 @@ type Db = any;
 export function copyWrites(db: Db): CopyWrites {
   return {
     async post(clientId, key) {
-      const { data } = await db.from("calendar_posts").select("copy, hashtags, cta, platform, format, updated_at").eq("client_id", clientId).eq("post_key", key).maybeSingle();
+      const { data } = await db.from("calendar_posts").select("copy, hashtags, cta, platform, format, touched_at, updated_at").eq("client_id", clientId).eq("post_key", key).maybeSingle();
       return (data as CopyPost | null) ?? null;
     },
     async lastVersion(clientId, key) {
@@ -216,12 +246,23 @@ export function copyWrites(db: Db): CopyWrites {
     },
     async insertIteration(row) {
       const { error } = await db.from("post_iterations").insert(row);
-      if (error) throw new Error(`Could not save the copy: ${error.message}`);
+      if (!error) return;
+      if (error.code !== "23505") throw new Error(`Could not save the copy: ${error.message}`);
+      // A copy revision already sits at this version (a unique index keeps one per version). The same copy
+      // sent again is already saved; another copy goes after the latest revision.
+      const { data: same } = await db.from("post_iterations").select("post_copy").eq("client_id", row.client_id).eq("calendar_post_key", row.calendar_post_key)
+        .eq("version", row.version).is("media_urls", null).limit(1);
+      if (String((same as Array<{ post_copy: string }> | null)?.[0]?.post_copy ?? "") === row.post_copy) return;
+      const { data: last } = await db.from("post_iterations").select("version").eq("client_id", row.client_id).eq("calendar_post_key", row.calendar_post_key).order("version", { ascending: false }).limit(1);
+      const next = (Number((last as Array<{ version: number }> | null)?.[0]?.version) || 0) + 1;
+      const { error: again } = await db.from("post_iterations").insert({ ...row, version: next });
+      if (again) throw new Error(`Could not save the copy: ${again.message}`);
     },
     async updatePost(clientId, key, fields, unchangedSince) {
       let q = db.from("calendar_posts").update(fields).eq("client_id", clientId).eq("post_key", key);
       if (unchangedSince) q = q.eq("updated_at", unchangedSince);
-      const { data } = await q.select("updated_at");
+      const { data, error } = await q.select("updated_at");
+      if (error) throw new Error(`Could not save the copy: ${error.message}`);
       return (data as Array<{ updated_at: string }> | null)?.[0]?.updated_at ?? null;
     },
   };

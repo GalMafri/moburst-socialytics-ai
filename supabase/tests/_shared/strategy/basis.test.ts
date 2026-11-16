@@ -6,14 +6,16 @@
 // read has no follower count; a thin or none platform's goals measure only
 // posts a week or followers.
 import { describe, expect, it } from "vitest";
-import { basisOf, dataLine, metricsFor, PUBLIC_MIN_POSTS, publicWindowLine, rateKindOf, type PlatformFigures } from "../../../functions/_shared/strategy/basis";
+import { basisOf, basisWords, dataLine, metricsFor, PUBLIC_MIN_POSTS, publicWindowLine, rateKindOf, type PlatformFigures } from "../../../functions/_shared/strategy/basis";
 
 const f = (over: Partial<PlatformFigures>): PlatformFigures => ({ platform: "Instagram", basis: "public", posts: 20, posts_per_week: 1.6, median_engagement: 40, rate: null, rate_kind: null, followers: 1200, ...over });
 
 describe("the data basis", () => {
   it("comes from the data", () => {
     expect(PUBLIC_MIN_POSTS).toBe(12);
-    expect(basisOf({ sprout: true, posts: 0 })).toBe("measured");
+    expect(basisOf({ sprout: true, posts: 1 })).toBe("measured");
+    // A connected account with no posts yet has nothing measured.
+    expect(basisOf({ sprout: true, posts: 0 })).toBe("none");
     expect(basisOf({ sprout: false, posts: 12 })).toBe("public");
     expect(basisOf({ sprout: false, posts: 11 })).toBe("thin");
     expect(basisOf({ sprout: false, posts: 1 })).toBe("thin");
@@ -37,10 +39,18 @@ describe("the data basis", () => {
     expect(metricsFor(f({ platform: "LinkedIn", followers: null }))).toEqual(["posts_per_week", "median_engagement"]);
   });
 
-  it("says each platform's basis in words, and the deck's one factual line", () => {
-    expect(dataLine([f({ basis: "measured" }), f({ platform: "TikTok" }), f({ platform: "LinkedIn", followers: null }), f({ platform: "X", basis: "thin", posts: 4 }), f({ platform: "YouTube", basis: "none", posts: 0 })]))
-      .toBe("Data: Instagram from Sprout | TikTok public posts | LinkedIn public posts, no follower count | X public posts, 4 in 90 days | YouTube: no public posts found");
-    expect(publicWindowLine([f({})], { start: "2026-08-05", end: "2026-11-02" })).toBe("Based on public posts from 5 Aug to 2 Nov 2026");
+  it("says where each platform's numbers come from in plain words, with no vendor name and no pipe", () => {
+    const all = [f({ basis: "measured" }), f({ platform: "TikTok" }), f({ platform: "LinkedIn", followers: null }), f({ platform: "X", basis: "thin", posts: 4 }), f({ platform: "YouTube", basis: "none", posts: 0 })];
+    expect(dataLine(all)).toBe("Instagram from your own account; TikTok, LinkedIn and X from public posts; YouTube not measured yet");
+    expect(dataLine([f({ basis: "measured" })])).toBe("Instagram from your own account");
+    expect(dataLine([])).toBe("");
+    for (const line of [dataLine(all), ...all.map(basisWords)]) expect(line).not.toMatch(/sprout|rivaliq|apify|\|/i);
+    // A gap in a figure is not a line of its own.
+    expect(dataLine([f({ platform: "LinkedIn", followers: null })])).not.toMatch(/follower/);
+  });
+
+  it("says the deck's one factual line", () => {
+    expect(publicWindowLine([f({})], { start: "2026-08-05", end: "2026-11-02" })).toBe("Based on public posts from Aug 5 to Nov 2, 2026");
     expect(publicWindowLine([f({ basis: "measured" })], { start: "2026-08-05", end: "2026-11-02" })).toBe("");
   });
 });

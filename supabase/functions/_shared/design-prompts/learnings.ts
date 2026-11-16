@@ -7,12 +7,18 @@
 // design-request), read by every generator. A rule someone took back with
 // Undo, or removed in Client setup > Designs, is gone from the table.
 
+/**
+ * How many rules a design follows: the same number Client setup > Designs
+ * lists, so what the card says every design follows is what they follow.
+ */
+export const DESIGN_LEARNINGS_LIMIT = 100;
+
 export interface DesignLearnings { avoid: string[]; prefer: string[] }
 
 export async function loadDesignLearnings(
   supabase: { from: (t: string) => any },
   clientId: string | null | undefined,
-  limit = 8,
+  limit = DESIGN_LEARNINGS_LIMIT,
 ): Promise<DesignLearnings | null> {
   if (!clientId) return null;
   try {

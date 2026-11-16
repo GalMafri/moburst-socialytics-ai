@@ -6,30 +6,26 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Archive, Check, Download, Expand, Loader2, Sparkles, Star, ThumbsDown } from "lucide-react";
+import { Check, Download, Expand, Loader2, Sparkles, ThumbsDown, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
+import { mondayOf } from "@/lib/calendarPosts";
+import { previewWeek, waitingLine } from "@/lib/designWeek";
 import { useDesignRequestForPost, useDesignRequests, useFilmedReasonForPost } from "./DesignRequestsContext";
-import { PostDesign } from "./PostDesign";
+import { FeedbackDialog, PostDesign } from "./PostDesign";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { NOT_YET, NotYet, useNotYet } from "@/components/ui/not-yet";
 import { CalendarPostActions } from "@/components/calendar/CalendarPostActions";
 import { ClipNotAccepted, createDesigns, designVersions, isDesignOption, isPreparing, putDesignInUse, sendDesignFeedback, uploadFilmedClip, type ShotBrief } from "@/lib/designRequests";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useAuth } from "@/hooks/useAuth";
 import { PlatformBadge } from "@/lib/platform-config";
 import { CopyEditor } from "./CopyEditor";
-import { CreatePostDesignButton } from "@/components/reports/CreatePostDesignButton";
-import { useGenerationForPost } from "@/components/reports/calendar/GenerationContext";
-import { CreatePostVideoButton } from "@/components/reports/CreatePostVideoButton";
-import { SchedulePostModal, scheduledFor, useScheduledPosts } from "@/components/reports/SchedulePostModal";
-import { sproutDraftLine } from "@/lib/display";
+import { SchedulePostModal, scheduledFor, sendStateLine, useScheduledPosts, useSendClock } from "@/components/reports/SchedulePostModal";
 import type { ClientContext } from "@/lib/clientContext";
-import { isStoryPost, isTextOnlyFormat, isVideoFormat } from "@/lib/platform";
+import { formatLabel, isStoryPost, isTextOnlyFormat, isVideoFormat } from "@/lib/platform";
 import { storyFileName } from "@/lib/story";
 import { StoryLinks } from "./StoryLinks";
 import { useEffect, useRef, useState } from "react";
@@ -54,8 +50,6 @@ interface Props {
   reportId?: string;
   clientTimezone?: string;
   onCopySaved?: (post: CalendarPost) => void;
-  /** Toggle is_selected on a variant. */
-  onToggleSelected?: (iterationId: string, nextSelected: boolean) => void;
   /** Reject (with a reason the app learns from) or archive a variant. Staff only. */
   onFeedback?: (iterationId: string, verdict: "rejected" | "archived", reason?: string, note?: string) => Promise<void> | void;
   /** The tab to open on, e.g. "design" when arriving from a design progress card. */
@@ -79,17 +73,18 @@ export function PostPanel({
   reportId,
   clientTimezone,
   onCopySaved,
-  onToggleSelected,
   onFeedback,
   initialTab,
 }: Props) {
   const { isClient, isMoburstStaff } = useAuth();
   const queryClient = useQueryClient();
   const refreshMedia = () => { void queryClient.invalidateQueries({ queryKey: ["post-iterations", clientId] }); };
+  // What the design controls say when a press got no answer (src/components/ui/not-yet.tsx).
+  const notYet = useNotYet();
+  const clearNotYet = notYet.clear;
   const [editedPost, setEditedPost] = useState<CalendarPost | null>(null);
-  useEffect(() => { setEditedPost(null); setScheduleOpen(false); setTab(initialTab || "copy"); }, [sourcePost?._calendarPostKey, open, initialTab]);
+  useEffect(() => { setEditedPost(null); setScheduleOpen(false); setTab(initialTab || "copy"); clearNotYet(); }, [sourcePost?._calendarPostKey, open, initialTab, clearNotYet]);
   const post = editedPost && editedPost._calendarPostKey === sourcePost?._calendarPostKey ? editedPost : sourcePost;
-  const designRun = useGenerationForPost(post);
   const designRequest = useDesignRequestForPost(post);
   // Why this post's video is filmed; it stays known after a video from the posts was chosen instead.
   const filmedReason = useFilmedReasonForPost(post);
@@ -109,9 +104,20 @@ export function PostPanel({
     },
   });
   const designsReady = !!designSettings?.confirmed_at;
+  // What the client's design setup still waits for, said to staff in the Design tab (the same sentence the week band uses).
+  const postDay = typeof post?.date_label === "string" && /^\d{4}-\d{2}-\d{2}/.test(post.date_label) ? post.date_label.slice(0, 10) : null;
+  const { data: waitingText } = useQuery({
+    queryKey: ["design-waiting", clientId, postDay ? mondayOf(postDay) : null],
+    enabled: !!clientId && open && isMoburstStaff && !designSettingsLoading && !designsReady && !!postDay,
+    queryFn: async () => {
+      const preview = await previewWeek(clientId!, mondayOf(postDay!));
+      return preview?.code === "not_set_up" ? waitingLine(preview.waiting_for, preview.client_name ?? clientContext?.client_name) : null;
+    },
+  });
   // The post's state in Sprout: sent for a time, or not sent yet.
   const { data: scheduledRows } = useScheduledPosts(clientId, open && !isClient);
   const scheduled = scheduledFor(scheduledRows, sourcePost);
+  const sendClock = useSendClock(scheduled);
   // A filmed post's video can instead be made in the look of the client's
   // posts; once chosen, making it again follows the same route.
   // The shot brief for a filmed post: only Moburst staff and admins can read it.
@@ -144,6 +150,11 @@ export function PostPanel({
       setStartingDesigns(false);
     }
   };
+  /** Create design and Make this video: when the press got no answer the panel says it is not started yet. */
+  const startFromButton = async (route?: "posts") => {
+    notYet.clear();
+    if (!(await startDesigns(route))) notYet.say(NOT_YET.start);
+  };
   const [uploadingClip, setUploadingClip] = useState(false);
   /** A clip that has not gone up yet: it stays selected, so sending it again never means choosing it again. */
   const [pendingClip, setPendingClip] = useState<File | null>(null);
@@ -167,25 +178,45 @@ export function PostPanel({
   // Sent again quietly when they do not get through; the designs then show what the server has.
   const applyDesign = async (iterationId: string) => {
     setUsingId(iterationId);
+    notYet.clear();
     try {
       await putDesignInUse(iterationId);
       toast.success("In use for this post");
     } catch {
       // The design shown in use is the one the server has.
+      notYet.say(NOT_YET.use);
     } finally {
       refreshMedia();
       setUsingId(null);
     }
   };
-  const designFeedback = async (iterationId: string, verdict: "rejected" | "deleted", reason?: string, note?: string, makeNew?: boolean) => {
+  const designFeedback = async (iterationId: string, verdict: "rejected" | "deleted", reason?: string, note?: string, makeNew?: boolean): Promise<boolean> => {
+    notYet.clear();
     try {
       const { request } = await sendDesignFeedback({ iterationId, verdict, reason, note, makeNew });
       toast.success(verdict === "deleted" ? "Deleted" : request ? "Thanks. A new design is being made with your feedback." : "Thanks. The next designs will take it into account.");
+      return true;
     } catch {
       // The post's designs show what the server has.
+      notYet.say(verdict === "deleted" ? NOT_YET.delete : NOT_YET.feedback);
+      return false;
     } finally {
       refreshMedia();
       designRequests?.refresh();
+    }
+  };
+  // Older media tiles: the parent only sends and throws when the send got no
+  // answer. The outcome words are the design's own, shown here.
+  const tileFeedback = async (iterationId: string, verdict: "rejected" | "archived", ...details: [reason?: string, note?: string]): Promise<boolean> => {
+    if (!onFeedback) return false;
+    notYet.clear();
+    try {
+      await onFeedback(iterationId, verdict, ...details);
+      toast.success(verdict === "archived" ? "Deleted" : "Thanks. The next designs will take it into account.");
+      return true;
+    } catch {
+      notYet.say(verdict === "archived" ? NOT_YET.delete : NOT_YET.feedback);
+      return false;
     }
   };
   // Artwork the server completed while nobody was watching still needs its
@@ -234,11 +265,13 @@ export function PostPanel({
   // One design per post; earlier ones stay on the post to switch back to. A
   // video post's design is its video (cover card, footage, end card).
   const videoDesigns = plannedVideo && designsReady;
-  // A still post's Video tab is the team's tool; a client sees it only once the post has a video.
-  const showVideoTab = !videoDesigns && !story && (!isClient || videoTiles.length > 0);
+  // The Video tab lists the videos a post already has; it makes none.
+  const showVideoTab = !videoDesigns && !story && videoTiles.length > 0;
   const showScheduleTab = !isClient && !story;
   const versions = designVersions(postIterations, videoDesigns ? isVideoUrl : (u) => !isVideoUrl(u));
   const otherTiles = imageTiles.filter((t) => !isDesignOption({ variant_angle: t.variantAngle }));
+  // The format as the cards show it: its kind's label, never the planner's raw text.
+  const formatText = formatLabel(post.format, post.platform);
   const isCarouselPost = /carousel|document|pdf/i.test(String(post.format || "")) || (versions[0]?.urls.length ?? 0) > 1;
 
   const openPreview = (url: string, video: boolean) => {
@@ -256,12 +289,12 @@ export function PostPanel({
           <SheetHeader>
             <SheetTitle className="flex items-center gap-2 flex-wrap t-h3">
               {post.platform && <PlatformBadge platform={post.platform} size="sm" />}
-              {post.format && (
+              {formatText && (
                 <Badge
                   variant="outline"
                   className="t-badge tracking-[-0.2px] py-0.5 px-2 rounded-full border-white/15"
                 >
-                  {post.format}
+                  {formatText}
                 </Badge>
               )}
               {post.posting_time && (
@@ -280,6 +313,7 @@ export function PostPanel({
           </SheetHeader>
           <SheetDescription className="sr-only">Review the copy and creative for this post.</SheetDescription>
 
+          {notYet.line && <NotYet className="mt-4">{notYet.line}</NotYet>}
           <Tabs value={tab} onValueChange={setTab} className="mt-4">
             <TabsList className={`grid ${TAB_COLUMNS[2 + (showVideoTab ? 1 : 0) + (showScheduleTab ? 1 : 0)]}`}>
               <TabsTrigger value="copy">{story ? "Message" : "Copy"}</TabsTrigger>
@@ -311,16 +345,6 @@ export function PostPanel({
                   <Button size="sm" variant="outline" className="shrink-0" onClick={() => void uploadClip(pendingClip)}>Upload</Button>
                 </div>
               )}
-              {plannedVideo && !designsReady && (
-                <div className="glass-inner p-inner flex items-start justify-between gap-3 flex-wrap">
-                  <p className="t-body min-w-0">
-                    This post is planned as a <span className="font-semibold text-white">{post.format}</span>. Designs here are stills, useful as a cover frame; the clip itself is generated on the Video tab.
-                  </p>
-                  <Button size="sm" variant="outline" className="shrink-0" onClick={() => setTab("video")}>
-                    Go to Video
-                  </Button>
-                </div>
-              )}
               {designsReady ? (
                 <>
                   <div className="min-w-0">
@@ -344,16 +368,17 @@ export function PostPanel({
                     isStaff={isMoburstStaff}
                     aspect={videoDesigns ? "aspect-[9/16]" : tileAspectFor(post) || "aspect-[4/5]"}
                     filenameStub={`design-${post.platform || "post"}`}
-                    onCreate={() => void startDesigns()}
+                    onCreate={() => void startFromButton()}
                     onRegenerate={(note) => startDesigns(undefined, note)}
                     brand={clientContext?.client_name ?? null}
-                    onMakeFromPosts={() => void startDesigns("posts")}
+                    onMakeFromPosts={() => void startFromButton("posts")}
                     filmedReason={filmedReason}
                     shotBrief={isMoburstStaff ? shotBrief ?? null : null}
                     creating={startingDesigns}
                     onUse={applyDesign}
                     usingId={usingId}
                     onFeedback={designFeedback}
+                    feedbackLine={notYet.line === NOT_YET.feedback ? notYet.line : null}
                     waitingForCopy={!postCopyOf(post).trim()}
                     storyFileName={story ? storyFileName(clientContext?.client_name, String(post.date_label || "")) : null}
                   />
@@ -370,8 +395,10 @@ export function PostPanel({
                             tileAspect={tileAspectFor(post)}
                             filenameStub={`design-${post.platform || "post"}`}
                             onPreview={() => openPreview(tile.url, false)}
-                            onToggleSelected={onToggleSelected}
-                            onFeedback={onFeedback}
+                            onUse={applyDesign}
+                            using={usingId === tile.iterationId}
+                            feedbackLine={notYet.line === NOT_YET.feedback ? notYet.line : null}
+                            onFeedback={onFeedback ? tileFeedback : undefined}
                           />
                         ))}
                       </div>
@@ -380,33 +407,18 @@ export function PostPanel({
                 </>
               ) : (
                 <>
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="t-h4">
-                        {imageTiles.length > 0
-                          ? `${imageTiles.length} design${imageTiles.length === 1 ? "" : "s"}`
-                          : designRun?.status === "running"
-                            ? `Generating designs · ${designRun.completed}/${designRun.total} done`
-                            : "No designs yet"}
-                      </p>
-                      <p className="t-secondary">
-                        {imageTiles.length > 0
-                          ? "Click a design to see it at full size."
-                          : designRun?.status === "running"
-                            ? "The run continues while this panel is closed. Open Design to follow it."
-                            : isMoburstStaff
-                              ? "Make one when this post needs it."
-                              : "Designs the team makes for this post appear here."}
-                      </p>
-                    </div>
-                    {!designSettingsLoading && isMoburstStaff && <CreatePostDesignButton
-                      post={post}
-                      clientContext={clientContext}
-                      clientId={clientId}
-                      onImagesGenerated={refreshMedia}
-                    />}
+                  <div className="min-w-0">
+                    <p className="t-h4">
+                      {imageTiles.length > 0
+                        ? `${imageTiles.length} design${imageTiles.length === 1 ? "" : "s"}`
+                        : "No designs yet"}
+                    </p>
+                    <p className="t-secondary">
+                      {imageTiles.length > 0
+                        ? "Click a design to see it at full size."
+                        : waitingText ?? "Designs for this post appear here."}
+                    </p>
                   </div>
-
 
                   {imageTiles.length > 0 ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -419,8 +431,10 @@ export function PostPanel({
                           tileAspect={tileAspectFor(post)}
                           filenameStub={`design-${post.platform || "post"}`}
                           onPreview={() => openPreview(tile.url, false)}
-                          onToggleSelected={isClient ? undefined : onToggleSelected}
-                          onFeedback={isClient ? undefined : onFeedback}
+                          onUse={isClient ? undefined : applyDesign}
+                          using={usingId === tile.iterationId}
+                          feedbackLine={notYet.line === NOT_YET.feedback ? notYet.line : null}
+                          onFeedback={isClient || !onFeedback ? undefined : tileFeedback}
                         />
                       ))}
                     </div>
@@ -436,27 +450,9 @@ export function PostPanel({
 
             {/* Video tab */}
             <TabsContent value="video" className="mt-4 space-y-4">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <p className="t-h4">
-                    {videoTiles.length > 0
-                      ? `${videoTiles.length} video${videoTiles.length === 1 ? "" : "s"}`
-                      : "No videos yet"}
-                  </p>
-                  <p className="t-secondary">
-                    {videoTiles.length > 0
-                      ? "Click any video to preview at full size."
-                      : !isMoburstStaff
-                        ? "Your account team adds the video for this post."
-                        : "Make one video for this post in the client's look, with the headline and logo over it."}
-                  </p>
-                </div>
-                {isMoburstStaff && <CreatePostVideoButton
-                  post={post}
-                  clientContext={clientContext}
-                  clientId={clientId}
-                  onVideoGenerated={refreshMedia}
-                />}
+              <div>
+                <p className="t-h4">{`${videoTiles.length} video${videoTiles.length === 1 ? "" : "s"}`}</p>
+                <p className="t-secondary">Click any video to preview at full size.</p>
               </div>
 
               {videoTiles.length > 0 ? (
@@ -470,8 +466,10 @@ export function PostPanel({
                       tileAspect={tileAspectFor(post)}
                       filenameStub={`video-${post.platform || "post"}`}
                       onPreview={() => openPreview(tile.url, true)}
-                      onToggleSelected={onToggleSelected}
-                      onFeedback={isClient ? undefined : onFeedback}
+                      onUse={applyDesign}
+                      using={usingId === tile.iterationId}
+                      feedbackLine={notYet.line === NOT_YET.feedback ? notYet.line : null}
+                      onFeedback={isClient || !onFeedback ? undefined : tileFeedback}
                     />
                   ))}
                 </div>
@@ -488,7 +486,8 @@ export function PostPanel({
             {/* Schedule tab — hidden for clients */}
             {!isClient && (
               <TabsContent value="schedule" className="mt-4 space-y-3">
-                <p className="t-body" role="status">{sproutDraftLine(scheduled?.scheduled_time, clientTimezone)}</p>
+                {/* The same state, in the same words, as the send dialog (sendStateOf). */}
+                <p className="t-body" role="status">{sendStateLine(scheduled, clientTimezone, sendClock)}</p>
                 {clientId ? (
                   <>
                     <Button onClick={() => setScheduleOpen(true)}>Send to Sprout</Button>
@@ -550,21 +549,14 @@ interface TileCardProps {
   tileAspect?: string;
   filenameStub: string;
   onPreview: () => void;
-  onToggleSelected?: (iterationId: string, nextSelected: boolean) => void;
-  onFeedback?: (iterationId: string, verdict: "rejected" | "archived", reason?: string, note?: string) => Promise<void> | void;
-  /** For a design option: put it in use for the post. */
-  onUse?: () => void;
+  /** Resolves to whether the feedback got through. */
+  onFeedback?: (iterationId: string, verdict: "rejected" | "archived", ...details: [reason?: string, note?: string]) => Promise<boolean>;
+  /** Put this one in use for the post: the design's own Use, which leaves every other one of the post not in use. */
+  onUse?: (iterationId: string) => void;
   using?: boolean;
+  /** The line the panel shows when Not right got no answer, shown inside the dialog the person is looking at. */
+  feedbackLine?: string | null;
 }
-
-const REJECT_REASONS: Array<{ value: string; label: string }> = [
-  { value: "off_brand_colours", label: "Off-brand colors" },
-  { value: "wrong_style", label: "Wrong style or layout" },
-  { value: "text_errors", label: "Text is wrong or garbled" },
-  { value: "logo_or_mark", label: "Shows a logo or mark it shouldn't" },
-  { value: "not_relevant", label: "Doesn't fit the message" },
-  { value: "other", label: "Something else" },
-];
 
 function MediaTileCard({
   tile,
@@ -573,24 +565,23 @@ function MediaTileCard({
   tileAspect,
   filenameStub,
   onPreview,
-  onToggleSelected,
   onFeedback,
   onUse,
   using,
+  feedbackLine,
 }: TileCardProps) {
-  const canToggle = !!tile.iterationId && !!onToggleSelected;
+  const canUse = !!tile.iterationId && !!onUse;
   const canReview = !!tile.iterationId && !!onFeedback;
   const [rejecting, setRejecting] = useState(false);
-  const [archiveOpen, setArchiveOpen] = useState(false);
-  const [reason, setReason] = useState("wrong_style");
-  const [note, setNote] = useState("");
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const submit = async (verdict: "rejected" | "archived") => {
-    if (!tile.iterationId || !onFeedback) return;
+  const noun = isVideo ? "video" : "design";
+  // The same words as the post's own design: Not right and Delete.
+  const submit = async (verdict: "rejected" | "archived", reason?: string, note?: string): Promise<boolean> => {
+    if (!tile.iterationId || !onFeedback) return false;
     setBusy(true);
     try {
-      await onFeedback(tile.iterationId, verdict, verdict === "rejected" ? reason : undefined, verdict === "rejected" ? note : undefined);
-      setRejecting(false);
+      return verdict === "rejected" ? await onFeedback(tile.iterationId, verdict, reason, note) : await onFeedback(tile.iterationId, verdict);
     } finally {
       setBusy(false);
     }
@@ -621,47 +612,35 @@ function MediaTileCard({
         )}
       </button>
 
-      {onUse && (
-        <div className="px-2 pt-2 bg-[rgba(0,0,0,0.4)]">
-          {tile.isSelected ? (
-            <span className="w-full inline-flex items-center justify-center gap-1.5 h-9 rounded-[10px] bg-[rgba(185,224,69,0.10)] text-[#b9e045] text-sm font-medium">
-              <Check className="h-3.5 w-3.5" /> In use
-            </span>
-          ) : (
-            <Button size="sm" className="w-full h-9" onClick={(e) => { e.stopPropagation(); onUse(); }} disabled={using}>
-              {using ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : null}
-              Use this design
-            </Button>
-          )}
-        </div>
-      )}
       <div className="flex items-center justify-between px-2 py-1.5 bg-[rgba(0,0,0,0.4)]">
         <span className="t-secondary uppercase tracking-wide">
           #{index + 1}
         </span>
         <div className="flex items-center gap-1">
-          {canToggle && (
+          {canUse && (tile.isSelected ? (
+            <span className="inline-flex items-center gap-1 px-2 text-sm text-primary">
+              <Check className="h-3 w-3" aria-hidden />
+              In use for this post
+            </span>
+          ) : (
             <Button
               variant="ghost"
-              size="icon-sm"
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleSelected!(tile.iterationId!, !tile.isSelected);
-              }}
-              title={tile.isSelected ? "Unmark as favorite" : "Mark as favorite"}
+              size="sm"
+              onClick={(e) => { e.stopPropagation(); onUse!(tile.iterationId!); }}
+              disabled={using}
+              aria-label="Use for this post"
             >
-              <Star
-                className={`h-3 w-3 ${tile.isSelected ? "fill-primary text-primary" : ""}`}
-              />
+              {using ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> : <Check className="h-3 w-3" aria-hidden />}
+              Use
             </Button>
-          )}
+          ))}
           {canReview && (
             <>
-              <Button variant="ghost" size="icon-sm" title="Reject and teach the app why" aria-label="Reject this design" onClick={() => setRejecting(true)} disabled={busy}>
-                <ThumbsDown className="h-3.5 w-3.5" />
+              <Button variant="ghost" size="sm" aria-label="Not right: tell us why" onClick={() => setRejecting(true)} disabled={busy}>
+                <ThumbsDown className="h-3.5 w-3.5" />Not right
               </Button>
-              <Button variant="ghost" size="icon-sm" title="Archive without feedback" aria-label="Archive this design" onClick={() => setArchiveOpen(true)} disabled={busy}>
-                <Archive className="h-3.5 w-3.5" />
+              <Button variant="ghost" size="icon-sm" aria-label={`Delete this ${noun}`} onClick={() => setDeleteOpen(true)} disabled={busy}>
+                <Trash2 className="h-3.5 w-3.5" />
               </Button>
             </>
           )}
@@ -677,46 +656,21 @@ function MediaTileCard({
             </a>
           </Button>
           <ConfirmDialog
-            open={archiveOpen}
-            onOpenChange={setArchiveOpen}
-            title="Archive this design?"
-            description={<p>It comes out of the post's designs. Nothing is learned from an archive. Reject it instead if it is wrong for the brand.</p>}
-            confirmLabel="Archive"
-            destructive={false}
-            onConfirm={() => {
-              setArchiveOpen(false);
-              void submit("archived");
-            }}
+            open={deleteOpen}
+            onOpenChange={setDeleteOpen}
+            title={`Delete this ${noun}?`}
+            description="It's removed from this post. To say what was wrong so the next designs improve, use Not right instead."
+            confirmLabel="Delete"
+            onConfirm={async () => { setDeleteOpen(false); await submit("archived"); }}
           />
-          {/* The reason is what turns a rejection into a rule for the next design. */}
-          <Dialog open={rejecting} onOpenChange={setRejecting}>
-            <DialogContent className="max-w-md">
-              <div className="space-y-4">
-                <div>
-                  <DialogTitle className="t-h3">Why is this one wrong?</DialogTitle>
-                  <p className="t-secondary mt-1">The design is hidden either way. The reason becomes a rule the next designs for this client follow.</p>
-                </div>
-                <RadioGroup value={reason} onValueChange={setReason} className="space-y-2">
-                  {REJECT_REASONS.map((r) => (
-                    <div key={r.value} className="flex items-center gap-2">
-                      <RadioGroupItem value={r.value} id={`reason-${tile.iterationId}-${r.value}`} />
-                      <Label htmlFor={`reason-${tile.iterationId}-${r.value}`} className="t-body font-normal">{r.label}</Label>
-                    </div>
-                  ))}
-                </RadioGroup>
-                <div className="space-y-1.5">
-                  <Label htmlFor={`note-${tile.iterationId}`} className="t-label">Anything specific? (optional)</Label>
-                  <Textarea id={`note-${tile.iterationId}`} value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="e.g. the red button, this brand never uses red" className="t-body" />
-                </div>
-                <div className="flex justify-end gap-2">
-                  <Button variant="ghost" size="sm" onClick={() => setRejecting(false)} disabled={busy}>Cancel</Button>
-                  <Button size="sm" onClick={() => submit("rejected")} disabled={busy}>
-                    <ThumbsDown className="h-3.5 w-3.5 mr-1.5" /> Reject and learn
-                  </Button>
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
+          <FeedbackDialog
+            open={rejecting}
+            isCurrent={false}
+            noun={noun}
+            line={feedbackLine}
+            onOpenChange={setRejecting}
+            onSubmit={async (reason, note) => { if (await submit("rejected", reason, note)) setRejecting(false); }}
+          />
         </div>
       </div>
     </div>

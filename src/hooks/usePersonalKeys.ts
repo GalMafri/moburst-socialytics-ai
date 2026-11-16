@@ -58,7 +58,7 @@ async function request<T>(url: string, init: RequestInit): Promise<T> {
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     const code = typeof body?.error?.code === "string" ? body.error.code : null;
-    const message = typeof body?.error?.message === "string" ? body.error.message : `The request failed (${res.status}).`;
+    const message = typeof body?.error?.message === "string" ? body.error.message : `The request did not go through (${res.status}).`;
     throw new PersonalKeyError(message, res.status, code);
   }
   return body as T;

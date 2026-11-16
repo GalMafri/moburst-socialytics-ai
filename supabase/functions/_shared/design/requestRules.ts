@@ -91,6 +91,11 @@ export function filmingOutcome(postAt: Date | null, now: Date, footageArrived: b
   return "keep";
 }
 
+/** Whether a video may wait for footage: only while the post is more than FILMING_CLOSE_HOURS away. A post whose time is unknown is not held to a date. A person's request for a post past that point is made from the client's posts instead, never parked (12 Nov 2026). */
+export function canFilm(postAt: Date | null, now: Date): boolean {
+  return postAt === null ? true : filmingOutcome(postAt, now, false) === "keep";
+}
+
 /** Whether a request still planning has stopped moving. */
 export function planningStalled(r: { status: string; stage: string; updated_at: string }, now: Date): boolean {
   return r.status === "preparing" && r.stage === "planning" && now.getTime() - Date.parse(r.updated_at) >= NO_PROGRESS_MINUTES * MINUTE;
@@ -124,17 +129,21 @@ export type WeekHold = "preparing" | "filming" | "ready" | "ended";
  * post's earlier requests (the rules the automatic designs used until 2 Nov, with no
  * retry timer: a person asked). Never while one is being prepared or waits
  * for footage, nor once the newest one made a design; at once when the
- * newest ended without a design or was stopped by a person, made the way
+ * newest ended without a design (a ready one whose designs are all gone
+ * included) or was stopped by a person, made the way
  * that one was; from the client's posts (never filming) once a filmed post's
  * footage did not arrive. askFilming: whether a video post is first checked
  * for someone who must be filmed (only a post never designed before).
  */
-export function weekDecision(requests: PostRequest[]): { start: false; why: WeekHold } | { start: true; route: string | null; askFilming: boolean } {
+export function weekDecision(requests: PostRequest[], hasDesign: boolean): { start: false; why: WeekHold } | { start: true; route: string | null; askFilming: boolean } {
   if (!requests.length) return { start: true, route: null, askFilming: true };
   if (requests.some((r) => r.status === "preparing")) return { start: false, why: "preparing" };
   if (requests.some((r) => r.status === "needs_filming")) return { start: false, why: "filming" };
   const latest = [...requests].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0];
-  if (latest.status === "ready") return { start: false, why: "ready" };
+  if (latest.status === "ready") {
+    // A ready request counts only while the post still has the design it made. One whose designs were all deleted or turned down ended without a design.
+    return hasDesign ? { start: false, why: "ready" } : { start: true, route: latest.video_route ?? null, askFilming: false };
+  }
   if (latest.status === "canceled") return { start: true, route: latest.video_route ?? null, askFilming: false };
   if (latest.status === "closed" && latest.end_reason === "no_footage") return { start: true, route: "posts", askFilming: false };
   if (latest.status === "closed" && (latest.end_reason === "no_design" || latest.end_reason === "no_progress")) {

@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Plus, Play, Calendar, BarChart3, MoreVertical, Archive, RotateCcw, Trash2, Crosshair, Users, Settings, FileText } from "lucide-react";
 import { PlatformBadge } from "@/lib/platform-config";
-import { isActiveClient } from "@/lib/activeClients";
+import { isActiveClient, LOGO_SURFACE_SELECT } from "@/lib/activeClients";
 import { formatDate } from "@/lib/display";
 import { ClientOrigin } from "@/components/clients/ClientOrigin";
 import { useState, useEffect } from "react";
@@ -101,6 +101,8 @@ export function AdminDashboard() {
       .channel("admin-reports")
       .on("postgres_changes", { event: "*", schema: "public", table: "reports" }, () => {
         queryClient.invalidateQueries({ queryKey: ["clients"] });
+        // Each client's overview reads its latest report, so it is read again too.
+        queryClient.invalidateQueries({ queryKey: ["client-overview"] });
       })
       .subscribe();
     return () => {
@@ -113,7 +115,7 @@ export function AdminDashboard() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("clients")
-        .select("*, reports(id, status, created_at)")
+        .select(`*, reports(id, status, created_at), ${LOGO_SURFACE_SELECT}`)
         .order("name");
       if (error) throw error;
       return data;
@@ -131,7 +133,8 @@ export function AdminDashboard() {
   const chooseClient = (id: string) => setParams(prev => { prev.set("client", id); return prev; }, { replace: true });
 
   const active = (clients ?? []).filter(isActiveClient);
-  const allReports = (clients ?? []).flatMap((c: any) => c.reports ?? []);
+  // The tiles describe the active clients; an archived client's reports are not theirs.
+  const allReports = active.flatMap((c: any) => c.reports ?? []);
   const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
   const reportsThisMonth = allReports.filter((r: any) => new Date(r.created_at) >= monthStart).length;
   const runningNow = allReports.filter((r: any) => r.status === "running").length;
@@ -214,7 +217,7 @@ export function AdminDashboard() {
                 <CardHeader className="border-b border-white/10">
                   <p className="t-subhead">Selected client</p>
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                    {client.logo_url && <ClientLogo client={client} />}
+                    <ClientLogo client={client} />
                     <div className="flex flex-wrap items-center gap-2 min-w-[12rem] flex-1">
                       {/* The name opens setup. The card itself is no longer a
                           control: a button wrapping five other buttons is a
@@ -224,8 +227,8 @@ export function AdminDashboard() {
                         <button
                           type="button"
                           onClick={() => navigate(`/clients/${client.id}/setup`)}
-                          aria-label={`Open ${client.name} setup`}
-                          className="text-left hover:underline underline-offset-4 decoration-[rgba(255,255,255,0.35)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-[6px]"
+                          aria-label={`Open ${client.name} client setup`}
+                          className="text-left hover:underline underline-offset-4 decoration-[rgba(255,255,255,0.35)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-[8px]"
                         >
                           {client.name}
                         </button>
@@ -234,7 +237,7 @@ export function AdminDashboard() {
                         <Badge variant="secondary">Archived</Badge>
                       )}
                       {(client as any).demo_job_id && (
-                        <Badge variant="outline" title="Created by an API demo; it can be removed from the demo job">Demo</Badge>
+                        <Badge variant="outline" title="Made for a product demo">Demo</Badge>
                       )}
                     </div>
                     <div className="flex items-center gap-2">
@@ -252,7 +255,7 @@ export function AdminDashboard() {
                           <DropdownMenuContent align="end">
                             {canRunAnalysis && (
                               <DropdownMenuItem onClick={() => navigate(`/clients/${client.id}/competitive`)}>
-                                <Crosshair className="h-4 w-4 mr-2" /> Competitive analysis
+                                <Crosshair className="h-4 w-4 mr-2" /> Edit competitors
                               </DropdownMenuItem>
                             )}
                             <DropdownMenuItem onClick={() => navigate(`/clients/${client.id}/setup`)}>
@@ -294,8 +297,8 @@ export function AdminDashboard() {
                       {lastReport ? `Last report ${formatDate(lastReport.created_at)}` : "No reports yet"}
                       {reportCount > 0 ? ` · ${reportCount} report${reportCount === 1 ? "" : "s"}` : ""}
                     </span>
-                    <span className="flex items-center gap-1.5">
-                      {client.primary_platforms?.slice(0, 3).map((p: string) => (
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      {client.primary_platforms?.map((p: string) => (
                         <PlatformBadge key={p} platform={p} size="sm" />
                       ))}
                     </span>
@@ -303,11 +306,11 @@ export function AdminDashboard() {
                   {/* Straight to this client's work, as one even row of
                       equal buttons rather than a ragged wrap of seven. */}
                   <nav aria-label={`${client.name} pages`} className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                    <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${client.id}/setup`)}><Settings /> Edit client</Button>
+                    <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${client.id}/setup`)}><Settings /> Client setup</Button>
                     {canRunAnalysis && !client.archived_at && <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${client.id}/competitive`)}><Crosshair /> Edit competitors</Button>}
-                    {canRunAnalysis && !client.archived_at && <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${client.id}/competitive/run`)}><Play /> Run competitive report</Button>}
-                    <Button size="sm" variant="outline" aria-label="Monthly reports" onClick={() => navigate(`/clients/${client.id}/reports`)}><FileText /> Reports</Button>
-                    <Button size="sm" variant="outline" aria-label="Competitive analyses" onClick={() => navigate(`/clients/${client.id}/competitive/reports`)}><Crosshair /> Competitive reports</Button>
+                    {canRunAnalysis && !client.archived_at && <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${client.id}/competitive/run`)}><Play /> Run competitive analysis</Button>}
+                    <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${client.id}/reports`)}><FileText /> Monthly reports</Button>
+                    <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${client.id}/competitive/reports`)}><Crosshair /> Competitive analyses</Button>
                     <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${client.id}/analytics`)}><BarChart3 /> Analytics</Button>
                   </nav>
                 </CardContent>
@@ -320,7 +323,7 @@ export function AdminDashboard() {
         <EmptyState
           icon={Plus}
           title={canManageClients ? "Add your first client" : "No clients yet"}
-          description={canManageClients ? "Get started by creating a client configuration." : "No clients have been configured yet."}
+          description={canManageClients ? "Add a client to see its reports, competitors and content here." : "No clients have been added yet."}
           action={
             canManageClients ? (
               <Button onClick={() => navigate("/clients/new/setup")}>

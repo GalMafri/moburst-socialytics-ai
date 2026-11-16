@@ -37,7 +37,7 @@ vi.mock('@/integrations/supabase/client', () => ({ supabase: {
   } },
   from: (table: string) => {
     const q: any = {
-      select: () => q, eq: () => q, neq: () => q, in: () => q, order: () => q, limit: () => q, is: () => q,
+      select: () => q, eq: () => q, neq: () => q, in: () => q, not: () => q, range: () => q, order: () => q, limit: () => q, is: () => q,
       maybeSingle: async () => ({ data: table === 'design_brand_settings' ? { confirmed_at: '2026-10-20T10:00:00Z' } : table === 'calendar_posts' && f.storyOf ? { post_key: f.storyOf } : null, error: null }),
       then: (resolve: any) => Promise.resolve({ data: [], error: null }).then(resolve),
     };
@@ -84,7 +84,7 @@ describe('New post', () => {
 
   it('shows the formats as a row of choices, and choosing Story picks the only platform that takes one', async () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-    render(<QueryClientProvider client={qc}><NewPostDialog clientId="c1" platforms={['Instagram', 'LinkedIn']} defaultDate="2026-11-05" /></QueryClientProvider>);
+    render(<MemoryRouter><QueryClientProvider client={qc}><NewPostDialog clientId="c1" platforms={['Instagram', 'LinkedIn']} defaultDate="2026-11-05" /></QueryClientProvider></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: /New post/ }));
     const formats = await screen.findByRole('radiogroup', { name: 'Format' });
     expect(within(formats).getAllByRole('radio').map((r) => r.textContent)).toEqual(['Best fit for the idea', 'Single image', 'Carousel', 'Reel or short video', 'Story']);
@@ -159,7 +159,7 @@ describe('Add a Story, in the post\'s header', () => {
   it('keeps the post\'s own design and Schedule tab, and the block under the design is gone', async () => {
     panel(feedPost(), [design('post:f')]);
     expect(await screen.findByRole('button', { name: 'Add a Story' })).toBeInTheDocument();
-    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Copy', 'Design', 'Video', 'Schedule']);
+    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Copy', 'Design', 'Schedule']);
     expect(screen.getByRole('button', { name: 'Download' })).toBeInTheDocument();
     expect(screen.queryByText(STORY_POSTED_BY_HAND)).toBeNull();
     expect(screen.queryByText(/A 9:16 Story frame designed from this post/)).toBeNull();
@@ -184,7 +184,7 @@ describe('Add a Story, in the post\'s header', () => {
     f.storyAnswer = { data: { error: 'no' }, error: null };
     panel(feedPost(), [design('post:f')]);
     fireEvent.click(await screen.findByRole('button', { name: 'Add a Story' }));
-    expect(await screen.findByText("The Story isn't added yet.")).toBeInTheDocument();
+    expect(await screen.findByText("The story isn't added yet.")).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Add a Story' })).toBeEnabled();
   });
 
@@ -232,9 +232,10 @@ describe('the board', () => {
     expect(story.querySelector('[data-story-rail]')).not.toBeNull();
     const loose = within(thursday).getByRole('button', { name: 'Open Instagram Story: A Story from New post.' }).closest('[data-story-card]')!;
     expect(loose.querySelector('[data-story-rail]')).toBeNull();
-    const post = within(thursday).getByRole('button', { name: 'Open post: Captains pay last.' });
-    expect(within(post).getByText('Story')).toBeInTheDocument();
-    expect(within(within(thursday).getByRole('button', { name: 'Open post: LinkedIn post.' })).queryByText('Story')).toBeNull();
+    // A card is a container: its open button covers it, and what it says sits beside that button.
+    const cardOf = (name: string) => within(thursday).getByRole('button', { name }).parentElement as HTMLElement;
+    expect(within(cardOf('Open post: Captains pay last.')).getByText('Story')).toBeInTheDocument();
+    expect(within(cardOf('Open post: LinkedIn post.')).queryByText('Story')).toBeNull();
   });
 
   it('shows a Story on the all-clients week with a Story label and a 9:16 frame, right after its post', async () => {
@@ -245,6 +246,35 @@ describe('the board', () => {
     const cards = within(thursday).getAllByRole('button').map((b) => b.getAttribute('aria-label'));
     expect(cards).toEqual(["Open Pay The Pyper's Instagram post", "Open Pay The Pyper's Instagram Story", "Open Pay The Pyper's LinkedIn post"]);
     expect(within(within(thursday).getByRole('button', { name: "Open Pay The Pyper's Instagram Story" })).getByText('Story')).toBeInTheDocument();
+  });
+});
+
+describe('the all-clients week', () => {
+  const week = (posts: any[]) => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    render(<MemoryRouter><QueryClientProvider client={qc}><AllClientsWeek posts={posts as any} week="2026-11-02" /></QueryClientProvider></MemoryRouter>);
+  };
+  const post = (over: any) => ({ id: over.key, post_key: over.key, client_id: 'c1', client_name: 'Pay The Pyper', platform: 'LinkedIn', format: 'Single image', post_date: '2026-11-05', posting_time: null, copy: 'Copy', story_of: null, created_at: '2026-11-01T00:00:00Z', ...over });
+
+  it('says No design yet for a post without a design, and nothing about accounts not being connected', async () => {
+    week([post({ key: 'post:a' })]);
+    expect(await screen.findByText('No design yet')).toBeInTheDocument();
+    // Let every query of the week settle before looking for the old label.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByText(/Accounts not connected/i)).toBeNull();
+    expect(screen.getByText('No design yet')).toBeInTheDocument();
+  });
+
+  it("puts 6:00 PM before 10:00 PM and shows each time in one form with the client's zone", () => {
+    week([
+      post({ key: 'post:late', client_name: 'Same Client', posting_time: '10:00 PM', copy: 'Late one', client_timezone: 'America/New_York' }),
+      post({ key: 'post:early', client_name: 'Same Client', posting_time: '18:00', copy: 'Early one', client_timezone: 'America/New_York' }),
+    ]);
+    const thursday = screen.getByRole('region', { name: /^Thursday/ });
+    const buttons = within(thursday).getAllByRole('button');
+    expect(buttons[0]).toHaveTextContent('Early one');
+    expect(buttons[0]).toHaveTextContent('6:00 PM EST');
+    expect(buttons[1]).toHaveTextContent('10:00 PM EST');
   });
 });
 

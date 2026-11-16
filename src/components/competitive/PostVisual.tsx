@@ -73,6 +73,9 @@ export function usePostPreviews(items: Array<string | PreviewHint | null | undef
   return { previews: query.data || {}, isLoading: query.isLoading, error: query.error };
 }
 
+/** How long a failed picture waits before each new try; its length is the number of tries. */
+const RETRY_WAITS_MS = [800, 2000, 4500];
+
 // Video frames load only when the tile is near the viewport, and at most a
 // few at a time. Storage shares its HTTP/2 connection with the Supabase API,
 // and a dozen parallel media streams starve everything else on the page.
@@ -132,18 +135,41 @@ export function PostVisual({ url, image, preview, mediaType, platform, className
     return list;
   }, [preview?.image_url, image]);
   const [failed, setFailed] = useState<string[]>([]);
+  // Storage can refuse a picture for a moment when a page asks for many at
+  // once. A source that fails is asked for again after a growing wait, up to
+  // RETRY_WAITS_MS.length times, before the next source (or the placeholder)
+  // takes over. `attempts` also keys the element, so a retry is a fresh load.
+  const [attempts, setAttempts] = useState<Record<string, number>>({});
+  // True from the first failed try until a picture has loaded, so the tile shows
+  // its labelled placeholder under the picture instead of an empty dark box.
+  const [retrying, setRetrying] = useState(false);
+  const loaded = () => setRetrying(false);
+  const waiting = useRef<Set<string>>(new Set());
+  const timers = useRef<number[]>([]);
+  useEffect(() => () => { timers.current.forEach((t) => window.clearTimeout(t)); }, []);
   const src = candidates.find((c) => !failed.includes(c)) || null;
-  const fail = () => { if (src) setFailed((f) => [...f, src]); };
+  const attempt = src ? attempts[src] ?? 0 : 0;
+  const fail = () => {
+    if (!src || waiting.current.has(src)) return;
+    const failedSrc = src;
+    setRetrying(true);
+    if (attempt >= RETRY_WAITS_MS.length) { setFailed((f) => [...f, failedSrc]); return; }
+    waiting.current.add(failedSrc);
+    timers.current.push(window.setTimeout(() => {
+      waiting.current.delete(failedSrc);
+      setAttempts((a) => ({ ...a, [failedSrc]: (a[failedSrc] ?? 0) + 1 }));
+    }, RETRY_WAITS_MS[attempt]));
+  };
   // RivalIQ hands back the video file itself for Instagram Reels; a muted
   // <video> shows its first frame where an <img> would fail.
   const isVideoFile = !!src && /\.(mp4|mov|webm|m4v)(\?|#|$)/i.test(src);
   const kind = mediaKind(mediaType || preview?.media_type, url);
   const plat = normalizePlatform(platform || preview?.platform || platformFromUrl(url));
-  // One frame everywhere (4:5, the tallest common social ratio) and contain
-  // by default: a square frame with object-cover turned a 9:16 Reel into a
+  // One frame for full tiles (4:5, the tallest common social ratio; compact
+  // side thumbnails are square) and contain by default: a square frame with object-cover turned a 9:16 Reel into a
   // crop of its middle, which is how a thumbnail ends up unreadable. The
   // blurred copy behind it fills the rest of the frame.
-  const aspect = frame || "aspect-[4/5]";
+  const aspect = frame || (compact ? "aspect-square" : "aspect-[4/5]");
   const objectFit = (fit || "contain") === "cover" ? "object-cover" : "object-contain";
   const videoRef = useRef<HTMLVideoElement>(null);
   useEffect(() => {
@@ -167,41 +193,51 @@ export function PostVisual({ url, image, preview, mediaType, platform, className
     }, { rootMargin: "300px" });
     observer.observe(el);
     return () => { cancelled = true; observer.disconnect(); };
-  }, [src, isVideoFile]);
+  }, [src, isVideoFile, attempt]);
 
   const body = (
     <>
       {src && !isVideoFile && (
-        <img src={src} alt="" aria-hidden referrerPolicy="no-referrer" className="absolute inset-0 h-full w-full object-cover scale-110 blur-2xl opacity-50" />
+        <img key={`${src}:${attempt}:backdrop`} src={src} alt="" aria-hidden referrerPolicy="no-referrer" className="absolute inset-0 h-full w-full object-cover scale-110 blur-2xl opacity-50" />
       )}
       {src && isVideoFile ? (
         <video
+          key={`${src}:${attempt}`}
           ref={videoRef}
           muted
           playsInline
           preload="none"
           onError={fail}
+          onLoadedData={loaded}
           className={`absolute inset-0 h-full w-full ${objectFit} pointer-events-none`}
         />
       ) : src ? (
         <img
+          key={`${src}:${attempt}`}
           src={src}
           alt=""
           loading="lazy"
           referrerPolicy="no-referrer"
           onError={fail}
+          onLoad={loaded}
           className={`absolute inset-0 h-full w-full ${objectFit}`}
         />
-      ) : (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-2 text-center bg-[linear-gradient(135deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02))] text-muted-foreground">
-          {kind === "video" ? <Play className="h-7 w-7" /> : kind === "carousel" ? <Layers className="h-7 w-7" /> : kind === "document" ? <FileText className="h-7 w-7" /> : kind === "link" ? <LinkIcon className="h-7 w-7" /> : <ImageOff className="h-6 w-6" />}
-          {!compact && (
-            <span className="t-label">
-              {!url ? "No link" : plat ? `No preview from ${platformLabel(plat)}` : "No preview"}
-            </span>
-          )}
+      ) : null}
+      {(!src || retrying) && (compact ? (
+        // A compact tile can be as small as 64px: the type pill already names the
+        // kind, so it carries a short state word alone, in the label ramp, on one line
+        // (eight characters, about 50px, inside the smallest tile).
+        <div data-post-placeholder="" className="absolute inset-0 flex items-end justify-center pb-1.5 bg-[linear-gradient(135deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02))] text-muted-foreground">
+          <span className="t-label max-w-full truncate px-1">No image</span>
         </div>
-      )}
+      ) : (
+        <div data-post-placeholder="" className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-2 text-center bg-[linear-gradient(135deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02))] text-muted-foreground">
+          {kind === "video" ? <Play className="h-7 w-7" /> : kind === "carousel" ? <Layers className="h-7 w-7" /> : kind === "document" ? <FileText className="h-7 w-7" /> : kind === "link" ? <LinkIcon className="h-7 w-7" /> : <ImageOff className="h-6 w-6" />}
+          <span className="t-label">
+            {!url ? "No link" : plat ? `No preview from ${platformLabel(plat)}` : "No preview"}
+          </span>
+        </div>
+      ))}
       {src && kind === "video" && (
         <span className="absolute inset-0 flex items-center justify-center">
           <span className="h-11 w-11 rounded-full bg-black/55 backdrop-blur-sm flex items-center justify-center"><Play className="h-5 w-5 text-white ml-0.5" fill="white" /></span>

@@ -60,9 +60,23 @@ describe("a moment's reason", () => {
 });
 
 describe("reasonLabel", () => {
-  it("adds the test mark, the fit and the early-signal note", () => {
+  it("adds the fit and the early-signal note, and leaves the test mark to the chip", () => {
     expect(reasonLabel({ type: "competitor", evidence: [RIVAL], fit: "Captains live this every week. Another note.", test: true }))
-      .toBe("Test: BenchApp's Instagram video from Oct 14 got 4x their usual engagement per follower. Captains live this every week. Early signal.");
+      .toBe("BenchApp's Instagram video from Oct 14 got 4x their usual engagement per follower. Captains live this every week. Early signal.");
+  });
+
+  it("does not start with Test: for the week's test", () => {
+    expect(reasonLabel({ type: "competitor", evidence: [RIVAL], test: true }).startsWith("Test:")).toBe(false);
+  });
+
+  it("ends a reason over the limit at the last sentence that fits, not mid-sentence", () => {
+    const moment = `Halloween. ${"The team posts a costume reel every year. ".repeat(8).trim()}`;
+    const fit = "Captains already show up for costume reels and the whole team joins in on the day, which keeps the account lively all week long and gives fans a reason to comment.";
+    const out = reasonLabel({ type: "seasonal", evidence: [{ id: "M1", kind: "moment", text: moment }], fit });
+    expect(out.length).toBeLessThanOrEqual(400);
+    expect(out.endsWith(".")).toBe(true);
+    expect(out).not.toContain("keeps the account");
+    expect(out.endsWith("every year.")).toBe(true);
   });
 
   it("falls back to the moment, then to the pillars", () => {
@@ -78,7 +92,7 @@ describe("wordReason", () => {
       .toBe("Trend from the monthly report: Carousel education can support clicks.");
     expect(wordReason({ type: "trend", label: "Old", fit: "Captains live this every week.", evidence: [THEME_TREND] }))
       .toBe('Inspired by "Captain POV skits": @benchpro\'s TikTok short video from Oct 14. Captains live this every week.');
-    expect(wordReason({ type: "test", label: "Old", evidence: [OWN] })).toBe("Test: Your Instagram carousel from Oct 5 got 2.7x your usual impressions.");
+    expect(wordReason({ type: "test", label: "Old", evidence: [OWN] })).toBe("Your Instagram carousel from Oct 5 got 2.7x your usual impressions.");
     expect(wordReason({ type: "seasonal", label: "Old", moment: "Halloween on Oct 31", fit: "Fits the team.", test: false })).toBe("Halloween on Oct 31. Fits the team.");
   });
 

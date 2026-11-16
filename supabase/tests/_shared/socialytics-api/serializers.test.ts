@@ -65,10 +65,31 @@ describe("clientOut", () => {
   });
 });
 
+describe("reportOut warnings", () => {
+  const row = (warnings: unknown) => ({ ...REPORT, report_data: { ...REPORT_DATA, warnings } });
+  it("returns the sentences the app engine writes", () => {
+    const kept = [
+      "The analysis is available, but the presentation did not complete. No presentation link is available.",
+      "The linked brief could not be read. This analysis has no text from that brief.",
+      "The brief could not be summarized; its original text was included in the analysis.",
+    ];
+    expect(reportOut(row(kept) as never).warnings).toEqual(kept);
+  });
+  it("never returns a sentence from the retired engine", () => {
+    const stored = [
+      "TikTok trend analysis could not run because there were no usable keywords. Add keywords in client setup.",
+      "Instagram trend analysis could not run because there were no usable keywords. Add keywords in client setup.",
+      "The linked brief could not be read. Use a Google Doc, text file or text-based PDF, or paste the brief into client setup. This analysis has no text from that brief.",
+    ];
+    expect(reportOut(row(stored) as never).warnings).toEqual([]);
+    expect(reportOut(row(undefined) as never).warnings).toEqual([]);
+  });
+});
+
 describe("reportOut", () => {
   it("summarises a social report and keeps the heavy blocks for the detail", () => {
     const s = reportOut(REPORT);
-    expect(s).toMatchObject({ id: "rep-1", client_id: "c-bader", status: "completed", period: { start: "2026-08-01", end: "2026-08-31" }, previous_period: { start: "2026-07-01", end: "2026-07-31" }, duration_minutes: 38, deck: { url: "https://gamma.app/docs/bader-aug", status: "ok" }, counts: { total_recommendations: 12, content_calendar_days: 7 }, metrics_summary: { impressions_change: -20.1 }, warnings: ["TikTok trends thin"], trend_status: "ok", links: { app: `${APP_URL}/clients/c-bader/reports/rep-1`, api: "/v1/reports/rep-1" } });
+    expect(s).toMatchObject({ id: "rep-1", client_id: "c-bader", status: "completed", period: { start: "2026-08-01", end: "2026-08-31" }, previous_period: { start: "2026-07-01", end: "2026-07-31" }, duration_minutes: 38, deck: { url: "https://gamma.app/docs/bader-aug", status: "ok" }, counts: { total_recommendations: 12, content_calendar_days: 7 }, metrics_summary: { impressions_change: -20.1 }, warnings: [], trend_status: "ok", links: { app: `${APP_URL}/clients/c-bader/reports/rep-1`, api: "/v1/reports/rep-1" } });
     expect("analysis" in s).toBe(false);
     const d = reportOut(REPORT, { detail: true });
     expect(d.analysis?.competitive_takeaways).toEqual(["Post more Reels."]);
@@ -79,6 +100,13 @@ describe("reportOut", () => {
     expect(JSON.stringify(withIds.performance)).not.toMatch(/profile_ids|123456/);
     expect(withIds.performance).toEqual({ platform_metrics: { TikTok: { impressions: 5 } }, platform_breakdown: [{ network: "tiktok" }] });
     expect(d.trends?.tiktok.posts).toBe(1);
+  });
+  it("serializes a report made before the per-network impression lists, and passes the lists of a newer one through", () => {
+    const post = (url: string, impressions: number) => ({ url, platform_display: "Facebook", impressions });
+    const old = reportOut({ ...REPORT, report_data: { ...REPORT_DATA, sprout_performance: { top_posts: [post("u1", 5)], top_posts_by_platform: { Facebook: [post("u1", 5)] } } } }, { detail: true });
+    expect(old.performance).toEqual({ top_posts: [post("u1", 5)], top_posts_by_platform: { Facebook: [post("u1", 5)] } });
+    const added = reportOut({ ...REPORT, report_data: { ...REPORT_DATA, sprout_performance: { top_posts_by_platform: { Facebook: [post("u1", 5)] }, top_posts_by_platform_impressions: { Facebook: [post("u2", 9), post("u1", 5)] } } } }, { detail: true });
+    expect((added.performance as { top_posts_by_platform_impressions: Record<string, Array<{ url: string }>> }).top_posts_by_platform_impressions.Facebook.map((p) => p.url)).toEqual(["u2", "u1"]);
   });
   it("tolerates a failed report whose data is only an error", () => {
     const f = reportOut({ ...REPORT, status: "failed", report_data: { error: "n8n stopped" }, gamma_url: null });
@@ -111,6 +139,14 @@ describe("competitiveReportOut", () => {
     expect(d.analysis?.executive_summary).toBe("Competitors post daily.");
     expect(d.aggregates?.companies[0]).toMatchObject({ name: "Morgan & Morgan", is_client: false, post_count: 120 });
     expect(JSON.stringify(d)).not.toMatch(/RC1|RC0|L123|company_id|landscape/);
+  });
+});
+
+describe("competitiveReportOut time zone", () => {
+  it("carries the zone the posting hours are in beside the aggregates, null for a report that names none", () => {
+    const zoned = { ...COMPETITIVE_REPORT, report_data: { ...(COMPETITIVE_REPORT.report_data as Record<string, unknown>), aggregates: { ...((COMPETITIVE_REPORT.report_data as { aggregates: Record<string, unknown> }).aggregates), time_zone: "America/Denver" } } };
+    expect(competitiveReportOut(zoned as never, { detail: true }).aggregates?.time_zone).toBe("America/Denver");
+    expect(competitiveReportOut(COMPETITIVE_REPORT, { detail: true }).aggregates?.time_zone).toBeNull();
   });
 });
 

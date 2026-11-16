@@ -14,6 +14,8 @@
 // OpenAI call when the caller needs the brand read. No Deno imports beyond
 // fetch, so the helpers can be tested.
 
+import { fetchPublic, isPubliclyFetchable } from "../net/safeUrl.ts";
+
 export const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
@@ -84,8 +86,12 @@ export function normalizeWebsite(website: string): string {
 export async function fetchSiteHtml(url: string, opts: { firecrawlKey?: string | null; fetchImpl?: Fetch; log?: string[] } = {}): Promise<{ html: string; via: "direct" | "firecrawl" }> {
   const f = opts.fetchImpl ?? fetch;
   const log = opts.log ?? [];
+  // The address comes from a person's input. A private, loopback or link-local
+  // one is never fetched, by us or by the scraping service.
+  if (!isPubliclyFetchable(url)) throw new ResearchError("site_unreachable", "The website could not be read.");
   try {
-    const resp = await f(url, { headers: { "User-Agent": BROWSER_UA, Accept: "text/html,*/*" }, redirect: "follow", signal: AbortSignal.timeout(15000) });
+    // Redirects are followed one hop at a time, each checked the same way.
+    const resp = await fetchPublic(url, { headers: { "User-Agent": BROWSER_UA, Accept: "text/html,*/*" }, signal: AbortSignal.timeout(15000) }, f as typeof fetch);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const html = await resp.text();
     log.push(`Fetched HTML directly (${html.length} chars)`);
@@ -135,11 +141,15 @@ export async function researchBrand(input: {
   page?: { html: string; via: "direct" | "firecrawl" } | null;
   fetchImpl?: Fetch;
 }): Promise<BrandRead> {
-  const f = input.fetchImpl ?? fetch;
+  const rawFetch = input.fetchImpl ?? fetch;
+  // Every request to an address the site names (its stylesheets, logos and
+  // images) goes through fetchPublic, so none of them can reach a private
+  // address, directly or by redirect. Only the fixed vendor calls use rawFetch.
+  const f: Fetch = (u, init) => fetchPublic(u, init, rawFetch as typeof fetch);
   const url = normalizeWebsite(input.websiteUrl);
   const baseUrl = new URL(url).origin;
   const log: string[] = [];
-  const { html, via } = input.page ?? await fetchSiteHtml(url, { firecrawlKey: input.firecrawlKey, fetchImpl: f, log });
+  const { html, via } = input.page ?? await fetchSiteHtml(url, { firecrawlKey: input.firecrawlKey, fetchImpl: rawFetch, log });
   const logo = logoOnPage(html, baseUrl);
   const withModel = input.withModel !== false;
   if (!withModel) {
@@ -165,7 +175,7 @@ export async function researchBrand(input: {
   log.push(`Found ${imageUrls.length} image URL(s): ${imageUrls.map((i) => i.label).join(", ") || "none"}`);
   const visionImages = await fetchRasterImagesAsBase64(imageUrls, log, f);
   const textSignals = extractTextSignals(html, cssText);
-  const read = await readWithModel({ clientName: input.clientName ?? null, url, structured: finalStructured, visionImages, textSignals, siteText: siteTextExcerpt(html), openaiKey: input.openaiKey, log, fetchImpl: f });
+  const read = await readWithModel({ clientName: input.clientName ?? null, url, structured: finalStructured, visionImages, textSignals, siteText: siteTextExcerpt(html), openaiKey: input.openaiKey, log, fetchImpl: rawFetch });
   return {
     brand_identity: read.identity, headquarters: read.headquarters, site_language: read.language, logo, html, url, fetched_via: via,
     debug: { structured_colors_found: finalStructured.length, structured_colors: finalStructured.slice(0, 10), images_found: imageUrls.length, raster_images_sent: visionImages.length, log },
@@ -472,7 +482,7 @@ async function fetchSvgColors(svgUrls: string[], debug: string[], f: Fetch): Pro
   };
   for (const url of svgUrls) {
     try {
-      const resp = await f(url, { headers: { "User-Agent": BROWSER_UA }, redirect: "follow", signal: AbortSignal.timeout(10000) });
+      const resp = await f(url, { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(10000) });
       if (!resp.ok) {
         debug.push(`SVG fetch failed (${resp.status}): ${url}`);
         continue;
@@ -576,7 +586,7 @@ async function fetchRasterImagesAsBase64(images: { url: string; label: string; i
       continue;
     }
     try {
-      const resp = await f(img.url, { headers: { "User-Agent": BROWSER_UA }, redirect: "follow", signal: AbortSignal.timeout(10000) });
+      const resp = await f(img.url, { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(10000) });
       if (!resp.ok) {
         debug.push(`Image fetch failed (${resp.status}): ${img.label}`);
         continue;
@@ -620,7 +630,7 @@ async function fetchExternalCss(html: string, baseUrl: string, f: Fetch): Promis
   while ((m = cssLinkRegex.exec(html)) !== null && urls.length < 4) urls.push(resolveUrl(m[1], baseUrl));
   const results = await Promise.all(urls.map(async (url) => {
     try {
-      const resp = await f(url, { headers: { "User-Agent": BROWSER_UA }, redirect: "follow", signal: AbortSignal.timeout(10000) });
+      const resp = await f(url, { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(10000) });
       return resp.ok ? (await resp.text()).slice(0, 40000) : "";
     } catch {
       return "";

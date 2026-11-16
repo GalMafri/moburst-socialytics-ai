@@ -26,18 +26,20 @@ export function MixChart({ pillars, sections, edits }: { pillars: Array<{ name: 
   };
   const rows = pillars.map((p) => ({ name: p.name, current: p.share, planned: planned(p.name) })).filter((r) => r.planned !== null);
   if (!rows.length) return null;
-  const hasCurrent = rows.some((r) => r.current !== null);
+  // The last 8 weeks are drawn only when every pillar has a share and the shares say something: a missing share is not 0, and shares that add up to nothing are no mix.
+  const hasCurrent = rows.every((r) => r.current !== null) && rows.reduce((sum, r) => sum + (r.current ?? 0), 0) > 0;
   return (
     <div className="glass p-card space-y-4" data-testid="strategy-mix">
       <p className="t-subhead">Share of posts</p>
       {hasCurrent ? (
         <CompareBars
-          items={rows.map((r) => ({ key: r.name, label: r.name, current: r.planned as number, previous: r.current ?? 0, format: pct }))}
+          items={rows.map((r) => ({ key: r.name, label: r.name, current: r.planned as number, previous: r.current as number, format: pct }))}
+          max={100}
           currentLabel="Planned"
           previousLabel="Last 8 weeks"
         />
       ) : (
-        <RankedBars rows={rows.map((r) => ({ key: r.name, label: r.name, name: r.name, value: r.planned as number }))} format={pct} />
+        <RankedBars rows={rows.map((r) => ({ key: r.name, label: r.name, name: r.name, value: r.planned as number }))} format={pct} max={100} />
       )}
     </div>
   );

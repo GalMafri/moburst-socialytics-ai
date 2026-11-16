@@ -8,7 +8,7 @@
 // week is a test. Free of Deno and network imports so it can be tested.
 
 import type { EvidenceItem, RhythmLine } from "./evidence.ts";
-import { clientFit, fmtMultiple, reasonLabel, type EvidenceRef, type Reason, type ReasonType } from "./reasonText.ts";
+import { clientFit, fmtMultiple, formatKind, postingTimeOf, reasonLabel, type EvidenceRef, type Reason, type ReasonType } from "./reasonText.ts";
 import { STORY_FORMAT, isStoryFormat } from "../design/story.ts";
 import { CATEGORY_WORDS, type MomentCategory } from "./moments.ts";
 import { postInstant } from "../design/requestRules.ts";
@@ -131,12 +131,13 @@ export function weekPrompt(c: WeekContext): string {
         ? "- A post for one of the dated moments above has reason_type \"seasonal\" and its M id in evidence_ids. A seasonal post cites one M id; no other holiday, awareness day or event can carry a post."
         : "- No dated moment checked out for this client this week, so no post is seasonal: don't plan a post for a holiday, awareness day or event.",
       "- At most one post is a test: something the evidence hasn't proven for this client yet, such as a competitor format it hasn't tried. Mark it \"test\": true.",
+      "- format \"short video\" is a tall clip (a Reel or a Short); \"video\" is any other clip.",
       "- copy is the full caption, ready to publish, written the way the voice section says.",
       ...(c.canFilm ? [] : ["- Every post has to be one the team can make without filming: don't plan ideas that need a specific person on camera (a team member, the founder, a customer) or footage only the client could shoot (its office, events, products in use). Videos made from designed scenes, text and motion are fine."]),
       "- Never invent facts: no names, titles, numbers, quotes, client results, launches or claims about people that aren't in the evidence, the pillars or the voice section.",
       "- fit is ONE short sentence (under 20 words) written for the client on why this post suits them. Never mention evidence ids (like P1 or C2), numbers, other posts, or what the post avoids.",
     ].join("\n"),
-    'Reply with JSON only: {"posts":[{"date":"YYYY-MM-DD","platform":"...","format":"...","posting_time":"HH:MM","pillar":"...","copy":"...","hashtags":["..."],"cta":"...","visual_direction":"one sentence on what the visual shows","reason_type":"performance|competitor|trend|seasonal","evidence_ids":["P1"],"fit":"...","test":false}]}',
+    'Reply with JSON only: {"posts":[{"date":"YYYY-MM-DD","platform":"...","format":"image|carousel|video|short video|text|document","posting_time":"HH:MM","pillar":"...","copy":"...","hashtags":["..."],"cta":"...","visual_direction":"one sentence on what the visual shows","reason_type":"performance|competitor|trend|seasonal","evidence_ids":["P1"],"fit":"...","test":false}]}',
   ].filter(Boolean).join("\n\n");
 }
 
@@ -240,8 +241,9 @@ export function parseWeekPlan(text: string, c: Pick<WeekContext, "monday" | "fir
     out.push({
       post_date: date,
       platform,
-      format: isStoryFormat(str(p.format, 40)) ? "Single Image" : str(p.format, 40) || null,
-      posting_time: str(p.posting_time, 10) || null,
+      // Whatever the model wrote lands on one of the fixed kinds; a Story it asked for is a feed post's image.
+      format: ((k) => (k === "story" ? "image" : k))(formatKind(str(p.format, 200), platform)),
+      posting_time: postingTimeOf(str(p.posting_time, 40)),
       pillar: str(p.pillar, 120) || null,
       copy,
       hashtags: Array.isArray(p.hashtags) ? (p.hashtags as unknown[]).map((h) => str(h, 80)).filter(Boolean).slice(0, 12) : [],

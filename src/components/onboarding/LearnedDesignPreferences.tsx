@@ -11,6 +11,7 @@ import { X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { sendQuietly, writeResendable } from "@/lib/quietSend";
 import { formatDate } from "@/lib/display";
+import { DESIGN_LEARNINGS_LIMIT } from "../../../supabase/functions/_shared/design-prompts/learnings";
 import { Section } from "@/components/ui/section";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,7 +20,7 @@ interface DesignLearning { id: string; pattern_type: string; pattern_description
 
 /** Where a design rule came from, as people read it. */
 export function designLearningSource(source: string | null | undefined): string {
-  return source === "regenerate_note" ? "From a regenerate note" : "From Not right";
+  return source === "regenerate_note" ? "From a regenerate note" : "From a design marked not right";
 }
 
 export function LearnedDesignPreferences({ clientId }: { clientId: string }) {
@@ -29,7 +30,7 @@ export function LearnedDesignPreferences({ clientId }: { clientId: string }) {
     queryFn: async () => {
       const { data, error } = await supabase.from("design_learnings")
         .select("id, pattern_type, pattern_description, source, created_at").eq("client_id", clientId)
-        .order("created_at", { ascending: false }).limit(100);
+        .order("created_at", { ascending: false }).limit(DESIGN_LEARNINGS_LIMIT);
       if (error) throw error;
       return (data || []) as DesignLearning[];
     },

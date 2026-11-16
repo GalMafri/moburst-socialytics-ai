@@ -3,6 +3,9 @@ import { Navigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Loading } from "@/components/ui/loading";
 import { useAuth } from "@/hooks/useAuth";
+import { isTransient } from "@/lib/authMessages";
+import { strongestRole } from "@/lib/roles";
+import { sendQuietly, writeResendable } from "@/lib/quietSend";
 import { supabase } from "@/integrations/supabase/client";
 import { browser, consentEntry, consentStep } from "@/utils/oauthConsent";
 import { rememberIntendedDestination } from "@/utils/returnTo";
@@ -38,26 +41,45 @@ export default function OAuthConsent() {
     const id = entry.authorizationId;
     let cancelled = false;
     const show = (v: View) => { if (!cancelled) setView(v); };
+    // A brief error is sent again quietly and then again after a pause, while
+    // the person sees the same "Opening Socialytics". Only an answer settles
+    // anything: a request is refused on a real refusal, never on a hiccup.
+    const settled = async <T extends { error: unknown }>(send: () => PromiseLike<T>, retry: (e: unknown) => boolean): Promise<T | null> => {
+      for (;;) {
+        const reply = await sendQuietly(send, { again: retry });
+        if (!reply.error || !retry(reply.error)) return reply;
+        await new Promise((r) => setTimeout(r, 5_000));
+        if (cancelled) return null;
+      }
+    };
     (async () => {
       try {
         if (!isAuthenticated) {
           const { data } = await supabase.auth.getSession();
-          if (!data.session) {
+          const userId = data.session?.user?.id;
+          if (!userId) {
             rememberIntendedDestination();
             show({ kind: "signin" });
             return;
           }
-          // Signed in, but with no Socialytics role.
-          await supabase.auth.oauth.denyAuthorization(id, { skipBrowserRedirect: true });
-          show({ kind: "no-role" });
-          return;
+          // Signed in, but the app has not placed the person: ask the roles
+          // table itself, so a failed sign-in check is not taken for "no role".
+          const roles = await settled(() => supabase.from("user_roles").select("role").eq("user_id", userId), writeResendable);
+          if (!roles) return;
+          if (!strongestRole(((roles.data as Array<{ role: string }> | null) ?? []).map((r) => r.role))) {
+            await sendQuietly(() => supabase.auth.oauth.denyAuthorization(id, { skipBrowserRedirect: true }), { again: isTransient });
+            show({ kind: "no-role" });
+            return;
+          }
         }
-        const { data, error } = await supabase.auth.oauth.getAuthorizationDetails(id);
+        const reply = await settled(() => supabase.auth.oauth.getAuthorizationDetails(id), isTransient);
+        if (!reply) return;
+        const { data, error } = reply;
         if (error || !data) return show({ kind: "expired" });
         const step = consentStep(data);
         if (step.kind === "go") return browser.assign(step.url);
         if (step.kind === "refuse") {
-          await supabase.auth.oauth.denyAuthorization(id, { skipBrowserRedirect: true });
+          await sendQuietly(() => supabase.auth.oauth.denyAuthorization(id, { skipBrowserRedirect: true }), { again: isTransient });
           return show({ kind: "not-claude" });
         }
         show({ kind: "ask", host: step.host, email: step.email, busy: false });
@@ -70,10 +92,15 @@ export default function OAuthConsent() {
 
   const decide = async (allow: boolean) => {
     if (entry.kind !== "here" || view.kind !== "ask") return;
-    setView({ ...view, busy: true });
+    const asking = view;
+    setView({ ...asking, busy: true });
     // Supabase sends the browser back to Claude, with the code or with the refusal.
-    const { error } = allow ? await supabase.auth.oauth.approveAuthorization(entry.authorizationId) : await supabase.auth.oauth.denyAuthorization(entry.authorizationId);
-    if (error) setView({ kind: "expired" });
+    const { error } = await sendQuietly(
+      () => (allow ? supabase.auth.oauth.approveAuthorization(entry.authorizationId) : supabase.auth.oauth.denyAuthorization(entry.authorizationId)),
+      { again: isTransient },
+    );
+    // Still not through after the quiet tries: the request is as it was, so the same buttons.
+    if (error) setView(isTransient(error) ? { ...asking, busy: false } : { kind: "expired" });
   };
 
   if (entry.kind === "forward" || view.kind === "loading") {
@@ -94,7 +121,7 @@ export default function OAuthConsent() {
         <div className="glass p-card space-y-3">
           {view.kind === "ask" && (
             <>
-              <h2 className="t-h1 text-white">Connect Claude to Socialytics</h2>
+              <h1 className="t-h1 text-white">Connect Claude to Socialytics</h1>
               <p className="t-secondary">Claude will be able to read reports, analytics, trends, the calendar and, for Moburst staff, client notes and the strategy. Staff can also save client notes, approved copy, strategy edits and finished decks.</p>
               <p className="t-label">Signed in as {view.email}. After you choose, you'll go back to {view.host}.</p>
               <div className="flex justify-center gap-3 pt-2">
@@ -105,19 +132,19 @@ export default function OAuthConsent() {
           )}
           {view.kind === "not-claude" && (
             <>
-              <h2 className="t-h1 text-white">This request didn't come from Claude</h2>
+              <h1 className="t-h1 text-white">This request didn't come from Claude</h1>
               <p className="t-secondary">Socialytics connects only to Claude, so nothing was shared.</p>
             </>
           )}
           {view.kind === "no-role" && (
             <>
-              <h2 className="t-h1 text-white">Socialytics isn't available to your account</h2>
-              <p className="t-secondary">Claude can connect once a portal admin gives your account access to Socialytics.</p>
+              <h1 className="t-h1 text-white">Socialytics isn't available to your account</h1>
+              <p className="t-secondary">This account has no access to Socialytics, so Claude was not connected.</p>
             </>
           )}
           {view.kind === "expired" && (
             <>
-              <h2 className="t-h1 text-white">This connection request has expired</h2>
+              <h1 className="t-h1 text-white">This connection request has expired</h1>
               <p className="t-secondary">Go back to Claude and click Connect next to Socialytics.</p>
             </>
           )}

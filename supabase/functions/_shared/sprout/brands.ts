@@ -20,6 +20,7 @@
 
 import { profileKeyOf, type SproutProfile } from "../lifecycle/accounts.ts";
 import { normName, sameName } from "../lifecycle/names.ts";
+import { linksTo, siteLinkSet } from "../lifecycle/siteLinks.ts";
 import { pathSegments, siteKeyOf, siteMatch } from "../net/domains.ts";
 import type { CustomerGroup } from "./profiles.ts";
 import { networkKey } from "./publishRules.ts";
@@ -275,7 +276,7 @@ export function matchBrand(brand: Brand, index: ClientIndex): BrandMatch | null 
     ["assigned", () => pick(ids.flatMap((id) => index.assigned.get(id) ?? []))],
     ["removed", () => pick(ids.flatMap((id) => index.removed.get(id) ?? []))],
     ["name", () => [...real.values()].filter((c) => sameName(c.name, brand.name) || sameName(c.name, brand.group?.name) || brand.profiles.some((p) => sameName(c.name, p.name)))],
-    ["site_link", () => [...real.values()].filter((c) => keys.some((k) => (c.site_profiles ?? []).includes(k)))],
+    ["site_link", () => [...real.values()].filter((c) => { const linked = siteLinkSet(c.site_profiles); return keys.some((k) => linksTo(linked, k)); })],
   ];
   for (const [by, find] of rules) {
     const clients = find();

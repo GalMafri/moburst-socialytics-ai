@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isVideoFormat, normalizePlatform, platformLabel } from "@/lib/platform";
+import { formatKind, formatLabel, isTextOnlyFormat, isVideoFormat, normalizePlatform, platformLabel } from "@/lib/platform";
 
 describe("isVideoFormat", () => {
   it("recognises the formats the planner recommends for a clip", () => {
@@ -24,6 +24,27 @@ describe("isVideoFormat", () => {
     expect(isVideoFormat(null, "youtube")).toBe(true);
     expect(isVideoFormat("Image", "tiktok")).toBe(false);
     expect(isVideoFormat("", "instagram")).toBe(false);
+  });
+});
+
+describe("formatKind", () => {
+  it("is video for the planner's own spellings, the same rule the server uses", () => {
+    for (const f of ["short_video", "video (animated text on soft designed background)", "Reel/video", "long_video"]) expect(isVideoFormat(f), f).toBe(true);
+  });
+
+  it("maps any format text to one of the seven kinds, with a label", () => {
+    const cases: Array<[string, string, string]> = [
+      ["Single Image", "image", "Single image"], ["photo", "image", "Single image"], ["Carousel (5 slides)", "carousel", "Carousel"],
+      ["Reel", "short video", "Reel or short video"], ["Video", "video", "Video"], ["YouTube Short", "short video", "Reel or short video"], ["short_video", "short video", "Reel or short video"], ["text only", "text", "Text post"], ["Document", "document", "Document"], ["Instagram Story", "story", "Story"],
+    ];
+    for (const [format, kind, label] of cases) {
+      expect(formatKind(format), format).toBe(kind);
+      expect(formatLabel(format), format).toBe(label);
+    }
+    expect(formatKind("", "tiktok")).toBe("video");
+    expect(formatKind("", "instagram")).toBeNull();
+    expect(formatLabel(null)).toBe("");
+    expect(isTextOnlyFormat("Text only")).toBe(true);
   });
 });
 

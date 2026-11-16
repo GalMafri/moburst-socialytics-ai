@@ -1,11 +1,11 @@
 // The competitive picture as a prompt block, for any generation step that
 // writes content for a client (ad-hoc posts, copy rewrites). Uses the latest
-// complete competitive report and the team's verdicts on its gaps: endorsed
+// ready competitive report and the team's verdicts on its gaps: endorsed
 // gaps must be addressed, hidden gaps must not be proposed, everything else is
 // context. Returns "" when the client has no competitive analysis yet. The
 // report is read as every reader reads it (reports/shownFields.ts): its
 // insights where it has them, through the evidence limits.
-import { competitiveReportQuality } from './reportEvidence.ts';
+import { newestReadyReport } from './reportEvidence.ts';
 import { readShownInsights, shownCompetitive } from '../reports/shownFields.ts';
 import { type CompetitiveLearning, editedSuggestion, learningLines } from './suggestionEdits.ts';
 
@@ -16,15 +16,15 @@ const insightKey = (text: string) =>
   String(text || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 120) || "untitled";
 
 export async function competitiveBrief(supabase: AnyClient, clientId: string, platform?: string | null): Promise<string> {
-  const { data: report } = await supabase
+  const { data: rows } = await supabase
     .from("competitive_reports")
     .select("id, created_at, report_data")
     .eq("client_id", clientId)
     .eq("status", "complete")
     .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (!report || !competitiveReportQuality(report.report_data).ready) return "";
+    .limit(12);
+  const report = newestReadyReport(rows as Array<{ id: string; created_at: string; report_data: unknown }> | null);
+  if (!report) return "";
   const { data: feedback } = await supabase
     .from("competitive_insight_feedback")
     .select("insight_key, verdict, gap_text, edited")

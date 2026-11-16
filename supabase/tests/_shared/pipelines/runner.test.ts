@@ -9,7 +9,7 @@ import {
   MAX_POLL_MINUTES, MAX_RUN_HOURS, MAX_STEP_ATTEMPTS, POLL_MAX_SECONDS, POLL_MIN_SECONDS, runPipelineJob, retryWaitMinutes, smallDetail,
   STATE_MAX_BYTES, type RunnerDeps, type StepOutcome,
 } from "../../../functions/_shared/pipelines/runner";
-import { StepRestart, type PipelineDefinition, type PipelineRun } from "../../../functions/_shared/pipelines/types";
+import { StepRestart, StepStop, type PipelineDefinition, type PipelineRun } from "../../../functions/_shared/pipelines/types";
 
 const T0 = new Date("2026-11-07T07:20:00Z");
 const at = (minutes: number) => new Date(T0.getTime() + minutes * 60_000);
@@ -243,6 +243,100 @@ describe("runPipelineJob: limits", () => {
     const plain = harness(def(async () => { throw new Error("provider 503"); }));
     plain.job.payload = { ...plain.job.payload, poll: { handle: { job: "kept" }, polls: 1, since: T0.toISOString() } };
     expect(((await plain.lease()).payload as { poll: unknown }).poll).toMatchObject({ handle: { job: "kept" } });
+  });
+
+  it("a wait for an account is a state of the run: no try, no poll limit, no run limit, and the job handle is kept", async () => {
+    let waiting = true;
+    // The run's horizon is a week away, so the wait may go on past the run's own hours.
+    const h = harness(def(async (ctx) => ({ type: "poll", waitSeconds: 600, handle: { apify_run_id: "r1" }, ...(waiting ? { waitingFor: "APIFY_API_TOKEN" } : {}) }), { waitHorizon: () => at(7 * 24 * 60) }));
+    h.job.payload = { ...h.job.payload, poll: { handle: { apify_run_id: "r1" }, polls: 3, since: T0.toISOString() } };
+    const attemptsBefore = h.job.attempts;
+    // 14 hours of waiting, past both MAX_RUN_HOURS and MAX_POLL_MINUTES.
+    for (let minutes = 10; minutes <= 14 * 60; minutes += 10) {
+      const r = await h.next(at(minutes));
+      expect(r.status).toBe("queued");
+      expect(r.deferred).toBe(true);
+    }
+    expect(h.run.status).toBe("running");
+    expect(h.job.attempts).toBe(attemptsBefore);
+    expect(h.job.payload).toMatchObject({ poll: { handle: { apify_run_id: "r1" } } });
+    expect(h.log.every((l) => l.outcome === "poll")).toBe(true);
+
+    // The account answers again: the run goes on from the same handle, and the wait is not counted against its hours.
+    waiting = false;
+    const after = await h.next(at(14 * 60 + 10));
+    expect(after.status).toBe("queued");
+    expect(h.run.status).toBe("running");
+    expect(h.job.payload).toMatchObject({ poll: { handle: { apify_run_id: "r1" } } });
+    // Real run time still counts: another MAX_RUN_HOURS of ordinary polling stops it.
+    const late = await h.next(at(14 * 60 + 10 + MAX_RUN_HOURS * 60 + 1));
+    expect(late.status).toBe("failed");
+    expect(h.run.status).toBe("stopped");
+  });
+
+  it("a waiting job with a started run id leased 4 hours later, after a worker outage, keeps its handle, spends no try and stays queued", async () => {
+    let waiting = true;
+    const h = harness(def(async () => ({ type: "poll", waitSeconds: 600, handle: { apify_run_id: "r1" }, ...(waiting ? { waitingFor: "APIFY_API_TOKEN" } : {}) }), { waitHorizon: () => at(7 * 24 * 60) }));
+    h.job.payload = { ...h.job.payload, poll: { handle: { apify_run_id: "r1" }, polls: 2, since: at(10).toISOString() }, paused_at: at(10).toISOString(), paused_for: "APIFY_API_TOKEN" };
+    const attemptsBefore = h.job.attempts;
+    // No worker ran for 4 hours: the last look is far older than MAX_POLL_MINUTES.
+    const outage = await h.next(at(10 + 4 * 60));
+    expect(outage.status).toBe("queued");
+    expect(outage.deferred).toBe(true);
+    expect(h.run.status).toBe("running");
+    expect(h.job.attempts).toBe(attemptsBefore);
+    expect(h.job.payload).toMatchObject({ poll: { handle: { apify_run_id: "r1" } } });
+    expect(h.log.map((l) => l.outcome)).toEqual(["poll"]);
+    // The account answers on that same lease's next look: the poll clock starts then, so the job is not judged by the outage.
+    waiting = false;
+    const answered = await h.next(at(10 + 4 * 60 + 10));
+    expect(answered.status).toBe("queued");
+    const after = await h.next(at(10 + 4 * 60 + 20));
+    expect(after.status).toBe("queued");
+    expect(h.run.status).toBe("running");
+    expect(h.job.payload).toMatchObject({ poll: { handle: { apify_run_id: "r1" } } });
+    expect(h.log.map((l) => l.outcome)).toEqual(["poll", "poll", "poll"]);
+  });
+
+  it("stops a run that is still waiting for an account once its horizon has passed, without calling the step, and records why", async () => {
+    let called = 0;
+    const h = harness(def(async () => { called += 1; return { type: "poll", waitSeconds: 600, handle: { apify_run_id: "r1" }, waitingFor: "APIFY_API_TOKEN" }; }, { waitHorizon: () => at(24 * 60) }));
+    for (let minutes = 10; minutes < 24 * 60; minutes += 10) expect((await h.next(at(minutes))).status).toBe("queued");
+    const callsBefore = called;
+    // Past the horizon the account may answer again, but the run is over: the step is not called.
+    const r = await h.next(at(24 * 60 + 5));
+    expect(r.status).toBe("failed");
+    expect(called).toBe(callsBefore);
+    expect(h.run.status).toBe("stopped");
+    expect(h.run.outcome).toContain("APIFY_API_TOKEN");
+    expect(h.run.outcome).toContain(at(24 * 60).toISOString());
+  });
+
+  it("stops a run whose first wait for an account begins after its horizon", async () => {
+    const h = harness(def(async () => ({ type: "poll", waitSeconds: 600, handle: {}, waitingFor: "APIFY_API_TOKEN" }), { waitHorizon: () => at(-1) }));
+    const r = await h.lease();
+    expect(r.status).toBe("failed");
+    expect(h.run.status).toBe("stopped");
+    expect(h.log.map((l) => l.outcome)).toEqual(["stopped"]);
+  });
+
+  it("without a horizon of its own, a pipeline's account wait ends at the run's own hours", async () => {
+    const h = harness(def(async () => ({ type: "poll", waitSeconds: 1800, handle: {}, waitingFor: "APIFY_API_TOKEN" })));
+    for (let minutes = 30; minutes < MAX_RUN_HOURS * 60; minutes += 30) expect((await h.next(at(minutes))).status).toBe("queued");
+    const r = await h.next(at(MAX_RUN_HOURS * 60 + 1));
+    expect(r.status).toBe("failed");
+    expect(h.run.status).toBe("stopped");
+  });
+
+  it("a step that throws StepStop ends the run at once, with no retry", async () => {
+    let called = 0;
+    const h = harness(def(async () => { called += 1; throw new StepStop("Every watched platform failed."); }));
+    const r = await h.lease();
+    expect(r.status).toBe("failed");
+    expect(called).toBe(1);
+    expect(h.run.status).toBe("stopped");
+    expect(h.run.outcome).toContain("Every watched platform failed.");
+    expect(h.log.map((l) => l.outcome)).toEqual(["stopped"]);
   });
 
   it("stops a run that has gone on longer than MAX_RUN_HOURS", async () => {

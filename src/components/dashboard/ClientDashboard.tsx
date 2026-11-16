@@ -1,4 +1,7 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useActiveClients, viewerClients } from "@/lib/activeClients";
+import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/display";
 import { ClientOverview } from "@/components/dashboard/ClientOverview";
 import { useQuery } from "@tanstack/react-query";
@@ -12,45 +15,33 @@ import { Loading } from "@/components/ui/loading";
 import { LoadRetry } from "@/components/ui/load-error";
 import { EmptyState } from "@/components/ui/empty-state";
 
-// Defense-in-depth: even when RLS returns extra/stale clients (e.g. client_users
-// cache not yet cleaned, or migration to computed is_client_member not applied
-// yet), we filter client-side to the user's CURRENT Hub company. This keeps the
-// dashboard showing only the right client's data no matter what the DB state is.
-
-function normalize(s: string | null | undefined): string {
-  return (s ?? "").trim().toLowerCase();
+/**
+ * What a client user sees before its account is linked to a client: the
+ * dashboard's own words, shared with the Calendar tab. It states the status
+ * and what will appear, and asks for nothing.
+ */
+export function ClientNotLinked({ appears = "Your reports, competitive analyses and analytics appear here once your account is connected." }: { appears?: string }) {
+  return (
+    <EmptyState
+      icon={Clock}
+      title="Your dashboard is being set up"
+      description={appears}
+    />
+  );
 }
 
 export function ClientDashboard() {
   const navigate = useNavigate();
   const { user, isGosSession } = useAuth();
 
-  // Pull everything RLS allows, then filter here.
-  const { data: allClients, isLoading, error, refetch } = useQuery({
-    queryKey: ["client-dashboard-clients"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("clients")
-        .select("id, name, logo_url, hub_company_name")
-        .order("name");
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!user,
-  });
+  // Active clients only, as every client list reads them; row access decides which.
+  const { data: allClients, isLoading, error, refetch } = useActiveClients<{ id: string; name: string; logo_url: string | null; hub_company_name: string | null }>("id, name, logo_url, hub_company_name", { enabled: !!user });
 
-  // Filter to clients whose hub_company_name matches the user's Hub company.
-  // gOS sessions are already company-scoped by RLS (allowed_company_slugs), so
-  // trust the rows RLS returned; legacy sessions keep the name filter.
-  const userCompany = normalize(user?.company);
-  const matchingClients = isGosSession
-    ? (allClients ?? [])
-    : (allClients ?? []).filter((c) => {
-        if (!userCompany) return false;
-        return normalize(c.hub_company_name) === userCompany;
-      });
-
-  const firstClient = matchingClients[0];
+  // The viewer's clients by the one rule the Calendar and Analytics tabs
+  // share (src/lib/activeClients.ts): several are chosen between here.
+  const matchingClients = viewerClients(allClients, { company: user?.company, isGosSession });
+  const [pickedId, setPickedId] = useState<string | null>(null);
+  const firstClient = matchingClients.find((c) => c.id === pickedId) ?? matchingClients[0];
   const clientId = firstClient?.id;
 
   const { data: latestReport } = useQuery({
@@ -79,13 +70,7 @@ export function ClientDashboard() {
   }
 
   if (matchingClients.length === 0) {
-    return (
-      <EmptyState
-        icon={Clock}
-        title="Your dashboard is being set up"
-        description="Your Moburst account team is connecting your account. Contact them if this does not change soon."
-      />
-    );
+    return <ClientNotLinked />;
   }
 
   const displayName =
@@ -93,7 +78,19 @@ export function ClientDashboard() {
 
   return (
     <div className="space-y-section">
-      <PageHeader title={displayName} description="Your social media intelligence dashboard" />
+      <PageHeader
+        title={displayName}
+        description="Your social media intelligence dashboard"
+        actions={matchingClients.length > 1 ? (
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Client">
+            {matchingClients.map((c) => (
+              <Button key={c.id} size="sm" variant={c.id === clientId ? "default" : "outline"} aria-pressed={c.id === clientId} onClick={() => setPickedId(c.id)}>
+                {c.name}
+              </Button>
+            ))}
+          </div>
+        ) : undefined}
+      />
       <Card>
         <CardContent>
           <ClientOverview clientId={firstClient.id} isStaff={false} />

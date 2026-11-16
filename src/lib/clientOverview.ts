@@ -10,6 +10,7 @@
  */
 
 import { inWeek, type WeekWindow } from "@/lib/weekWindow";
+import { weekCountLabel } from "@/lib/calendarPosts";
 
 const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
 
@@ -27,9 +28,9 @@ const METRIC_ORDER: Array<[string, string]> = [
 
 const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
-/** The report's own month-over-month figures: up to three headline metrics, and how many of all metrics rose. */
+/** The report's own month-over-month figures: up to three headline metrics, and how many of all measures that have a previous value rose. */
 export function reportHeadline(reportData: unknown): { metrics: HeadlineMetric[]; rose: number; total: number } | null {
-  type Change = { current?: unknown; percent?: unknown };
+  type Change = { current?: unknown; previous?: unknown; percent?: unknown };
   const rd = (Array.isArray(reportData) ? reportData[0] : reportData) as { sprout_performance?: { month_comparison?: { changes?: Record<string, Change> } } } | null;
   const changes = rd?.sprout_performance?.month_comparison?.changes;
   if (!changes || typeof changes !== "object") return null;
@@ -40,9 +41,10 @@ export function reportHeadline(reportData: unknown): { metrics: HeadlineMetric[]
     metrics.push({ key, label, current: c.current as number, percent: finite(c.percent) ? c.percent : null });
     if (metrics.length === 3) break;
   }
-  const all = Object.values(changes).map((c) => c?.percent).filter(finite);
+  // Every measure with a current and a previous value counts, one that rose from zero too (it has no percent).
+  const compared = Object.values(changes).filter((c): c is Change & { current: number; previous: number } => !!c && finite(c.current) && finite(c.previous));
   if (!metrics.length) return null;
-  return { metrics, rose: all.filter((p) => p > 0).length, total: all.length };
+  return { metrics, rose: compared.filter((c) => c.current > c.previous).length, total: compared.length };
 }
 
 export interface Standing { shareOfVoice: number | null; competitors: string[]; ahead: string[]; behind: string[] }
@@ -59,12 +61,14 @@ export function competitiveStanding(ctx: { share_of_voice_pct?: number | null; c
   };
 }
 
-export interface WeekPost { id: string; post_key: string; post_date: string; platform: string; source: string; copy: string }
+export interface WeekPost { id: string; post_key: string; post_date: string; platform: string; source: string; copy: string; format?: string | null }
 export interface PostMedia { calendar_post_key: string | null; is_selected: boolean | null; is_approved: boolean | null; media_urls: string[] | null }
 
 export interface ContentWeek {
   /** Posts this week, Monday to Sunday: the number the calendar shows as "N posts this week". */
   planned: number;
+  /** The same count in the week band's words, Stories apart: "13 posts and 7 Stories this week". */
+  plannedLabel: string;
   designed: number;
   approved: number;
   /** Posts from today to Sunday with copy and no chosen design, soonest first. */
@@ -89,6 +93,7 @@ export function contentWeek(posts: WeekPost[], media: PostMedia[], week: WeekWin
   const approved = (p: WeekPost) => (byKey.get(p.post_key) || []).some((m) => m.is_approved);
   return {
     planned: thisWeek.length,
+    plannedLabel: weekCountLabel(thisWeek, true),
     designed: thisWeek.filter(designed).length,
     approved: thisWeek.filter(approved).length,
     withoutDesign: upcoming.filter((p) => p.post_date <= week.end && !designed(p)),

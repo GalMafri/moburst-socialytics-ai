@@ -2,22 +2,24 @@ import { describe, it, expect, vi } from "vitest";
 import { CLIENT_COLUMNS, competitiveFromLight, makeStore, reportFromLight, TREND_POST_COLUMNS, TREND_THEME_COLUMNS, TREND_WEEK_COLUMNS } from "../../../functions/_shared/socialytics-api/store";
 import { TABLE_COLUMNS } from "../../../functions/api/schema-check";
 import { competitiveReportOut, reportOut } from "../../../functions/_shared/socialytics-api/serializers";
+import { DECK_INCOMPLETE_WARNING } from "../../../functions/_shared/reports/shownWarnings";
 import { SHOWN_INSIGHT_COLUMNS } from "../../../functions/_shared/reports/shownFields";
 
 describe("light list rows", () => {
   it("rebuild the report_data the summary serializer reads", () => {
     const row = reportFromLight({ id: "r", client_id: "c", report_type: "weekly", status: "completed", date_range_start: "2026-08-01", date_range_end: "2026-08-31", gamma_url: null, duration_minutes: 38, created_at: "2026-09-01T00:00:00.000Z", demo_job_id: null,
-      rd_period: { current_month: { start: "2026-08-01", end: "2026-08-31" }, previous_month: { start: "2026-07-01", end: "2026-07-31" } }, rd_counts: { total_recommendations: 12 }, rd_metrics: { impressions_change: -2 }, rd_warnings: ["w"], rd_trend: "ok", rd_gamma_status: "ok", rd_gamma_url: "https://gamma.app/x", rd_completed: "2026-09-01T07:38:00.000Z", rd_error: null, rd_duration: 38 });
-    expect(reportOut(row)).toMatchObject({ previous_period: { start: "2026-07-01" }, counts: { total_recommendations: 12 }, warnings: ["w"], trend_status: "ok", deck: { url: "https://gamma.app/x", status: "ok" }, completed_at: "2026-09-01T07:38:00.000Z" });
+      rd_period: { current_month: { start: "2026-08-01", end: "2026-08-31" }, previous_month: { start: "2026-07-01", end: "2026-07-31" } }, rd_counts: { total_recommendations: 12 }, rd_metrics: { impressions_change: -2 }, rd_warnings: [DECK_INCOMPLETE_WARNING, "TikTok trend analysis could not run because there were no usable keywords. Add keywords in client setup."], rd_trend: "ok", rd_gamma_status: "ok", rd_gamma_url: "https://gamma.app/x", rd_completed: "2026-09-01T07:38:00.000Z", rd_error: null, rd_duration: 38 });
+    expect(reportOut(row)).toMatchObject({ previous_period: { start: "2026-07-01" }, counts: { total_recommendations: 12 }, warnings: [DECK_INCOMPLETE_WARNING], trend_status: "ok", deck: { url: "https://gamma.app/x", status: "ok" }, completed_at: "2026-09-01T07:38:00.000Z" });
     const c = competitiveFromLight({ id: "x", client_id: "c", set_id: "s", status: "complete", gamma_url: null, duration_minutes: 20, date_range_start: null, date_range_end: null, created_at: "2026-09-25T00:00:00.000Z", demo_job_id: null, rd_period: { start: "2026-08-25", end: "2026-09-24", days: 31 }, rd_totals: { posts_analyzed: 4 }, rd_quality: { state: "needs_review" }, rd_provider: "ok", rd_generated: "2026-09-25T08:00:00.000Z", rd_gamma_url: null });
     expect(competitiveReportOut(c)).toMatchObject({ period: { start: "2026-08-25", days: 31 }, totals: { posts_analyzed: 4 }, quality_check: { state: "needs_review" }, completed_at: "2026-09-25T08:00:00.000Z" });
   });
 });
 
 /** A supabase-js stand-in that records each query and answers with the table's rows. */
-function recordingDb(tables: Record<string, unknown[]>) {
+function recordingDb(tables: Record<string, unknown[]>, counts: unknown[] = []) {
   const queries: Array<{ table: string; select: string; filters: Array<[string, string, unknown]> }> = [];
   const db = {
+    rpc: (_name: string, _args: unknown) => Promise.resolve({ data: counts, error: null }),
     from(table: string) {
       const q = { table, select: "", filters: [] as Array<[string, string, unknown]> };
       queries.push(q);
@@ -53,6 +55,63 @@ describe("clientExtras", () => {
     expect(extras.c3.designSettings).toBeNull();
     expect(extras.c3.designSteps.map((r) => r.step)).toEqual(["design_refs", "design_settings"]);
     expect(extras.c1.designSteps).toEqual([]);
+  });
+});
+
+describe("clientExtras counts", () => {
+  /** A database that answers at most 1,000 rows to one read, as the API does, and counts in SQL from every row. */
+  function cappedDb(tables: Record<string, Array<Record<string, unknown>>>) {
+    const reads: string[] = [];
+    const db = {
+      rpc: (name: string, args: { client_ids: string[] }) => {
+        reads.push(`rpc:${name}`);
+        const of = (t: string, id: string, keep: (r: Record<string, unknown>) => boolean = () => true) => (tables[t] ?? []).filter((r) => r.client_id === id && keep(r)).length;
+        const data = args.client_ids.map((id) => {
+          const last = (tables.reports ?? []).filter((r) => r.client_id === id).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
+          return { client_id: id, reports: of("reports", id), competitive_reports: of("competitive_reports", id), posts: of("post_iterations", id, (r) => !r.archived_at), schedules: of("report_schedules", id, (r) => r.is_active === true), last_report_id: last?.id ?? null };
+        });
+        return Promise.resolve({ data, error: null });
+      },
+      from(table: string) {
+        let ids: string[] | null = null;
+        const b: Record<string, unknown> = {
+          select: () => b,
+          in: (col: string, vals: string[]) => { if (col === "id" || col === "client_id") ids = vals; return b; },
+          then: (ok: (v: unknown) => unknown, bad?: (e: unknown) => unknown) => {
+            reads.push(table);
+            const all = (tables[table] ?? []).filter((r) => !ids || ids.includes(String(r.id ?? r.client_id)));
+            return Promise.resolve({ data: all.slice(0, 1000), error: null }).then(ok, bad);
+          },
+        };
+        for (const op of ["eq", "neq", "is", "order", "limit"]) b[op] = () => b;
+        return b;
+      },
+    };
+    return { db, reads };
+  }
+
+  it("reports 1,500 posts for a client although one read answers at most 1,000 rows", async () => {
+    const many = (n: number, make: (i: number) => Record<string, unknown>) => Array.from({ length: n }, (_, i) => make(i));
+    const { db } = cappedDb({
+      post_iterations: many(1500, (i) => ({ id: `p${i}`, client_id: "c1", archived_at: null })),
+      reports: [...many(1200, (i) => ({ id: `r${i}`, client_id: "c1", created_at: `2026-10-${String(1 + (i % 28)).padStart(2, "0")}T00:00:00.000Z` })), { id: "last", client_id: "c1", created_at: "2026-11-01T00:00:00.000Z" }, { id: "other", client_id: "c2", created_at: "2026-10-01T00:00:00.000Z" }],
+      competitive_reports: many(1100, (i) => ({ id: `k${i}`, client_id: "c1" })),
+      report_schedules: [{ id: "s1", client_id: "c1", is_active: true }, { id: "s2", client_id: "c1", is_active: false }],
+    });
+    const extras = await makeStore(db as never).clientExtras(["c1", "c2"]);
+    expect(extras.c1.counts).toEqual({ reports: 1201, competitive_reports: 1100, posts: 1500, schedules: 1 });
+    expect(extras.c2.counts).toEqual({ reports: 1, competitive_reports: 0, posts: 0, schedules: 0 });
+    expect(extras.c1.lastReport?.id).toBe("last");
+    expect(extras.c2.lastReport?.id).toBe("other");
+  });
+
+  it("reads the counts once for the whole page, never a table scan per client", async () => {
+    const { db, reads } = cappedDb({});
+    await makeStore(db as never).clientExtras(["c1", "c2", "c3"]);
+    expect(reads.filter((r) => r === "rpc:client_counts")).toHaveLength(1);
+    expect(reads).not.toContain("post_iterations");
+    expect(reads).not.toContain("competitive_reports");
+    expect(reads).not.toContain("report_schedules");
   });
 });
 

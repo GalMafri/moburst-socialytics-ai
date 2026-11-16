@@ -51,7 +51,7 @@
 import { claudeBatchStep } from "../claude.ts";
 import { ANTHROPIC_API_KEY, GAMMA_API_KEY, SPROUT_CLIENT_ID, SPROUT_CLIENT_SECRET } from "../secrets.ts";
 import type { PipelineDefinition, StepContext, StepResult } from "../types.ts";
-import { briefAnswer, briefRequest, parseAnswer, repairRequest, synthesisProblems, synthesisRequest } from "../social/analysis.ts";
+import { analysisExemptions, briefAnswer, briefRequest, parseAnswer, repairRequest, synthesisProblems, synthesisRequest } from "../social/analysis.ts";
 import {
   aggregateSprout, attachCompetitiveContext, attachPostThumbnails, buildNormalizedClient, buildPresentationContent, checkGammaState, combineBrief,
   generateRunSummary, hasSproutProfiles, prepareBriefText, readsTrends, skipSproutAnalytics, sproutSetup, workflowConfiguration,
@@ -132,13 +132,14 @@ export function socialPipeline(deps: SocialDeps = {}): PipelineDefinition {
    * the deck).
    */
   const runSummary = async (ctx: StepContext, deck: { gamma: Any; presentation: Any } | null) => {
-    const [config, combined, prepared, normalized, aggregate, analysis, kept] = await Promise.all([
-      need(ctx, "config"), need(ctx, "combined"), need(ctx, "prepared"), need(ctx, "normalized"), need(ctx, "sprout.aggregate"), need(ctx, KEPT.analysis),
+    // The Sprout item, with each post's thumbnail stamped on (Attach Post Thumbnails), is what the report keeps; the aggregate only says whether the brand had profiles.
+    const [config, combined, prepared, normalized, aggregate, stamped, analysis, kept] = await Promise.all([
+      need(ctx, "config"), need(ctx, "combined"), need(ctx, "prepared"), need(ctx, "normalized"), need(ctx, "sprout.aggregate"), need(ctx, "sprout.item"), need(ctx, KEPT.analysis),
       ctx.payloads.get<KeptTrends>(KEPT.trends),
     ]);
     return generateRunSummary({
       gamma: deck?.gamma ?? {}, presentation: deck?.presentation ?? {}, clientData: normalized, combined, config,
-      sprout: aggregate.skipped ? null : aggregate, ai: analysis, prepared, industryTrends: kept?.trends ?? null,
+      sprout: aggregate.skipped ? null : stamped, ai: analysis, prepared, industryTrends: kept?.trends ?? null,
       startedAt: new Date(ctx.run.started_at), now: ctx.now(),
     });
   };
@@ -278,7 +279,7 @@ export function socialPipeline(deps: SocialDeps = {}): PipelineDefinition {
       async parse(ctx) {
         const answer = await need<{ text: string; stop_reason: string }>(ctx, "synthesis.answer");
         const parsed = parseAnswer(answer.text);
-        const problems = "value" in parsed ? synthesisProblems(parsed.value) : [parsed.error];
+        const problems = "value" in parsed ? synthesisProblems(parsed.value, analysisExemptions(await need(ctx, "normalized"))) : [parsed.error];
         if (!problems.length && "value" in parsed) return accept(ctx, parsed.value, { stop_reason: answer.stop_reason });
         return { type: "next", step: "repair", state: { ...ctx.state, repair_error: problems.join("; ").slice(0, 4000) }, detail: { stop_reason: answer.stop_reason, problems: problems.slice(0, 10) } };
       },
@@ -296,7 +297,7 @@ export function socialPipeline(deps: SocialDeps = {}): PipelineDefinition {
       async parse_repair(ctx) {
         const answer = await need<{ text: string }>(ctx, "synthesis.repaired");
         const parsed = parseAnswer(answer.text);
-        const problems = "value" in parsed ? synthesisProblems(parsed.value) : [parsed.error];
+        const problems = "value" in parsed ? synthesisProblems(parsed.value, analysisExemptions(await need(ctx, "normalized"))) : [parsed.error];
         if (!problems.length && "value" in parsed) return accept(ctx, parsed.value, { repaired: true });
         const rounds = Number(ctx.state.analysis_rounds ?? 0);
         if (rounds < ANALYSIS_ROUNDS) {

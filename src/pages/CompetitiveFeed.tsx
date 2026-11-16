@@ -20,26 +20,31 @@ import { LoadRetry } from "@/components/ui/load-error";
 import { toast as sonnerToast } from "sonner";
 import { mondayOf } from "@/lib/calendarPosts";
 import { clipText } from "@/lib/clipText";
+import { todayInZone } from "@/lib/weekWindow";
 import { displayCompanyName } from "@/lib/companyName";
 import { useToast } from "@/hooks/use-toast";
 import { PostVisual, usePostPreviews, normalizePlatform, platformLabel } from "@/components/competitive/PostVisual";
 import { sendQuietly, writeResendable } from "@/lib/quietSend";
-import { cleanText, formatDate, formatDateTime, formatRange } from "@/lib/display";
+import { cleanText, formatDate, formatDateTime, formatRange, NO_DATA } from "@/lib/display";
 import { fetchOpenTopics } from "@/lib/openTopics";
 import { ChangeCards } from "@/components/competitive/ChangeCards";
 import { aggregatePosts, pickComparableFeed, diffCompanies, sameCompany } from "@/lib/competitiveChanges";
+import { postReach } from "@/lib/competitiveMetrics";
 import { ArrowLeft, RefreshCw, Rss, Sparkles, TrendingUp, X, Loader2, ExternalLink, History } from "lucide-react";
 
 type FeedPost = {
+  ownedImpressions?: number | null; tiktokViews?: number | null; youtubeViews?: number | null;
   companyId?: string | number; companyName?: string; channel?: string; type?: string; message?: string; publishedAt?: string;
   engagementTotal?: number; engagementRate?: number; estimatedImpressions?: number; views?: number; postLink?: string | null; image?: string | null;
-  /** RivalIQ's paid-promotion signal on Facebook posts: "Likely Boosted", "Not Likely Boosted" or "No Prediction". */
+  /** The paid-promotion signal on Facebook posts: "Likely Boosted", "Not Likely Boosted" or "No Prediction". */
   facebookLikelyBoosted?: string | boolean | null;
   authorship?: "company" | "collaboration";
 };
 const isBoosted = (v: unknown) => (typeof v === "string" ? v.trim().toLowerCase() === "likely boosted" : v === true);
 
-const fmt = (n: number | null | undefined) => (n == null ? "–" : Math.round(Number(n)).toLocaleString());
+const fmt = (n: number | null | undefined) => (n == null ? NO_DATA : Math.round(Number(n)).toLocaleString());
+const reachLabel = (r: { value: number; kind: "views" | "impressions" | "estimated" } | null) =>
+  r ? `${fmt(r.value)} ${r.kind === "views" ? "views" : r.kind === "estimated" ? "est. impr." : "impr."}` : null;
 
 
 export default function CompetitiveFeed() {
@@ -59,15 +64,13 @@ export default function CompetitiveFeed() {
   /** A draft that has not reached the calendar yet; the dialog stays up with it. */
   const [notDrafted, setNotDrafted] = useState(false);
 
-  const { data: client } = useQuery({
-    queryKey: ["client", id],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("clients").select("id, name").eq("id", id!).maybeSingle();
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!id,
-  });
+  // Its own key: other screens cache this client with fewer columns under ["client", id].
+  const loadClient = async () => {
+    const { data, error } = await supabase.from("clients").select("id, name, timezone, primary_platforms").eq("id", id!).maybeSingle();
+    if (error) throw error;
+    return data;
+  };
+  const { data: client } = useQuery({ queryKey: ["client-feed", id], queryFn: loadClient, enabled: !!id });
 
   // Repeated pulls of this week must not displace the last comparable week.
   const { data: snaps, isLoading, isError: feedFailed, error: feedError, refetch: refetchFeed } = useQuery({
@@ -108,7 +111,9 @@ export default function CompetitiveFeed() {
       return data as any;
     },
     onSuccess: (d: any) => {
-      toast({ title: "Feed refreshed", description: `${d.posts} posts from the last week, ${d.alerts} shared topic${d.alerts === 1 ? "" : "s"} detected.` });
+      // A pass that got no answer is queued again; it is not a pass with no topics.
+      const pending = d.linkedin_not_collected ? "LinkedIn posts and shared topics are still coming in." : d.topics_not_detected ? "Shared topics are still being found." : null;
+      toast({ title: "Feed refreshed", description: pending ? `${d.posts} posts from the last week. ${pending}` : `${d.posts} posts from the last week, ${d.alerts} shared topic${d.alerts === 1 ? "" : "s"} detected.` });
     },
     onError: (e: any) => console.warn("[feed refresh] not refreshed yet", e),
     onSettled: () => {
@@ -119,6 +124,9 @@ export default function CompetitiveFeed() {
 
   const draft = useMutation({
     mutationFn: async ({ topic, reason, platform, alertId }: { topic: string; reason: string; platform: string; alertId?: string }) => {
+      // Today where the client is, not the UTC date, which is already tomorrow for an evening in the Americas.
+      // Read before the paid draft, so nothing after it can drop the finished post.
+      const zone = (await qc.ensureQueryData({ queryKey: ["client-feed", id], queryFn: loadClient }))?.timezone;
       // A new post each time, so it is sent again only when it never reached the server.
       const { data, error } = await sendQuietly(() => supabase.functions.invoke("generate-ad-hoc-post", { body: { client_id: id, platform, topic } }));
       const post = (data as any)?.post;
@@ -127,7 +135,7 @@ export default function CompetitiveFeed() {
       // Drafts go to the client's Calendar (today, to be moved), with the topic as the reason.
       // The row's id is made here, once, so sending the insert again can never add the post twice.
       const rowId = crypto.randomUUID();
-      const postDate = new Date().toISOString().slice(0, 10);
+      const postDate = todayInZone(zone);
       // calendar_posts is not in the generated types yet.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { error: insErr } = await sendQuietly(() => (supabase.from("calendar_posts" as never) as any).insert({
@@ -178,7 +186,23 @@ export default function CompetitiveFeed() {
     const list: FeedPost[] = Array.isArray(payload.socialPosts) ? payload.socialPosts : [];
     return [...list].sort((a, b) => new Date(b.publishedAt || 0).getTime() - new Date(a.publishedAt || 0).getTime());
   }, [payload.socialPosts]);
+  const platforms = useMemo(() => Array.from(new Set(posts.map((p) => normalizePlatform(p.channel)).filter(Boolean))), [posts]);
+  // Filtered by the stored name, shown by the readable one.
   const companies = useMemo(() => Array.from(new Set(posts.map((p) => p.companyName || String(p.companyId || "")).filter(Boolean))), [posts]);
+  // The one reach definition: what a card shows and what the note says both come from it.
+  const reachOf = (p: FeedPost) => postReach({ channel: p.channel, views: p.views ?? p.tiktokViews ?? p.youtubeViews, actual_impressions: p.ownedImpressions, est_impressions: p.estimatedImpressions });
+  // Networks whose posts in the loaded feed carry no reach figure at all, and networks where only some do not.
+  const reachGaps = useMemo(() => {
+    const none: string[] = [];
+    const some: string[] = [];
+    for (const net of platforms) {
+      const ofNet = posts.filter((p) => normalizePlatform(p.channel) === net);
+      const withReach = ofNet.filter((p) => reachOf(p)).length;
+      if (ofNet.length > 0 && withReach === 0) none.push(net);
+      else if (withReach < ofNet.length) some.push(net);
+    }
+    return { none, some };
+  }, [posts, platforms]);
   // Week-over-week movements, only when the previous pull covers an earlier week rather than the same one.
   const prevWindow: { start: string; end: string } | null = (prevSnapshot?.payload as any)?.window || null;
   const changes = useMemo(() => {
@@ -187,7 +211,6 @@ export default function CompetitiveFeed() {
     const days = (w: { start: string; end: string }) => Math.max(1, Math.round((Date.parse(w.end) - Date.parse(w.start)) / 86400000) + 1);
     return diffCompanies(aggregatePosts(prev.socialPosts || [], days(prev.window), client?.name), aggregatePosts(payload.socialPosts || [], days(payload.window), client?.name), 6);
   }, [prevSnapshot, payload, client?.name]);
-  const platforms = useMemo(() => Array.from(new Set(posts.map((p) => normalizePlatform(p.channel)).filter(Boolean))), [posts]);
   // RivalIQ returns X posts with no link, caption or image. A tile for one is an
   // empty box with a "Draft our take" button that has nothing to work from, so
   // they are counted in a footnote instead, as they are on the report.
@@ -204,9 +227,14 @@ export default function CompetitiveFeed() {
   const byUrl = useMemo(() => new Map(posts.filter((p) => p.postLink).map((p) => [p.postLink as string, p])), [posts]);
 
   const clientName = client?.name || "Client";
-  const topicFor = (p: FeedPost) => `Our own take on this competitor post by ${p.companyName || "a competitor"} (${platformLabel(p.channel)}): "${clipText(p.message, 240)}". Do not copy it; use the angle that works and make it ours.`;
   // The client's own posts are in the feed for comparison; a "take" on them makes no sense.
   const isOwnPost = (p: FeedPost) => (p as { source?: string }).source === "sprout" || (!!client?.name && sameCompany(String(p.companyName || ""), client.name.toLowerCase().trim()));
+  // A platform the client posts on: its own posts in the feed first, then the platforms it is set up for, then any in the feed.
+  const ownPlatform = (() => {
+    const own = posts.find((p) => isOwnPost(p) && p.channel)?.channel ?? (client?.primary_platforms ?? [])[0] ?? platforms[0] ?? null;
+    return own ? platformLabel(own) : "social";
+  })();
+  const topicFor = (p: FeedPost) => `Our own take on this competitor post by ${displayCompanyName(p.companyName || "a competitor")} (${platformLabel(p.channel)}): "${clipText(p.message, 240)}". Do not copy it; use the angle that works and make it ours.`;
   const reasonFor = (p: FeedPost) => `Our take on a ${displayCompanyName(p.companyName || "competitor")} ${platformLabel(p.channel)} post`;
 
   return (
@@ -251,6 +279,8 @@ export default function CompetitiveFeed() {
                   {(alerts || []).map((a: any) => {
                     const examples: FeedPost[] = (a.post_urls || []).map((u: string) => byUrl.get(u)).filter(Boolean).slice(0, 3);
                     const conf = Math.round(Number(a.confidence) * 100);
+                    // The topic's own platform, else the first of the posts behind it, else one the client posts on.
+                    const topicPlatform = (a.platforms || [])[0] ? platformLabel((a.platforms || [])[0]) : examples[0]?.channel ? platformLabel(examples[0].channel) : ownPlatform;
                     return (
                       <div key={a.id} className="glass-inner p-inner space-y-3">
                         <div className="flex items-start justify-between gap-3">
@@ -258,7 +288,7 @@ export default function CompetitiveFeed() {
                             <p className="t-h4">{a.topic}</p>
                             <div className="flex gap-1.5 flex-wrap">
                               <Badge variant={conf >= 75 ? "default" : "secondary"}>{conf}% confidence</Badge>
-                              {(a.companies || []).map((c: string) => <Badge key={c} variant="outline">{c}</Badge>)}
+                              {(a.companies || []).map((c: string) => <Badge key={c} variant="outline">{displayCompanyName(c)}</Badge>)}
                               {(a.platforms || []).map((p: string) => <Badge key={p} variant="outline">{platformLabel(p)}</Badge>)}
                               {a.status === "drafted" && <Badge>Drafted</Badge>}
                             </div>
@@ -274,7 +304,7 @@ export default function CompetitiveFeed() {
                           </div>
                         )}
                         {canRunAnalysis && (
-                          <Button size="sm" disabled={draft.isPending} onClick={() => setPendingDraft({ topic: `${a.topic}. ${a.summary || ""} Competitors ${(a.companies || []).join(", ")} are posting about this now; give ${clientName} its own angle.`, reason: `Competitors are posting about ${a.topic}`, platform: (a.platforms || [])[0] ? platformLabel((a.platforms || [])[0]) : "Instagram", alertId: a.id, about: `the shared topic "${a.topic}"` })}>
+                          <Button size="sm" disabled={draft.isPending} onClick={() => setPendingDraft({ topic: `${a.topic}. ${a.summary || ""} Competitors ${(a.companies || []).map((c: string) => displayCompanyName(c)).join(", ")} are posting about this now; give ${clientName} its own angle.`, reason: `Competitors are posting about ${a.topic}`, platform: topicPlatform, alertId: a.id, about: `the shared topic "${a.topic}"` })}>
                             {draft.isPending ? <Loader2 className="animate-spin" /> : <Sparkles />} Draft our take
                           </Button>
                         )}
@@ -304,7 +334,7 @@ export default function CompetitiveFeed() {
             <div className="glass px-card py-3 flex flex-wrap items-center gap-x-6 gap-y-3">
               <SegmentedGroup label="Company">
                 <Segment active={company === "all"} onClick={() => setCompany("all")}>All</Segment>
-                {companies.map((c) => <Segment key={c} active={company === c} onClick={() => setCompany(c)}>{c}</Segment>)}
+                {companies.map((c) => <Segment key={c} active={company === c} onClick={() => setCompany(c)}>{displayCompanyName(c)}</Segment>)}
               </SegmentedGroup>
               <SegmentedGroup label="Platform">
                 <Segment active={plat === "all"} onClick={() => setPlat("all")}>All</Segment>
@@ -321,16 +351,16 @@ export default function CompetitiveFeed() {
                   <div key={`${p.postLink || i}`} className="glass p-inner space-y-2.5">
                     <PostVisual url={p.postLink} image={p.image} preview={p.postLink ? previews[p.postLink] : null} mediaType={p.type} platform={p.channel} />
                     <div className="flex items-center justify-between gap-2 t-secondary">
-                      <span className="t-h4 truncate">{p.companyName}</span>
+                      <span className="t-h4 truncate">{displayCompanyName(p.companyName)}</span>
                       <span className="flex items-center gap-2 shrink-0">
-                        {isBoosted(p.facebookLikelyBoosted) && <Badge variant="secondary" title="RivalIQ estimates this Facebook post was paid promotion">Likely boosted</Badge>}
+                        {isBoosted(p.facebookLikelyBoosted) && <Badge variant="secondary" title="This Facebook post is estimated to be paid promotion">Likely boosted</Badge>}
                         {formatDate(p.publishedAt)}
                       </span>
                     </div>
                     {p.authorship === "collaboration" && <Badge variant="secondary">Company collaboration</Badge>}
                     <p className="t-body line-clamp-3 min-h-[4.5rem] whitespace-pre-line">{p.message ? cleanText(p.message) : "No caption."}</p>
                     <div className="flex gap-2 flex-wrap t-secondary">
-                      {[p.engagementTotal != null ? `${fmt(p.engagementTotal)} eng.` : null, p.estimatedImpressions ? `${fmt(p.estimatedImpressions)} est. impr.` : null, p.views ? `${fmt(p.views)} views` : null]
+                      {[p.engagementTotal != null ? `${fmt(p.engagementTotal)} eng.` : null, reachLabel(reachOf(p))]
                         .filter(Boolean).map((t, i) => <span key={i}>{i ? `· ${t}` : t}</span>)}
                     </div>
                     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -352,8 +382,14 @@ export default function CompetitiveFeed() {
                 Showing the {matching.length} newest of {allMatching.length} posts in this filter.
               </p>
             )}
+            {reachGaps.none.length > 0 && (
+              <p className="t-label">{reachGaps.none.map(platformLabel).join(" and ")} reach is not reported.</p>
+            )}
+            {reachGaps.some.length > 0 && (
+              <p className="t-label">Some {reachGaps.some.map(platformLabel).join(" and ")} posts report no reach.</p>
+            )}
             {contentless > 0 && (
-              <p className="t-label">{contentless} X {contentless === 1 ? "post is" : "posts are"} counted in the totals only: RivalIQ sends no link, caption or image for X.</p>
+              <p className="t-label">{contentless} X {contentless === 1 ? "post is" : "posts are"} counted in the totals only: X posts come with no link, caption or image.</p>
             )}
           </>
         )}
@@ -364,10 +400,9 @@ export default function CompetitiveFeed() {
         description={
           <>
             <p>
-              This pulls the last seven days of posts for every tracked company from RivalIQ, which uses one request from the
-              account's hourly allowance, and collects the reviewed LinkedIn pages and {clientName}'s own posts.
+              This pulls the last seven days of posts for every tracked company and collects the reviewed LinkedIn pages and {clientName}'s own posts.
             </p>
-            <p>The AI then looks for topics two or more companies posted about. It can take a minute or more.</p>
+            <p>It also finds the topics two or more companies posted about. It can take a minute or more.</p>
           </>
         }
         confirmLabel={snapshot ? "Refresh now" : "Pull posts"}
@@ -405,7 +440,7 @@ export default function CompetitiveFeed() {
       <ConfirmDialog
         open={!!dismissing}
         onOpenChange={(o) => !o && setDismissing(null)}
-        title="Dismiss this alert?"
+        title="Dismiss this topic?"
         description={<p>It comes off the feed. The posts behind it stay in the competitor data.</p>}
         confirmLabel="Dismiss"
         destructive={false}

@@ -7,6 +7,7 @@ import type { CalendarPost } from "@/lib/calendarRevision";
 import { evidenceSentence, wordReason } from "../../supabase/functions/_shared/calendar/reasonText";
 import { planInFlight, plannable } from "../../supabase/functions/_shared/calendar/planState";
 import { isStoryPost } from "../../supabase/functions/_shared/design/story";
+import { platformKey, platformName } from "./display";
 
 export { evidenceSentence };
 
@@ -114,14 +115,14 @@ export function shortDate(isoDay: string): string {
   return utc(isoDay).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
-/** "Oct 12 – 18, 2026" or "Sep 28 – Oct 4, 2026" */
+/** "Oct 12 to 18, 2026" or "Sep 28 to Oct 4, 2026" */
 export function weekLabel(monday: string): string {
   const sunday = addDays(monday, 6);
   const a = utc(monday);
   const b = utc(sunday);
   const sameMonth = a.getUTCMonth() === b.getUTCMonth();
   const end = sameMonth ? String(b.getUTCDate()) : shortDate(sunday);
-  return `${shortDate(monday)} – ${end}, ${b.getUTCFullYear()}`;
+  return `${shortDate(monday)} to ${end}, ${b.getUTCFullYear()}`;
 }
 
 /** One week's plan (calendar_plans). */
@@ -270,3 +271,33 @@ export function dayCountLabel(posts: Array<{ format?: string | null; platform?: 
   return words.join(" and ");
 }
 
+
+/** A week's count in the day headers' words, for the week band: "13 posts and 7 Stories this week", "2 posts", "No posts this week". */
+export function weekCountLabel(posts: Array<{ format?: string | null; platform?: string | null }>, isThisWeek: boolean): string {
+  return `${dayCountLabel(posts)}${isThisWeek ? " this week" : ""}`;
+}
+
+/**
+ * The networks a client's calendar offers, from its own data: the networks it
+ * is set up for, its connected Sprout profiles and the networks already on its
+ * calendar, one entry per network in its usual name. The five common networks
+ * stand in only for a client with none of these.
+ */
+export function calendarPlatforms(own: { primary?: string[] | null; profiles?: string[] | null; posted?: string[] | null }): string[] {
+  const seen = new Map<string, string>();
+  for (const raw of [...(own.primary ?? []), ...(own.profiles ?? []), ...(own.posted ?? [])]) {
+    const key = platformKey(raw);
+    if (key && !seen.has(key)) seen.set(key, platformName(raw));
+  }
+  return seen.size ? [...seen.values()] : ["Instagram", "LinkedIn", "TikTok", "Facebook", "X"];
+}
+
+/** The networks that have posts among these, in the order they first appear. */
+export function postedPlatforms(posts: Array<{ platform?: string | null }>): string[] {
+  const seen = new Map<string, string>();
+  for (const p of posts) {
+    const key = platformKey(p.platform);
+    if (key && !seen.has(key)) seen.set(key, platformName(p.platform));
+  }
+  return [...seen.values()];
+}

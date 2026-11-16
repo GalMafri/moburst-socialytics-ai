@@ -9,11 +9,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { functionsDir } from "../paths.ts";
 
 const migration = readFileSync(join(functionsDir, "..", "migrations", "20261111130200_video_style_merge.sql"), "utf8");
+const takeMigration = readFileSync(join(functionsDir, "..", "migrations", "20261113103200_video_style_take_kit.sql"), "utf8");
 
 const CLIENT = "00000000-0000-4000-8000-0000000000c1";
 const EMPTY = "00000000-0000-4000-8000-0000000000c2";
 const JOB_A = "00000000-0000-4000-8000-0000000000b1";
 const JOB_B = "00000000-0000-4000-8000-0000000000b2";
+const JOB_C = "00000000-0000-4000-8000-0000000000b3";
 
 const SETUP = `
 create role anon nologin; create role authenticated nologin; create role service_role nologin bypassrls;
@@ -39,6 +41,8 @@ beforeAll(async () => {
   await db.exec(SETUP);
   await db.exec(migration);
   await db.exec(migration);
+  await db.exec(takeMigration);
+  await db.exec(takeMigration);
 }, 30_000);
 afterAll(async () => { await db.close(); });
 
@@ -99,6 +103,35 @@ describe("video_style_claim_kit", () => {
   it("is for the service role only", async () => {
     const { rows } = await db.query<{ a: boolean; s: boolean }>(
       "select has_function_privilege('anon', 'public.video_style_claim_kit(uuid, uuid, interval)', 'execute') as a, has_function_privilege('service_role', 'public.video_style_claim_kit(uuid, uuid, interval)', 'execute') as s",
+    );
+    expect(rows[0]).toEqual({ a: false, s: true });
+  });
+});
+
+describe("video_style_take_kit", () => {
+  async function take(id: string, job: string, ended: string): Promise<boolean> {
+    const { rows } = await db.query<{ v: boolean }>("select public.video_style_take_kit($1, $2, $3) as v", [id, job, ended]);
+    return rows[0].v;
+  }
+
+  it("takes a claim from the ended job that holds it, once", async () => {
+    await merge(CLIENT, { kit: null, kit_started_at: null, kit_job: null });
+    expect(await claim(CLIENT, JOB_A)).toBe(true);
+    expect(await take(CLIENT, JOB_B, JOB_A)).toBe(true);
+    expect((await style(CLIENT)).kit_job).toBe(JOB_B);
+    // Job C also read A as ended: B's fresh claim is not taken from B.
+    expect(await take(CLIENT, JOB_C, JOB_A)).toBe(false);
+    expect((await style(CLIENT)).kit_job).toBe(JOB_B);
+  });
+
+  it("takes nothing while a kit is stored", async () => {
+    await merge(CLIENT, { kit: ["k0", "k1"], kit_job: JOB_A });
+    expect(await take(CLIENT, JOB_B, JOB_A)).toBe(false);
+  });
+
+  it("is for the service role only", async () => {
+    const { rows } = await db.query<{ a: boolean; s: boolean }>(
+      "select has_function_privilege('anon', 'public.video_style_take_kit(uuid, uuid, uuid)', 'execute') as a, has_function_privilege('service_role', 'public.video_style_take_kit(uuid, uuid, uuid)', 'execute') as s",
     );
     expect(rows[0]).toEqual({ a: false, s: true });
   });

@@ -108,6 +108,23 @@ describe("runWeekPlan", () => {
     expect(m.anthropic.mock.calls[0][0].body.messages[0].content).toContain("no post is seasonal");
   });
 
+  it("puts a moments job that failed before this plan job was created back in the queue once, and waits for it", async () => {
+    m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
+    m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [{ date: "2026-10-27", platform: "Instagram", copy: "Captains.", reason_type: "performance", evidence_ids: [] }] }), raw: {} });
+    const unjudged = { ...plan, moments: null };
+    const key = "week_moments:ptp:2026-10-26";
+    // The moments job gave up on 12 Oct; this week's plan job was created on 19 Oct.
+    const older = fakeDb({ calendar_plans: [unjudged], clients: [CLIENT], scheduled_jobs: [{ kind: "week_moments", client_id: "ptp", dedupe_key: key, status: "failed", finished_at: "2026-10-12T07:00:00Z" }] });
+    expect(await runWeekPlan(older, job({ created_at: "2026-10-19T07:00:00Z" } as Partial<WeekJob>), NOW)).toMatchObject({ status: "queued", deferred: true, reason: "Waiting for the week's dated moments." });
+    expect(m.anthropic).not.toHaveBeenCalled();
+    expect(older.writes.filter((w) => w.table === "scheduled_jobs")).toEqual([{ table: "scheduled_jobs", op: "update", value: expect.objectContaining({ status: "queued", attempts: 0 }) }]);
+
+    // A failure during this plan job's own run still plans without moments, and queues nothing.
+    const during = fakeDb({ calendar_plans: [unjudged], clients: [CLIENT], scheduled_jobs: [{ kind: "week_moments", client_id: "ptp", dedupe_key: key, status: "failed", finished_at: "2026-10-19T07:10:00Z" }] });
+    expect((await runWeekPlan(during, job({ created_at: "2026-10-19T07:00:00Z" } as Partial<WeekJob>), NOW)).status).toBe("done");
+    expect(during.writes.filter((w) => w.table === "scheduled_jobs")).toEqual([]);
+  });
+
   // The weekly Trends collection runs on the client's feed weekday; on a Monday
   // it was still collecting when the plans ran, so Monday-feed clients were
   // planned from week-old trends (9 Nov 2026: Buzznow, European Wax Center, Yangra).
@@ -447,7 +464,7 @@ describe("a week's Stories", () => {
     const made = rows.filter((r) => r.format === "Story");
     // Tuesday's and Wednesday's posts are the soonest on Instagram; the model's Story is a single image.
     expect(made.map((r) => r.copy)).toEqual(["Tuesday post", "Wednesday post"]);
-    expect(rows.find((r) => r.copy === "Wednesday post" && r.format !== "Story")?.format).toBe("Single Image");
+    expect(rows.find((r) => r.copy === "Wednesday post" && r.format !== "Story")?.format).toBe("image");
     for (const st of made) {
       expect(rows.find((r) => r.post_key === st.story_of)).toMatchObject({ copy: st.copy, post_date: st.post_date, platform: "Instagram" });
       expect(st).toMatchObject({ plan_id: "plan-1", client_id: "ptp", source: "plan", reasons: [{ type: "story", label: "Pay The Pyper posted 26 Instagram Stories in the last 90 days." }] });

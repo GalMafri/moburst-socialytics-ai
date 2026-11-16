@@ -1,4 +1,4 @@
-import { competitiveRangeError } from "../_shared/reports/competitiveRange.ts";
+import { competitiveRangeError, dayInZone, socialRangeError } from "../_shared/reports/competitiveRange.ts";
 // supabase/functions/run-report/index.ts
 //
 // A person asks for a report for a period. Every run the app starts by hand
@@ -55,17 +55,22 @@ Deno.serve(async (req) => {
 
     const caller = await requireStaff(req, { writeClientId: clientId });
 
-    const { data: client, error: clientErr } = await admin.from("clients").select("id, name, archived_at").eq("id", clientId).maybeSingle();
+    const { data: client, error: clientErr } = await admin.from("clients").select("id, name, archived_at, timezone").eq("id", clientId).maybeSingle();
     if (clientErr || !client) return json({ error: "Client not found" }, 404);
     if (client.archived_at) return json({ error: `${client.name} is archived.` }, 422);
 
     // Default range: the last 30 days, matching what the run pages offer.
     if (kind === "competitive" && (!!range.start !== !!range.end)) return json({ error: "Choose both start and end dates." }, 400);
     if (!range.start || !range.end) {
-      const end = new Date();
+      // Competitive: complete UTC days. Monthly: ending on the client's own today.
+      const end = new Date(`${kind === "competitive" ? new Date().toISOString().slice(0, 10) : dayInZone(client.timezone)}T00:00:00Z`);
       if (kind === "competitive") end.setUTCDate(end.getUTCDate() - 1);
       const start = new Date(end.getTime() - 29 * 86400000);
       range = { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
+    }
+    if (kind === "social") {
+      const rangeError = socialRangeError(range, client.timezone);
+      if (rangeError) return json({ error: rangeError }, 400);
     }
     if (kind === "competitive") {
       const rangeError = competitiveRangeError(range);

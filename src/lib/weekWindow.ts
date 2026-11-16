@@ -46,3 +46,19 @@ export function thisWeek(timeZone: string | null | undefined, now = new Date()):
 export function inWeek(day: string, week: { start: string; end: string }): boolean {
   return day >= week.start && day <= week.end;
 }
+
+/** The Monday of the week an address names: a real YYYY-MM-DD date gives its own week, anything else (a damaged or missing value) gives this week. */
+export function weekFromParam(raw: string | null | undefined, today: string): string {
+  const value = (raw ?? "").trim();
+  const real = /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(utc(value).getTime()) && iso(utc(value)) === value;
+  return weekOf(real ? value : today).start;
+}
+
+/** The viewer's own time zone, UTC when the browser does not say. */
+export function viewerTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}

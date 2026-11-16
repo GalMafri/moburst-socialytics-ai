@@ -65,6 +65,17 @@ function template(text: string, json: Any, nodes: Record<string, Any> = {}): str
   });
 }
 
+/**
+ * The one named difference from n8n's Combine node: n8n compared September with
+ * 2 to 31 August (the same length, 30 days); the app compares it with all of
+ * August. Everything else in the node is n8n's.
+ */
+const PREVIOUS_MONTH_EDIT = { previous_month_start: "2026-08-01", previous_month_end: "2026-08-31" };
+const withCalendarPrevious = (client: Any): Any => ({
+  ...client, ...("previous_month_start" in client ? PREVIOUS_MONTH_EDIT : {}),
+  ...(client.date_ranges ? { date_ranges: { ...client.date_ranges, previous_month: { start: PREVIOUS_MONTH_EDIT.previous_month_start, end: PREVIOUS_MONTH_EDIT.previous_month_end } } } : {}),
+});
+
 const request = moburstRequest({ withFile: true });
 const NOW = new Date("2026-10-16T20:59:30.000Z");
 const config = workflowConfiguration(request, NOW);
@@ -82,15 +93,23 @@ describe("the repo's copies of the n8n code are the live workflow's", () => {
 });
 
 describe("Workflow Configuration (Luxon's calendar arithmetic, checked by hand)", () => {
-  it("keeps the period and makes the previous one the same length, ending the day before", () => {
+  it("keeps the period and makes the previous one the whole calendar month before for a whole month", () => {
     expect(config).toMatchObject({
-      current_month_start: "2026-09-01", current_month_end: "2026-09-30", previous_month_start: "2026-08-02", previous_month_end: "2026-08-31",
+      current_month_start: "2026-09-01", current_month_end: "2026-09-30", previous_month_start: "2026-08-01", previous_month_end: "2026-08-31",
       client_name: "Moburst", report_id: "fd501cba-a2fe-4df8-b025-7ed4b204a4c3", date_range_start: "2026-09-01", date_range_end: "2026-09-30",
     });
     expect(config.body).toBe(request);
     // Across Israel's daylight-saving change (25 Oct 2026) the days stay calendar days.
-    expect(workflowConfiguration({ date_range_start: "2026-11-01", date_range_end: "2026-11-30" }, NOW)).toMatchObject({ previous_month_start: "2026-10-02", previous_month_end: "2026-10-31" });
+    expect(workflowConfiguration({ date_range_start: "2026-11-01", date_range_end: "2026-11-30" }, NOW)).toMatchObject({ previous_month_start: "2026-10-01", previous_month_end: "2026-10-31" });
     expect(workflowConfiguration({ date_range_start: "2026-09-30", date_range_end: "2026-09-30" }, NOW)).toMatchObject({ previous_month_start: "2026-09-29", previous_month_end: "2026-09-29" });
+  });
+
+  it("October is compared with September (1 to 30), not 31 Aug to 30 Sep; a custom range keeps its own length", () => {
+    expect(workflowConfiguration({ date_range_start: "2026-10-01", date_range_end: "2026-10-31" }, NOW)).toMatchObject({ previous_month_start: "2026-09-01", previous_month_end: "2026-09-30" });
+    expect(workflowConfiguration({ date_range_start: "2026-03-01", date_range_end: "2026-03-31" }, NOW)).toMatchObject({ previous_month_start: "2026-02-01", previous_month_end: "2026-02-28" });
+    expect(workflowConfiguration({ date_range_start: "2026-01-01", date_range_end: "2026-01-31" }, NOW)).toMatchObject({ previous_month_start: "2025-12-01", previous_month_end: "2025-12-31" });
+    expect(workflowConfiguration({ date_range_start: "2026-10-10", date_range_end: "2026-10-18" }, NOW)).toMatchObject({ previous_month_start: "2026-10-01", previous_month_end: "2026-10-09" });
+    expect(workflowConfiguration({ date_range_start: "2026-10-01", date_range_end: "2026-10-30" }, NOW)).toMatchObject({ previous_month_start: "2026-09-01", previous_month_end: "2026-09-30" });
   });
 
   it("falls back to this month and the last in Israel time when the request has no period", () => {
@@ -118,12 +137,12 @@ describe("the brief", () => {
     const nodes = { "Workflow Configuration": config, Webhook: { body: request }, "Prepare Brief Text": MOBURST.prepared_brief };
     const n8n = await runNode(nodeCode("Combine Brief Context with Client Data"), nodes, [MOBURST.brief_analysis]);
     const port = plain(combineBrief(MOBURST.brief_analysis, config, MOBURST.prepared_brief));
-    expect(port).toEqual(n8n[0]);
-    expect(port).toEqual(MOBURST.combine);
+    expect(port).toEqual(withCalendarPrevious(n8n[0]));
+    expect(port).toEqual(withCalendarPrevious(MOBURST.combine));
     for (const analysis of [{ error: "The brief analysis did not answer." }, { brief_text: "", brief_source: "none", brief_warning: "" }]) {
       const prepared = { brief_text: analysis.error ? "Some brief." : "", brief_source: "client_setup", brief_warning: "" };
       const n = { ...nodes, "Prepare Brief Text": prepared };
-      expect(plain(combineBrief(analysis, config, prepared))).toEqual((await runNode(nodeCode("Combine Brief Context with Client Data"), n, [analysis]))[0]);
+      expect(plain(combineBrief(analysis, config, prepared))).toEqual(withCalendarPrevious((await runNode(nodeCode("Combine Brief Context with Client Data"), n, [analysis]))[0]));
     }
   });
 
@@ -170,9 +189,52 @@ describe("Sprout", () => {
       "Get Sprout Social Post Analytics": pages.posts, "Get Previous Month Post Analytics": pages.previous_posts,
     };
     const n8n = await runNode(mirror("social-aggregate"), nodes, []);
-    const port = plain(aggregateSprout({ pages, combined, config, setup: MOBURST.sprout_setup }));
+    const { top_posts_by_platform_impressions: added, ...port } = plain(aggregateSprout({ pages, combined, config, setup: MOBURST.sprout_setup }));
+    // The one key the port adds (nodes.ts header); everything else is n8n's, key for key.
+    expect(Object.keys(added).sort()).toEqual(Object.keys(port.top_posts_by_platform).sort());
     expect(port).toEqual(n8n[0]);
     expect(port).toEqual(MOBURST.aggregate);
+  });
+
+  it("a count Sprout answers below zero is aggregated as zero, for profile days and for posts", () => {
+    const neg = (m: Any) => Object.fromEntries(Object.keys(m).map((k) => [k, typeof m[k] === "number" ? -1 : m[k]]));
+    const clone = (v: Any) => JSON.parse(JSON.stringify(v));
+    const p = clone(pages);
+    for (const row of p.current[0].data) row.metrics = neg(row.metrics);
+    for (const row of p.posts[0].data) row.metrics = neg(row.metrics);
+    const out = plain(aggregateSprout({ pages: p, combined, config, setup: MOBURST.sprout_setup }));
+    const numbers: number[] = [];
+    const walk = (v: Any, key = "") => {
+      if (typeof v === "number" && /impressions|reactions|likes|comments|shares|clicks|views|engagement/.test(key) && !/percent|change|absolute/.test(key)) numbers.push(v);
+      else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) walk(x, k);
+    };
+    walk(out.overall_totals); walk(out.platform_metrics); walk(out.top_posts);
+    expect(numbers.length).toBeGreaterThan(0);
+    expect(numbers.filter((n) => n < 0)).toEqual([]);
+  });
+
+  it("daily corrections are summed as Sprout sends them and the month is clamped once: +3 and -1 shares make 2, an all-negative month makes 0", () => {
+    const clone = (v: Any) => JSON.parse(JSON.stringify(v));
+    const zero = (m: Any) => Object.fromEntries(Object.keys(m).map((k) => [k, typeof m[k] === "number" ? 0 : m[k]]));
+    const month = (shares: number[]) => {
+      const p = clone(pages);
+      const rows = p.current[0].data;
+      for (const row of rows) row.metrics = zero(row.metrics);
+      // The same profile and the same network: one row per day, each with its own correction.
+      const first = clone(rows[0]);
+      const field = Object.keys(first.dimensions).find((key) => key.startsWith("reporting_period")) as string;
+      rows.splice(0, rows.length, ...shares.map((n, i) => ({
+        ...clone(first), dimensions: { ...first.dimensions, [field]: `2026-09-0${i + 1}` }, metrics: { ...zero(first.metrics), shares_count: n },
+      })));
+      const out = plain(aggregateSprout({ pages: p, combined, config, setup: MOBURST.sprout_setup }));
+      return { overall: out.overall_totals.shares, platform: Object.values(out.platform_metrics).map((m: Any) => m.shares) };
+    };
+    const mixed = month([3, -1]);
+    expect(mixed.overall).toBe(2);
+    expect(Math.max(...mixed.platform)).toBe(2);
+    const negative = month([-1, -2]);
+    expect(negative.overall).toBe(0);
+    expect(negative.platform.every((n: number) => n === 0)).toBe(true);
   });
 
   it("Aggregate Sprout Social Data refuses what n8n refuses: a missing page, a day outside the period, an error answer", async () => {

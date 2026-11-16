@@ -238,6 +238,7 @@ export function CopyEditor({ post, clientId, reportId, brand, onCopySaved }: Pro
       {isEditing ? (
         <div className="space-y-2">
           <Textarea
+            aria-label="Edit post copy"
             value={editedCopy}
             onChange={(e) => setEditedCopy(e.target.value)}
             rows={6}
@@ -327,9 +328,10 @@ export function CopyEditor({ post, clientId, reportId, brand, onCopySaved }: Pro
             </p>
           )}
           {post.rationale && (
-            <div className="bg-[rgba(255,255,255,0.03)] p-3.5 rounded-md t-body text-muted-foreground">
-              💡 {post.rationale}
-            </div>
+            <p className="text-base text-muted-foreground leading-relaxed">
+              <span className="font-medium text-foreground">Idea: </span>
+              {post.rationale}
+            </p>
           )}
           <PostReason reasons={(post as { _reasons?: Reason[] })._reasons} />
         </>

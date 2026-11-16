@@ -56,7 +56,7 @@ function unconfirmed(error: unknown): boolean {
   return error != null;
 }
 
-const UNCONFIRMED_LINE = "We couldn't confirm the new key. Check your keys below before making another.";
+const UNCONFIRMED_LINE = "The new key is not confirmed yet. Check your keys below before making another.";
 
 function KeyRow({ k, onRevoke }: { k: PersonalKey; onRevoke: (k: PersonalKey) => void }) {
   const state = stateOf(k);
@@ -113,7 +113,7 @@ function OneTimeKey({ created, onDone }: { created: CreatedPersonalKey; onDone: 
       </DialogHeader>
       <div className="space-y-3" data-testid="personal-key-created">
         <div className="flex items-center gap-2">
-          <code className="input-glass min-w-0 flex-1 break-all rounded-xl px-3 py-2 font-mono text-[13px] text-[#d7f07a]">{created.key}</code>
+          <code className="input-glass min-w-0 flex-1 break-all rounded-xl px-3 py-2 font-mono text-[13px] text-primary">{created.key}</code>
           <Button size="sm" variant="outline" onClick={copy}>
             {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
             {copied ? "Copied" : "Copy"}

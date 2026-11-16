@@ -1,5 +1,9 @@
 import { createClient } from "../_shared/supabase.ts";
-import { staffGate } from "../_shared/auth/requireStaff.ts";
+import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
+import { authzResponse } from "../_shared/auth/authz.ts";
+import { fetchGeneratedMedia } from "../_shared/brand-references/mediaFetch.ts";
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -12,12 +16,10 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // Writes to storage with the service role and fetches whatever remote URL it
-  // is handed. Unauthenticated, that is a free file host and an open fetcher.
-  const denied = await staffGate(req, corsHeaders);
-  if (denied) return denied;
-
   try {
+    // Who is asking comes first: an unauthenticated caller gets 401 whatever
+    // the body says, never a hint about what a valid body looks like.
+    await requireStaff(req);
     const { client_id, media_data, media_type, file_name } = await req.json();
     // media_data: base64 data URL (for images) or a remote URL (for videos)
     // media_type: "image" or "video"
@@ -25,6 +27,12 @@ Deno.serve(async (req) => {
     if (!client_id || !media_data) {
       return jsonResp({ error: "client_id and media_data are required" }, 400);
     }
+    if (!UUID.test(String(client_id))) {
+      return jsonResp({ error: "Choose a client first." }, 400);
+    }
+    // Writes to storage with the service role, so the caller needs write
+    // access to the client whose folder it writes to, not just a staff role.
+    await requireStaff(req, { writeClientId: String(client_id) });
 
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
@@ -34,7 +42,9 @@ Deno.serve(async (req) => {
     const timestamp = Date.now();
     const type = media_type || "image";
     const ext = type === "video" ? "mp4" : "png";
-    const storagePath = `${client_id}/${timestamp}-${file_name || type}.${ext}`;
+    // The name never carries a path: it could otherwise step into another client's folder.
+    const safeName = String(file_name || type).replace(/[^A-Za-z0-9_-]+/g, "-").slice(0, 80);
+    const storagePath = `${client_id}/${timestamp}-${safeName}.${ext}`;
     const bucket = "generated-media";
 
     let fileBlob: Blob;
@@ -56,10 +66,12 @@ Deno.serve(async (req) => {
       fileBlob = new Blob([bytes], { type: contentType });
     } else if (media_data.startsWith("http")) {
       // Remote URL — download and re-upload
-      const response = await fetch(media_data);
+      // Only our own storage and the generation provider's CDN, with every
+      // redirect checked; anything else could be an address inside our network.
+      const response = await fetchGeneratedMedia(media_data, new URL(Deno.env.get("SUPABASE_URL")!).hostname);
       if (!response.ok) {
         return jsonResp(
-          { error: `Failed to download media: ${response.status}` },
+          { error: "The media could not be downloaded." },
           500,
         );
       }
@@ -84,36 +96,8 @@ Deno.serve(async (req) => {
       });
 
     if (uploadError) {
-      console.error("Initial upload error:", uploadError.message);
-      // If bucket doesn't exist, try to create it
-      if (
-        uploadError.message?.includes("not found") ||
-        uploadError.message?.includes("Bucket") ||
-        uploadError.message?.includes("does not exist")
-      ) {
-        console.log("Attempting to create bucket:", bucket);
-        const { error: bucketError } = await supabase.storage.createBucket(bucket, {
-          public: true,
-          fileSizeLimit: 52428800, // 50MB
-        });
-        if (bucketError) console.error("Bucket creation error:", bucketError.message);
-
-        // Retry upload
-        const { error: retryError } = await supabase.storage
-          .from(bucket)
-          .upload(storagePath, fileBlob, {
-            contentType,
-            upsert: true,
-          });
-        if (retryError) {
-          return jsonResp(
-            { error: `Upload failed after bucket creation: ${retryError.message}` },
-            500,
-          );
-        }
-      } else {
-        return jsonResp({ error: `Upload failed: ${uploadError.message}` }, 500);
-      }
+      console.error("Upload error:", uploadError.message);
+      return jsonResp({ error: "The file could not be stored." }, 500);
     }
 
     // Get public URL
@@ -127,8 +111,9 @@ Deno.serve(async (req) => {
       media_type: type,
     });
   } catch (err: any) {
+    if (err instanceof AuthzError) return authzResponse(err, corsHeaders);
     console.error("upload-generated-media error:", err);
-    return jsonResp({ error: err.message }, 500);
+    return jsonResp({ error: err?.message === "Unsupported media host" ? "That media address is not supported." : "The media could not be stored." }, err?.message === "Unsupported media host" ? 400 : 500);
   }
 });
 

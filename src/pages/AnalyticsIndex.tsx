@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { useActiveClients } from "@/lib/activeClients";
+import { useActiveClients, viewerClients } from "@/lib/activeClients";
+import { ClientNotLinked } from "@/components/dashboard/ClientDashboard";
 import { useAuth } from "@/hooks/useAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -18,19 +19,14 @@ export default function AnalyticsIndex() {
   // Active clients only, the one shared definition every client list uses.
   const { data: clients, isLoading, isError, error, refetch } = useActiveClients<{ id: string; name: string; logo_url: string | null; hub_company_name: string | null }>("id, name, logo_url, hub_company_name");
 
-  // Client-role users should skip the chooser and go straight to their own
-  // client's analytics page.
+  // A client user has the clients the shared rule gives it (src/lib/activeClients.ts):
+  // exactly one opens straight away, several are chosen between below.
+  const mine = isClient && clients ? viewerClients(clients, { company: user?.company, isGosSession }) : null;
+  const only = mine?.length === 1 ? mine[0] : null;
   useEffect(() => {
-    if (!isClient || !clients?.length) return;
-    const userCompany = (user?.company ?? "").trim().toLowerCase();
-    // gOS client sessions are RLS-scoped, so any returned client is theirs — take
-    // the first. Legacy sessions match on hub_company_name.
-    const mine = isGosSession
-      ? clients[0]
-      : (clients.find((c) => (c.hub_company_name ?? "").trim().toLowerCase() === userCompany) ??
-        (clients.length === 1 ? clients[0] : null));
-    if (mine) navigate(`/clients/${mine.id}/analytics`, { replace: true });
-  }, [isClient, clients, user?.company, isGosSession, navigate]);
+    if (only) navigate(`/clients/${only.id}/analytics`, { replace: true });
+  }, [only, navigate]);
+  const shown = mine ?? clients;
 
   return (
     <AppLayout title="Analytics"
@@ -39,11 +35,15 @@ export default function AnalyticsIndex() {
           <Loading label="Loading clients" />
         ) : isError ? (
           <LoadRetry context="clients" error={error} onRetry={() => refetch()} />
-        ) : !clients?.length ? (
+        ) : only ? (
+          <Loading label="Opening your analytics" />
+        ) : isClient && !shown?.length ? (
+          <ClientNotLinked appears="Your analytics appear here once your account is connected." />
+        ) : !shown?.length ? (
           <EmptyState icon={BarChart3} title="No clients yet" />
         ) : (
           <div className="grid gap-inner sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 stagger-children">
-            {clients.map((c) => (
+            {shown.map((c) => (
               <ClickableCard
                 key={c.id}
                 className="hover-lift"

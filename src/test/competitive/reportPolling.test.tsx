@@ -44,7 +44,7 @@ it.each(['complete', 'failed'])('refreshes a running report into %s without a pa
 
 it('holds mismatched completed reports without exposing narrative, export or diagnostic paragraphs',async()=>{
  fixture.status='complete';fixture.data={schema_note:'RivalIQ returned no in-period posts for Phiture.',aggregates:{companies:[{name:'SplitMetrics',post_count:16,rivaliq_metrics:{posts:{current:21}}}]},ai_analysis:{executive_summary:'Unverified summary'}};
- mount();await tick(20);
+ mount();await tick(20);await tick(20);
  expect(screen.getByText('Its source figures did not pass the checks, so it is not shared. The product makes it again once a day, and it is shared when its figures pass.')).toBeInTheDocument();
  expect(screen.queryByRole('button',{name:'Export PDF'})).toBeNull();
  expect(screen.queryByText('Unverified summary')).toBeNull();

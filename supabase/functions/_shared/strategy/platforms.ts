@@ -67,7 +67,7 @@ export interface WrittenPlatform extends Omit<StrategyPlatform, "state"> {
 
 export interface PlatformInput {
   /** The client's own posts, as the calendar's gatherEvidence reads them. */
-  own: OwnPost[];
+  own: PresencePost[];
   now: Date;
   /** clients.primary_platforms, as stored. */
   primary: unknown;
@@ -102,16 +102,25 @@ export function pillarSectionKey(name: string): string {
   return `pillar:${String(name ?? "").trim()}`;
 }
 
+/**
+ * A post of the client's, kept for presence, cadence and counts. A public post
+ * whose platform hides its engagement has null: it is a post, and never a
+ * figure in a median, a rate or a score. A calendar OwnPost fits as it is.
+ */
+export type PresencePost = Omit<OwnPost, "engagement"> & { engagement: number | null };
+
 /** The last 90 days on one platform. Engagement measures leave out paid posts and posts younger than 48 hours. */
-export function baselineOf(own: OwnPost[], platform: string, now: Date): Baseline {
+export function baselineOf(own: PresencePost[], platform: string, now: Date): Baseline {
   const t = now.getTime();
   const recent = own.filter((p) => {
     const at = Date.parse(p.publishedAt);
     return p.platform === platform && Number.isFinite(at) && at <= t && at >= t - OWN_DAYS * DAY;
   });
   const settled = recent.filter((p) => !p.boosted && Date.parse(p.publishedAt) <= t - SETTLE_HOURS * 3600_000);
-  const mid = median(settled.map((p) => Number(p.engagement) || 0));
-  const reach = settled.filter((p) => (p.impressions ?? 0) > 0);
+  // A post whose engagement is unknown counts as a post, never in a median or a rate.
+  const known = settled.filter((p) => p.engagement !== null);
+  const mid = median(known.map((p) => Number(p.engagement) || 0));
+  const reach = known.filter((p) => (p.impressions ?? 0) > 0);
   const impressions = reach.reduce((s, p) => s + (p.impressions as number), 0);
   return {
     posts: recent.length,
