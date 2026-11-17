@@ -300,8 +300,7 @@ describe("startOption and the client's logo set", () => {
   });
 
   it("starts a job with the one file when there is no set or the set belongs to another logo", async () => {
-    // A set of the rule of 16 Nov is not read: it is made again by the lifecycle's next look.
-    for (const logo_set of [undefined, null, set({ of: "c1/older-logo.png" }), { ...set(), rule: 1 }, { ...set(), rule: 3 }]) {
+    for (const logo_set of [undefined, null, set({ of: "c1/older-logo.png" }), { ...set(), rule: 3 }]) {
       const row = { ...settings, logo_set } as Settings;
       const db = world(row);
       await startOption(db, request(), row, "Northwind Hockey", 0, 0);
@@ -309,8 +308,22 @@ describe("startOption and the client's logo set", () => {
       expect(job.input.logo_path).toBe("c1/logo.png");
       expect(job.input.logo_size).toEqual([701, 251]);
       expect(job.input.generate.background).toBe("#0B0E1A");
+      // The header-only file of this test has no pixel to read: the row's background as it is, and the job says so.
+      expect(job.input.generate.background_from).toBe("row");
       expect("logos" in job.input).toBe(false);
     }
+  });
+
+  it("reads a set of the rule of 16 Nov as it is when its canvas needs nothing else, and says where the ground came from", async () => {
+    const { inks: _inks, ...rule1 } = { ...set(), rule: 1 };
+    const row = { ...settings, logo_set: rule1 } as Settings;
+    const db = world(row);
+    await startOption(db, request(), row, "Northwind Hockey", 0, 0);
+    const [job] = db.tables.canva_finish_jobs;
+    expect(job.input.logo_path).toBe(OTHER);
+    expect(job.input.generate.background).toBe("#0F294C");
+    expect(job.input.generate.background_from).toBe("set");
+    expect(job.input.logos).toEqual(LOGOS);
   });
 
   it("works out a Story's placement from the canvas file's size", async () => {
@@ -374,24 +387,55 @@ describe("startOption and the client's logo set", () => {
       const used = await startOption(db, request(), row, "Northwind Hockey", 0, 0);
       return { job: db.tables.canva_finish_jobs[0], used, stored: db.tables.design_brand_settings[0] };
     };
-    // No set yet, a set of the rule before, a set for another logo: the job has the one file, and the near-black settings
-    // background would hide a letter of it. The job starts from the neutral of the ground the file was made for.
-    for (const logo_set of [null, { ...set(), rule: 1 }, set({ of: "c1/older-logo.png" })]) {
+    // No set yet, or a set for another logo: the job has the one file, and the near-black settings background would hide
+    // a letter of it. The job starts from the neutral of the ground the file was made for.
+    for (const logo_set of [null, set({ of: "c1/older-logo.png" })]) {
       const row = { ...settings, background: "#1A1A1A", logo_set } as Settings;
       const { job, used, stored } = await start(row);
       expect("logos" in job.input).toBe(false);
       expect(job.input.logo_path).toBe("c1/logo.png");
       expect(job.input.generate.background).toBe("#FFFFFF");
+      expect(job.input.generate.background_from).toBe("file");
       // Nothing of the settings is changed by it.
       expect(used.background).toBe("#1A1A1A");
       expect(stored.background).toBe("#1A1A1A");
     }
+    // The set of 16 Nov of that client (rule 1: the stored file on the settings background, the copy for dark pictures beside it)
+    // is read with the file's own parts: the stored file on white, and the copy keeps its template for dark pictures.
+    const { inks: _inks, ...rule1 } = { ...set({ white: null, made: { other: OTHER, white: null }, canvas: { file: "stored", ground: "#1A1A1A", from: "settings" } }), rule: 1 };
+    const window = await start({ ...settings, background: "#1A1A1A", logo_set: rule1 } as Settings);
+    expect(window.job.input.logo_path).toBe("c1/logo.png");
+    expect(window.job.input.generate.background).toBe("#FFFFFF");
+    expect(window.job.input.generate.background_from).toBe("file");
+    expect(window.job.input.logos).toEqual({ files: { stored: "c1/logo.png", other: OTHER }, canvas: "stored", second: { file: "other", ground: "#0B0E1A" }, fixed: [], names: { canvas: [], second: [] } });
     // A background the file shows whole on is where it starts.
     expect((await start({ ...settings, background: "#f4f4f0", logo_set: null } as Settings)).job.input.generate.background).toBe("#F4F4F0");
-    // A person's row by the same rule; their background is never written.
+    // A person's row whose background a part of their file does not show on; their background is never written.
     const theirs = await start({ ...settings, source: "person", background: "#1A1A1A", logo_set: null } as Settings);
     expect(theirs.job.input.generate.background).toBe("#FFFFFF");
     expect(theirs.stored.background).toBe("#1A1A1A");
+    // A background a part of their file is only weak on is theirs to choose.
+    expect((await start({ ...settings, source: "person", background: "#D7D7D7", logo_set: null } as Settings)).job.input.generate.background).toBe("#D7D7D7");
+    expect((await start({ ...settings, background: "#D7D7D7", logo_set: null } as Settings)).job.input.generate.background).toBe("#FFFFFF");
+  });
+
+  it("reads the stored file's parts once for a request: each option starts from the settings the one before handed back", async () => {
+    const row = { ...settings, background: "#1A1A1A", logo_set: null } as Settings;
+    const db = world(row);
+    // A file with pixels: 20 by 10, all of one near-black ink.
+    const file = new Uint8Array(24 + 20 * 10 * 4);
+    file.set(pngHeader(20, 10));
+    for (let i = 24; i < file.length; i += 4) file.set([26, 25, 25, 255], i);
+    db.uploads.set(`${BUCKET}/c1/logo.png`, file);
+    const imaging = await import("../../../functions/_shared/lifecycle/imaging");
+    const read = vi.spyOn(imaging, "logoWhole");
+    const req = request({ options_wanted: 3, briefs: [{ headline: ["A"], picture: "p" }, { headline: ["B"], picture: "q" }, { headline: ["C"], picture: "r" }] });
+    let current = row;
+    for (let i = 0; i < 3; i++) current = await startOption(db, req, current, "Northwind Hockey", i, i);
+    expect(db.tables.canva_finish_jobs).toHaveLength(3);
+    for (const job of db.tables.canva_finish_jobs) expect(job.input.generate).toMatchObject({ background: "#FFFFFF", background_from: "file" });
+    expect(read).toHaveBeenCalledTimes(1);
+    read.mockRestore();
   });
 
   it("keeps the set through a design's start when the stored logo is already its ink alone", async () => {

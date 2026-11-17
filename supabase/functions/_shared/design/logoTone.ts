@@ -20,21 +20,27 @@
 // ground and so the first template. A found post counts for a file's ground
 // when that file's own search found the logo there, whatever a contrast bar
 // says. Every ground a file of the set serves has a template, and a file is
-// stamped only on a ground it serves.
+// stamped only on a ground it serves. One line holds everywhere a file
+// meets a ground (hidesPart): a whole part under 1.5:1 there does not show
+// (designSettings.ts, UNSEEN), so no canvas, template or rest ground is such
+// a ground while another exists, and locate names no file for a picture
+// whose ground around the found logo is such a ground for it.
 //
 // Free of Deno and network imports: the picture service, the lifecycle step,
 // the design worker and the tests all import it.
 
 import { canvasLogoRect, resampleRGBA } from "../canva/brief.ts";
-import { contrast, LOGO_TONE_RULE, NEUTRAL_DARK, NEUTRAL_LIGHT, weakestContrast } from "../lifecycle/designSettings.ts";
+import { bestNeutral, contrast, groundRank, hidesInk, LOGO_TONE_READ_RULES, LOGO_TONE_RULE, NEUTRAL_DARK, NEUTRAL_LIGHT, weakestContrast } from "../lifecycle/designSettings.ts";
 import type { Ground, Ink, LogoFileName, LogoSetResult, Placement, PostLogo, Rect, Rgb } from "../picture/contract.ts";
 import { findLogo, logoFound } from "./logoMatch.ts";
 
 /** RGBA, straight alpha, row by row, 4 bytes a pixel. */
 export type Raster = { width: number; height: number; data: Uint8ClampedArray };
 
-/** The version of the rule a stored set was made with; a set of another version is not read. */
+/** The version of the rule a set is made with. */
 export const TONE_RULE = LOGO_TONE_RULE;
+/** The versions of the rule whose stored sets are read (designSettings.ts, LOGO_TONE_READ_RULES). */
+export const READ_RULES = LOGO_TONE_READ_RULES;
 
 function hexRgb(hex: string): Rgb {
   const n = parseInt(hex.replace("#", "").slice(0, 6), 16);
@@ -193,13 +199,13 @@ export function showsWhole(inks: Rgb[], ground: Rgb): boolean {
 }
 
 /**
- * Whether a whole part of a file has the ground's own color: within PART_STEP
- * per channel of it, the product's own step between two pixels of one part.
- * Such a part is not a part of its own on that ground, whatever the brand's
- * posts show there. Weaker than 3:1 is not this: a part at 2.4:1 shows.
+ * Whether a whole part of a file does not show on a ground: its contrast
+ * there is under 1.5:1 (designSettings.ts, UNSEEN, hidesInk), whatever its
+ * hue and whatever the brand's posts show there. Weaker than 3:1 is not
+ * this: a part at 2.4:1 shows, and the brand's own posts say so.
  */
-export function vanishesOn(inks: Rgb[], ground: Rgb): boolean {
-  return inks.some((c) => Math.abs(c[0] - ground[0]) <= PART_STEP && Math.abs(c[1] - ground[1]) <= PART_STEP && Math.abs(c[2] - ground[2]) <= PART_STEP);
+export function hidesPart(inks: Rgb[], ground: Rgb): boolean {
+  return hidesInk(inks, ground);
 }
 
 /**
@@ -227,15 +233,30 @@ function distinctInks(inks: Ink[]): Rgb[] {
 
 /**
  * Where the stored file rests when no post of the client's says: on the
- * settings background when the file shows whole on it, otherwise on the
- * neutral of its own ground ("pole"). Read when the set is settled and again
- * when a design starts, so a design never starts from a file on a ground
- * where one of its whole parts does not show.
+ * settings background, or on the neutral its weakest whole part shows best
+ * on (bestNeutral: the neutral of its own ground for every file that shows
+ * whole there). Read when the set is settled and again when a design
+ * starts, so a design never starts from a file on a ground where one of its
+ * whole parts does not show while another ground is free of that.
+ *
+ * A row the lifecycle wrote rests on its background when the file shows
+ * whole there, or when the background shows the weakest part better than
+ * the neutral does (groundRank): the lifecycle chooses the background by
+ * the same measure, and a background from before that choice gives way.
+ * A row a person set rests on their background unless a whole part of
+ * their file does not show there: what a person chose is believed as a
+ * post of the client's is, under 3:1 too.
  */
-export function restGround(inks: Rgb[], background: string, own: Ground): { ground: string; from: "settings" | "pole" } {
+export function restGround(inks: Rgb[], background: string, own: Ground, person = false): { ground: string; from: "settings" | "pole" } {
   const hex = String(background ?? "").trim();
-  if (HEX.test(hex) && showsWhole(inks, hexRgb(hex))) return { ground: hex.toUpperCase(), from: "settings" };
-  return { ground: own === "light" ? NEUTRAL_LIGHT : NEUTRAL_DARK, from: "pole" };
+  const neutral = bestNeutral(inks, own);
+  if (HEX.test(hex)) {
+    const bg = hexRgb(hex);
+    const rank = groundRank(inks, bg);
+    const stays = person ? !hidesInk(inks, bg) || hidesInk(inks, hexRgb(neutral)) : rank >= SHOWS || rank > groundRank(inks, hexRgb(neutral));
+    if (stays) return { ground: hex.toUpperCase(), from: "settings" };
+  }
+  return { ground: neutral, from: "pole" };
 }
 
 // ── Two files of one logo ───────────────────────────────────────────────────
@@ -397,10 +418,17 @@ export function searchTemplates(picture: Raster, templates: TemplateIn[], placem
  * (`names`), only the matched file and those can win: a file is stamped
  * only on a ground it serves, whatever a color distance says. Every
  * candidate's distance is still measured and answered, for review.
+ *
+ * `ground` is the picture's own ground around the found logo (groundAround).
+ * With it, a file one of whose whole parts does not show on that ground cannot
+ * be named (hidesPart): stamped there, that part would not show. When no
+ * file is left, none is named (null), and the design is made again as one
+ * with no found logo is. This holds for a person's file too.
  */
-export function nameFile(picture: Raster, found: Found, templates: TemplateIn[], compare: CompareIn[], order: LogoFileName[]): { file: LogoFileName; gaps: Partial<Record<LogoFileName, number>> } {
+export function nameFile(picture: Raster, found: Found, templates: TemplateIn[], compare: CompareIn[], order: LogoFileName[], ground?: Rgb | null): { file: LogoFileName | null; gaps: Partial<Record<LogoFileName, number>> } {
   const matched = templates[found.index];
-  if (matched.fixed) return { file: matched.file, gaps: {} };
+  const shows = (raster: Raster) => !ground || !hidesPart(wholeInksOf(raster), ground);
+  if (matched.fixed) return { file: shows(matched.raster) ? matched.file : null, gaps: {} };
   const candidates = new Map<LogoFileName, Raster>([[matched.file, matched.raster]]);
   for (const t of templates) if (!t.fixed && !candidates.has(t.file)) candidates.set(t.file, t.raster);
   for (const c of compare) if (!candidates.has(c.file)) candidates.set(c.file, c.raster);
@@ -410,13 +438,38 @@ export function nameFile(picture: Raster, found: Found, templates: TemplateIn[],
     if (Number.isFinite(gap)) gaps[file] = gap;
   }
   const rank = (f: LogoFileName) => { const at = order.indexOf(f); return at < 0 ? order.length : at; };
-  const may = (f: LogoFileName) => f === matched.file || !matched.names || matched.names.includes(f);
-  let file = matched.file, least = Infinity;
-  for (const f of [...candidates.keys()].filter(may).sort((a, b) => rank(a) - rank(b))) {
+  const may = (f: LogoFileName) => (f === matched.file || !matched.names || matched.names.includes(f)) && shows(candidates.get(f)!);
+  const allowed = [...candidates.keys()].filter(may).sort((a, b) => rank(a) - rank(b));
+  if (!allowed.length) return { file: null, gaps };
+  // The matched file when nothing could be measured, as before, unless it may not be named here.
+  let file: LogoFileName = allowed.includes(matched.file) ? matched.file : allowed[0], least = Infinity;
+  for (const f of allowed) {
     const gap = gaps[f];
     if (gap !== undefined && gap < least) { file = f; least = gap; }
   }
   return { file, gaps };
+}
+
+/** The colors of a file's whole exposed parts, read once for each raster a call holds. */
+const WHOLE = new WeakMap<Raster, Rgb[]>();
+export function wholeInksOf(file: Raster): Rgb[] {
+  let inks = WHOLE.get(file);
+  if (!inks) {
+    inks = wholeInks(file).inks;
+    WHOLE.set(file, inks);
+  }
+  return inks;
+}
+
+/**
+ * Whether a design whose logo was found may not be finished with this one
+ * file: one of the file's whole parts does not show on the picture's ground
+ * around the found rectangle (hidesPart). False when
+ * the picture has no pixel to sample around the rectangle.
+ */
+export function lostOn(picture: Raster, file: Raster, rect: Rect): { ground: Rgb | null; lost: boolean } {
+  const around = groundAround(picture, rect);
+  return around ? { ground: around.ground, lost: hidesPart(wholeInksOf(file), around.ground) } : { ground: null, lost: false };
 }
 
 /**
@@ -513,24 +566,22 @@ export interface LogoSet {
  * has no search of its own and counts when it is the closest in color). A
  * post where another file's search found the logo, and this file was only
  * the closest in color, shows the brand's logo in a color the app has no
- * file for and says nothing about where this file sits. Of the grounds that
- * count, those on which the file shows whole come first; when the client's
- * posts show the file only on grounds under 3:1, those are used, because a
- * contrast bar does not overrule the brand's own posts, unless a whole part
- * has the ground's own color there (vanishesOn): that ground never counts.
- * Among them the
- * ground closest to the others (the smallest sum of distances), then the
- * flatter one, then the earlier post. A ground on which a whole part has
- * the ground's own color (vanishesOn) never counts, whatever a post shows.
- * With no ground that counts: where the
- * stored file rests (restGround: the row's background when the file shows
- * whole on it, else the neutral of its own ground), and for another file
- * the neutral of the ground it serves. This sets a starting color for the
- * image model and passes or fails nothing.
+ * file for and says nothing about where this file sits. A ground on which a
+ * whole part of the file does not show (hidesPart) never
+ * counts, whatever a post shows. Of the grounds that count, those on which
+ * the file shows whole come first; when the client's posts show the file
+ * only on grounds under 3:1, those are used, because a contrast bar does
+ * not overrule the brand's own posts. Among them the ground closest to the
+ * others wins (the smallest sum of distances), then the flatter one, then
+ * the earlier post. With no ground that counts: where the stored file rests
+ * (restGround), and for another file the neutral its weakest whole part
+ * shows best on, starting from the neutral of the ground it serves
+ * (bestNeutral). This sets a starting color for the image model and passes
+ * or fails nothing.
  *
  * The canvas of a row a person set: their file, where it rests (their
- * background whenever their file shows whole on it). Nothing of theirs is
- * written.
+ * background unless a whole part of their file has that background's own
+ * color). Nothing of theirs is written.
  */
 export function chooseSet(input: {
   of: string; source: "lifecycle" | "person"; background: string;
@@ -548,7 +599,7 @@ export function chooseSet(input: {
   const white: LogoSet["white"] = paths.white && facts.made.white && shown.white > 0 ? { path: paths.white } : null;
 
   const storedInks = distinctInks(facts.inks.stored ?? []);
-  const rest = restGround(storedInks, input.background, facts.own);
+  const rest = restGround(storedInks, input.background, facts.own, input.source === "person");
   let canvas: LogoSet["canvas"] = { file: "stored", ...rest };
   if (input.source !== "person") {
     const has: Record<LogoFileName, boolean> = { stored: true, other: !!other, white: !!white };
@@ -556,15 +607,15 @@ export function chooseSet(input: {
     for (const f of FILE_ORDER) if (has[f] && shown[f] > shown[file]) file = f;
     const inks = (facts.inks[file] ?? []).map((ink) => ink.color);
     const counts = found.map((p, at) => ({ p, at })).filter(({ p }) => p.shows === file && (file === "white" || p.matched === file));
-    // Three tiers, the first with a post wins: grounds the file shows whole on, grounds where no whole part has the ground's own color, none.
+    // Three tiers, the first with a post wins: grounds the file shows whole on, grounds where every whole part shows (none under 1.5:1), none.
     const whole = counts.filter(({ p }) => showsWhole(inks, p.ground));
-    const grounds = whole.length ? whole : counts.filter(({ p }) => !vanishesOn(inks, p.ground));
+    const grounds = whole.length ? whole : counts.filter(({ p }) => !hidesPart(inks, p.ground));
     const ranked = grounds
       .map((g) => ({ ...g, sum: grounds.reduce((s, o) => s + Math.hypot(g.p.ground[0] - o.p.ground[0], g.p.ground[1] - o.p.ground[1], g.p.ground[2] - o.p.ground[2]), 0) }))
       .sort((a, b) => a.sum - b.sum || b.p.flat - a.p.flat || a.at - b.at);
     if (ranked.length) canvas = { file, ground: hexOf(ranked[0].p.ground), from: "client_posts" };
     else if (file === "stored") canvas = { file, ...rest };
-    else canvas = { file, ground: hexOf(file === "white" || facts.own === "light" ? DARK : LIGHT), from: "pole" };
+    else canvas = { file, ground: bestNeutral(distinctInks(facts.inks[file] ?? []), file === "white" ? "dark" : otherGround(facts.own)), from: "pole" };
   }
 
   return {
@@ -587,20 +638,20 @@ export function chooseSet(input: {
 export interface JobLogos {
   files: { stored: string; other?: string; white?: string };
   canvas: LogoFileName;
-  second: { file: LogoFileName; ground: typeof NEUTRAL_LIGHT | typeof NEUTRAL_DARK } | null;
+  second: { file: LogoFileName; ground: string } | null;
   fixed: LogoFileName[];
   names?: { canvas: LogoFileName[]; second: LogoFileName[] };
 }
 
 /**
  * What a design job reads from a settings row's set: the canvas file's path,
- * the canvas ground, and the job's logos. Null when the row has no current
- * set, and the job then runs with logo_path and background exactly as
- * before: the set must belong to the row's logo_path and to this version of
- * the rule, name a canvas file it holds and a six digit ground, and, when
- * its second file is a person's, the row's person key must still name that
- * file for that logo (a removed file stays in the set until it is settled
- * again).
+ * the canvas ground, and the job's logos. Null when the row has no set to
+ * read, and the job then runs with the one file (jobs.ts): the set must
+ * belong to the row's logo_path and to a version of the rule that is read
+ * (READ_RULES), name a canvas file it holds and a six digit ground, and,
+ * when its second file is a person's, the row's person key must still name
+ * that file for that logo (a removed file stays in the set until it is
+ * settled again).
  *
  * A row a person set always starts from their own file, whatever their
  * posts show; its set only adds the files a design may be recognized and
@@ -609,12 +660,13 @@ export interface JobLogos {
  * The ground. A ground the client's posts gave is the set's own. Wherever
  * the stored file is the canvas file with no such ground (a person's row, a
  * ground from the settings, or the file resting on its neutral), the ground
- * is read here, from the row's background as it is now and the file's inks
- * in the set (restGround): the background when the file shows whole on it,
- * else the neutral of its own ground. So the canvas, and with it the first
- * template, never carries the stored file on a ground where one of its
- * whole parts does not show, whatever the row's background is at this
- * moment.
+ * is read here, from the row's background as it is now and the colors of
+ * the file's whole parts (restGround). Those colors are the set's `inks`;
+ * a set of rule 1 has none, and `whole` then gives them, read by the caller
+ * from the stored file's own pixels. With neither, null. So the canvas, and
+ * with it the first template, never carries the stored file on a ground
+ * where one of its whole parts does not show, whatever the
+ * row's background is at this moment and whichever rule made the set.
  *
  * `second` is the template for the ground the canvas file does not cover.
  * The canvas file covers the dark ground when it is the white file and the
@@ -626,18 +678,24 @@ export interface JobLogos {
  * file for the ground still needed is the stored file when that is its own
  * ground, else the second file, else the stored file when it shows on both
  * grounds, else the white file when that ground is the dark one, else none.
- * So every ground a file of the set serves has a template.
+ * So every ground a file of the set serves has a template. The second
+ * template lies on that ground's neutral; the stored file for its own
+ * ground, when it serves that ground alone, lies on the neutral it rests on
+ * (bestNeutral), which is the same color for every file that shows whole
+ * there.
  *
  * `names` lists, for each template, the other files that serve the ground
  * it covers and are no person's: the stored file its own ground (both when
  * it shows on both), the second file the other ground, the white file the
  * dark ground. Locate names only the matched file or one of these.
  */
-export function jobLogos(row: { logo_path: string; background: string; source?: string | null; logo_set?: unknown }): { logo_path: string; background: string; logos: JobLogos } | null {
+export function jobLogos(
+  row: { logo_path: string; background: string; source?: string | null; logo_set?: unknown },
+  whole?: { inks: Rgb[]; own: Ground } | null,
+): { logo_path: string; background: string; logos: JobLogos } | null {
   const set = row.logo_set as Partial<LogoSet> | null | undefined;
-  if (!set || typeof set !== "object" || set.of !== row.logo_path || set.rule !== TONE_RULE) return null;
+  if (!set || typeof set !== "object" || set.of !== row.logo_path || !READ_RULES.includes(set.rule as number)) return null;
   if (set.own !== "light" && set.own !== "dark") return null;
-  if (!Array.isArray(set.inks)) return null;
   const own: Ground = set.own;
   const other = set.other && typeof set.other.path === "string" && set.other.path ? set.other : null;
   const white = set.white && typeof set.white.path === "string" && set.white.path ? set.white : null;
@@ -645,17 +703,22 @@ export function jobLogos(row: { logo_path: string; background: string; source?: 
   const files: JobLogos["files"] = { stored: row.logo_path, ...(other ? { other: other.path } : {}), ...(white ? { white: white.path } : {}) };
   const stored = set.canvas;
   if (!stored || !FILE_ORDER.includes(stored.file) || !files[stored.file] || typeof stored.ground !== "string" || !HEX.test(stored.ground)) return null;
+  // The colors of the stored file's whole parts: the set's own, or for a set of rule 1 the ones read from the file.
+  const inks: Rgb[] | null = Array.isArray(set.inks) ? (set.inks as Rgb[]) : whole?.inks ?? null;
   // Where the stored file rests is read from the row, never from the copy of it in the set, so a background changed
   // since the set was settled is used at once: always for a row a person set (their own file), and for the stored
   // file whenever the client's posts gave it no ground.
-  const rests = row.source === "person" || (stored.file === "stored" && stored.from !== "client_posts");
-  const canvas = rests ? { file: "stored" as LogoFileName, ground: restGround(set.inks as Rgb[], row.background, own).ground } : stored;
+  const person = row.source === "person";
+  const rests = person || (stored.file === "stored" && stored.from !== "client_posts");
+  if (rests && !inks) return null;
+  const canvas = rests ? { file: "stored" as LogoFileName, ground: restGround(inks!, row.background, own, person).ground } : stored;
 
   const both = set.both === true;
   const fixed: LogoFileName[] = other?.from === "person" ? ["other"] : [];
   const covered: Ground = canvas.file === "white" ? "dark" : canvas.file === "other" ? otherGround(own) : both ? sideOf(hexRgb(canvas.ground)) : own;
   const needed = otherGround(covered);
   const file: LogoFileName | null = needed === own ? "stored" : other ? "other" : both ? "stored" : needed === "dark" && white ? "white" : null;
+  const neutral = needed === "light" ? NEUTRAL_LIGHT : NEUTRAL_DARK;
   // The files that may be stamped with a template: the ones that serve the ground it covers.
   const serves = (f: LogoFileName, ground: Ground) => (f === "stored" ? ground === own || both : f === "other" ? ground === otherGround(own) : ground === "dark");
   const namesFor = (template: LogoFileName, ground: Ground) => FILE_ORDER.filter((f) => f !== template && !!files[f] && !fixed.includes(f) && serves(f, ground));
@@ -665,7 +728,8 @@ export function jobLogos(row: { logo_path: string; background: string; source?: 
     logos: {
       files,
       canvas: canvas.file,
-      second: file ? { file, ground: needed === "light" ? NEUTRAL_LIGHT : NEUTRAL_DARK } : null,
+      // The stored file for its own ground, behind another file on the canvas: on the neutral it rests on.
+      second: file ? { file, ground: file === "stored" && needed === own && !both && inks ? bestNeutral(inks, own) : neutral } : null,
       fixed,
       names: { canvas: namesFor(canvas.file, covered), second: file ? namesFor(file, needed) : [] },
     },

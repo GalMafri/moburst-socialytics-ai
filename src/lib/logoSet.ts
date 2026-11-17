@@ -14,7 +14,7 @@
 // it.
 
 import type { LogoSet } from "../../supabase/functions/_shared/design/logoTone";
-import { LOGO_TONE_RULE, NEUTRAL_DARK, NEUTRAL_LIGHT, personOther } from "../../supabase/functions/_shared/lifecycle/designSettings";
+import { LOGO_TONE_READ_RULES, NEUTRAL_DARK, NEUTRAL_LIGHT, personOther } from "../../supabase/functions/_shared/lifecycle/designSettings";
 
 export interface LogoTile {
   key: "light" | "dark" | "white";
@@ -39,7 +39,9 @@ const STORED = "The client's logo file";
 
 /**
  * The view for a row: no tiles and no control while the row has no set for
- * its logo (none made yet, or the main logo changed since).
+ * its logo (none made yet, or the main logo changed since). A set of the
+ * rule before is shown until the lifecycle has made it again: its files are
+ * the same, so the tiles do not go away and come back.
  *
  * The client's logo file is shown on the pictures it was made for. For the
  * other pictures: a person's own file while the row names one for this logo
@@ -50,7 +52,7 @@ const STORED = "The client's logo file";
  */
 export function logoSetView(row: LogoSetRow | null | undefined): LogoSetView {
   const set = row?.logo_set as Partial<LogoSet> | null | undefined;
-  if (!row || !set || typeof set !== "object" || set.of !== row.logo_path || set.rule !== LOGO_TONE_RULE || (set.own !== "light" && set.own !== "dark")) return { tiles: [], control: null };
+  if (!row || !set || typeof set !== "object" || set.of !== row.logo_path || !LOGO_TONE_READ_RULES.includes(set.rule as number) || (set.own !== "light" && set.own !== "dark")) return { tiles: [], control: null };
   const own = set.own;
   const person = personOther(row);
   // A person's file the set still names after it was removed is no longer the client's second file.

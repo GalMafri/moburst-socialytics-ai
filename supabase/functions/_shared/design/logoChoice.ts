@@ -8,6 +8,7 @@
 // network imports, so the worker, the replay script and the tests share it.
 
 import type { LocateResult, LogoFileName, Placement, Rgb } from "../picture/contract.ts";
+import { logoFound } from "./logoMatch.ts";
 import { jobLogos, type JobLogos } from "./logoTone.ts";
 
 function hexRgb(hex: string): Rgb {
@@ -55,14 +56,36 @@ export function locatePlan(input: LocateInput): LocatePlan {
 const places = (n: number, k: number) => Math.round(n * 10 ** k) / 10 ** k;
 
 /**
+ * Why a located design is made again, or null when it goes on to be
+ * finished. Two reasons, in this order: the match is not the logo at a size
+ * the client uses (logoFound, the test a design always had), or no file
+ * that may be stamped shows on the picture's own ground around the logo (a
+ * whole part of each is under 1.5:1 there, `lost` in the service's answer,
+ * 17 Nov 2026). The text is for the job's record and the log, never for a screen.
+ */
+export function locateRefusal(found: LocateResult): string | null {
+  const score = places(found.score, 3), scale = (found.width / found.usual.width).toFixed(2);
+  if (!logoFound(found, found.usual.width)) {
+    const each = found.scores && found.scores.length > 1 ? ` (each file: ${found.scores.map((v) => v.toFixed(3)).join(", ")})` : "";
+    return `logo match ${score} at ${scale} of the usual width${each}`;
+  }
+  if (found.lost === true) {
+    const hex = found.ground ? `#${found.ground.map((v) => Math.round(v).toString(16).padStart(2, "0")).join("")}`.toUpperCase() : "its ground";
+    return `logo match ${score}, and a part of the logo does not show on the picture behind it (${hex})`;
+  }
+  return null;
+}
+
+/**
  * What the job keeps once the logo was found. Always the score, the
  * rectangle the file is stamped at (the service's own rectangle for a named
  * file of another shape, else where the logo was found) and the design's
  * size, exactly as before. For a job that carries a set also the file
  * finish stamps (the named file, or the canvas file when the answer names
  * none), which file was named and which matched, each template's score and
- * each color distance, for review. All of it is cleared when a design is
- * made again (modelSteps.ts, OF_THE_DESIGN).
+ * each color distance, for review. For every job also the picture's own
+ * color around the found logo, when the service answered it. All of it is
+ * cleared when a design is made again (modelSteps.ts, OF_THE_DESIGN).
  */
 export function logoState(input: { logo_path: string; logos?: JobLogos | null }, found: LocateResult): Record<string, unknown> {
   const state: Record<string, unknown> = {
@@ -70,6 +93,8 @@ export function logoState(input: { logo_path: string; logos?: JobLogos | null },
     logo_rect: found.stamp ?? { x: found.x, y: found.y, width: found.width, height: found.height },
     logo_frame: found.frame,
   };
+  // The picture's own color around the found logo, for review.
+  if (found.ground) state.logo_ground = found.ground;
   const logos = input.logos;
   if (!logos) return state;
   const named: LogoFileName = found.file && logos.files[found.file] ? found.file : logos.canvas;

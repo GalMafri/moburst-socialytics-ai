@@ -13,6 +13,8 @@
 // buys one clip, so it is never replaced; when it does not finish, the
 // request closes with its reason.
 
+import { wordsOnly } from "../design/words.ts";
+
 export const OPTIONS_WANTED = 1;
 /** How many options a still request may start in all, replacements included. */
 export const MAX_CANDIDATES = 3;
@@ -108,7 +110,7 @@ export const CAROUSEL_SLIDES = 5;
 const MAX_HEADLINE_WORDS = 12;
 
 function cleanSlide(o: unknown): Slide | null {
-  const headline = Array.isArray((o as Slide)?.headline) ? (o as Slide).headline.map((l) => String(l).replace(/\s+/g, " ").trim()).filter(Boolean).slice(0, 2) : [];
+  const headline = Array.isArray((o as Slide)?.headline) ? (o as Slide).headline.map((l) => wordsOnly(String(l))).filter(Boolean).slice(0, 2) : [];
   const picture = String((o as Slide)?.picture ?? "").replace(/\s+/g, " ").trim();
   const words = headline.join(" ").split(" ").filter(Boolean).length;
   if (!headline.length || !picture || words > MAX_HEADLINE_WORDS) return null;
@@ -181,7 +183,7 @@ export function parseBriefs(text: string, library: string[] = []): Brief[] {
   if (!Array.isArray(raw)) return [];
   const out: Brief[] = [];
   for (const o of raw) {
-    const headline = Array.isArray((o as Brief)?.headline) ? (o as Brief).headline.map((l) => String(l).replace(/\s+/g, " ").trim()).filter(Boolean).slice(0, 2) : [];
+    const headline = Array.isArray((o as Brief)?.headline) ? (o as Brief).headline.map((l) => wordsOnly(String(l))).filter(Boolean).slice(0, 2) : [];
     const picture = String((o as Brief)?.picture ?? "").replace(/\s+/g, " ").trim();
     const words = headline.join(" ").split(" ").filter(Boolean).length;
     if (!headline.length || !picture || words > MAX_HEADLINE_WORDS) continue;
@@ -300,7 +302,7 @@ export function carouselPlannerPrompt(args: { brand: string; platform: string; c
     "For each option give:",
     CHOOSE_POSTS(args.brand),
     "- slides, and for each slide:",
-    `  - headline: the words set on that slide, written in ${args.brand}'s voice from the copy, in the copy's language. One line of at most 8 words, optionally a second, shorter line.`,
+    `  - headline: the words set on that slide, written in ${args.brand}'s voice from the copy, in the copy's language. One line of at most 8 words, optionally a second, shorter line. Words only: an emoji stays in the post's copy.`,
     "  - picture: one sentence describing the picture behind the words, using the kinds of subjects, materials, light and composition of the posts you chose, with a subject the recent designs did not show. Describe what is in the picture, all of it in sharp focus. It holds no lettering, numbers, signs, screens with writing, logos or brand marks, and names no brand. It shows no real or identifiable person and no portrait standing in for one: where a chosen post has a person, use an object, a scene or hands instead. The slides of one option share one setting and look, so they read as a series, and each slide shows a different subject or moment, so no two slides repeat a picture.",
     "The options differ from each other in layout or setting, and in wording. Put the strongest first: it is the one that will be made, so it should be the one you would publish.",
     `Reply with JSON only: {"options":[{"posts":[2],"layout":"...","slides":[{"headline":["line one","optional line two"],"picture":"..."}]}]}`,
@@ -550,7 +552,7 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
       s.on_screen_text === "none"
         ? `${args.brand}'s videos carry no text over the footage, so this video carries none: the copy goes with the post.`
         : [
-            `- headline: the text over the footage, written in ${args.brand}'s voice from the copy, in the copy's language, the way ${args.brand}'s videos put text on screen. One line of at most 8 words, optionally a second, shorter line.`,
+            `- headline: the text over the footage, written in ${args.brand}'s voice from the copy, in the copy's language, the way ${args.brand}'s videos put text on screen. One line of at most 8 words, optionally a second, shorter line. Words only: an emoji stays in the post's copy.`,
             `- text: one sentence on how it looks and where it sits, taken from the text in ${args.brand}'s videos (${s.text_style || s.on_screen_text}). Keep their treatment as it is: no box, band, panel or overlay behind the text unless their videos have one.`,
           ].join("\n"),
       "The options differ from each other in footage. Put the strongest first: it is the one that will be made.",
@@ -572,7 +574,7 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
       `The footage is ${args.brand}'s own filmed clip (this post was filmed because ${args.filmed}), used as it is with its sound. Over it the hook is set as on-screen text, with ${args.brand}'s logo.`,
       "For each option give:",
       CHOOSE_POSTS(args.brand),
-      `- headline: the hook set on screen, written in ${args.brand}'s voice from the copy, in the copy's language. One line of at most 8 words, optionally a second, shorter line.`,
+      `- headline: the hook set on screen, written in ${args.brand}'s voice from the copy, in the copy's language. One line of at most 8 words, optionally a second, shorter line. Words only: an emoji stays in the post's copy.`,
       "- text: one sentence on how the hook looks on screen, taken from the type in the posts you chose (weight, case, color, glow or shadow), set at the top of the frame or in the lower third so faces and the main subject stay clear.",
       "The options differ in wording. Put the strongest first: it is the one that will be made.",
       'Reply with JSON only: {"options":[{"posts":[2],"layout":"...","headline":["line one","optional line two"],"text":"..."}]}',
@@ -591,7 +593,7 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
     `The video is one continuous 8-second shot of footage with sound, made by a video model from an opening frame drawn in the world of ${args.brand}'s posts. Over it the hook is set as on-screen text, with ${args.brand}'s logo.`,
     "For each option give:",
     CHOOSE_POSTS(args.brand),
-    `- headline: the hook set on screen, written in ${args.brand}'s voice from the copy, in the copy's language. One line of at most 8 words, optionally a second, shorter line.`,
+    `- headline: the hook set on screen, written in ${args.brand}'s voice from the copy, in the copy's language. One line of at most 8 words, optionally a second, shorter line. Words only: an emoji stays in the post's copy.`,
     "- text: one sentence on how the hook looks on screen, taken from the type in the posts you chose (weight, case, color, glow or shadow) and where on the frame it sits (top, center or lower third), so it reads clearly over moving footage.",
     `- footage: one shot, described for the video model in two or three sentences: what is in frame, how it moves, how the camera moves, the light and the palette, in the world of ${args.brand}'s posts and videos, all of it in sharp focus. It holds no lettering, numbers, signs, logos or brand marks, and no screens, dashboards, charts, documents or interfaces (the video model fills those with garbled writing), and names no brand. It shows no real or identifiable person: use objects, materials, places, hands or abstract motion instead. It is one whole scene: it holds no band, panel or empty area kept for the hook, which is laid over it as it is.`,
     "The options differ from each other in footage and wording. Put the strongest first: it is the one that will be made, so it should be the one you would publish.",
@@ -617,7 +619,7 @@ export function plannerPrompt(args: { brand: string; platform: string; copy: str
     noteLine(args.note),
     "For each option give:",
     CHOOSE_POSTS(args.brand),
-    `- headline: the words that will be set on the design, written in ${args.brand}'s voice from the post's message, in the copy's language. One line of at most 8 words, optionally a second, shorter line.`,
+    `- headline: the words that will be set on the design, written in ${args.brand}'s voice from the post's message, in the copy's language. One line of at most 8 words, optionally a second, shorter line. Words only: an emoji stays in the post's copy.`,
     "- picture: one sentence describing the picture behind the words, using the kinds of subjects, materials, light and composition of the posts you chose, with a subject the recent designs did not show. Describe what is in the picture, all of it in sharp focus. It holds no lettering, numbers, signs, screens with writing, logos or brand marks, and names no brand. It shows no real or identifiable person and no portrait standing in for one: where a chosen post has a person, use an object, a scene or hands instead.",
     "The options differ from each other in layout or picture, and in headline. Put the strongest first: it is the one that will be made, so it should be the one you would publish.",
     'Reply with JSON only: {"options":[{"posts":[2],"layout":"...","headline":["line one","optional line two"],"picture":"..."}]}',

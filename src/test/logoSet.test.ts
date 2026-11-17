@@ -27,9 +27,12 @@ describe("the card's view of a logo set", () => {
     expect(view(null)).toEqual(NOTHING);
     expect(view(undefined)).toEqual(NOTHING);
     expect(view(set({ of: "c1/older-logo.png" }))).toEqual(NOTHING);
-    // A set made by another version of the rule is not shown: the lifecycle makes it again.
-    expect(view({ ...set(), rule: 1 })).toEqual(NOTHING);
+    // A set of a version of the rule that is not read is not shown.
     expect(view({ ...set(), rule: 3 })).toEqual(NOTHING);
+    expect(view({ ...set(), rule: undefined })).toEqual(NOTHING);
+    // A set of the rule before is shown until the lifecycle has made it again: its files are the same, so no tile goes away and comes back.
+    expect(view({ ...set(), rule: 1, inks: undefined })).toEqual(view(set()));
+    expect(view({ ...set(), rule: 1, inks: undefined }).tiles.length).toBeGreaterThan(0);
     // A person's second file saved before any set was made: nothing yet.
     expect(view({ person: { path: PERSON, of: LOGO, at: AT } })).toEqual(NOTHING);
   });

@@ -11,6 +11,14 @@ describe("parseBriefs", () => {
     const text = 'Here you go {"options":[{"headline":["AI answers are changing","how brands get found"],"picture":"a crystal brain on a glass pedestal"},{"headline":[],"picture":"x"},{"headline":["one two three four five six seven eight nine ten eleven twelve thirteen"],"picture":"y"}]}';
     expect(parseBriefs(text)).toEqual([{ headline: ["AI answers are changing", "how brands get found"], picture: "a crystal brain on a glass pedestal" }]);
   });
+  it("keeps a headline to its words: a pictograph is left to the caption, and a line that was only one is dropped", () => {
+    const text = '{"options":[{"headline":["Your patch, your rules \u{1FA75}","Share your tip below \u{1F447}"],"picture":"a patch on a shelf"},{"headline":["\u2764\uFE0F your skin","\u{1F447}\u{1F447}"],"picture":"a jar"},{"headline":["Wax Center\u00AE wins","Top 5 tips\u2122"],"picture":"a room"},{"headline":["\u{1F499}"],"picture":"nothing"}]}';
+    expect(parseBriefs(text)).toEqual([
+      { headline: ["Your patch, your rules", "Share your tip below"], picture: "a patch on a shelf" },
+      { headline: ["your skin"], picture: "a jar" },
+      { headline: ["Wax Center\u00AE wins", "Top 5 tips\u2122"], picture: "a room" },
+    ]);
+  });
   it("returns nothing for a reply without JSON", () => {
     expect(parseBriefs("sorry")).toEqual([]);
   });

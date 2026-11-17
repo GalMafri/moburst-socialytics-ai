@@ -73,10 +73,17 @@ export type LocateRequest = PictureMeta & { design: string; placement: Placement
  * file), `scores` (one per template, in the order sent), `gaps` (the color
  * distances that were measured) and, only when the named file's shape differs
  * from the matched file's, `stamp` (the rectangle to stamp it at).
+ *
+ * Since 17 Nov 2026 every answer also has `ground`, the picture's own color
+ * around the found rectangle (absent when there is no pixel to sample), and
+ * `lost` is true when no file that may be stamped shows on it: a whole part
+ * of each is under 1.5:1 there. `file` is then null. The worker makes
+ * such a design again, as it does one with no found logo.
  */
 export type LocateResult = {
   x: number; y: number; width: number; height: number; score: number; usual: Rect; frame: [number, number];
-  file?: LogoFileName; matched?: LogoFileName; scores?: number[]; gaps?: Partial<Record<LogoFileName, number>>; stamp?: Rect;
+  file?: LogoFileName | null; matched?: LogoFileName; scores?: number[]; gaps?: Partial<Record<LogoFileName, number>>; stamp?: Rect;
+  ground?: Rgb; lost?: boolean;
 };
 export type ReadRequest = PictureMeta & { picture: string; page: Size; band?: Rect; area?: Rect; out: { page: string; band?: string; area?: string } };
 export type ReadResult = { picture: Size; page: Size; band?: Size; area?: Size };

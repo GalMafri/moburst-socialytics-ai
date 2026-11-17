@@ -105,16 +105,85 @@ export function weakestContrast(inks: Array<[number, number, number]>, ground: [
   return least;
 }
 
+/** A color shows on another at this contrast or more. */
+const SHOWS = 3;
+/**
+ * A whole part of a logo does not show on a ground where its contrast there
+ * is under this (17 Nov 2026). Measured that day: every case where a part
+ * could not be seen at full size was 1.29:1 or less (a black wordmark on a
+ * brand's near-black, an orange half on the brand's orange, a cyan panel on
+ * the brand's cyan), and the weakest ground any client's own posts show a
+ * part on is 2.19:1. Every color within 16 per channel of the ground, the
+ * step between two pixels of one part, is under it (1.29:1 at most).
+ */
+export const UNSEEN = 1.5;
+
+/**
+ * Whether a whole part of a logo does not show on a ground: one of the inks
+ * has under UNSEEN contrast there. A hue of its own does not make up for
+ * it: an orange part on a coral of nearly its lightness does not show.
+ * Weaker than 3:1 is not this: a part at 2.4:1 shows, and the brand's own
+ * posts say so.
+ */
+export function hidesInk(inks: Array<[number, number, number]>, ground: [number, number, number]): boolean {
+  return inks.some((c) => contrast(c, ground) < UNSEEN);
+}
+
+/**
+ * How well a logo's inks show on a ground, for choosing between grounds:
+ * the contrast of the weakest ink, with 3:1 counted as enough (every ground
+ * the logo shows whole on is as good as another), and below every other
+ * ground when a part does not show there (hidesInk).
+ */
+export function groundRank(inks: Array<[number, number, number]>, ground: [number, number, number]): number {
+  return hidesInk(inks, ground) ? 0 : Math.min(SHOWS, weakestContrast(inks, ground));
+}
+
+/** The gray with this relative luminance, as a hex color. */
+function grayOf(luminanceWanted: number): string {
+  const y = Math.max(0, Math.min(1, luminanceWanted));
+  const s = y <= 0.0030353 ? y * 12.92 : 1.055 * y ** (1 / 2.4) - 0.055;
+  const v = Math.max(0, Math.min(255, Math.round(s * 255)));
+  return `#${v.toString(16).padStart(2, "0").repeat(3)}`.toUpperCase();
+}
+
+/**
+ * The neutral a logo file rests on when nothing else says: the one on which
+ * its weakest whole part shows best (groundRank). The candidates are the
+ * neutral of the ground the file was made for (`own`), the other neutral,
+ * and, for a file with light and dark parts, the gray halfway in contrast
+ * between each two neighboring brightnesses of its inks, darkest first.
+ * Equal ranks go to the earlier candidate, so every file that shows whole on
+ * the neutral of its own ground rests there, as before. A dark file with a
+ * white part, whose white part does not show on white and whose dark part
+ * does not show on the dark neutral, rests on a gray both parts show on.
+ */
+export function bestNeutral(inks: Array<[number, number, number]>, own: "light" | "dark"): string {
+  const first = own === "light" ? NEUTRAL_LIGHT : NEUTRAL_DARK, second = own === "light" ? NEUTRAL_DARK : NEUTRAL_LIGHT;
+  const candidates = [first, second];
+  const levels = [...new Set(inks.map((c) => luminance(c)))].sort((a, b) => a - b);
+  for (let i = 0; i + 1 < levels.length; i++) candidates.push(grayOf(Math.sqrt((levels[i] + 0.05) * (levels[i + 1] + 0.05)) - 0.05));
+  let best = first, rank = -1;
+  for (const c of candidates) {
+    const r = groundRank(inks, rgb(c)!);
+    if (r > rank) { best = c; rank = r; }
+  }
+  return best;
+}
+
 /**
  * The background behind the logo. `inks` are the colors of the logo file's
  * whole parts (_shared/design/logoTone.ts, wholeInks), and a color is held
  * to the part that shows worst on it: the brand color on which the weakest
- * part has the highest contrast, when that is 3:1 or more; otherwise the
- * neutral of the ground the file was made for (`own`), or, when that is not
- * known, the neutral its weakest part shows better on. The average of the
- * ink is never the measure (17 Nov 2026): a logo of two green letters and a
- * near-black one averaged to a color that stands out on near-black, where
- * one letter of three does not show.
+ * part has the highest contrast, when that is 3:1 or more. With no such
+ * brand color, the neutral the file rests on (bestNeutral, for the ground
+ * the file was made for, `own`): the one its weakest part shows best on,
+ * never one on which a part does not show (hidesInk) while another is
+ * free of that. A gray of every brightness is among those neutrals, so no
+ * brand color under 3:1 shows the weakest part better. The average of the
+ * ink is never the measure (17 Nov 2026): a logo of two green
+ * letters and a near-black one averaged to a color that stands out on
+ * near-black, where one letter of three does not show.
  */
 export function pickBackground(brandColors: Array<string | null | undefined>, inks: Array<[number, number, number]> | null, own?: "light" | "dark"): { hex: string; from: "brand_color" | "neutral" } {
   const colors = brandColors.map((c) => (c ? String(c).trim() : "")).filter((c) => rgb(c));
@@ -128,10 +197,10 @@ export function pickBackground(brandColors: Array<string | null | undefined>, in
     const ratio = weakestContrast(inks, rgb(c)!);
     if (!best || ratio > best.ratio) best = { hex: c, ratio };
   }
-  if (best && best.ratio >= 3) return { hex: best.hex.toUpperCase(), from: "brand_color" };
-  if (own) return { hex: own === "light" ? NEUTRAL_LIGHT : NEUTRAL_DARK, from: "neutral" };
-  const dark = weakestContrast(inks, rgb(NEUTRAL_DARK)!), light = weakestContrast(inks, rgb(NEUTRAL_LIGHT)!);
-  return { hex: dark >= light ? NEUTRAL_DARK : NEUTRAL_LIGHT, from: "neutral" };
+  if (best && best.ratio >= SHOWS) return { hex: best.hex.toUpperCase(), from: "brand_color" };
+  // The ground the file was made for, when it is not known: the neutral its weakest part shows better on.
+  const made = own ?? (weakestContrast(inks, rgb(NEUTRAL_DARK)!) >= weakestContrast(inks, rgb(NEUTRAL_LIGHT)!) ? "dark" : "light");
+  return { hex: bestNeutral(inks, made), from: "neutral" };
 }
 
 /** The average color of a logo's visible ink, from RGBA pixels; null when it has none. */
@@ -231,6 +300,17 @@ export function generatedMediaPath(url: string | null | undefined, projectUrl: s
  * with no model call (the stored read of the logo's spot is reused).
  */
 export const LOGO_TONE_RULE = 2;
+/**
+ * The versions of the rule whose stored sets are read (by a design's start,
+ * _shared/design/logoTone.ts jobLogos, and by the settings card). A set of
+ * rule 1 (16 Nov 2026) holds the same files and the same facts about them
+ * as a set of rule 2. What rule 1 got wrong is where the stored file rests
+ * when no post gives it a ground, and that is never read from a set of
+ * either rule: it is worked out when a design starts. So a set of rule 1 is
+ * read until the lifecycle has made it again, and no client goes back to
+ * one file in between.
+ */
+export const LOGO_TONE_READ_RULES: readonly number[] = [1, LOGO_TONE_RULE];
 
 /**
  * The parts of a lifecycle row's key that the read of the logo's spot

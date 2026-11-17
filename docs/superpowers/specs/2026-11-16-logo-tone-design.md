@@ -752,7 +752,7 @@ Words. A file shows whole on a color when every whole exposed part of it has 3:1
 4. The canvas ground. Of the grounds that count for the canvas file, those on which it shows whole come first, and among them the choice is as before (closest to the others, then flatter, then earlier). When the posts show the file only on grounds under 3:1, those grounds are used: the brand puts its logo there, and a contrast bar does not overrule the brand's own posts. With no ground that counts: rule 2 for the stored file, the neutral of the ground it serves for another file.
 5. The templates. The first template is the canvas file over the canvas ground, which by rules 2 to 4 is never a ground chosen blind. The second is the file that serves the ground the first does not cover, over that ground's neutral: the stored file when that is its own ground, else the second file, else the stored file when it shows on both, else the white file when the ground is the dark one. So every ground a file of the set serves has a template, with two templates at most.
 6. The file that is stamped. Locate still names the file closest in color to what was drawn. It now chooses among the matched file and the files that serve the ground the matched template covers. A file is therefore never stamped on a ground it was not made for, whatever a color distance says. The other distances are still measured and stored for review.
-7. Every stored set and background follows. The rule's version becomes 2. It is part of the step's key, so the lifecycle's next look runs the step once for every client: it writes the background by rule 1 for the rows it owns, makes the set again and settles it. The read of the logo's spot is reused as on 16 Nov (section 4), so no model is called. A job reads only a set of version 2. Until a client's set is settled again its designs start with the one file, as on 15 Nov.
+7. Every stored set and background follows. The rule's version becomes 2. It is part of the step's key, so the lifecycle's next look runs the step once for every client: it writes the background by rule 1 for the rows it owns, makes the set again and settles it. The read of the logo's spot is reused as on 16 Nov (section 4), so no model is called. A design's start reads a set of version 1 as well until the lifecycle has made it again (third pass, below), so no client goes back to one file in between.
 
 ### Why this is the rule
 
@@ -763,16 +763,17 @@ Words. A file shows whole on a color when every whole exposed part of it has 3:1
 
 ### What changes for each client
 
-Measured on the stored logos (the two that changed since 16 Nov read from storage) and the posts on disk. "Weakest" is the lowest contrast any whole exposed part has with the settings background.
+Measured on each live row's own logo file and every post its step reads, as read on 17 Nov (the replay record of 17 Nov, second review; the first version of this table used the 8 posts per client of 16 Nov and missed one change). "Weakest" is the lowest contrast any whole exposed part has with the settings background.
 
 | Client | Weakest on its background | Background | Canvas | Templates |
 |---|---|---|---|---|
 | The client of 16 Nov | 1.01 on #1A1A1A | becomes #FFFFFF | the stored file on #E8E8E8, from its two light posts (was on #1A1A1A) | stored on #E8E8E8, copy on #0B0E1A |
 | The orange and purple mark | 1.08 on #FF9D2F | becomes #FFFFFF | the stored file on #FFFFFF (was on #FF9D2F) | stored on #FFFFFF |
-| The other 10 lifecycle rows | 3.97 to 21 | unchanged | unchanged | unchanged |
-| The 3 rows a person set | 3.58, 6.70, 19.70 | never written | unchanged | unchanged |
+| The client with one cyan ink | 8.78 on #0B0E1A | unchanged | the white file on #00BFD9, from two posts that show its logo in white on its cyan at 2.22 and 2.23:1 (was the white file on #0B0E1A) | white on #00BFD9 |
+| The other 9 lifecycle rows | 3.97 to 21 | unchanged | unchanged | unchanged |
+| The 3 rows a person set (one, of an archived client, has no set) | 3.58, 6.70, 19.70 | never written | unchanged | unchanged |
 
-The client with one cyan ink keeps its canvas: its one post that names the stored file was found by the near-black copy's search (rule 3), so its settings background stays, where cyan has 8.78:1.
+The cyan client's change follows rule 3: the posts are found by the white file's own measure (it is the closest in color), and the brand shows its logo that way, on its packaging too; it was looked at at full size. Two other canvases differ from the 16 Nov record for the same reason (more posts read), Olo and PrepSmart Recipes, and were already so in their live sets of rule 2 before this review.
 
 ### Data and contract
 
@@ -783,11 +784,11 @@ The client with one cyan ink keeps its canvas: its one post that names the store
 
 ### A design with part of its logo not showing
 
-Asked plainly after the delivered design of 16 Nov: can one still be delivered?
+Asked plainly after the delivered design of 16 Nov: can one still be delivered? The first answer here said no for a job that carries a set. The review of 17 Nov showed that was wrong: the search score does not change with contrast, and nothing compared the file that is stamped with the picture's real ground, so a black wordmark kept on a brand's near-black (1.21 to 1.29:1), an orange half kept on the brand's orange (1.01:1) and a cyan panel kept on the brand's cyan (1.05:1) passed and would have been stamped. The answer since the third pass, below:
 
-- Through a job that carries a set: no template lies on a ground where a whole part of its file vanishes by choice of an average, and no file is stamped on a ground it does not serve. The delivered design of 16 Nov and its picture as delivered are replay rows, and both fail locate under this rule (0.407 and 0.471 for the design, 0.344 and 0.451 for the delivered picture; the replay record of 17 Nov).
-- Through a job with one file (no current set: none settled yet, a set of version 1, or a logo that changed since): the template is the logo over a ground that a design's start reads from the file itself (second pass, below), never from the row's background as it is. So the window between the release and the lifecycle's look at each client does not carry a file on a ground where a whole part of it vanishes. For a row the lifecycle wrote, rule 1 also corrects the stored background by that look.
-- What is left, said plainly. A file with a part under 3:1 on both neutrals and on every brand color has no ground it shows whole on. It rests on its own neutral, where 90% of its ink shows best. One client's green has 2.91:1 on white, and its posts show it on #E8E8E8 at 2.37:1. And the one test passes a match of 0.75, so a design that draws a small part faintly can pass, as it could before. Neither is a part chosen away by the app.
+- A design is finished only with a file whose whole parts all show on the picture's own ground around the found logo (1.5:1 or more for each). When no file of the set, or the one file of a job without a set, does, the design is made again with the reason kept, as one whose logo was not found. This holds for every job, a person's file included. The delivered design of 16 Nov and its picture fail locate under this rule (the replay record of 17 Nov), and the review's cases are replay rows that are made again.
+- The canvas never carries a file on a ground where a whole part does not show, while any ground is free of that: posts are believed under 3:1 but never under 1.5:1, and where nothing else says, the file rests on the neutral, or the gray, its weakest part shows best on.
+- What is left, said plainly. A small part (under 1% of the file's ink, such as a registered mark) is not tested. The picture's ground is the median of a ring of pixels around the logo; on a busy picture a part can be hard to see on some of it while the median shows it. And a part between 1.5:1 and 3:1 shows weakly by choice: the brand's own posts show parts at 2.19 to 2.37:1.
 
 ### Second pass, 17 Nov 2026 (what the build showed after the rule was written)
 
@@ -799,3 +800,16 @@ Written before the code of these four changes.
 4. The proof. The 18 designs that failed on 16 Nov, the 2 designs of the job that ended ready and its delivered picture are rows of the replay, each with an expected result (the replay record of 17 Nov).
 
 How the eight sets made by rule 1 are made again. The rule's version is in the key of the lifecycle's `design_settings` step. The next daily look of each client sees a new key and queues the step once. The step writes the settings background by rule 1 (for a row the lifecycle owns, with the stored read of the logo's spot reused: no model call), asks the picture service for the files again, reads the client's posts again and settles a set of version 2. Nothing is asked of a person. A row a person set keeps its logo, placement and background; only its set is made again.
+
+### Third pass, 17 Nov 2026 (the review of the second pass)
+
+Written with the code of these changes; the rulings are 64 to 72 of the plan.
+
+1. One line for a part that does not show. A whole part does not show on a ground where its contrast is under 1.5:1. It holds wherever a file meets a ground: a post's ground for the canvas, the settings background, where the stored file rests, and the ground a file is stamped on. It replaces "within 16 per channel" of the second pass, which it contains. Measured: every part that could not be seen at full size was at 1.29:1 or less; the weakest ground the clients' own posts show a part on is 2.19:1. A hue of its own does not make up for it.
+2. The ground a file is stamped on. Locate reads the picture's own ground around the found logo and names only a file whose whole parts all show there; with none it answers `lost`, and the worker makes the design again (the section above). The one test of the match is unchanged.
+3. Where a file rests when nothing else says. The neutral its weakest whole part shows best on: the neutral of its own ground, the other neutral, or a gray halfway in contrast between two of its inks, the neutral of its own ground first when equal. Every stored logo of today rests where it did; a dark file with a white part, or a white file with a dark part, rests on a gray both parts show on. A person's background stays unless a whole part of their file does not show there.
+4. A set of rule 1 is read. Its files and facts are those of rule 2; where its stored file rests is worked out when a design starts, from the file's own pixels, read once per request. Each job keeps where its canvas color came from. The rule's version stays 2: the new line changes no stored set and no background (the replay record of 17 Nov, second review), and where a file rests is read at each start.
+5. The proof on what the live step reads. One replay entry per live row with a set, from its own logo file and every post its step reads, with ten pictures drawn from the clients' real files for the review's cases (no model).
+
+How the sets made by rule 1 are made again, with nobody doing anything and no model call: the step's key carries the rule's version, so the lifecycle's next daily look at each client sees a new key and runs the step once. It writes the settings background for a row it owns (the stored read of the logo's spot reused), asks the picture service for the files, reads the posts and settles a set of rule 2. Until then a design starts from the set of rule 1 as it is, with the stored file's rest ground worked out at the start. A row a person set keeps its logo, placement and background.
+

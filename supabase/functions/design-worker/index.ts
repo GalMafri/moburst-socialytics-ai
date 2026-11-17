@@ -40,7 +40,7 @@ import type { LocateRequest, LogoTemplate } from "../_shared/picture/contract.ts
 import { heldWork } from "../_shared/canva/hold.ts";
 import { DESIGN_LIMITS, MAX_DESIGN_ATTEMPTS, type StepResult, Stopped, advanceDesignJob } from "../_shared/design/advance.ts";
 import { type GenerateDeps, OF_THE_DESIGN, runGenerate, runUnlogo } from "../_shared/design/modelSteps.ts";
-import { type LocatePlan, checkInput, locatePlan, logoState, stampFile } from "../_shared/design/logoChoice.ts";
+import { type LocatePlan, checkInput, locatePlan, locateRefusal, logoState, stampFile } from "../_shared/design/logoChoice.ts";
 import { jobLogos, postSearchPlan } from "../_shared/design/logoTone.ts";
 import { POSTS_PER_CALL, askLogoSet, askPostLogos, liveIo } from "../_shared/design/logoSetWork.ts";
 import { personOther } from "../_shared/lifecycle/designSettings.ts";
@@ -273,16 +273,15 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       const plan = locatePlan({ logo_path: job.input.logo_path, generate: g, logos: job.input.logos });
       const { result: found, ms } = await callPicture(admin, "locate", await locateRequest(admin, plan, { job: job.id, step: "locate", designPath: s.design_path, placement: job.input.placement }));
       notePicture(s, "locate", ms);
-      const usual = found.usual;
       s.logo_score = Math.round(found.score * 1000) / 1000;
-      // The one test, whatever the job sent: the better match is the logo at a size the client uses.
-      if (!logoFound(found, usual.width)) {
-        // No logo at the client's usual spot, or one at a size the client never
-        // uses: designed again, the way every other check sends a design back,
-        // so the reason is kept and a carousel cover takes its slides with it
-        // (slides drawn on a cover sent back here used to keep following it).
-        const each = plan.shape === "set" && found.scores ? ` (each file: ${found.scores.map((v) => v.toFixed(3)).join(", ")})` : "";
-        const why = `logo match ${s.logo_score} at ${(found.width / usual.width).toFixed(2)} of the usual width${each}`;
+      // Two reasons a located design is made again (_shared/design/logoChoice.ts, locateRefusal). The test of the
+      // match, whatever the job sent: the better match is the logo at a size the client uses. And, since 17 Nov
+      // 2026, no file that may be stamped shows on the picture's own ground around the logo.
+      const why = locateRefusal(found);
+      if (why) {
+        // Designed again, the way every other check sends a design back, so the reason is
+        // kept and a carousel cover takes its slides with it (slides drawn on a cover sent
+        // back here used to keep following it).
         console.warn(`[design-worker] job ${job.id}: ${why}; designing again.`);
         await designAgain(admin, job, why);
         return "next";
@@ -598,6 +597,7 @@ async function toneCheck(admin: any, clientId: string, designs: number | null): 
       return {
         job: r.id as string, status: r.status as string, ms, ok: true,
         found: logoFound(found, found.usual.width), score: Math.round(found.score * 1000) / 1000,
+        made_again: locateRefusal(found), ground: found.ground ?? null,
         matched: found.matched ?? null, file: found.file ?? null,
         scores: (found.scores ?? []).map((v) => Math.round(v * 1000) / 1000),
         gaps: Object.fromEntries(Object.entries(found.gaps ?? {}).map(([file, gap]) => [file, Math.round((gap as number) * 10) / 10])),

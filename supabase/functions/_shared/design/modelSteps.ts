@@ -25,7 +25,7 @@ export const MAX_UNLOGO = 4;
 
 /** What a later step found on a design: all of it goes when a new design is made. The five keys after logo_score are what locate kept for a job that carries a logo set (logoChoice.ts). */
 export const OF_THE_DESIGN = [
-  "logo_rect", "logo_frame", "logo_score", "logo_file", "logo_named", "logo_matched", "logo_scores", "logo_gaps",
+  "logo_rect", "logo_frame", "logo_score", "logo_file", "logo_named", "logo_matched", "logo_scores", "logo_gaps", "logo_ground",
   "nologo_path", "unlogos", "final_path", "read", "band_read", "marks_check", "marks_where", "mark_cleans",
 ];
 

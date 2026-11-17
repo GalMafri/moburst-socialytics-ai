@@ -11,7 +11,7 @@ import { STORY_PAGE, STORY_SURFACE, isStoryPost, storyLogoPlacement } from "../d
 import { videoRouteFor } from "../video/kit.ts";
 import { pngSize } from "../picture/headers.ts";
 import { settleLogo } from "../design/logoFit.ts";
-import { jobLogos, restGround } from "../design/logoTone.ts";
+import { jobLogos, restGround, type JobLogos } from "../design/logoTone.ts";
 
 export const BUCKET = "generated-media";
 
@@ -69,24 +69,60 @@ async function logoSize(admin: any, path: string): Promise<[number, number]> {
 }
 
 /**
- * Where a still starts when its job has the one file (no current set: none
- * settled yet, a set of an earlier rule, or the logo changed since). The
- * file's whole parts are read from its own pixels, and it rests where a set
- * would rest it (logoTone.ts, restGround): on the settings background when
- * every whole part shows there, else on the neutral of the ground it was
- * made for. So a canvas, and the one template locate lays over the same
- * color, never carries the file on a ground chosen for the average of its
- * ink, whatever the row holds at this moment and whoever set it (17 Nov
- * 2026). Nothing of the row is written. A file whose pixels cannot be read
- * starts on the background as it is.
+ * The colors of a stored logo's whole parts and the ground it was made for,
+ * read from the file's own pixels (imaging.ts, logoWhole) once for the
+ * settings a request's options are started from: startOption hands its
+ * settings back and the next option starts from that same object, so the
+ * read is kept beside it and the file is decoded once for a request, not
+ * once for an option. Null is a file with no whole part or one whose pixels
+ * could not be read; that is kept too.
  */
-async function oneFileGround(bytes: Uint8Array, background: string): Promise<string> {
+type Whole = { inks: Array<[number, number, number]>; own: "light" | "dark" };
+const WHOLE = new WeakMap<Settings, { path: string; whole: Whole | null }>();
+/** `bytes` are the stored file's, when this call is the one that read them, so its size is not read from storage again. */
+async function logoWholeOnce(admin: any, settings: Settings): Promise<{ whole: Whole | null; bytes?: Uint8Array }> {
+  const kept = WHOLE.get(settings);
+  if (kept && kept.path === settings.logo_path) return { whole: kept.whole };
+  let whole: Whole | null = null;
+  let bytes: Uint8Array | undefined;
   try {
-    const whole = await (await import("../lifecycle/imaging.ts")).logoWhole(bytes);
-    return whole ? restGround(whole.inks, background, whole.own).ground : background;
+    bytes = await logoBytes(admin, settings.logo_path);
+    whole = await (await import("../lifecycle/imaging.ts")).logoWhole(bytes);
   } catch {
-    return background;
+    whole = null;
   }
+  WHOLE.set(settings, { path: settings.logo_path, whole });
+  return { whole, bytes };
+}
+
+/**
+ * What a still starts from (17 Nov 2026): the file on the canvas, the color
+ * behind it, the set the job carries, and where the color came from, which
+ * is kept on the job (`input.generate.background_from`).
+ *
+ *   "set":  the row has a set of the current rule that needs nothing else.
+ *   "file": the stored file's whole parts were read from its own pixels. A
+ *           set of rule 1 is then read with them (logoTone.ts, jobLogos),
+ *           and with no set to read the job has the one file, resting where
+ *           a set would rest it (restGround): on the settings background,
+ *           or on the neutral its weakest whole part shows best on. So a
+ *           canvas, and the template locate lays over the same color, never
+ *           carries the file on a ground chosen for the average of its ink,
+ *           whatever the row holds at this moment and whoever set it.
+ *   "row":  the file has no whole part or its pixels could not be read: the
+ *           one file on the row's background as it is. Recorded, so a job
+ *           that started this way can be told from the others.
+ *
+ * Nothing of the row is written.
+ */
+async function stillStart(admin: any, settings: Settings): Promise<{ logoPath: string; background: string; logos: JobLogos | null; from: "set" | "file" | "row"; bytes?: Uint8Array }> {
+  const set = jobLogos(settings);
+  if (set) return { logoPath: set.logo_path, background: set.background, logos: set.logos, from: "set" };
+  const { whole, bytes } = await logoWholeOnce(admin, settings);
+  if (!whole) return { logoPath: settings.logo_path, background: settings.background, logos: null, from: "row", bytes };
+  const read = jobLogos(settings, whole);
+  if (read) return { logoPath: read.logo_path, background: read.background, logos: read.logos, from: "file", ...(read.logo_path === settings.logo_path ? { bytes } : {}) };
+  return { logoPath: settings.logo_path, background: restGround(whole.inks, settings.background, whole.own, settings.source === "person").ground, logos: null, from: "file", bytes };
 }
 
 /**
@@ -116,28 +152,26 @@ async function insertJobs(admin: any, requestId: string, optionIndex: number, ro
  * cover wait for it and follow its look). Answers the settings it used, so
  * the next option of the same request starts from them.
  *
- * A still starts from the client's logo set when the row has a current one
+ * A still starts from the client's logo set when the row has one to read
  * (16 Nov 2026): the canvas carries the file most of the client's posts show,
  * on the ground they show it on, and the job carries the set (input.logos)
- * for locate. With no current set (none settled yet, or the logo changed
+ * for locate. With no set to read (none settled yet, or the logo changed
  * since, as when it was trimmed at this very start) the job has the one
- * file, on the settings background when every whole part of the file shows
- * there and otherwise on the neutral of its own ground (oneFileGround), and
- * nothing waits. The settings handed back are never changed by this, and a
- * video keeps the stored file.
+ * file, and nothing waits. Either way the color behind the file is one the
+ * file shows on (stillStart). The settings handed back are never changed by
+ * this, and a video keeps the stored file.
  */
 export async function startOption(admin: any, req: DesignRequest, given: Settings, brandName: string, briefIndex: number, optionIndex: number): Promise<Settings> {
   const brief = req.briefs[briefIndex % req.briefs.length];
   // The logo is its ink alone before a design is built on it (a logo stored padded is trimmed here, once).
   const settings = await settleLogo(admin, given, async () => (await import("../lifecycle/imaging.ts")).refitStoredLogo);
   if (req.kind === "video") { await startVideoOption(admin, req, settings, brandName, brief, optionIndex, await logoSize(admin, settings.logo_path)); return settings; }
-  const tone = jobLogos(settings);
-  const logoPath = tone?.logo_path ?? settings.logo_path;
+  const start = await stillStart(admin, settings);
+  const logoPath = start.logoPath;
   // The size of the file the canvas carries, read from the file itself.
-  const file = await logoBytes(admin, logoPath);
-  const [lw, lh] = pngSize(file);
-  // The color the canvas starts from: the set's, or for a job with one file where that file shows whole.
-  const background = tone?.background ?? await oneFileGround(file, settings.background);
+  const [lw, lh] = pngSize(start.bytes ?? await logoBytes(admin, logoPath));
+  // The color the canvas starts from: one the file shows on.
+  const background = start.background;
   const slides = req.kind === "carousel" && brief.slides?.length ? brief.slides : [brief];
   const carousel = req.kind === "carousel" && slides.length > 1;
   // A Story is drawn on its own 9:16 page, as a Story, with the client's logo spot moved into Meta's safe band.
@@ -154,7 +188,7 @@ export async function startOption(admin: any, req: DesignRequest, given: Setting
       logo_path: logoPath,
       logo_size: [lw, lh],
       // The files locate may recognize and finish may stamp; absent for a job with one file.
-      ...(tone ? { logos: tone.logos } : {}),
+      ...(start.logos ? { logos: start.logos } : {}),
       copy: slide.headline,
       placement: story ? storyLogoPlacement(settings.placement, lw, lh) : settings.placement,
       title: `${brandName} ${req.platform ?? ""} option ${optionIndex + 1}${carousel ? ` slide ${i + 1}` : ""}`.replace(/\s+/g, " "),
@@ -162,7 +196,7 @@ export async function startOption(admin: any, req: DesignRequest, given: Setting
       // The posts this design builds on, as the planner chose them for this
       // post; a brief from before that choice existed uses the first three.
       generate: {
-        brand_name: brandName, platform: req.platform ?? "social", concept: slide.picture, background, refs: brief.refs?.length ? brief.refs : settings.reference_paths.slice(0, 3),
+        brand_name: brandName, platform: req.platform ?? "social", concept: slide.picture, background, background_from: start.from, refs: brief.refs?.length ? brief.refs : settings.reference_paths.slice(0, 3),
         ...(story ? { size: { ...STORY_PAGE }, surface: STORY_SURFACE } : {}),
         // The person's note, so the image model sees it and a retry of the job keeps it.
         ...(req.note?.trim() ? { note: req.note.trim() } : {}),

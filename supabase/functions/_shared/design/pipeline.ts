@@ -27,6 +27,8 @@
 //
 // Free of Deno and network imports so it can be tested.
 
+import { wordsOnly } from "./words.ts";
+
 /** The instruction for step 3. */
 export function removePrompt(brand: string, alsoRemove?: string | null): string {
   return `Remove every logo and brand mark of ${brand} from this image: its wordmark and symbol, and any copy of the symbol anywhere else, including on objects, signs, clothing or screens. ` +
@@ -100,9 +102,9 @@ export function parseLogoCheck(text: string): { clear: boolean; touching: string
   return { clear: clear[1].toLowerCase() === "true", touching: touching ? touching[1] : "" };
 }
 
-/** Text compared the way a reader sees it: case, quote style, dash style and spacing do not count. */
+/** Text compared the way a reader sees it: case, quote style, dash style and spacing do not count, and a pictograph is no word (words.ts). */
 export function readable(s: string): string {
-  return s.toLowerCase().replace(/[’‘`´]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, "-").replace(/\s+/g, " ").trim();
+  return wordsOnly(s).toLowerCase().replace(/[’‘`´]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, "-").replace(/\s+/g, " ").trim();
 }
 
 /** Whether the words on the post are the headline's words, in order, with nothing added or missing. */

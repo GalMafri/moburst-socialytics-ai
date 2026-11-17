@@ -2,7 +2,7 @@
 // The design worker's side of locate: what it sends for a job, what it keeps
 // from the answer, and the file finish stamps.
 import { describe, expect, it } from "vitest";
-import { checkInput, locatePlan, logoState, stampFile } from "../../../functions/_shared/design/logoChoice";
+import { checkInput, locatePlan, locateRefusal, logoState, stampFile } from "../../../functions/_shared/design/logoChoice";
 import type { LocateResult } from "../../../functions/_shared/picture/contract";
 import type { JobLogos } from "../../../functions/_shared/design/logoTone";
 
@@ -93,6 +93,26 @@ describe("what the worker keeps from locate's answer", () => {
     expect(state).toEqual({ logo_score: 0.964, logo_rect: { x: 466, y: 1218, width: 150, height: 44 }, logo_frame: [1088, 1360] });
     expect(Object.keys(state)).toEqual(["logo_score", "logo_rect", "logo_frame"]);
     expect(Object.keys(logoState({ logo_path: STORED, logos: null }, answer()))).toEqual(["logo_score", "logo_rect", "logo_frame"]);
+  });
+
+  it("keeps the picture's own ground around the logo for review, for a job with one file too", () => {
+    expect(logoState({ logo_path: STORED }, answer({ ground: [232, 232, 232] }))).toEqual({ logo_score: 0.964, logo_rect: { x: 466, y: 1218, width: 150, height: 44 }, logo_frame: [1088, 1360], logo_ground: [232, 232, 232] });
+    expect(logoState({ logo_path: STORED, logos: logos() }, answer({ file: "stored", matched: "stored", scores: [0.9], gaps: {}, ground: [15, 41, 76] }))).toMatchObject({ logo_file: STORED, logo_ground: [15, 41, 76] });
+  });
+
+  it("makes a design again when the match is not the logo, or when no file that may be stamped shows on the picture's ground", () => {
+    // Found at a size the client uses, and a file to stamp: the design goes on.
+    expect(locateRefusal(answer())).toBeNull();
+    expect(locateRefusal(answer({ file: "other", matched: "other", scores: [0.31, 0.964], ground: [20, 20, 20] }))).toBeNull();
+    // The test a design always had.
+    expect(locateRefusal(answer({ score: 0.471, scores: [0.407, 0.471] }))).toBe("logo match 0.471 at 0.99 of the usual width (each file: 0.407, 0.471)");
+    expect(locateRefusal(answer({ score: 0.61 }))).toBe("logo match 0.61 at 0.99 of the usual width");
+    expect(locateRefusal(answer({ width: 60 }))).toMatch(/^logo match 0\.964 at 0\.39 of the usual width/);
+    // A match that is the logo, on a picture whose ground has the color of a whole part of every file that may be stamped.
+    expect(locateRefusal(answer({ file: null, matched: "stored", scores: [0.974], lost: true, ground: [26, 26, 25] }))).toBe("logo match 0.964, and a part of the logo does not show on the picture behind it (#1A1A19)");
+    expect(locateRefusal(answer({ lost: true }))).toBe("logo match 0.964, and a part of the logo does not show on the picture behind it (its ground)");
+    // A low match is said first, whatever else is true.
+    expect(locateRefusal(answer({ score: 0.4, lost: true, ground: [26, 26, 25] }))).toBe("logo match 0.4 at 0.99 of the usual width");
   });
 
   it("stores the rectangle to stamp when the service gave one", () => {

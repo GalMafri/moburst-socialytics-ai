@@ -12,6 +12,16 @@ describe("copyMatches", () => {
     expect(copyMatches(["Results matter."], ["Results matter.", "Standards matter first."])).toBe(false);
     expect(copyMatches(["Results matter.", "Standards matter first.", "Learn more"], ["Results matter.", "Standards matter first."])).toBe(false);
   });
+  it("does not count a pictograph as a word: a headline with an emoji matches whichever emoji was drawn, or none", () => {
+    expect(copyMatches(["Your patch, your rules \u{1F499}", "How do you patch?"], ["Your patch, your rules \u{1FA75}", "How do you patch?"])).toBe(true);
+    expect(copyMatches(["Your patch, your rules", "How do you patch?"], ["Your patch, your rules \u{1FA75}", "How do you patch?"])).toBe(true);
+    expect(copyMatches(["Share your tip below \u{1F447}\u{1F3FD}", "\u2764\uFE0F"], ["Share your tip below"])).toBe(true);
+  });
+  it("still rejects a wrong word beside a pictograph, and still counts the marks a brand name carries", () => {
+    expect(copyMatches(["Your patch, your rule \u{1F499}"], ["Your patch, your rules \u{1FA75}"])).toBe(false);
+    expect(copyMatches(["Wax Center"], ["Wax Center\u00AE"])).toBe(false);
+    expect(copyMatches(["Top 5 tips"], ["Top 6 tips"])).toBe(false);
+  });
   it("rejects a misread letter such as AI read as Al", () => {
     expect(copyMatches(["Search and Al Visibility"], ["Search and AI Visibility"])).toBe(false);
   });

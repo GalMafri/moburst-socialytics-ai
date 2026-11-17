@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  contrast, generatedMediaPath, inkColor, libraryPaths, logoNormalization, logoStorePlan, parseLogoSpot, personKey, personOther, pickBackground, placementFor, pngSize, readInputs,
-  referencePaths, storedSpotRead, toneKeyTail, toPlacement, weakestContrast,
+  bestNeutral, contrast, generatedMediaPath, groundRank, hidesInk, inkColor, libraryPaths, logoNormalization, logoStorePlan, parseLogoSpot, personKey, personOther, pickBackground, placementFor, pngSize, readInputs,
+  referencePaths, storedSpotRead, toneKeyTail, toPlacement, UNSEEN, weakestContrast,
 } from "../../../functions/_shared/lifecycle/designSettings";
 
 describe("placement", () => {
@@ -51,6 +51,52 @@ describe("background", () => {
     expect(pickBackground(["#233a5e", "#2ec4f1", "#f7c948"], [[252, 222, 65], [251, 103, 115], [253, 253, 253]], "dark")).toEqual({ hex: "#233A5E", from: "brand_color" });
     expect(pickBackground(["#d40f3d", "#ff6f91", "#ffcfda"], [[17, 18, 24]], "light")).toEqual({ hex: "#FFCFDA", from: "brand_color" });
   });
+  it("never takes a neutral that hides a whole part while another ground is free of that", () => {
+    // A navy wordmark with a white part; a pale and a dark brand color. White hides the white part, and the dark ones nearly hide the navy: the gray both show on.
+    const navyWhite: Array<[number, number, number]> = [[20, 30, 70], [255, 255, 255]];
+    const picked = pickBackground(["#f4f1ea", "#101828", "#0e1420"], navyWhite, "light");
+    expect(picked.from).toBe("neutral");
+    expect(picked.hex).toMatch(/^#([0-9A-F]{2})\1\1$/);
+    const g = parseInt(picked.hex.slice(1, 3), 16);
+    expect(weakestContrast(navyWhite, [g, g, g])).toBeGreaterThanOrEqual(3);
+    expect(hidesInk(navyWhite, [255, 255, 255])).toBe(true);
+    // A black half and a white half.
+    const halves = pickBackground(["#f4f1ea", "#101828"], [[0, 0, 0], [255, 255, 255]], "dark");
+    const h = parseInt(halves.hex.slice(1, 3), 16);
+    expect(weakestContrast([[0, 0, 0], [255, 255, 255]], [h, h, h])).toBeGreaterThan(4);
+    // A brand color under 3:1 is never taken: two green letters and a near-black one, with a gray brand color, rest on white.
+    expect(pickBackground(["#b4b4b4"], [[40, 140, 70], [26, 25, 25]], "light")).toEqual({ hex: "#FFFFFF", from: "neutral" });
+  });
+
+  it("says a whole part does not show on a ground where its contrast is under 1.5:1, whatever its hue", () => {
+    expect(UNSEEN).toBe(1.5);
+    // The cases measured on 17 Nov where a part could not be seen at full size (1.01 to 1.29:1).
+    expect(hidesInk([[0, 0, 0]], [0x23, 0x1f, 0x20])).toBe(true);
+    expect(hidesInk([[0, 0, 0]], [0x1a, 0x1a, 0x1a])).toBe(true);
+    expect(hidesInk([[255, 146, 44], [90, 25, 233]], [0xff, 0x9d, 0x2f])).toBe(true);
+    expect(hidesInk([[17, 18, 24]], [20, 20, 20])).toBe(true);
+    // A hue of its own is not enough: an orange part on a coral of nearly its lightness, a yellow part on cream.
+    expect(hidesInk([[255, 157, 47]], [252, 128, 91])).toBe(true);
+    expect(hidesInk([[254, 228, 61]], [0xff, 0xf9, 0xea])).toBe(true);
+    // The weakest grounds the clients' own posts show a part on (2.19 to 2.37:1) are grounds it shows on, and so is a light gray at 1.6:1.
+    expect(hidesInk([[255, 255, 255]], [0x00, 0xbf, 0xd9])).toBe(false);
+    expect(hidesInk([[59, 172, 85], [26, 25, 25]], [0xe8, 0xe8, 0xe8])).toBe(false);
+    expect(hidesInk([[255, 255, 255]], [0xcc, 0xcc, 0xcc])).toBe(false);
+    // Every color within 16 per channel of the ground (the step between two pixels of one part) is under the line.
+    expect(contrast([64, 64, 64], [80, 80, 80])).toBeLessThan(UNSEEN);
+    expect(hidesInk([], [26, 26, 26])).toBe(false);
+  });
+
+  it("ranks a ground by the weakest part, counts 3:1 as enough, and puts a ground that hides a part last", () => {
+    const inks: Array<[number, number, number]> = [[40, 140, 70], [26, 25, 25]];
+    expect(groundRank(inks, [255, 255, 255])).toBe(3);
+    expect(groundRank(inks, [250, 250, 250])).toBe(3);
+    expect(groundRank(inks, [26, 26, 26])).toBe(0);
+    expect(groundRank(inks, [200, 200, 200])).toBeCloseTo(weakestContrast(inks, [200, 200, 200]), 10);
+    expect(bestNeutral(inks, "light")).toBe("#FFFFFF");
+    expect(bestNeutral([[255, 255, 255]], "dark")).toBe("#0B0E1A");
+  });
+
   it("averages only the logo's visible ink", () => {
     expect(inkColor([255, 0, 0, 255, 0, 0, 255, 0])).toEqual([255, 0, 0]);
     expect(inkColor([1, 2, 3, 0])).toBeNull();

@@ -6,9 +6,10 @@
 // service's own logoSet, reads each of the client's posts with postLogo,
 // makes the choice with chooseSet, builds a job's logos from that set the
 // way a design job reads them (jobLogos, locatePlan), and runs the service's
-// locate with templates on each stored design, followed by the worker's one
-// test (logoFound). Every row has an expected result, and the script exits
-// 1 when any differs:
+// locate with templates on each stored design, followed by the worker's own
+// decision (locateRefusal: the match is the logo at a size the client uses,
+// and a file that may be stamped shows on the picture's ground). Every row
+// has an expected result, and the script exits 1 when any differs:
 //   the files of the set, the canvas file, its ground and where the ground
 //   came from; each post's found or not and the file it shows; each
 //   design's pass or fail and the file that would be stamped (all compared
@@ -24,17 +25,34 @@
 // background, in the order the lifecycle step works: settings first, then
 // the set.
 //
+// Since the second pass of 17 Nov an entry may also hold the client's live
+// row as it is before the lifecycle's look (`live`: its background and its
+// stored set, of rule 1). The replay then has a window row: what a design
+// that starts in that window starts from (the still start of jobs.ts:
+// jobLogos, with the file's whole parts read from its pixels for a set of
+// rule 1, else the one file where it rests), compared exactly with the one
+// expected, and each of `window_designs` through locate as such a job would
+// send it. A design may be a picture drawn for the replay (`design` then
+// says so): a real logo file laid on a flat color with noise, to prove what
+// locate answers for a picture no client has had yet.
+//
 // The manifest is a JSON array, one entry per client, exported read-only
 // and never committed:
 //   { client, source, logo_path, logo_local?, placement, background,
 //     brand_colors?: [primary, secondary, accent],
 //     posts:   [{ path, local? }],
 //     designs: [{ job, design, design_path, local?, placement, background }],
+//     live?:   { background, logo_set },
+//     window_designs?: [{ job, design, design_path, local?, placement, background }],
 //     expect:  { background?: "#RRGGBB",
 //                files: { other: "made" | null, white: boolean },
 //                canvas: { file, ground, from },
 //                posts: [{ path, found, shows? }],
-//                designs: [{ job, design, pass, file?, scores: [number, number | null] }] } }
+//                designs: [{ job, design, pass, file?, lost?, scores: [number, number | null] }],
+//                window?: { file, ground, second: { file, ground } | null },
+//                window_designs?: [{ job, design, pass, file?, lost?, scores }] } }
+// `lost` is true for a design whose match is the logo and that is made again
+// because no file that may be stamped shows on the picture's own ground.
 // A file is read from `local` when the entry has one, else from the
 // product's storage by path (the logo and designs from generated-media, the
 // posts from design-references). `job` is a label: the job's id, or its
@@ -56,9 +74,9 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { PUBLIC_DEFAULTS } from "../../public-env.ts";
 import { resampleRGBA } from "../../supabase/functions/_shared/canva/brief.ts";
-import { locatePlan } from "../../supabase/functions/_shared/design/logoChoice.ts";
+import { locatePlan, locateRefusal } from "../../supabase/functions/_shared/design/logoChoice.ts";
 import { LOGO_SCALES, logoFound } from "../../supabase/functions/_shared/design/logoMatch.ts";
-import { chooseSet, jobLogos, postSearchPlan, wholeInks, type CompareIn, type LogoSet, type SetPaths, type TemplateIn } from "../../supabase/functions/_shared/design/logoTone.ts";
+import { chooseSet, jobLogos, postSearchPlan, restGround, wholeInks, type CompareIn, type JobLogos, type LogoSet, type SetPaths, type TemplateIn } from "../../supabase/functions/_shared/design/logoTone.ts";
 import { logoNormalization, pickBackground, weakestContrast } from "../../supabase/functions/_shared/lifecycle/designSettings.ts";
 import type { LogoFileName, Placement, PostLogo, Rgb } from "../../supabase/functions/_shared/picture/contract.ts";
 import { decodeRaster, type Raster } from "../src/picture/raster.ts";
@@ -76,17 +94,23 @@ type Entry = {
   background: string;
   brand_colors?: Array<string | null>;
   posts: Array<{ path: string; local?: string }>;
-  designs: Array<{ job: string; design: string; design_path: string; local?: string; placement: Placement; background: string }>;
+  designs: DesignIn[];
+  live?: { background: string; logo_set: unknown };
+  window_designs?: DesignIn[];
   expect: {
     background?: string;
     files: { other: "made" | null; white: boolean };
     canvas: { file: LogoFileName; ground: string; from: string };
     posts: Array<{ path: string; found: boolean; shows?: LogoFileName }>;
-    designs: Array<{ job: string; design: string; pass: boolean; file?: LogoFileName; scores: [number, number | null] }>;
+    designs: DesignWant[];
+    window?: { file: LogoFileName; ground: string; second: { file: LogoFileName; ground: string } | null };
+    window_designs?: DesignWant[];
   };
 };
+type DesignIn = { job: string; design: string; design_path: string; local?: string; placement: Placement; background: string };
+type DesignWant = { job: string; design: string; pass: boolean; file?: LogoFileName; lost?: boolean; scores?: [number, number | null] };
 
-type RowOut = { client: string; kind: "settings" | "set" | "post" | "design"; what: string; expected: unknown; got: unknown; same: boolean; ms?: number };
+type RowOut = { client: string; kind: "settings" | "set" | "post" | "design" | "window" | "window design"; what: string; expected: unknown; got: unknown; same: boolean; ms?: number };
 
 async function read(bucket: string, path: string, local?: string): Promise<Uint8Array> {
   if (local) return new Uint8Array(await readFile(local));
@@ -181,12 +205,11 @@ async function replayClient(entry: Entry): Promise<{ rows: RowOut[]; set: LogoSe
   });
   rows.unshift(...settings);
 
-  // The stored designs, through locate as a job started from this set would send it.
-  const job = jobLogos({ logo_path: entry.logo_path, background, source: entry.source, logo_set: set });
-  for (const d of entry.designs) {
-    const want = entry.expect.designs.find((e) => e.job === d.job && e.design === d.design);
-    const input = job ? { logo_path: job.logo_path, generate: { background: job.background }, logos: job.logos } : { logo_path: entry.logo_path, generate: { background: d.background } };
-    const sent = locatePlan(input);
+  // One design through locate, as a job with these logos on this background would send it, then the worker's decision.
+  const whole = wholeInks(stored);
+  const inksOf: Partial<Record<LogoFileName, Rgb[]>> = { stored: facts.inks.stored.map((i) => i.color), other: facts.inks.other?.map((i) => i.color), white: facts.inks.white?.map((i) => i.color) };
+  async function locateRow(kind: "design" | "window design", d: DesignIn, want: DesignWant | undefined, start: { logo_path: string; background: string; logos: JobLogos | null }): Promise<RowOut> {
+    const sent = locatePlan({ logo_path: start.logo_path, generate: { background: start.background }, logos: start.logos });
     const templates: TemplateIn[] = sent.shape === "set"
       ? sent.templates.map((t) => ({ file: t.file, raster: rasterAt(t.path), ground: t.ground, fixed: t.fixed, names: t.names }))
       : [{ file: "stored", raster: stored, ground: sent.background }];
@@ -195,18 +218,57 @@ async function replayClient(entry: Entry): Promise<{ rows: RowOut[]; set: LogoSe
     const t = performance.now();
     const found = locateTemplates(design, templates, compared, d.placement, LOGO_SCALES);
     const ms = Math.round(performance.now() - t);
-    const pass = logoFound(found, found.usual.width);
+    const refusal = locateRefusal(found);
+    const pass = refusal === null;
+    const lost = logoFound(found, found.usual.width) && found.lost === true;
     const scores: [number, number | null] = [round(found.scores![0], 3), found.scores!.length > 1 ? round(found.scores![1], 3) : null];
-    const expected = want ? { pass: want.pass, ...(want.pass ? { file: want.file } : {}), scores: want.scores } : null;
-    const scoresSame = !!want && want.scores.every((s, i) => (s === null ? scores[i] === null : scores[i] !== null && Math.abs((scores[i] as number) - s) <= SCORE_ROOM));
-    rows.push({
-      client: entry.client, kind: "design", what: `${d.job} ${d.design}`, expected,
+    const expected = want ? { pass: want.pass, ...(want.pass ? { file: want.file } : {}), ...(want.lost ? { lost: true } : {}), ...(want.scores ? { scores: want.scores } : {}) } : null;
+    // A picture drawn for the replay has no scores to keep: its pass, file and lost are what is expected of it.
+    const scoresSame = !!want && (!want.scores || want.scores.every((s, i) => (s === null ? scores[i] === null : scores[i] !== null && Math.abs((scores[i] as number) - s) <= SCORE_ROOM)));
+    // How the file that is stamped, or the matched file of a design that is made again, shows on the picture's own ground.
+    const shown = (found.file ?? found.matched) as LogoFileName;
+    const weakest = found.ground && inksOf[shown]?.length ? round(weakestContrast(inksOf[shown]!, found.ground), 2) : null;
+    return {
+      client: entry.client, kind, what: `${d.job} ${d.design}`, expected,
       got: {
-        pass, ...(pass ? { file: found.file } : {}), scores, matched: found.matched,
+        pass, ...(pass ? { file: found.file } : {}), ...(lost ? { lost: true } : {}), scores, matched: found.matched,
         templates: templates.map((t) => `${t.file} on ${hexOf(t.ground)}`), names: templates.map((t) => t.names ?? null), scale: round(found.width / found.usual.width, 2), gaps: roundGaps(found.gaps ?? {}),
+        ground: found.ground ? hexOf(found.ground) : null, weakest_on_ground: weakest, ...(refusal ? { made_again: refusal } : {}),
       },
-      same: !!want && want.pass === pass && (!pass || want.file === found.file) && scoresSame, ms,
+      same: !!want && want.pass === pass && (!pass || want.file === found.file) && !!want.lost === lost && scoresSame, ms,
+    };
+  }
+
+  // The stored designs, through locate as a job started from this set would send it.
+  const job = jobLogos({ logo_path: entry.logo_path, background, source: entry.source, logo_set: set });
+  for (const d of entry.designs) {
+    const want = entry.expect.designs.find((e) => e.job === d.job && e.design === d.design);
+    rows.push(await locateRow("design", d, want, job ? { logo_path: job.logo_path, background: job.background, logos: job.logos } : { logo_path: entry.logo_path, background: d.background, logos: null }));
+  }
+
+  // The window between the release and the lifecycle's look at this client: what a design starts from on the live row as it is (jobs.ts, stillStart).
+  if (entry.live) {
+    const row = { logo_path: entry.logo_path, background: entry.live.background, source: entry.source, logo_set: entry.live.logo_set };
+    const fromSet = jobLogos(row) ?? (whole.inks.length ? jobLogos(row, whole) : null);
+    const start = fromSet
+      ? { logo_path: fromSet.logo_path, background: fromSet.background, logos: fromSet.logos as JobLogos | null }
+      : { logo_path: entry.logo_path, background: whole.inks.length ? restGround(whole.inks, entry.live.background, whole.own, entry.source === "person").ground : entry.live.background, logos: null };
+    // The live set's own files (its copies as the lifecycle stored them), read from storage once.
+    for (const path of Object.values(start.logos?.files ?? {})) {
+      if (path && !rasters.has(path)) rasters.set(path, await decodeRaster(await read("generated-media", path)));
+    }
+    const got = { file: start.logos?.canvas ?? "stored", ground: start.background.toUpperCase(), second: start.logos?.second ?? null };
+    const inks = inksOf[got.file] ?? [];
+    rows.push({
+      client: entry.client, kind: "window", what: "what a design starts from before the lifecycle's look",
+      expected: entry.expect.window ?? null,
+      got: { ...got, one_file: !start.logos, weakest: inks.length ? round(weakestContrast(inks, hexRgb(got.ground)), 2) : null },
+      same: !!entry.expect.window && sameText(entry.expect.window, got),
     });
+    for (const d of entry.window_designs ?? []) {
+      const want = (entry.expect.window_designs ?? []).find((e) => e.job === d.job && e.design === d.design);
+      rows.push(await locateRow("window design", d, want, start));
+    }
   }
   return { rows, set };
 }
@@ -238,15 +300,17 @@ async function main(): Promise<void> {
     all.push(...rows);
   }
   const differ = all.filter((r) => !r.same);
-  const designs = all.filter((r) => r.kind === "design");
+  const designs = all.filter((r) => r.kind === "design" || r.kind === "window design");
   const posts = all.filter((r) => r.kind === "post");
   const summary = {
     clients: manifest.length,
     settings: all.filter((r) => r.kind === "settings").length,
     posts: posts.length,
     posts_found: posts.filter((r) => (r.got as { found?: boolean } | null)?.found).length,
+    windows: all.filter((r) => r.kind === "window").length,
     designs: designs.length,
     designs_pass: designs.filter((r) => (r.got as { pass: boolean }).pass).length,
+    designs_lost: designs.filter((r) => (r.got as { lost?: boolean }).lost).length,
     rows_that_differ: differ.length,
     slowest_locate_ms: Math.max(0, ...designs.map((r) => r.ms ?? 0)),
     slowest_post_ms: Math.max(0, ...posts.map((r) => r.ms ?? 0)),

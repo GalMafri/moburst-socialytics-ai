@@ -171,6 +171,63 @@ Slowest locate 7.3 s, slowest read of one post 7.4 s, on a loaded laptop. The se
 
 The sets and canvases were looked at at full size, cropped 1:1 around the logo, for all 15 manifest entries and the copy with the white letter on #0B0E1A. Every whole part of each file shows on its canvas ground. The live rows of 17 Nov for Olo and DermaAngel hold another canvas file and ground than this manifest, which uses the files of 16 Nov: those two are not re-measured here.
 
+Correction (the review of 17 Nov): the reason given in the last sentence is wrong. The logo files did not change; the live steps read 12 to 16 posts where this manifest has 8, and a third client (PrepSmart Recipes) differs for the same reason. The run below is made on what the live step reads.
+
+## The run of 17 Nov 2026, second review (on what the live step reads)
+
+Plan rulings 64 to 72. Run: `npx tsx server/scripts/tone-replay.ts` on the tree of commit `547311fe` (code) with the manifest below, on a laptop running other work. No model call; the only network reads are GETs of the product's public storage (each live set's stored copies); nothing written outside a scratch folder.
+
+Manifest: the 15 entries of the run above, unchanged, and one entry for each of the 14 live rows that hold a set, built from the row read on 17 Nov through the connector (read only): its own logo file, every post its step reads (`reference_paths`, 12 to 16), its brand colors, its live set (rule 1 or 2) and background. For each, the expected settings background, set and canvas were written from the rule before the run, and the expected window (what a design starts from on the live row before the lifecycle's next look) from the live row and the rule. Ten pictures were drawn for the review's cases (no model): a client's real file, or its white copy, laid on a flat color with noise and a slight shade, 1.04 times its usual width and shifted, at 2160 by 2700. The 21 designs of 16 Nov are also run through the window's templates.
+
+First run: 2 rows of 407 differed, both expectations, both explained below; they were corrected and the run made again.
+
+- The orange and purple client's stored design-2 (job f553e4b3), expected to pass as before, is made again: the orange half of its mark sits on the picture's coral (#FC805B) at 1.12:1. This is the line of Ruling 64, and the row of 16 Nov ("pass, 0.761") is wrong by it. At full size the half is told apart from the coral by its hue alone.
+- The window score of the delivered picture of 16 Nov had an estimate (0.348) for its first template; the measured score is 0.335. It is not found either way.
+
+Second run: 0 rows differ of 407 (29 sets, 25 settings backgrounds, 270 posts, 14 windows, 69 designs; exit 0, 9 minutes 5 seconds). A logo was found on 81 of 270 posts. 50 of 69 designs pass; 7 are made again because a whole part of every file that may be stamped does not show on the picture's ground (6 drawn, 1 stored). Slowest locate 7.2 s, slowest read of one post 7.1 s, on the laptop.
+
+Each live row, before and after. "Live" is the set the row holds on 17 Nov; "by this rule" is what the lifecycle settles at its next look; "window" is what a design starts from until then. Every value below is a row of the run, compared exactly.
+
+| Client | Row, rule | Background | Live canvas | Canvas by this rule | Window (canvas; second template) |
+|---|---|---|---|---|---|
+| Adaptive Sound Technologies | lifecycle, 1 | #FFFFFF, unchanged | other on #0F294C, posts | the same | other on #0F294C; stored on #FFFFFF |
+| Bader Law | person, 1 | #0C1D2F, never written | stored on #0C1D2F | the same | the same; none |
+| BetterBee | lifecycle, 1 | #FFFFFF (written by the runner of rule 2 on 17 Nov from #FF9D2F) | stored on #FF9D2F, settings | stored on #FFFFFF, its own neutral | stored on #FFFFFF; none |
+| Buzznow | lifecycle, 2 | #FFCFDA, unchanged | stored on #F7E8E5, posts | the same | the same; other on #0B0E1A |
+| DermaAngel US | lifecycle, 2 | #0B0E1A, unchanged | white on #00BFD9, posts | the same | the same; none |
+| European Wax Center | lifecycle, 1 | #FFFFFF, unchanged | stored on #FFFFFF | the same | the same; none |
+| Kitcaster by Moburst | lifecycle, 1 | #233A5E, unchanged | stored on #233A5E | the same | the same; none |
+| Moburst | person, 1 | #0B0E1A, never written | stored on #0B0E1A | the same | the same; none |
+| Olo | lifecycle, 2 | #0B0E1A, unchanged | white on #3F3E39, posts | the same | the same; stored on #FFFFFF |
+| Pay The Pyper | lifecycle, 2 | #FFFFFF (from #1A1A1A, by the runner of rule 2) | stored on #E8E8E8, posts | the same | the same; other on #0B0E1A |
+| PrepSmart Recipes | lifecycle, 2 | #0B0E1A, unchanged | stored on #1E1B16, posts | the same | the same; other on #FFFFFF |
+| Twos | lifecycle, 1 | #FFF9EA, unchanged | stored on #FFF9EA | the same | the same; none |
+| Uproar by Moburst | lifecycle, 1 | #0B0E1A, unchanged | stored on #192033, posts | the same | the same; none |
+| Yangra | lifecycle, 1 | #181F36, unchanged | stored on #151A42, posts | the same | the same; none |
+
+LegaBot (a person's row of an archived client) has no set and no step row, and is not in the manifest.
+
+So the new line changes no stored set and no background. Three canvases differ from the manifest of 16 Nov, all already live and all by rule 2 as built before this review: DermaAngel US (white on #0B0E1A to white on #00BFD9: two of its 12 posts show its logo in white on its cyan, 2.22 and 2.23:1, as on its packaging; looked at at full size), Olo (white on #2A95FD to white on #3F3E39: 8 posts of 12 show the white file, the ground closest to the others is now a dark one) and PrepSmart Recipes (other on #F2EADF to stored on #1E1B16: with 12 posts the stored file's own posts give its ground). The design that starts on BetterBee's rule 1 set already starts on #FFFFFF, because a canvas from the settings reads the row's background as it is (Ruling 31).
+
+The pictures drawn for the review's cases, each expected before the run:
+
+| Client | Drawn | Expected | Got | Picture's ground, weakest part there |
+|---|---|---|---|---|
+| BetterBee | the stored file on #FF9D2F | made again, lost | lost, 0.940 | #F99729, 1.01:1 |
+| Uproar by Moburst | the stored file on #FF6671 | made again, lost | lost, 0.925 | #FA616C, 1.06:1 |
+| Uproar by Moburst | the white copy on #3BD4FF (the stored file has a cyan panel) | made again, lost | lost, 0.954 | #36CFFA, 1.05:1 |
+| European Wax Center | the stored file on #231F20 | made again, lost | lost, 0.949 | #1D191A, 1.21:1 |
+| European Wax Center | the stored file on #1A1A1A | made again, lost | lost, 0.934 | #141414, 1.14:1 |
+| Twos | the stored file on #1A1A1A | made again, lost | lost, 0.973 | #1F1F1F, 1.27:1 |
+| Buzznow | the stored file on #1A1A1A | made again: no template lies on such a ground | not found, 0.207 and 0.105 | #141414 |
+| Pay The Pyper | the stored file on #1A1A1A | made again, the same | not found, 0.202 and 0.461 | #212121 |
+| DermaAngel US | the white copy on #00BFD9 | found, white | found, white, 0.978 | #00B9D3, 2.36:1 |
+| Olo | the white copy on #2A95FD | found, white | found, white, 0.999 | #248FF7, 3.31:1 |
+
+The designs of 16 Nov (the client of 16 Nov), through the set of rule 2 and through the window on its live row: 18 of 18 on light pictures are found with the stored file (0.833 to 0.980), the green at 2.20:1 or more on the picture's ground; cf6cbd60 design-1 is found with the copy (0.962); design-2, delivered with two letters of three, and the delivered picture are not found (0.407 and 0.471; 0.344 and 0.451; through the window 0.411 and 0.471; 0.335 and 0.451).
+
+The 181 rows of the 15 earlier entries keep their result except the orange and purple client's design-2 above. Of every post ground and design ground measured, none has its weakest part between 1.3 and 1.8:1, so any line in that band gives this run.
+
 ## The website second-file proof, first run
 
 Tool: `supabase/tests/tools/site-logos.ts`, run under Deno on 16 Nov 2026. It fetched each homepage directly, listed the page's logo and its other logo files with the product's own `logoOnPage` and `logoFilesOnPage`, converted each with the product's own `logoPng` into a store kept in memory, and ran `sameLogo` against the client's stored logo. No model, no scraping service, nothing written to the product.

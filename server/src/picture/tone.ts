@@ -20,20 +20,28 @@ const NAME_ORDER: LogoFileName[] = ["stored", "other", "white"];
 /**
  * Locate for a job that carries a logo set. Each template is searched for
  * with the search a single logo gets, and the better match is answered with
- * today's fields, so the worker's one test (logoFound) reads it as before.
- * The answer also names the file closest in color to what was drawn: the
- * file to stamp. Whether the match is good enough stays the worker's
- * decision.
+ * today's fields, so the worker's test of the match (logoFound) reads it as
+ * before. The answer also names the file closest in color to what was
+ * drawn: the file to stamp. Whether the match is good enough stays the
+ * worker's decision.
+ *
+ * The picture's own ground around the found logo is read too (a real pixel
+ * of the design), and a file one of whose whole parts has that color is not
+ * named: stamped there, the part would not show. With no file left, `file`
+ * is null and `lost` is true.
  */
 export function locateTemplates(design: Raster, templates: TemplateIn[], compare: CompareIn[], placement: Placement, scales: [number, number]): LocateResult {
   const found = searchTemplates(design, templates, placement, scales);
-  const named = nameFile(design, found, templates, compare, [found.matched, ...NAME_ORDER]);
+  const ground = groundAround(design, found.rect)?.ground ?? null;
+  const named = nameFile(design, found, templates, compare, [found.matched, ...NAME_ORDER], ground);
   const rasterOf = (file: LogoFileName) => templates.find((t) => t.file === file)?.raster ?? compare.find((c) => c.file === file)?.raster ?? templates[found.index].raster;
-  const stamp = stampRect(found.rect, templates[found.index].raster, rasterOf(named.file));
+  const stamp = named.file ? stampRect(found.rect, templates[found.index].raster, rasterOf(named.file)) : null;
   return {
     ...found.rect, score: found.score, usual: found.usual, frame: [design.width, design.height],
     file: named.file, matched: found.matched, scores: found.scores, gaps: named.gaps,
     ...(stamp ? { stamp } : {}),
+    ...(ground ? { ground } : {}),
+    ...(named.file === null ? { lost: true } : {}),
   };
 }
 
@@ -93,5 +101,6 @@ export function postLogo(post: Raster, searches: TemplateIn[], compare: CompareI
   const around = groundAround(post, found.rect);
   if (!around) return { found: false, score: found.score };
   const named = nameFile(post, found, searches, compare, NAME_ORDER);
-  return { found: true, score: found.score, matched: found.matched, rect: found.rect, gaps: named.gaps, shows: named.file, ground: around.ground, flat: around.flat };
+  // No ground is given to the naming of a post's file, so a file is always named: a post shows what it shows.
+  return { found: true, score: found.score, matched: found.matched, rect: found.rect, gaps: named.gaps, shows: named.file ?? found.matched, ground: around.ground, flat: around.flat };
 }

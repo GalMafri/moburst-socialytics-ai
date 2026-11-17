@@ -187,8 +187,22 @@ describe("POST /api/picture/locate", () => {
     expect(expected.frame).toEqual([320, 240]);
     expect(Object.keys(puts)).toEqual([]);
     expect(lines[0]).toMatchObject({ route: "locate", ok: true, in: { design: "320x240", logo: "40x16" }, out: {} });
-    // An old request is answered with exactly the old fields.
-    expect(Object.keys(json.result as object)).toEqual(["x", "y", "width", "height", "score", "usual", "frame"]);
+    // A request with one file is answered with the old fields and the picture's own ground around the found logo.
+    expect(Object.keys(json.result as object)).toEqual(["x", "y", "width", "height", "score", "usual", "frame", "ground"]);
+    expect((json.result as LocateResult).ground).toEqual([10, 12, 30]);
+
+    // The same logo kept on a picture of its own color (a part of the file has the ground's color): found by its shape, and answered as lost.
+    const faint = raster(W, H);
+    for (let i = 0; i < W * H; i++) faint.data.set([246, 246, 246, 255], i * 4);
+    for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
+      const lx = Math.floor((x * lw) / sw), ly = Math.floor((y * lh) / sh);
+      if (logo.data[(ly * lw + lx) * 4 + 3]) faint.data.set([255, 255, 255, 255], ((sy + y) * W + sx + x) * 4);
+    }
+    const kept = harness({ "design.png": await encodePng(faint), "logo.png": logoPng });
+    const lost = (await kept.call("locate", { ...meta, design: `${GET}design.png`, logo: `${GET}logo.png`, placement, background: [10, 12, 30], scales: [0.45, 1.15] })).json.result as LocateResult;
+    expect(lost.score).toBeGreaterThanOrEqual(0.75);
+    expect(lost.ground).toEqual([246, 246, 246]);
+    expect(lost.lost).toBe(true);
   });
 });
 
@@ -278,6 +292,35 @@ describe("POST /api/picture/locate with a logo set", () => {
     const bad = await call("locate", { ...base, templates: template(["blue"]), compare });
     expect(bad.status).toBe(400);
     expect(String(bad.json.reason)).toContain("templates.0.names.0");
+  });
+
+  it("names no file when a whole part of each does not show on the picture's ground, and says the design's logo is lost", async () => {
+    // Two green bars and a near-black one, kept by the model on a near-black band: found by its shape, with a part that would not show.
+    const GREEN: Rgb = [60, 170, 90];
+    const stored = box(inked(shape, GREEN), 24, 0, 40, 7, [26, 25, 25]);
+    const copy = box(inked(shape, GREEN), 24, 0, 40, 7, [255, 255, 255]);
+    const band: Rgb = [28, 28, 27];
+    const design = drawLogo(flat(W, H, band), stored, drawn);
+    const { call } = await store(design, { stored, other: copy });
+    const one = await call("locate", { ...base, templates: [{ file: "stored", logo: `${GET}stored.png`, ground: [26, 26, 26], names: [] }], compare: [{ file: "other", logo: `${GET}other.png` }] });
+    expect(one.status).toBe(200);
+    const got = result(one.json);
+    expect(got.score).toBeGreaterThanOrEqual(0.75);
+    expect(got.matched).toBe("stored");
+    expect(got.file).toBeNull();
+    expect(got.lost).toBe(true);
+    expect(got.ground).toEqual(band);
+    expect(got).not.toHaveProperty("stamp");
+    // The copy with the white part serves that ground and is listed: it is the file to stamp, and nothing is lost.
+    const two = result((await call("locate", { ...base, templates: [{ file: "stored", logo: `${GET}stored.png`, ground: [26, 26, 26], names: ["other"] }], compare: [{ file: "other", logo: `${GET}other.png` }] })).json);
+    expect(two.file).toBe("other");
+    expect(two).not.toHaveProperty("lost");
+    // On a light picture every part of the stored file shows: named as before, with the ground answered.
+    const light = await store(drawLogo(flat(W, H, [232, 232, 232]), stored, drawn), { stored });
+    const seen = result((await light.call("locate", { ...base, templates: [{ file: "stored", logo: `${GET}stored.png`, ground: [232, 232, 232], names: [] }], compare: [] })).json);
+    expect(seen.file).toBe("stored");
+    expect(seen.ground).toEqual([232, 232, 232]);
+    expect(seen).not.toHaveProperty("lost");
   });
 
   it("names a person's file when its template matched and compares nothing", async () => {
