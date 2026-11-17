@@ -117,7 +117,7 @@ async function asPng(file: File): Promise<File> {
 }
 
 const DERIVED_WORDS = {
-  placement: { client_posts: "where the client's own posts put it", default: "the standard place at the top" } as Record<string, string>,
+  placement: { client_posts: "where the client's own posts put it", logo_on_posts: "where the client's own posts put it", default: "the standard place at the top" } as Record<string, string>,
   background: { brand_color: "a brand color", neutral: "a neutral color that suits the logo" } as Record<string, string>,
 };
 

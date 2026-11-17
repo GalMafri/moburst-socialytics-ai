@@ -4,6 +4,7 @@ import { deps, settled, siteKey, STEPS, weeksFor } from "../../../functions/_sha
 import { fakeDb, writeClientRpc } from "../../../functions/_shared/lifecycle/fakeDb";
 import { rowAfter, type StepRow } from "../../../functions/_shared/lifecycle/policy";
 import { NotInStorage, PictureError } from "../../../functions/_shared/picture/client";
+import { ResearchError } from "../../../functions/_shared/brand/research";
 import { textHash } from "../../../functions/_shared/lifecycle/names";
 
 const original = { ...deps };
@@ -277,6 +278,10 @@ describe("brand_read", () => {
     expect(db.uploads.has(`generated-media/${svgPath}`)).toBe(true);
     expect(fetched).not.toHaveBeenCalled();
     expect(out.result.model_read).toBe(false);
+    // The list says which listing made it, so a list from before a change of the listing is known to be older.
+    expect((out.result as { logo_marks?: number }).logo_marks).toBe(1);
+    // The marks that can be the client's logo itself are the header's: no logo the footer merely names, and no inline SVG the page would color.
+    expect((out.result as { logo_own?: string[] }).logo_own).toEqual(["https://www.northwind.test/logo-white.png", "https://www.northwind.test/a.png", "https://www.northwind.test/b.png"]);
 
     // A logo a person set is the main one: the site's own header logo is then one of the other files.
     const p = client({ name: "Northwind", website_url: "https://www.northwind.test/", field_sources: person("brand_identity", "logo_url"), brand_identity: BRAND, logo_url: "https://www.northwind.test/logo-white.png" });
@@ -552,7 +557,7 @@ describe("a page on another client's site is used for text only", () => {
       status: "done",
       result: {
         website: "moburst.com/services/organic/podcast-booking", fetched_via: "direct", model_read: false,
-        timezone: null, timezone_source: null, country: null, language: "en", logo: "none", written: [], kept: [], logo_files: [], site_profiles: [], parent_page: true,
+        timezone: null, timezone_source: null, country: null, language: "en", logo: "none", written: [], kept: [], logo_files: [], logo_own: [], logo_marks: 1, site_profiles: [], parent_page: true,
       },
     });
     expect(c).toMatchObject({ logo_url: null, brand_identity: null, location: null, timezone: "UTC", geo: "" });
@@ -666,7 +671,7 @@ describe("a plain-domain client is unchanged by the parent-page rule", () => {
         website: "olo.com", fetched_via: "direct", model_read: true, timezone: "America/New_York", timezone_source: "page_footer", country: "US", language: "en",
         logo: "file", written: ["brand_identity", "logo_url", "location", "timezone"], kept: [], site_profiles: ["linkedin:olo"],
         // The page's header image is not the logo the read chose, so it is kept as one of the site's other logo files (16 Nov 2026).
-        logo_files: [`${c.website_url}logo.png`],
+        logo_files: [`${c.website_url}logo.png`], logo_own: [`${c.website_url}logo.png`], logo_marks: 1,
       },
     });
     expect(c).toMatchObject({ brand_identity: BRAND, logo_url: "https://www.olo.com/logo.svg", timezone: "America/New_York", location: { source: "page_footer", website: "olo.com" } });
@@ -879,10 +884,25 @@ describe("design_settings", () => {
   };
 
   /** Fakes for everything the step calls outside the database; `seen` records each call. */
-  function world(opts: { row?: Record<string, unknown> | null; shows?: Record<string, unknown>; facts?: Record<string, unknown>; logo?: Record<string, unknown>; picture?: (route: string) => void; site?: Record<string, string | null>; gone?: string[]; given?: Record<string, (a: Record<string, unknown>, db: ReturnType<typeof dbWith>) => unknown> } = {}) {
+  function world(opts: {
+    row?: Record<string, unknown> | null; shows?: Record<string, unknown>; facts?: Record<string, unknown>; logo?: Record<string, unknown>; picture?: (route: string) => void; site?: Record<string, string | null>; gone?: string[];
+    given?: Record<string, (a: Record<string, unknown>, db: ReturnType<typeof dbWith>) => unknown>;
+    /** The client's homepage, as a direct read gives it: a page with no mark of the brand when not given, and null for a site that cannot be read. */
+    page?: string | null;
+    /** What the service answers for one logo file, by its stored path: its facts, and what each post shows of it, or the failure it answers with. */
+    byLogo?: Record<string, { facts?: Record<string, unknown>; shows?: Record<string, unknown>; fail?: Error }>;
+  } = {}) {
     const db = dbWith({ design_brand_settings: opts.row === null ? [] : [opts.row ?? stored()] }, { ...rpcs, ...(opts.given ?? {}) });
-    const seen = { key: 0, spot: 0, logoPng: [] as string[], hash: [] as string[], calls: [] as Array<{ route: string; body: Record<string, unknown> }> };
+    const seen = { key: 0, spot: 0, pages: [] as string[], sizes: [] as string[], logoPng: [] as string[], hash: [] as string[], calls: [] as Array<{ route: string; body: Record<string, unknown> }> };
     deps.now = () => new Date(T);
+    deps.projectUrl = () => "https://project.test";
+    deps.fetchSiteHtml = (async (url: string, o: { firecrawlKey?: string | null } = {}) => {
+      seen.pages.push(url);
+      // The step reads the page directly: it never hands a scraping key over.
+      if (o.firecrawlKey) throw new Error("the step must read the homepage without a scraping service");
+      if (opts.page === null) throw new ResearchError("site_unreachable", "The website could not be read.");
+      return { html: opts.page ?? "<html><body><main></main></body></html>", via: "direct" as const };
+    }) as never;
     deps.anthropicKey = async () => { seen.key++; return "key"; };
     deps.imaging = (async () => ({
       logoPng: async (_db: unknown, _client: string, url: string) => {
@@ -894,13 +914,18 @@ describe("design_settings", () => {
       },
       readLogoSpot: async () => { seen.spot++; return SPOT; },
       fileHash: async (_db: unknown, path: string) => { seen.hash.push(path); return HASH; },
+      postSize: async (_db: unknown, path: string) => { seen.sizes.push(path); return [1000, 1250] as [number, number]; },
     })) as never;
     deps.picture = (() => ({
       call: async (route: string, body: Record<string, unknown>) => {
         opts.picture?.(route);
         seen.calls.push({ route, body });
-        if (route === "logo-set") return { result: { ...FACTS, ...(opts.facts ?? {}) }, ms: 40 };
-        return { result: { posts: (body.posts as string[]).map((link) => opts.shows?.[link.replace("design-references/", "")] ?? MISSED) }, ms: 900 };
+        const logo = String(route === "logo-set" ? body.logo : (body.searches as Array<{ logo: string }>)[0].logo).replace("generated-media/", "");
+        const own = opts.byLogo?.[logo];
+        if (own?.fail) throw own.fail;
+        if (route === "logo-set") return { result: { ...FACTS, ...(opts.facts ?? {}), ...(own?.facts ?? {}) }, ms: 40 };
+        const shows = own ? own.shows ?? {} : opts.shows ?? {};
+        return { result: { posts: (body.posts as string[]).map((link) => shows[link.replace("design-references/", "")] ?? MISSED) }, ms: 900 };
       },
       read: async (bucket: string, path: string) => {
         // A file that is gone from storage: what signedRead gives for it.
@@ -945,13 +970,13 @@ describe("design_settings", () => {
     expect(logo_set).toMatchObject({ of: "c1/their-logo.png", canvas: { file: "stored", ground: "#0C1D2F", from: "settings" } });
   });
 
-  it("keys a lifecycle row on its posts, logo and colors, then the website's logo files, a person's second file and the tone rule", async () => {
+  it("keys a lifecycle row on its posts, logo and colors, then the website's logo files, a person's second file, the tone rule and the rule for the logo its posts show", async () => {
     const { db } = world();
-    expect(await STEPS.design_settings.inputs(db, c(), refs)).toBe(`${INPUTS}${COLORS}|site:|other:|tone:2`);
+    expect(await STEPS.design_settings.inputs(db, c(), refs)).toBe(`${INPUTS}${COLORS}|site:|other:|tone:2|pick:1`);
     const withSite = rowsOf(row("design_refs", { result: { synthesized_at: T } }), row("brand_read", { result: { logo_files: ["https://brand.test/logo-white.svg"] } }));
-    expect(await STEPS.design_settings.inputs(db, c(), withSite)).toMatch(/\|site:[0-9a-z]+\|other:\|tone:2$/);
+    expect(await STEPS.design_settings.inputs(db, c(), withSite)).toMatch(/\|site:[0-9a-z]+\|other:\|tone:2\|pick:1$/);
     db.tables.design_brand_settings[0].logo_set = { person: { path: "c1/design-settings/logo-other-9.png", of: LOGO, at: T } };
-    expect(await STEPS.design_settings.inputs(db, c(), refs)).toBe(`${INPUTS}${COLORS}|site:|other:c1/design-settings/logo-other-9.png|tone:2`);
+    expect(await STEPS.design_settings.inputs(db, c(), refs)).toBe(`${INPUTS}${COLORS}|site:|other:c1/design-settings/logo-other-9.png|tone:2|pick:1`);
   });
 
   it("derives the logo file, the placement from the client's posts and the background from the brand colors", async () => {
@@ -989,7 +1014,7 @@ describe("design_settings", () => {
     });
     const rows = before({ inputs_key: `${INPUTS}${COLORS}|site:|other:|tone:1`, result: { written: true, logo_path: LOGO, tone: { of: LOGO, settled: "2026-11-16T09:00:00.000Z" } } });
     // The key moved with the rule, so the step runs with nobody doing anything.
-    expect(await STEPS.design_settings.inputs(db, c(), rows)).toBe(`${INPUTS}${COLORS}|site:|other:|tone:2`);
+    expect(await STEPS.design_settings.inputs(db, c(), rows)).toBe(`${INPUTS}${COLORS}|site:|other:|tone:2|pick:1`);
     const outs = await drive(db, c(), rows);
     expect(outs.at(-1)).toMatchObject({ status: "done", result: { written: true, background: "#0B0E1A", background_from: "neutral" } });
     // The stored read of the logo's spot is reused: no model and no key.
@@ -1211,6 +1236,396 @@ describe("design_settings", () => {
     await drive(stale.db, c(), before());
     expect(picture(stale.seen, "logo-set")[0].body).not.toHaveProperty("person");
     expect(stale.row().logo_set.other).toBeNull();
+  });
+
+  describe("the logo the client's posts show", () => {
+    // The homepage: an icon in its schema.org record (the logo the website read kept), the wordmark as an inline SVG in the header's link
+    // to the home page, a second mark of the brand in the header, and a partner's logo in the footer, which is no mark of the brand.
+    const MARK = `<svg width="76" height="25" viewBox="0 0 579 194" fill="white" aria-hidden="true"><g><path d="M1 1h5v5z"/></g></svg>`;
+    const page = (mark: string) => `<html><head><script type="application/ld+json">{"@type":"Organization","logo":"${LOGO_URL}"}</script></head><body><header><a href="/" aria-label="Brand">${mark}</a><img class="logo" src="/brand-badge.png"></header><footer><a href="https://partner.test/"><img class="logo" src="/partner-logo.png"></a></footer></body></html>`;
+    const PAGE = page(MARK);
+    const MARK_URL = `https://project.test/storage/v1/object/public/generated-media/c1/brand/logo-site-${textHash(MARK)}.svg`;
+    const BADGE_URL = "https://brand.test/brand-badge.png";
+    const PARTNER_URL = "https://brand.test/partner-logo.png";
+    const WORDMARK = "c1/design-settings/logo-site-wordmark.png";
+    const BADGE = "c1/design-settings/logo-site-badge.png";
+    const six = posts(6).map((p) => p.path);
+    const site = { [MARK_URL]: WORDMARK, [BADGE_URL]: BADGE, [PARTNER_URL]: "c1/design-settings/logo-site-partner.png" };
+    const WIDE = { own: "dark", made: { other: { turned: 1 }, white: null } };
+    /** A post that shows a logo in the middle near the bottom, 0.12 of the post's width. */
+    const low = (shows: "stored" | "other") => ({ ...found(shows), rect: { x: 440, y: 1125, width: 120, height: 40 } });
+    /** A post that shows a logo at a score of its own. */
+    const scored = (score: number) => ({ ...low("stored"), score });
+    const brand = (over: Record<string, unknown> = {}) => c({ website_url: "https://brand.test/", harvested_design_references: posts(6), ...over });
+    const wordmarkOn = (n: number) => Object.fromEntries(six.slice(0, n).map((p, i) => [p, low(i % 2 ? "other" : "stored")]));
+    const writes = (db: ReturnType<typeof dbWith>) => db.rpcCalls.filter((r) => r.name === "lifecycle_write_design_settings");
+    const readsOf = (seen: { calls: Array<{ route: string; body: Record<string, unknown> }> }, logo: string) => seen.calls.filter((x) => x.route === "post-logos" && (x.body.searches as Array<{ logo: string }>)[0].logo === `generated-media/${logo}`).length;
+
+    it("takes the mark the posts carry in place of the website's first logo, with its place from where it was found, and makes its set", async () => {
+      const { db, seen, row: settings } = world({ row: stored({ reference_paths: six }), page: PAGE, site, byLogo: { [WORDMARK]: { facts: WIDE, shows: wordmarkOn(5) }, [BADGE]: { facts: WIDE } } });
+      const outs = await drive(db, brand(), before(), 30);
+      expect(outs.at(-1)).toMatchObject({ status: "done" });
+      // The homepage was read directly, once, and no model was asked.
+      expect(seen.pages).toEqual(["https://brand.test/"]);
+      // Its inline SVG is stored as a file of its own: the drawing as the page has it, with the namespace a file needs.
+      expect(new TextDecoder().decode(db.uploads.get(`generated-media/c1/brand/logo-site-${textHash(MARK)}.svg`) as Uint8Array)).toBe(MARK.replace("<svg", `<svg xmlns="http://www.w3.org/2000/svg"`));
+      expect(seen.spot).toBe(0);
+      expect(seen.key).toBe(0);
+      // The wordmark is the logo now, placed where the posts carry it, on a background from the brand colors for its ink.
+      expect(settings()).toMatchObject({ source: "lifecycle", logo_path: WORDMARK, placement: { anchor: "center", width: 0.12, top: 0.9 }, reference_paths: six });
+      expect(settings().derived).toMatchObject({
+        logo_from: MARK_URL, placement_from: "logo_on_posts", logo_read: SPOT,
+        // The choice keeps the file as the conversion gave it, so a later look writes it again without fetching anything.
+        logo_pick: { rule: 1, for: LOGO_URL, from: MARK_URL, logo: { path: WORDMARK, width: 600, height: 200, ink: null, converted: "kept" }, placement: { anchor: "center", width: 0.12, top: 0.9 }, found: 5, posts: 6, over: { path: LOGO, found: 0 } },
+      });
+      // Its set follows by itself: made for the new logo, searched at the new place.
+      expect(settings().logo_set).toMatchObject({ of: WORDMARK, rule: 2, posts: { read: 6, found: 5 } });
+      expect(outs.at(-1)!.result).toMatchObject({ logo_path: WORDMARK, tone: { of: WORDMARK, settled: T }, pick: { of: WORDMARK, chosen: null } });
+      const last = picture(seen, "post-logos").at(-1) as { body: { placement: unknown; searches: Array<{ logo: string }> } };
+      expect(last.body.searches[0].logo).toBe(`generated-media/${WORDMARK}`);
+      // Each candidate was searched where the model's stored read says the posts carry the logo, for its own shape.
+      const searched = picture(seen, "post-logos").map((x) => (x as { body: { placement: unknown; searches: Array<{ logo: string }> } }).body).find((b) => b.searches[0].logo === `generated-media/${BADGE}`)!;
+      expect(searched.placement).toEqual(PLACEMENT);
+      // The sizes of the posts it was found on were read from their headers, once.
+      expect(seen.sizes.sort()).toEqual(six.slice(0, 5));
+      // The logo that was replaced is a candidate from now on, and what its set's work read of the posts is kept as its work: it is not read again.
+      const read = (logo: string) => picture(seen, "post-logos").filter((x) => (x as unknown as { body: { searches: Array<{ logo: string }> } }).body.searches[0].logo === `generated-media/${logo}`).length;
+      expect([read(LOGO), read(BADGE), read(WORDMARK)]).toEqual([2, 2, 4]);
+      expect(outs.at(-1)!.result!.pick.counts).toEqual({ [WORDMARK]: 5, [LOGO]: 0, [BADGE]: 0 });
+      // The partner's logo in the footer is no mark of the brand: it was never fetched, converted or looked for.
+      expect(seen.logoPng).not.toContain(PARTNER_URL);
+      expect(outs.find((o) => o.result?.pick?.listed)!.result!.pick.listed).toEqual({ site: "brand.test", files: [MARK_URL, BADGE_URL, LOGO_URL] });
+      // The website's first logo is written once, then the choice; from then on only the choice.
+      expect(writes(db).map((w) => w.args.p_logo_path)).toEqual([LOGO, WORDMARK, WORDMARK]);
+    });
+
+    it("keeps the logo the client has when its posts carry it, or when one post alone shows another mark", async () => {
+      // The client's own logo on two posts, the wordmark on two others: a logo the posts carry is never replaced.
+      const tie = world({ row: stored({ reference_paths: six }), page: PAGE, site, shows: { [six[4]]: found("stored"), [six[5]]: found("stored") }, byLogo: { [WORDMARK]: { facts: WIDE, shows: wordmarkOn(2) }, [BADGE]: { facts: WIDE } } });
+      const outs = await drive(tie.db, brand(), before(), 30);
+      expect(outs.at(-1)).toMatchObject({ status: "done", result: { logo_path: LOGO, pick: { of: LOGO, chosen: null, counts: { [LOGO]: 2, [WORDMARK]: 2, [BADGE]: 0 } } } });
+      expect(tie.row()).toMatchObject({ logo_path: LOGO, placement: PLACEMENT });
+      expect(tie.row().derived.logo_pick).toBeUndefined();
+      expect(writes(tie.db)).toHaveLength(1);
+      // One post alone is not what the client's posts carry.
+      const one = world({ row: stored({ reference_paths: six }), page: PAGE, site, byLogo: { [WORDMARK]: { facts: WIDE, shows: wordmarkOn(1) }, [BADGE]: { facts: WIDE } } });
+      await drive(one.db, brand(), before(), 30);
+      expect(one.row().logo_path).toBe(LOGO);
+      expect(one.seen.sizes).toEqual([]);
+    });
+
+    it("never replaces a logo the posts carry, however many more posts carry another mark of the brand", async () => {
+      // The client's own logo on two posts, the wordmark on the four others.
+      const { db, row: settings } = world({ row: stored({ reference_paths: six }), page: PAGE, site, shows: { [six[4]]: found("stored"), [six[5]]: found("stored") }, byLogo: { [WORDMARK]: { facts: WIDE, shows: wordmarkOn(4) }, [BADGE]: { facts: WIDE } } });
+      const outs = await drive(db, brand(), before(), 30);
+      expect(outs.at(-1)).toMatchObject({ status: "done", result: { logo_path: LOGO, pick: { of: LOGO, chosen: null, counts: { [LOGO]: 2, [WORDMARK]: 4, [BADGE]: 0 } } } });
+      expect(settings()).toMatchObject({ logo_path: LOGO, placement: PLACEMENT });
+      expect(settings().derived.logo_pick).toBeUndefined();
+      expect(writes(db)).toHaveLength(1);
+    });
+
+    it("counts a post for a candidate only where it is found and scores higher than the client's logo: a sister lockup found at a lower score gets nothing for it", async () => {
+      // The client's logo on two posts at 0.97. The candidate is "found" on the same two at 0.77 and 0.79 (its rectangle covers a part of
+      // the mark those posts carry), and on one post of its own. Found on three posts against two, it counts for one.
+      const { db, row: settings } = world({
+        row: stored({ reference_paths: six }), page: PAGE, site, shows: { [six[4]]: { ...found("stored"), score: 0.973 }, [six[5]]: { ...found("stored"), score: 0.969 } },
+        byLogo: { [WORDMARK]: { facts: WIDE, shows: { [six[0]]: scored(0.8), [six[4]]: scored(0.766), [six[5]]: scored(0.792) } }, [BADGE]: { facts: WIDE } },
+      });
+      const outs = await drive(db, brand(), before(), 30);
+      expect(outs.at(-1)).toMatchObject({ status: "done", result: { logo_path: LOGO, pick: { chosen: null, counts: { [LOGO]: 2, [WORDMARK]: 1, [BADGE]: 0 } } } });
+      expect(settings().logo_path).toBe(LOGO);
+      expect(writes(db)).toHaveLength(1);
+    });
+
+    it("keeps a logo found on two posts, however much better another mark matches those posts", async () => {
+      // The client's logo is found on two posts at 0.78 and 0.76. The wordmark is found on the same two at 0.95 and 0.96 and on a third.
+      // The logo passes the one test of a design on two posts, so the posts carry it and it stays: the rule never trades one mark a brand uses for another.
+      const { db, row: settings } = world({
+        row: stored({ reference_paths: six }), page: PAGE, site, shows: { [six[0]]: { ...found("stored"), score: 0.78 }, [six[1]]: { ...found("stored"), score: 0.76 } },
+        byLogo: { [WORDMARK]: { facts: WIDE, shows: { [six[0]]: scored(0.95), [six[1]]: scored(0.96), [six[2]]: scored(0.9) } }, [BADGE]: { facts: WIDE } },
+      });
+      const outs = await drive(db, brand(), before(), 30);
+      expect(outs.at(-1)).toMatchObject({ status: "done", result: { logo_path: LOGO, pick: { of: LOGO, chosen: null, counts: { [LOGO]: 2, [WORDMARK]: 3, [BADGE]: 0 } } } });
+      expect(settings()).toMatchObject({ logo_path: LOGO, placement: PLACEMENT });
+      expect(settings().derived.logo_pick).toBeUndefined();
+      expect(writes(db)).toHaveLength(1);
+    });
+
+    it("keeps a logo its posts carry when a second file of the same logo scores a hair higher on every one of them", async () => {
+      // The site serves the same wordmark twice (one file for light pages, one for dark). Both are found on the same three posts,
+      // and the second file is ahead by a hair on each. Which file scores higher there depends on how each was drawn, so a score takes no post from the logo.
+      const three = { [six[0]]: { ...found("stored"), score: 0.906901 }, [six[1]]: { ...found("stored"), score: 0.943629 }, [six[2]]: { ...found("stored"), score: 0.899957 } };
+      const twin = { [six[0]]: scored(0.92), [six[1]]: scored(0.966), [six[2]]: scored(0.927) };
+      const { db, seen, row: settings } = world({ row: stored({ reference_paths: six }), page: PAGE, site, shows: three, byLogo: { [WORDMARK]: { facts: WIDE, shows: twin }, [BADGE]: { facts: WIDE } } });
+      const outs = await drive(db, brand(), before(), 30);
+      expect(outs.at(-1)).toMatchObject({ status: "done", result: { logo_path: LOGO, pick: { of: LOGO, chosen: null, counts: { [LOGO]: 3, [WORDMARK]: 3, [BADGE]: 0 } } } });
+      // Nothing of a client that works is rewritten: the logo, its place, its background and its set stay as they were made.
+      expect(settings()).toMatchObject({ logo_path: LOGO, placement: PLACEMENT, logo_set: { of: LOGO } });
+      expect(settings().derived.logo_pick).toBeUndefined();
+      expect(writes(db)).toHaveLength(1);
+      expect(seen.sizes).toEqual([]);
+    });
+
+    it("gives a candidate nothing for a post where the client's logo scores higher at a size the test does not accept", async () => {
+      // The client's logo matches two posts at 0.887 and 0.88 with the match at an end of the sizes searched, so it is not found there (the size half of the test).
+      // The wordmark is found on the same two at 0.80 and 0.79: its rectangle covers a part of the logo those posts carry. It counts neither, and the client keeps its logo.
+      const { db, row: settings } = world({
+        row: stored({ reference_paths: six }), page: PAGE, site, shows: { [six[0]]: { found: false, score: 0.887 }, [six[1]]: { found: false, score: 0.88 } },
+        byLogo: { [WORDMARK]: { facts: WIDE, shows: { [six[0]]: scored(0.8), [six[1]]: scored(0.79) } }, [BADGE]: { facts: WIDE } },
+      });
+      const outs = await drive(db, brand(), before(), 30);
+      expect(outs.at(-1)).toMatchObject({ status: "done", result: { logo_path: LOGO, pick: { of: LOGO, chosen: null, counts: { [LOGO]: 0, [WORDMARK]: 0, [BADGE]: 0 } } } });
+      expect(settings().logo_path).toBe(LOGO);
+      expect(settings().derived.logo_pick).toBeUndefined();
+      expect(writes(db)).toHaveLength(1);
+    });
+
+    it("places a chosen logo from the posts that count for it, and picks its background against its whole parts", async () => {
+      // The wordmark as the conversion gives it since the ground rule: its parts and the ground it was made for.
+      const parts = { ink: [200, 205, 215] as [number, number, number], inks: [[255, 255, 255], [60, 100, 160]] as Array<[number, number, number]>, own: "dark" as const };
+      const w = world({ row: stored({ reference_paths: six }), page: PAGE, site, byLogo: { [WORDMARK]: { facts: WIDE, shows: wordmarkOn(5) }, [BADGE]: { facts: WIDE, shows: { [six[0]]: { ...scored(0.99), rect: { x: 10, y: 10, width: 300, height: 100 } } } } } });
+      const imaging = await deps.imaging();
+      const logoPng = imaging.logoPng;
+      deps.imaging = (async () => ({ ...imaging, logoPng: async (db: unknown, id: string, url: string) => (url === MARK_URL ? { path: WORDMARK, width: 600, height: 200, ...parts, converted: "from_svg" as const } : logoPng(db as never, id, url)) })) as never;
+      await drive(w.db, brand(), before(), 30);
+      // The first post matches the badge better, so it is the badge's: the wordmark counts for four, and its place is measured on those four.
+      expect(w.row().derived.logo_pick).toMatchObject({ found: 4, logo: { path: WORDMARK, ...parts } });
+      expect(w.seen.sizes.sort()).toEqual(six.slice(1, 5));
+      // The dim part has under 3:1 on every brand color, so the background is the neutral of the file's own ground, as for any lifecycle row.
+      expect(w.row()).toMatchObject({ logo_path: WORDMARK, background: "#0B0E1A" });
+      expect(w.row().derived.background_from).toBe("neutral");
+    });
+
+    it("leaves out a mark the page would color: an inline SVG with no paint of its own is no candidate", async () => {
+      const PAINTED = MARK.replace(` fill="white"`, ` fill="currentColor"`);
+      const { db, seen, row: settings } = world({ row: stored({ reference_paths: six }), page: page(PAINTED), site: { [BADGE_URL]: BADGE }, byLogo: { [BADGE]: { facts: WIDE } } });
+      const outs = await drive(db, brand(), before(), 30);
+      expect(outs.at(-1)).toMatchObject({ status: "done", result: { logo_path: LOGO, pick: { candidates: 1, chosen: null } } });
+      // It was never stored, converted or looked for.
+      expect([...db.uploads.keys()].filter((k) => k.includes("/brand/logo-site-"))).toEqual([]);
+      expect(seen.logoPng).toEqual([LOGO_URL, BADGE_URL]);
+      expect(settings().logo_path).toBe(LOGO);
+    });
+
+    it("measures a standing logo's place again when the client's posts are learned again and carry it somewhere else", async () => {
+      const shows: Record<string, unknown> = wordmarkOn(5);
+      const { db, seen, row: settings } = world({ row: stored({ reference_paths: six }), page: PAGE, site, byLogo: { [WORDMARK]: { facts: WIDE, shows }, [BADGE]: { facts: WIDE } } });
+      const rows = before();
+      await drive(db, brand(), rows, 30);
+      expect(settings()).toMatchObject({ logo_path: WORDMARK, placement: { anchor: "center", width: 0.12, top: 0.9 } });
+      // New posts: the brand now carries the wordmark at the top left, wider.
+      const next = Array.from({ length: 6 }, (_, i) => ({ path: `c1/social-${10 + i}.jpg` }));
+      for (const p of next.slice(0, 4)) shows[p.path] = { ...found("stored"), rect: { x: 50, y: 60, width: 200, height: 66 } };
+      rows.set("design_refs", row("design_refs", { result: { synthesized_at: "2026-10-26T10:00:00.000Z" } }));
+      const sized = seen.sizes.length;
+      const outs = await drive(db, brand({ harvested_design_references: next }), rows, 40);
+      expect(outs.at(-1)).toMatchObject({ status: "done", result: { logo_path: WORDMARK, placement: { anchor: "left", width: 0.2, top: 0.048, left: 0.05 }, placement_from: "logo_on_posts", pick: { of: WORDMARK, chosen: null } } });
+      // The same logo, at the place its posts carry it now, with the choice's record following.
+      expect(settings()).toMatchObject({ logo_path: WORDMARK, placement: { anchor: "left", width: 0.2, top: 0.048, left: 0.05 }, reference_paths: next.map((p) => p.path) });
+      expect(settings().derived.logo_pick).toMatchObject({ logo: { path: WORDMARK }, placement: { anchor: "left", width: 0.2, top: 0.048, left: 0.05 }, found: 4, posts: 6 });
+      // Its set was made again at the new place, and the posts' sizes were read once for the new measure.
+      expect(settings().logo_set).toMatchObject({ of: WORDMARK, posts: { read: 6, found: 4 } });
+      expect((picture(seen, "post-logos").at(-1) as unknown as { body: { placement: unknown } }).body.placement).toEqual({ anchor: "left", width: 0.2, top: 0.048, left: 0.05 });
+      expect(seen.sizes.slice(sized).sort()).toEqual(next.slice(0, 4).map((p) => p.path));
+      // A later look on the same posts measures nothing again and writes nothing.
+      const wrote = writes(db).length;
+      const again = await STEPS.design_settings.run(db, brand({ harvested_design_references: next }), { force: false, previous: rows.get("design_settings")!, rows }) as Out;
+      expect(again.status).toBe("done");
+      expect(writes(db)).toHaveLength(wrote);
+      expect(seen.sizes.slice(sized)).toHaveLength(4);
+    });
+
+    it("tries a homepage it could not read again, three times in all, before it settles for no candidate", async () => {
+      const opts = { row: stored({ reference_paths: six }), page: null as string | null, site, byLogo: { [WORDMARK]: { facts: WIDE, shows: wordmarkOn(5) }, [BADGE]: { facts: WIDE } } };
+      const { db, seen, row: settings } = world(opts);
+      const rows = before();
+      const first = await drive(db, brand(), rows, 30);
+      // The set is settled and designs run; only the look for another mark waits, quietly, for the site.
+      expect(first.at(-1)).toMatchObject({ status: "waiting", reason: "website", recheckMinutes: 30, result: { logo_path: LOGO, tone: { settled: T }, pick: { open: true, listed: { files: [], unread: 1 } } } });
+      expect((await drive(db, brand(), rows, 30)).at(-1)).toMatchObject({ status: "waiting", reason: "website", result: { pick: { listed: { unread: 2 } } } });
+      // The third read answers: the candidates are looked for as if the first had.
+      opts.page = PAGE;
+      const outs = await drive(db, brand(), rows, 30);
+      expect(outs.at(-1)).toMatchObject({ status: "done", result: { logo_path: WORDMARK } });
+      expect(seen.pages).toHaveLength(3);
+      expect(settings().logo_path).toBe(WORDMARK);
+
+      // A site that never answers: three reads, then the client keeps its logo and the step is done.
+      const down = world({ row: stored({ reference_paths: six }), page: null });
+      const downRows = before();
+      const ends: Out[] = [];
+      for (let i = 0; i < 5; i++) ends.push((await drive(down.db, brand(), downRows, 30)).at(-1)!);
+      expect(ends.map((o) => o.status)).toEqual(["waiting", "waiting", "done", "done", "done"]);
+      expect(ends[2]).toMatchObject({ result: { logo_path: LOGO, pick: { candidates: 0, listed: { files: [], unread: 3 } } } });
+      expect(down.seen.pages).toHaveLength(3);
+    });
+
+    it("reads one candidate's posts to a run, four posts to a call, and keeps what it read between runs", async () => {
+      const { db, seen } = world({ row: stored({ reference_paths: six }), page: PAGE, site, byLogo: { [WORDMARK]: { facts: WIDE }, [BADGE]: { facts: WIDE } } });
+      const outs = await drive(db, brand(), before(), 30);
+      expect(outs.at(-1)).toMatchObject({ status: "done" });
+      expect(outs.slice(0, -1).every((o) => o.status === "waiting" && o.reason === "in_progress" && o.recheckMinutes === 1)).toBe(true);
+      // The client's own logo: one logo-set and two reads of posts. Each candidate the same. Nothing twice.
+      const by = (route: string, logo: string) => seen.calls.filter((x) => x.route === route && String(route === "logo-set" ? x.body.logo : (x.body.searches as Array<{ logo: string }>)[0].logo) === `generated-media/${logo}`).length;
+      expect([by("logo-set", LOGO), by("post-logos", LOGO)]).toEqual([1, 2]);
+      expect([by("logo-set", WORDMARK), by("post-logos", WORDMARK)]).toEqual([1, 2]);
+      expect([by("logo-set", BADGE), by("post-logos", BADGE)]).toEqual([1, 2]);
+      // Every wait carries the settings and the set's work, so nothing a screen reads goes missing.
+      expect(outs.at(-2)!.result).toMatchObject({ written: true, logo_path: LOGO, tone: { of: LOGO, settled: T } });
+    });
+
+    it("holds one read of posts to a look, and converts no candidate in the look that made the set's last calls", async () => {
+      const { db, seen } = world({ row: stored({ reference_paths: six }), page: PAGE, site, byLogo: { [WORDMARK]: { facts: WIDE, shows: wordmarkOn(5) }, [BADGE]: { facts: WIDE } } });
+      const rows = before();
+      const looks: Array<{ sets: number; reads: number; converted: number; settled: boolean }> = [];
+      for (let i = 0; i < 40; i++) {
+        const key = await STEPS.design_settings.inputs(db, brand(), rows);
+        const prev = rows.get("design_settings") ?? null;
+        const at = { calls: seen.calls.length, png: seen.logoPng.length };
+        const out = await STEPS.design_settings.run(db, brand(), { force: false, previous: prev && prev.inputs_key === key ? prev : null, rows }) as Out;
+        const calls = seen.calls.slice(at.calls);
+        looks.push({
+          sets: calls.filter((x) => x.route === "logo-set").length, reads: calls.filter((x) => x.route === "post-logos").length,
+          converted: seen.logoPng.slice(at.png).filter((u) => u !== LOGO_URL).length, settled: !!out.result?.tone?.settled && !prev?.result?.tone?.settled,
+        });
+        rows.set("design_settings", rowAfter(prev, { client_id: "c1", step: "design_settings", inputs_key: key! }, out as never, new Date(T)));
+        if (out.status !== "waiting") break;
+      }
+      expect(rows.get("design_settings")!.status).toBe("done");
+      expect(looks.every((l) => l.sets <= 1 && l.reads <= 1 && l.converted <= 1)).toBe(true);
+      // The looks in which a set was settled (the first logo's, then the chosen one's) converted no candidate and asked nothing about one.
+      const settling = looks.filter((l) => l.settled);
+      expect(settling.length).toBe(2);
+      expect(settling.every((l) => l.converted === 0)).toBe(true);
+    });
+
+    it("after the step's inputs change, lists the page again, tries a file it could not fetch again, and reads no post twice for a file it kept", async () => {
+      const lost = { [MARK_URL]: WORDMARK } as Record<string, string | null>;
+      const { db, seen, row: settings } = world({ row: stored({ reference_paths: six }), page: PAGE, site: lost, byLogo: { [WORDMARK]: { facts: WIDE, shows: wordmarkOn(1) }, [BADGE]: { facts: WIDE } } });
+      const rows = before();
+      expect((await drive(db, brand(), rows, 30)).at(-1)).toMatchObject({ status: "done", result: { pick: { candidates: 1, chosen: null } } });
+      // The badge's file could not be fetched: it was tried once and left out.
+      expect(seen.logoPng.filter((u) => u === BADGE_URL)).toHaveLength(1);
+      const reads = () => picture(seen, "post-logos").filter((x) => (x as unknown as { body: { searches: Array<{ logo: string }> } }).body.searches[0].logo === `generated-media/${WORDMARK}`).length;
+      expect(reads()).toBe(2);
+      // The posts were learned again (the same six), and the file can be fetched now.
+      lost[BADGE_URL] = BADGE;
+      rows.set("design_refs", row("design_refs", { result: { synthesized_at: "2026-10-26T10:00:00.000Z" } }));
+      const outs = await drive(db, brand(), rows, 30);
+      expect(outs.at(-1)).toMatchObject({ status: "done", result: { pick: { candidates: 2, chosen: null } } });
+      expect(seen.pages).toEqual(["https://brand.test/", "https://brand.test/"]);
+      expect(seen.logoPng.filter((u) => u === BADGE_URL)).toHaveLength(2);
+      expect(seen.logoPng.filter((u) => u === MARK_URL)).toHaveLength(1);
+      // The wordmark's posts were read under the old inputs: none of them is read again.
+      expect(reads()).toBe(2);
+      expect(settings().logo_path).toBe(LOGO);
+    });
+
+    it("never fails the step for a candidate: one the service turns away or cannot use is no candidate", async () => {
+      for (const why of ["refused", "unusable"] as const) {
+        const { db, row: settings } = world({ row: stored({ reference_paths: six }), page: PAGE, site, byLogo: { [WORDMARK]: { fail: new PictureError("The picture service turned the call away.", "logo-set", why) }, [BADGE]: { facts: WIDE } } });
+        const outs = await drive(db, brand(), before(), 30);
+        expect(outs.at(-1)).toMatchObject({ status: "done", result: { logo_path: LOGO, tone: { of: LOGO, settled: T }, pick: { chosen: null } } });
+        expect(outs.some((o) => o.status === "failed")).toBe(false);
+        expect(settings().logo_path).toBe(LOGO);
+      }
+      // A service that is unavailable is a quiet wait, and the set stays settled.
+      const down = world({ row: stored({ reference_paths: six }), page: PAGE, site, byLogo: { [WORDMARK]: { fail: new PictureError("The picture service did not answer.", "post-logos", "unavailable") } } });
+      const waits = await drive(down.db, brand(), before(), 30);
+      expect(waits.at(-1)).toMatchObject({ status: "waiting", reason: "picture_service", recheckMinutes: 10, result: { logo_path: LOGO, tone: { settled: T }, pick: { open: true, batch: 2 } } });
+    });
+
+    it("looks for no candidate for a logo a person gave or a page on another client's site", async () => {
+      const given = world({ row: stored({ reference_paths: six }), page: PAGE, site });
+      const outs = await drive(given.db, brand({ field_sources: person("logo_url") }), before(), 30);
+      expect(outs.at(-1)).toMatchObject({ status: "done", result: { pick: { kept: "person_logo" } } });
+      expect(given.seen.pages).toEqual([]);
+      expect(given.seen.logoPng).toEqual([LOGO_URL]);
+
+      const parent = { id: "c9", name: "Parent", website_url: "https://brand.test/", archived_at: null, demo_job_id: null };
+      const child = world({ row: stored({ reference_paths: six }), page: PAGE, site });
+      child.db.tables.clients.push(parent);
+      const kid = brand({ website_url: "https://brand.test/services/one/" });
+      const rows = before();
+      rows.set("brand_read", row("brand_read", { result: { parent_page: true, logo_files: [] } }));
+      expect((await drive(child.db, kid, rows, 30)).at(-1)).toMatchObject({ status: "done", result: { pick: { kept: "not_own_site" } } });
+      expect(child.seen.pages).toEqual([]);
+
+    });
+
+    it("uses the website read's own list when it was made by this listing, and reads no page", async () => {
+      const { db, seen, row: settings } = world({ row: stored({ reference_paths: six }), site, byLogo: { [WORDMARK]: { facts: WIDE, shows: wordmarkOn(3) } }, facts: { site: null } });
+      const rows = before();
+      rows.set("brand_read", row("brand_read", { result: { logo_marks: 1, logo_files: [MARK_URL, PARTNER_URL], logo_own: [MARK_URL] } }));
+      const outs = await drive(db, brand(), rows, 30);
+      expect(outs.at(-1)).toMatchObject({ status: "done" });
+      expect(seen.pages).toEqual([]);
+      expect(settings().logo_path).toBe(WORDMARK);
+    });
+
+    it("lets a choice stand: a later look writes the chosen logo again, and the website's first logo is then a candidate like any other", async () => {
+      const NEW_URL = "https://brand.test/new-logo.svg";
+      const { db, seen, row: settings } = world({ row: stored({ reference_paths: six }), page: PAGE, site: { ...site, [NEW_URL]: "c1/design-settings/logo-site-new.png" }, byLogo: { [WORDMARK]: { facts: WIDE, shows: wordmarkOn(5) }, [BADGE]: { facts: WIDE } } });
+      const rows = before();
+      await drive(db, brand(), rows, 30);
+      expect(settings().logo_path).toBe(WORDMARK);
+      const picked = structuredClone(settings());
+      // The posts were learned again: a new key. The row never goes back to the website's first logo on the way.
+      const wrote = writes(db).length;
+      rows.set("design_refs", row("design_refs", { result: { synthesized_at: "2026-10-26T10:00:00.000Z" } }));
+      const outs = await drive(db, brand(), rows, 30);
+      expect(outs.at(-1)).toMatchObject({ status: "done", result: { logo_path: WORDMARK, pick: { of: WORDMARK, chosen: null } } });
+      expect(writes(db).slice(wrote).map((w) => w.args.p_logo_path)).toEqual([WORDMARK]);
+      expect(settings()).toMatchObject({ logo_path: WORDMARK, placement: picked.placement, background: picked.background });
+      expect(settings().derived.logo_pick).toMatchObject({ logo: { path: WORDMARK }, for: LOGO_URL });
+      // The website's first logo was looked for on the posts as a candidate, by the same test.
+      expect(outs.at(-1)!.result!.pick.counts).toMatchObject({ [WORDMARK]: 5, [LOGO]: 0 });
+      // The model's read of the posts is asked again because the posts changed, as before this rule, and never for the choice.
+      expect(seen.spot).toBe(1);
+
+      // The website now gives another first logo: the choice was made against the old one, so the new one is written and the choice is made again.
+      const after = writes(db).length;
+      await STEPS.design_settings.run(db, brand({ logo_url: NEW_URL }), { force: false, previous: null, rows });
+      expect(writes(db)[after].args.p_logo_path).toBe("c1/design-settings/logo-site-new.png");
+      expect(writes(db)[after].args.p_derived.logo_pick).toBeUndefined();
+    });
+
+    it("counts a standing logo on the posts its set finds it on too, so a logo its set shows on two posts or more is never replaced", async () => {
+      // What the service answers for the wordmark depends on where it is searched: `spot` where the model's read says the posts carry the logo
+      // (the search every candidate gets), `shows` at the place measured from its posts (its set's read, where a design is searched).
+      const shows: Record<string, unknown> = wordmarkOn(5);
+      let spot: Record<string, unknown> = shows;
+      const icon: Record<string, unknown> = {};
+      const { db, row: settings } = world({ row: stored({ reference_paths: six }), page: PAGE, site, shows: icon, byLogo: { [WORDMARK]: { facts: WIDE, shows }, [BADGE]: { facts: WIDE } } });
+      const io = deps.picture;
+      deps.picture = ((d: unknown) => {
+        const real = (io as (d: unknown) => { call: (route: string, body: Record<string, unknown>) => Promise<{ result: Record<string, unknown>; ms: number }> })(d);
+        return { ...real, call: async (route: string, body: Record<string, unknown>) => {
+          const got = await real.call(route, body);
+          const at = body.placement as { anchor: string; width: number; top: number } | undefined;
+          const atSpot = route === "post-logos" && (body.searches as Array<{ logo: string }>)[0].logo === `generated-media/${WORDMARK}` && at?.anchor === PLACEMENT.anchor && at.width === PLACEMENT.width && at.top === PLACEMENT.top;
+          return atSpot ? { ...got, result: { posts: (body.posts as string[]).map((link) => spot[link.replace("design-references/", "")] ?? MISSED) } } : got;
+        } };
+      }) as never;
+      const rows = before();
+      await drive(db, brand(), rows, 30);
+      expect(settings()).toMatchObject({ logo_path: WORDMARK, placement: { anchor: "center", width: 0.12, top: 0.9 } });
+      // New posts. The wordmark's own search at the model's spot finds it on one of them; its set, read where the posts carry it, on four.
+      // The website's first logo is found on the two others.
+      const next = Array.from({ length: 6 }, (_, i) => ({ path: `c1/social-${10 + i}.jpg` }));
+      for (const p of next.slice(0, 4)) shows[p.path] = low("stored");
+      spot = { [next[0].path]: low("stored") };
+      for (const p of next.slice(4)) icon[p.path] = low("stored");
+      rows.set("design_refs", row("design_refs", { result: { synthesized_at: "2026-10-26T10:00:00.000Z" } }));
+      const wrote = writes(db).length;
+      const outs = await drive(db, brand({ harvested_design_references: next }), rows, 40);
+      // Found on one post by its own search and on four by its set: the posts carry it, whatever the first logo is found on.
+      expect(outs.at(-1)).toMatchObject({ status: "done", result: { logo_path: WORDMARK, pick: { of: WORDMARK, chosen: null, counts: { [WORDMARK]: 4, [LOGO]: 2, [BADGE]: 0 } } } });
+      // The logo, its place and its set stay; the one write is the standing choice written again for the new posts.
+      expect(settings()).toMatchObject({ logo_path: WORDMARK, placement: { anchor: "center", width: 0.12, top: 0.9 }, logo_set: { of: WORDMARK, posts: { read: 6, found: 4 } } });
+      expect(settings().derived.logo_pick).toMatchObject({ logo: { path: WORDMARK }, for: LOGO_URL });
+      expect(writes(db).slice(wrote).map((x) => x.args.p_logo_path)).toEqual([WORDMARK]);
+    });
   });
 
   describe("design_settings for a row a person set", () => {

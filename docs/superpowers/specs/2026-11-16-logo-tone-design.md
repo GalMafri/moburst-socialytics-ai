@@ -813,3 +813,92 @@ Written with the code of these changes; the rulings are 64 to 72 of the plan.
 
 How the sets made by rule 1 are made again, with nobody doing anything and no model call: the step's key carries the rule's version, so the lifecycle's next daily look at each client sees a new key and runs the step once. It writes the settings background for a row it owns (the stored read of the logo's spot reused), asks the picture service for the files, reads the posts and settles a set of rule 2. Until then a design starts from the set of rule 1 as it is, with the stored file's rest ground worked out at the start. A row a person set keeps its logo, placement and background.
 
+## 12. The logo the client's posts show (17 Nov 2026)
+
+Status: built on branch `qafix/right-logo`, merged with main at `c4b572f5` (section 11) and again at `22adbca1` (section 11's third pass), revised the same day after the review of the build (the count, the choice, the candidates, the standing logo's place and the release order changed) and corrected after the re-check of that revision (the logo the client has counts every post it is found on, a candidate must beat the logo's score found or not, and a class in an SVG paints only when the SVG's own style names it). At the second merge one more line was closed: a standing logo also counts the posts its set finds it on (item 6). This text is the rule as built. Replayed on the live rows of 17 Nov (the plan's replay record, last two sections). Not released. It changes which file is a client's logo. Sections 1 to 11 are unchanged and run on whatever file that is.
+
+### Why
+
+The website read keeps the first logo a page gives (`_shared/brand/research.ts`, `logoOnPage`: the schema.org record first). For one client that is the brand's round icon, while every post of the client carries the brand's wordmark. Measured on 17 Nov on the stored pictures, with the product's own search and test:
+
+- The stored icon is found on 0 of the client's 12 posts (best score 0.501).
+- The wordmark the same homepage serves as an inline SVG in its header, inside the link to the home page, is found on 10 of 12 (0.815 to 0.992).
+- The placement in the settings was read by the model from the wordmark on the posts (bottom center, 0.14 wide) and then worked out for the icon's shape. The settings pair one mark's file with the other mark's place.
+- On 16 Nov, 9 paid designs were made for this client. All 9 failed locate (0.29 to 0.44): the model drew the wordmark its reference posts show, or an outline of the icon. Three of the 9 match the wordmark at 0.952 to 0.968.
+
+Recoloring (sections 1 to 11) cannot help: it is the wrong mark. Section 8 listed this as a non-goal ("The wrong asset"). This section is that work.
+
+### The rule
+
+A client's logo is the mark its own posts carry. The rule corrects a logo the posts do not carry. It never trades one mark a brand uses for another.
+
+1. Candidates. The marks the brand's own homepage ties to the brand by an exact fact of the page (`ownMarksOnPage`), in page order:
+   - in the first `<header>`: every `<img>` whose class, alt, id or source says "logo", the header's first `<img>`, and every inline `<svg>` whose class, aria-label or id says "logo";
+   - anywhere in the header, the first `<nav>` outside it or the first `<footer>`: every `<img>` and inline `<svg>` inside a link to the site's home page (an `<a>` whose address is "/", the site's own origin, or the page itself). That is where a site puts its own mark, and it needs no name;
+   - the logo the page's schema.org record names.
+   A logo the nav or the footer merely names is not a candidate: on real pages those are partners' logos, payment badges and app store badges. They stay in the wide list (`logoFilesOnPage`), which serves only the second file of section 3, where `sameLogo` decides.
+   - An inline SVG written out in the page is a candidate only when it is painted by its own text (`ownPaint`): it names neither `currentColor` nor a page variable, every `<use>` points at something the text holds, and every shape outside a clip path has a fill or a stroke set inside the SVG (on the shape, on an element around it, or by a class that the SVG's own style names with a fill or a stroke: a rule of that style whose selector is the class alone, outside any condition). A class that no rule of the SVG's own style paints is one only a style of the page could color, so it is no paint. An SVG that takes its color from the page is drawn black as a file of its own, whatever color the brand shows it in, so it is no file to make a logo from. This is read from the text; nothing is drawn or measured for it. An SVG a page builder keeps in a data address (a style's background image, its quotes written as `%22`) is a file of its own that no style of the page reaches: it is listed as the SVG it is (`dataAddressSvg` unescapes the text and changes nothing else) and always counts.
+   - The other way to decide this was looked at and not taken: counting a post only when the found logo's color is closest to the candidate's own file. The color step of `post-logos` always names one of the candidate's own files (the file, its copy or its white copy), so it tells nothing apart without a color distance bar, and that bar would be a gate on guessed pixels.
+   Repeats are dropped, the same inline SVG at two sizes counts once, the logo the client has is left out, and at most six are kept (`MAX_SITE_LOGOS`). Each is converted by the conversion the main logo gets (`imaging.logoPng`: a PNG is kept, an SVG is drawn 1,200 pixels wide, a JPEG or GIF has its backdrop cut, the result is trimmed to its ink). Nothing is redrawn or rebuilt. A file the conversion cannot take is left out.
+2. The test. Each candidate is looked for on the client's reference posts exactly as the client's logo is (section 3, "What the client's posts show"): one `logo-set` call gives the candidate's own ground and its copy for the other ground, and `post-logos` calls, four posts to a call, search for the file over its own ground and the copy over the other, near the spot where the model's stored read says the posts carry the logo, at the sizes a design is searched at. A candidate is found on a post when `logoFound` holds: a score of 0.75 or more at a size between 0.48 and 1.32 of the usual width. This is the test a design gets.
+3. The count (`postsCarrying`). The two sides are counted differently, on purpose.
+   - The logo the client has counts every post it is found on (`logoFound`), whatever any candidate scores there. A score never takes a post from it: two files of one logo score within a hair of each other on the same post, and which is ahead depends on how each file was drawn (measured below).
+   - A candidate counts a post only where all of this holds: it is found there; its score is higher than the client's logo's score there, whether or not the logo is found (a logo that matches better at a size the test does not accept is still what that post carries); and no other candidate scores higher there, found or not. Equal scores go to the client's logo, then to the earlier candidate. A mark that matches a part of the logo a post really carries (a sister lockup, found at a lower score in the same place) therefore gets nothing for that post.
+   The posts carry a mark when two or more count for it (`PICK_MIN_POSTS`): for the logo the client has, when it is found on two posts or more.
+4. The choice (`chooseLogo`). A logo the posts carry (found on two posts or more) is never replaced, however many posts count for a candidate and whatever a candidate scores on the logo's own posts. A logo the posts do not carry (found on none or one post) is replaced by the candidate the posts carry on the most posts, the earlier on the page when equal. With no candidate carried, the client keeps what it has.
+5. What follows a change, with nobody doing anything. The settings are written again through `lifecycle_write_design_settings`: the chosen file as `logo_path`; the placement from the rectangles of the posts that count for it (below); the background by section 11's rule from the brand colors and the chosen file's whole parts and own ground (a record without the parts has its one ink). `derived.logo_pick` records the choice. The logo set is then made for the new logo by the same step (sections 3, 4 and 11): its key is its `logo_path`, so the old set is stale at once and jobs run with one file until the new set is settled.
+6. A choice stands. While `derived.logo_pick` names the row's logo and was made for the client's current website logo, a later run of the step writes the chosen file again and never goes back to the website's first logo on its own. The website's first logo is then one of the candidates, under the same count and the same choice: it comes back only when the posts no longer carry the chosen mark and carry it. A standing logo is read twice: by its own search where the model's read says the posts carry the logo, the search every candidate gets, and by its set at the place measured from its posts, where a design is searched. It counts a post either read finds it on, and a candidate has to beat the higher of its two scores there (`eitherRead`). So a logo its set finds on two posts or more is never replaced, whatever its own search finds at the model's spot. When the posts are learned again and carry the chosen logo somewhere else, its placement is measured again from the posts it matches best now (found there, with no candidate scoring higher) and written, and the set is made again at that place. So the file and the place never part again. The place is measured from the logo's own search alone: the set is searched from the measured place itself, so a place taken from the set's rectangles could move at each look. The rectangles a place was measured from are kept as a short hash, and nothing is measured again while they are the same.
+
+The placement of a chosen logo, from the posts it matches best (for a candidate these are the posts that count for it), each rectangle taken as shares of its post's own width and height (read from the post's file header):
+
+- The anchor is center when the middle of the rectangles lies within 0.1 of the post's middle, measured as the median over the posts. Otherwise it is left or right, by the side the median lies on, and `left` is the median distance to that edge.
+- `top` is the median top edge, held so the logo ends inside its post and inside the 4:5 page a design is drawn on (a post taller than that page would otherwise let it end a few pixels below the page).
+- `width` is the median width, moved only as far as needed so that the sizes it was found at run from 0.55 to 1.2 of it. That is the run of a client's own posts the sizes searched were made for (`logoMatch.ts`, `LOGO_SCALES`), so a logo the posts show small on some and large on others gets the usual width from which both are sizes the client uses. The first version of this line moved the width only to the edge of the sizes searched (0.48 and 1.32); measured on the first client, one post found at 0.933 then fell outside the sizes by the search's own steps, so the run was taken in its place. When the found sizes run wider than 0.55 to 1.2, the width leaves the same room at both ends.
+- With no post whose size could be read, the placement is today's: the model's stored read, for the chosen file's shape.
+
+These numbers set where a canvas starts. The one test of a design stays `logoFound`.
+
+### What "the posts carry it" means, in numbers
+
+A mark is found on a post when the one test of a design, `logoFound`, holds for it. The logo the client has counts every post it is found on; a candidate counts a post where it is found and scores higher than the logo and every other candidate. Nothing new is measured and no number of this rule is a gate on pixels. What the measurements say (17 Nov, the product's own search, the 155 posts of the 14 live rows that have a set, on the live reference posts):
+
+- A mark a post really carries scores 0.815 to 0.992 there (the wordmark on 10 of one client's 12 posts). The lowest score of a mark looked at at full size on its post and seen there is 0.815.
+- A mark that is found and is not what the post carries: one client's candidate (a horizontal lockup) is found at 0.766 and 0.792 on the two posts where its stored stacked lockup is found at 0.973 and 0.969. Looked at at full size, both posts show the stacked lockup, and the candidate's rectangle covers only the brand's name in it. Under the count those two posts are the stored logo's and the candidate has none. An earlier version of this section said a carried mark scores from 0.766 and that the client's posts show the horizontal lockup. Both sentences were wrong.
+- Two files of one logo: one client's homepage serves its wordmark a second time in white. The two files have the same shape on every pixel, and both are found on the same 3 of its 12 live posts: 0.906901 against 0.906890, 0.943629 against 0.943629 and 0.899972 against 0.899957 (stored first). The same white file as a softer raster scores 0.920069, 0.965763 and 0.926734 on those posts. Between files of one logo the score says how a file was drawn. That is why the logo the client has counts every post it is found on: it stays in both cases.
+- Marks the posts do not carry score at most 0.501 (the stored icon of the first client, on 12 posts).
+- The posts that carry the wordmark and are not found score 0.456 and 0.440: they show it at 0.47 and 0.49 of the usual width, under the 0.48 floor. In the first version of the placement, one post that scored 0.933 was left out because it was shown at 1.31 of the usual width, the same case at the other end. That is why the width of a chosen logo is taken from the run 0.55 to 1.2 (above).
+- Two reference posts that are one creative posted twice count as two. The first client's 12 references hold at least two such pairs, and its wordmark is carried by 10. With the candidates held to the brand's own marks and a carried logo never replaced, a pair can at most give a brand's own mark to a client whose logo is on none or one of its posts.
+
+How many candidates: the logo the client has, and at most six from the page (`MAX_SITE_LOGOS`). The most any live lifecycle client has is two. How ties are settled: a post with equal scores is the client's logo's, then the earlier candidate's; candidates with equal counts go to the earlier on the page; and the client's logo never needs a tie or a margin settled, because it stays whenever it is found on two posts.
+
+### Who is never changed
+
+- A row a person set (`source = 'person'`). The step does not look for candidates for it.
+- A client whose logo a person gave (`field_sources.logo_url` set by a person). The lifecycle does not replace a person's logo.
+- A client whose website is a page on another client's site (text only): that page is not the brand's own site.
+- A client whose posts carry its logo: it is found on two posts or more, whatever any candidate scores on them.
+- A client whose posts carry no candidate.
+
+### Where the candidates come from
+
+The website read (`brand_read`) lists the wide list (`logo_files`) and the brand's own marks (`logo_own`) and records the version of the listing (`logo_marks: 1`). It runs every 180 days. A website read from before this rule has no list (all 14 live rows on 17 Nov), and reading every site again would call the brand model once per client. So for such a client the `design_settings` step reads the homepage itself, directly, with no scraping service and no model, lists the brand's own marks with the same function and keeps the list in its own result (`pick.listed`). A homepage that does not answer is no page without marks: the step waits half an hour and reads it again, three times in all (`SITE_READS`), while designs run on the logo and the set the client has. After the third read the client keeps its logo until its inputs next change (its posts are learned again each week), and the page is then read again.
+
+### What a client's first run makes, call by call
+
+- One model read of where the posts carry the logo, as today, and only when no stored read is current (section 4). Nothing else calls a model. No provider is called: the homepage read is a plain GET, at most three per key.
+- Storage reads and writes of the candidate files, and one read of each counted post's file header when a place is measured.
+- To the app's own picture service: `logo-set` and `post-logos` for the client's logo (as sections 3 and 4), then for each candidate one `logo-set` and one `post-logos` for every four posts, one call to a run. With 12 posts and 2 candidates that is 2 and 6 calls more. When a candidate is chosen, or a standing logo's place moves, the set is made once more.
+- Under an unchanged key nothing is asked twice. Under a new key (the posts were learned again) only posts not read before are read.
+
+### The key
+
+A lifecycle row's key gains `|pick:1` at its end (after section 11's `tone:2`), so every lifecycle client is looked at once when this arrives. A person's row keeps its key. The way back of the plan (statement B5) strips everything from `|site:` on, so it needs no change. The release order, its checks and the way back for this section are in the plan ("Release of section 12").
+
+### Checked against the rejected methods
+
+- A brand's file redrawn or rebuilt: no. A candidate is the site's own file or its own inline SVG, drawn by the conversion every SVG logo already gets. An SVG the page would color is left out, never recolored.
+- The model drawing the logo, positions in a prompt, elements moved after generation: untouched.
+- More checks: none. The choice uses the one existing test, on the client's own posts.
+- A gate on guessed pixels: none. The logo's count is the one existing test, post by post. A candidate's count compares scores of the same search on the same post. The candidates and the paint of an SVG are facts of the page's text. The placement numbers draft a starting place and pass or fail nothing.
+- One client as the target: the rule reads a page and posts. No client is named in code, prompts or tests.
+- Manual steps and flags: none.

@@ -1,6 +1,9 @@
 // supabase/tests/tools/site-logos.ts
 //
-// The website second-file proof (16 Nov 2026): what the lifecycle would take
+// The website logo proof (16 Nov 2026; 17 Nov: the marks the page ties to its
+// own brand are also the candidates for the client's logo,
+// _shared/design/logoPick.ts, and the replay reads the files written here,
+// server/scripts/tone-replay.ts): what the lifecycle would take
 // from each client's own website as a second logo file, run with the
 // product's own functions before the lifecycle's runner is deployed. It
 // calls no model and no paid provider and writes nothing to the product:
@@ -17,9 +20,12 @@
 //
 // The manifest is a JSON array, one entry per client, exported read-only and
 // never committed:
-//   { client, website, logo_path, logo_local? }
+//   { client, website, logo_path, logo_local?, logo_url? }
 // The stored logo is read from `logo_local` when the entry has one, else
-// from the product's public storage by path.
+// from the product's public storage by path. `logo_url` is the address the
+// client's logo came from (clients.logo_url): a mark at that address is the
+// logo the client has and is left out, as in the step; without it the
+// page's own first logo is.
 //
 // Run with Deno from the repository root:
 //   deno run --no-lock --allow-net --allow-read --allow-write --allow-env \
@@ -27,18 +33,22 @@
 //
 // For each client it prints one JSON line and writes, into the out folder,
 // `<n>-stored.png`, `<n>-main.png` and `<n>-file<k>.png` (`-PASS` in the
-// name of a file that passed), and at the end `result.json`.
+// name of a file that passed), `<n>-page.html` (the page as it was read) and
+// at the end `result.json`, where each file's `png` is the name it was
+// written under and `candidate` says whether the page ties the mark to its
+// own brand (research.ts, ownMarksOnPage), so that it can be the client's
+// logo itself.
 
 import { Image } from "https://deno.land/x/imagescript@1.3.0/mod.ts";
 import { PUBLIC_DEFAULTS } from "../../../public-env.ts";
-import { fetchSiteHtml, logoFilesOnPage, logoOnPage } from "../../functions/_shared/brand/research.ts";
+import { fetchSiteHtml, logoFilesOnPage, logoOnPage, normalizeWebsite, ownMarksOnPage, standaloneSvg } from "../../functions/_shared/brand/research.ts";
 import { resampleRGBA } from "../../functions/_shared/canva/brief.ts";
 import { ownGround, partsOf, sameLogo, SOLID_ALPHA, type Raster } from "../../functions/_shared/design/logoTone.ts";
 import { logoNormalization } from "../../functions/_shared/lifecycle/designSettings.ts";
 import { logoPng } from "../../functions/_shared/lifecycle/imaging.ts";
 import { svgToPng } from "../../functions/_shared/render/resvg.ts";
 
-type Entry = { client: string; website: string; logo_path: string; logo_local?: string };
+type Entry = { client: string; website: string; logo_path: string; logo_local?: string; logo_url?: string };
 /** The most website files the lifecycle keeps for one client (steps.ts, MAX_SITE_LOGOS). */
 const MAX_SITE_LOGOS = 6;
 
@@ -99,7 +109,7 @@ function sameDrawing(a: Raster, b: Raster): { shape: number; overlap: number } {
 /** One file of the page, converted as the step converts it. An inline SVG is drawn from its own text, as it is once stored. */
 async function convert(id: string, file: { url: string } | { svg: string }): Promise<{ from: string; raster: Raster | null; why?: string }> {
   try {
-    if ("svg" in file) return { from: "inline svg", raster: asStored(await raster(await svgToPng(db, file.svg, 1200, [], "Arial"))) };
+    if ("svg" in file) return { from: "inline svg", raster: asStored(await raster(await svgToPng(db, standaloneSvg(file.svg), 1200, [], "Arial"))) };
     const got = await logoPng(db, id, file.url);
     if (!got) return { from: file.url, raster: null, why: "not a kind of file the design path uses" };
     return { from: file.url, raster: await raster(store.get(got.path)!) };
@@ -121,8 +131,11 @@ for (const [i, entry] of manifest.entries()) {
     await write(`${id}-stored.png`, stored);
     Object.assign(row, { stored: `${stored.width}x${stored.height}`, own: ownGround(parts) });
 
-    const { html } = await fetchSiteHtml(entry.website, {});
-    const origin = new URL(entry.website).origin;
+    // The address as the lifecycle reads it (a bare domain gets its scheme), fetched directly: no scraping service, no model.
+    const website = normalizeWebsite(entry.website);
+    const { html } = await fetchSiteHtml(website, {});
+    await Deno.writeTextFile(`${out}/${id}-page.html`, html);
+    const origin = new URL(website).origin;
     const main = logoOnPage(html, origin);
     if (main) {
       const c = await convert(id, main);
@@ -130,16 +143,20 @@ for (const [i, entry] of manifest.entries()) {
       // The page's own logo against the stored one: when they are one drawing, the page is the one the stored logo came from.
       row.main = { from: c.from, why: c.why, size: c.raster ? `${c.raster.width}x${c.raster.height}` : null, ...(c.raster ? sameDrawing(stored, c.raster) : {}) };
     } else row.main = null;
-    const mainKey = main ? ("url" in main ? main.url : main.svg) : null;
+    const keyOf = (file: { url: string } | { svg: string }) => ("url" in file ? file.url : file.svg);
+    const mainKey = entry.logo_url ?? (main ? keyOf(main) : null);
+    // The wide list and the brand's own marks, each cut at six as the step cuts them, listed once in page order.
+    const cut = (marks: Array<{ url: string } | { svg: string }>) => marks.filter((f) => keyOf(f) !== mainKey).slice(0, MAX_SITE_LOGOS).map(keyOf);
+    const wide = cut(logoFilesOnPage(html, origin)), brandOwn = cut(ownMarksOnPage(html, origin));
     const files: unknown[] = [];
     for (const file of logoFilesOnPage(html, origin)) {
-      if (("url" in file ? file.url : file.svg) === mainKey) continue;
-      if (files.length >= MAX_SITE_LOGOS) break;
+      if (!wide.includes(keyOf(file)) && !brandOwn.includes(keyOf(file))) continue;
       const c = await convert(id, file);
       const same = c.raster ? sameLogo(stored, parts, c.raster) : null;
-      if (c.raster) await write(`${id}-file${files.length}${same?.same ? "-PASS" : ""}.png`, c.raster);
+      const png = c.raster ? `${id}-file${files.length}${same?.same ? "-PASS" : ""}.png` : null;
+      if (c.raster && png) await write(png, c.raster);
       files.push({
-        k: files.length, from: c.from, why: c.why, size: c.raster ? `${c.raster.width}x${c.raster.height}` : null,
+        k: files.length, from: c.from, why: c.why, png, candidate: brandOwn.includes(keyOf(file)), second_file: wide.includes(keyOf(file)), size: c.raster ? `${c.raster.width}x${c.raster.height}` : null,
         own: c.raster ? ownGround(partsOf(c.raster)) : null, shape: c.raster ? sameDrawing(stored, c.raster).shape : null, overlap: same?.overlap ?? null, passes: same?.same ?? false,
       });
     }

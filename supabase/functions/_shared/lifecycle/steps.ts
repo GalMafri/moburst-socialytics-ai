@@ -33,7 +33,7 @@ import { defaultSproutCustomerId } from "../sprout/customer.ts";
 import { listCustomerProfiles } from "../sprout/profiles.ts";
 import { listBrandPosts, MAX_POST_PAGES, POSTS_YEAR_DAYS } from "../sprout/posts.ts";
 import { searchWebsite, searchWebsiteByName, statedWebsite, webReader } from "../sprout/website.ts";
-import { fetchSiteHtml, logoFilesOnPage, logoOnPage, normalizeWebsite, openaiKeyFor, ResearchError, researchBrand } from "../brand/research.ts";
+import { fetchSiteHtml, LOGO_MARKS_RULE, logoFilesOnPage, logoOnPage, normalizeWebsite, openaiKeyFor, ownMarksOnPage, ResearchError, researchBrand, standaloneSvg, type PageMark } from "../brand/research.ts";
 import { anthropicKey, briefFromStrategyDoc, derivePillars, isGenericPillars, pageEvidence, PillarsError, type PillarClient, type PillarPost } from "../brand/pillars.ts";
 import { fetchSiteText, identifyCompetitors, IdentifyError } from "../competitive/identify.ts";
 import { detectCompetitorHandles } from "../competitive/detectHandles.ts";
@@ -64,10 +64,12 @@ import { advancePublicRead, POLL_MINUTES } from "../strategy/publicRead.ts";
 import { desiredProfiles, profileInputs, profilesKey, syncProfiles } from "../strategy/profiles.ts";
 import { apifyClient, APIFY_TOKEN_ENV } from "../apify/client.ts";
 import type { StepOutcome, StepPolicy, StepRow } from "./policy.ts";
-import { PictureError } from "../picture/client.ts";
+import { NotInStorage, PictureError } from "../picture/client.ts";
 import type { LogoSetResult, PostLogo } from "../picture/contract.ts";
 import { chooseSet, postSearchPlan, TONE_RULE, type SetPaths } from "../design/logoTone.ts";
 import { askLogoSet, askPostLogos, liveIo, POSTS_PER_CALL, type PictureIo } from "../design/logoSetWork.ts";
+import { chooseLogo, eitherRead, LOGO_PICK_RULE, measuredPlacement, postsCarrying, type FoundAt } from "../design/logoPick.ts";
+import type { LogoFile } from "./imaging.ts";
 import { clipText } from "../text/clip.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -361,7 +363,9 @@ function settingsOf(result: Record<string, unknown> | null | undefined): Record<
  */
 async function writeDesignSettings(db: Db, client: ClientRow, ctx: StepContext, existing: SettingsRow | null): Promise<{ outcome: StepOutcome } | { row: SettingsRow; settings: Record<string, unknown> }> {
   const imaging = await deps.imaging();
-  const logo = await imaging.logoPng(db, client.id, String(client.logo_url));
+  // A logo chosen from the client's posts stands (logoPick.ts): it is written again with its own place, never the website's first logo.
+  const standing = standingPick(existing, client);
+  const logo: LogoFile | null = standing ? standing.logo : await imaging.logoPng(db, client.id, String(client.logo_url));
   if (!logo) return { outcome: { status: "waiting", reason: "logo_file", result: { logo_url: client.logo_url } } };
   // Where the client's own posts put the logo, read from its posts, not its uploads.
   const posts = referencesFor([], (Array.isArray(client.harvested_design_references) ? client.harvested_design_references : []).filter((r: { upload?: boolean }) => !r?.upload), MAX_REFS, null);
@@ -374,14 +378,16 @@ async function writeDesignSettings(db: Db, client: ClientRow, ctx: StepContext, 
     if (!key) return { outcome: { status: "failed", error: "The AI connection is not configured." } };
     spot = await imaging.readLogoSpot(db, client.name, posts, key);
   }
-  const { placement, from } = placementFor(spot, logo.width / Math.max(1, logo.height));
+  const { placement, from }: { placement: Placement; from: LogoPick["placement_from"] } = standing
+    ? { placement: standing.placement, from: standing.placement_from }
+    : placementFor(spot, logo.width / Math.max(1, logo.height));
   const b = client.brand_identity ?? {};
   // Held to the logo's weakest whole part, never to the average of its ink (17 Nov 2026).
   const background = pickBackground([b.primary_color, b.secondary_color, b.accent_color], logo.inks?.length ? logo.inks : logo.ink ? [logo.ink] : null, logo.own);
   const paths = libraryPaths(client.design_references, client.harvested_design_references);
   const unchanged = !!kept && existing?.logo_path === logo.path && existing.background === background.hex && samePlacement(existing.placement, placement);
   const at = unchanged && typeof existing?.derived?.at === "string" ? existing.derived.at : deps.now().toISOString();
-  const derived = { logo_from: client.logo_url, logo_file: logo.converted, placement_from: from, logo_read: spot, logo_read_for: inputs, background_from: background.from, at };
+  const derived = { logo_from: standing?.from ?? client.logo_url, logo_file: logo.converted, placement_from: from, logo_read: spot, logo_read_for: inputs, background_from: background.from, at, ...(standing ? { logo_pick: standing } : {}) };
   const { data: wrote, error: writeError } = await db.rpc("lifecycle_write_design_settings", {
     p_client: client.id, p_logo_path: logo.path, p_placement: placement, p_background: background.hex, p_reference_paths: paths, p_derived: derived,
   });
@@ -506,6 +512,415 @@ async function settleLogoSet(db: Db, client: ClientRow, ctx: StepContext, row: S
   if (settled !== true) return wait();
   tone.settled = set.at;
   return { status: "done", result: result() };
+}
+
+// ── design_settings: the logo the client's posts show ───────────────────────
+
+/** A candidate as the design path uses it: the whole record the conversion gave (imaging.logoPng), so whatever the settings are chosen from for the website's first logo is there for a chosen one too. */
+type PickFile = LogoFile;
+
+/** What was asked about one candidate and what each post gave: the same two calls the client's logo gets for its set. */
+interface PickUnit {
+  hash?: string;
+  asked?: string;
+  facts?: LogoSetResult;
+  paths?: SetPaths;
+  searched?: string;
+  posts: Record<string, PostLogo | null>;
+  /** The service ran and could not use this file: it is no candidate. */
+  unusable?: string;
+}
+
+/**
+ * The step's work on the logo the client's posts show, kept in its result
+ * between runs so nothing is asked twice: the logo the candidates are
+ * compared with, the marks the homepage serves when the step read the page
+ * itself, each mark's converted file by its address (null for one that could
+ * not be fetched or converted), each file's two calls, how many posts show
+ * each, and the choice (null when the client keeps its logo).
+ */
+interface PickWork {
+  rule: number;
+  of: string;
+  open?: true;
+  /** Carried from before the step's inputs changed: its files and what its posts gave are reused, and its list of the page's marks and what it could not fetch are asked for again. */
+  before?: true;
+  /** The brand's own marks on the homepage, by address. `unread` counts the reads of the page that failed: it is read again, up to SITE_READS times in all. */
+  listed?: { site: string; files: string[]; unread?: number };
+  files: Record<string, PickFile | null>;
+  units: Record<string, PickUnit>;
+  batch?: number;
+  candidates?: number;
+  /** How many posts count for each file (logoPick.ts, postsCarrying): the logo the client has counts every post it is found on, a candidate the posts it matches best. */
+  counts?: Record<string, number>;
+  chosen?: string | null;
+  /** The found rectangles the row's logo was last placed from, as a short hash, so a place is measured again only when they change. */
+  placed?: { of: string; from: string };
+  kept?: "person_logo" | "not_own_site";
+}
+
+/** How many times in all the step reads a homepage that does not answer, half an hour apart, before the client keeps its logo until its inputs next change. */
+const SITE_READS = 3;
+
+/**
+ * A choice, as design_brand_settings.derived.logo_pick records it: the
+ * website logo it was made against (`for`), where the chosen mark came from
+ * and the file it was converted to (the record the conversion gave), its
+ * place and where that came from, how many of the posts showed it, and the
+ * logo it replaced with its count.
+ */
+interface LogoPick {
+  rule: number;
+  for: string;
+  from: string;
+  logo: PickFile;
+  placement: Placement;
+  placement_from: "logo_on_posts" | "client_posts" | "default";
+  found: number;
+  posts: number;
+  over: { path: string; found: number };
+  at: string;
+}
+
+function pickWork(result: Record<string, unknown> | null | undefined): PickWork | null {
+  const p = result?.pick as Partial<PickWork> | null | undefined;
+  if (!p || typeof p !== "object" || p.rule !== LOGO_PICK_RULE || typeof p.of !== "string") return null;
+  return { ...p, rule: p.rule, of: p.of, files: p.files && typeof p.files === "object" ? p.files : {}, units: p.units && typeof p.units === "object" ? p.units : {} };
+}
+
+function withoutPick(result: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  const { pick: _pick, ...rest } = result ?? {};
+  return rest;
+}
+
+/**
+ * The choice that stands for a row: the lifecycle's own row still names the
+ * chosen file, the choice was made by this rule against the website logo the
+ * client still has, and the logo is still the lifecycle's to choose. Null
+ * otherwise, and the website's first logo is then where the step starts.
+ */
+function standingPick(row: SettingsRow | null | undefined, client: ClientRow): LogoPick | null {
+  const pick = row?.derived?.logo_pick as Partial<LogoPick> | null | undefined;
+  if (!row || row.source !== "lifecycle" || !pick || typeof pick !== "object") return null;
+  const logo = pick.logo;
+  if (pick.rule !== LOGO_PICK_RULE || pick.for !== str(client.logo_url) || !logo || logo.path !== row.logo_path || !lifecycleMayWrite(client.field_sources, "logo_url")) return null;
+  const p = pick.placement;
+  if (!p || typeof p.width !== "number" || typeof p.top !== "number" || typeof logo.width !== "number" || typeof logo.height !== "number" || typeof pick.from !== "string") return null;
+  return pick as LogoPick;
+}
+
+/**
+ * The addresses of marks a homepage serves (research.ts: logoFilesOnPage,
+ * the wide list for a brand's second logo file, or ownMarksOnPage, the
+ * marks that can be the client's logo itself), at most six, without `main`
+ * and without repeats. An inline SVG is kept in the project's storage so it
+ * has an address; `stored` remembers the ones already kept, so two lists of
+ * one page store each once. Nothing is fetched.
+ */
+async function markAddresses(db: Db, clientId: string, marks: PageMark[], main: string, stored: Map<string, string | null> = new Map()): Promise<string[]> {
+  const addresses: string[] = [];
+  for (const file of marks) {
+    if (addresses.length >= MAX_SITE_LOGOS) break;
+    let url: string | null = null;
+    if ("url" in file) url = file.url;
+    else {
+      const path = `${clientId}/brand/logo-site-${textHash(file.svg)}.svg`;
+      const address = db.storage.from("generated-media").getPublicUrl(path).data.publicUrl;
+      if (address === main || addresses.includes(address)) continue;
+      if (!stored.has(address)) {
+        // Stored as a file of its own (the namespace an inline SVG leaves out), under the name of the text the page has.
+        const { error } = await db.storage.from("generated-media").upload(path, new TextEncoder().encode(standaloneSvg(file.svg)), { contentType: "image/svg+xml", upsert: true });
+        stored.set(address, error ? null : address);
+      }
+      url = stored.get(address) ?? null;
+    }
+    if (url && url !== main && !addresses.includes(url)) addresses.push(url);
+  }
+  return addresses;
+}
+
+/**
+ * The logo the client's posts show (spec section 12; the rule is in
+ * _shared/design/logoPick.ts). It runs once the logo set is made, for a row
+ * the lifecycle wrote and a logo the lifecycle chose, with no model call:
+ *   the candidates: the marks the homepage ties to its own brand (research.ts,
+ *     ownMarksOnPage: the header's, a link to the home page's, the schema.org
+ *     logo; never a logo the footer or the nav merely names, never an inline
+ *     SVG the page would color), from the website read's list when this
+ *     listing made it, else from one direct read of the homepage (no
+ *     scraping service), each converted the way the main logo is, one to a
+ *     run. A homepage that does not answer is read again half an hour
+ *     later, three times in all;
+ *   the test: each candidate gets the two calls the client's logo gets for
+ *     its set (logo-set, then post-logos, four posts to a call, one call to
+ *     a run), searched where the model's stored read says the posts carry
+ *     the logo;
+ *   the count (postsCarrying): the logo the client has counts every post
+ *     it is found on, whatever a candidate scores there; a candidate counts
+ *     a post only where it is found, scores higher than the client's logo
+ *     (found or not) and is the candidate with the highest score;
+ *   the choice (chooseLogo): a logo the posts carry, found on two or more,
+ *     is never replaced; one they do not carry gives way to the candidate
+ *     they carry on the most posts;
+ *   a change: the settings are written again with the chosen file, its
+ *     place from the rectangles of the posts that count for it and the
+ *     background for its whole parts, and the step looks again in a minute
+ *     to make its set.
+ * A choice stands (standingPick): the website's first logo is then one of
+ * the candidates, every mark gets the same search, the standing logo also
+ * counts the posts its set finds it on (read at its measured place), and
+ * when the posts are learned again and carry the logo somewhere else its
+ * place is measured again, from the posts it matches best. A client whose
+ * posts carry no candidate keeps what it has. `base` is the step's result
+ * so far: the settings keys and the set's work. `busy` says this run may
+ * already have asked the service for the set: it then lists the page's
+ * marks and leaves every conversion and every read of posts to the next
+ * look, so no run holds two reads of posts.
+ */
+async function pickLogo(db: Db, client: ClientRow, ctx: StepContext, base: Record<string, unknown>, busy: boolean): Promise<StepOutcome> {
+  const { data: row, error } = await db.from("design_brand_settings").select(SETTINGS_COLUMNS).eq("client_id", client.id).maybeSingle();
+  if (error) throw new Error(`Could not read the design settings: ${error.message}`);
+  if (!row || row.source !== "lifecycle") return { status: "done", result: base };
+  const settings = row as SettingsRow;
+  // Work from before the step's inputs changed is reused for what it read, never for what it listed or could not fetch.
+  const last = pickWork(ctx.previous?.result);
+  const same = last && !last.before ? last : null;
+  const kept = last ?? pickWork(ctx.rows.get("design_settings")?.result);
+  const pick: PickWork = { rule: LOGO_PICK_RULE, of: settings.logo_path, files: {}, units: {} };
+  const done = (): StepOutcome => ({ status: "done", result: { ...base, pick } });
+  const wait = (): StepOutcome => ({ status: "waiting", reason: "in_progress", recheckMinutes: 1, result: { ...base, pick: { ...pick, open: true } } });
+
+  // A logo a person gave is theirs. A page on another client's site is not the brand's own site.
+  if (!lifecycleMayWrite(client.field_sources, "logo_url")) { pick.kept = "person_logo"; return done(); }
+  const read = ctx.rows.get("brand_read")?.result;
+  const site = siteKey(client.website_url);
+  if (site && (read?.parent_page === true || await parentPageFor(db, client))) { pick.kept = "not_own_site"; return done(); }
+
+  // What an earlier look read of the posts is kept through every wait of this one, so no post is read twice for the same file.
+  // A file the service could not use is asked about again once the step's inputs have changed.
+  for (const [path, unit] of Object.entries(kept?.units ?? {})) {
+    pick.units[path] = { ...unit, posts: { ...(unit.posts ?? {}) } };
+    if (!same) delete pick.units[path].unusable;
+  }
+  if (same?.batch) pick.batch = same.batch;
+  if (kept?.placed) pick.placed = kept.placed;
+
+  // The brand's own marks on the homepage.
+  let listed: string[] = [];
+  const earlier = site && same?.listed?.site === site ? same.listed : null;
+  if (site && read?.logo_marks === LOGO_MARKS_RULE && Array.isArray(read.logo_own)) listed = read.logo_own.filter((a: unknown): a is string => typeof a === "string" && !!a);
+  else if (earlier && !(earlier.unread && earlier.unread < SITE_READS)) {
+    pick.listed = earlier;
+    listed = earlier.files;
+  } else if (site) {
+    // The website was read before this listing: one direct read of the homepage, with no scraping service and no model.
+    const address = normalizeWebsite(String(client.website_url));
+    try {
+      const page = await deps.fetchSiteHtml(address, {});
+      listed = await markAddresses(db, client.id, ownMarksOnPage(page.html, new URL(address).origin), "");
+      pick.listed = { site, files: listed };
+    } catch (e) {
+      if (!(e instanceof ResearchError)) throw e;
+      // A page that did not answer is no page without marks: it is read again in half an hour, SITE_READS times in all.
+      // Designs run meanwhile on the logo and the set the client has. After that the client keeps its logo until its inputs next change.
+      const unread = (earlier?.unread ?? 0) + 1;
+      pick.listed = { site, files: [], unread };
+      if (unread < SITE_READS) return { status: "waiting", reason: "website", recheckMinutes: 30, result: { ...base, pick: { ...pick, open: true } } };
+    }
+  }
+  const standing = standingPick(settings, client);
+  const main = str(client.logo_url);
+  // When a choice stands, the website's first logo is a candidate again, ahead of the page's other marks.
+  const addresses = [...new Set([...(standing ? [main] : []), ...listed])].filter((a) => a && a !== (standing ? standing.from : main)).slice(0, MAX_SITE_LOGOS + 1);
+
+  // Each mark as the PNG the design path uses, one conversion to a run. A file that could not be fetched is tried again when the step's inputs next change.
+  for (const a of addresses) {
+    const file = kept?.files[a];
+    if (file || (file === null && same)) pick.files[a] = file;
+  }
+  const unconverted = addresses.filter((a) => !(a in pick.files));
+  if (unconverted.length) {
+    if (busy) return wait();
+    const imaging = await deps.imaging();
+    try {
+      const f = await imaging.logoPng(db, client.id, unconverted[0]);
+      pick.files[unconverted[0]] = f ?? null;
+    } catch {
+      pick.files[unconverted[0]] = null;
+    }
+    if (unconverted.length > 1) return wait();
+  }
+  const candidates: Array<{ address: string; file: PickFile }> = [];
+  for (const a of addresses) {
+    const file = pick.files[a];
+    if (file && file.path !== settings.logo_path && !candidates.some((c) => c.file.path === file.path)) candidates.push({ address: a, file });
+  }
+  pick.candidates = candidates.length;
+  if (!candidates.length) {
+    pick.units = {};
+    return done();
+  }
+
+  // The test: each file is looked for on the client's posts where the model's stored read says they carry the logo, for the file's own shape.
+  const refs = (Array.isArray(settings.reference_paths) ? settings.reference_paths : []).slice(0, MAX_REFS);
+  const spot = (settings.derived?.logo_read ?? null) as LogoSpot | null;
+  const searchPlace = (width: number, height: number) => placementFor(spot, width / Math.max(1, height)).placement;
+  // A standing choice gets the same search as the candidates, so the scores compare like with like. Its count also takes its set's read (below).
+  const paths = [...(standing ? [standing.logo.path] : []), ...candidates.map((c) => c.file.path)];
+  pick.units = Object.fromEntries(paths.filter((path) => pick.units[path]).map((path) => [path, pick.units[path]]));
+  const io = deps.picture(db);
+  let called = busy;
+  for (const path of paths) {
+    const unit = (pick.units[path] ??= { posts: {} });
+    if (unit.unusable) continue;
+    try {
+      const asked = JSON.stringify([path, TONE_RULE]);
+      if (unit.asked !== asked || !unit.facts || !unit.paths) {
+        if (called) return wait();
+        const hash = await (await deps.imaging()).fileHash(db, path);
+        const out = { other: `${client.id}/design-settings/logo-${hash}-other.png`, white: `${client.id}/design-settings/logo-${hash}-white.png` };
+        const { facts } = await askLogoSet(io, { clientId: client.id, logoPath: path, site: [], person: null, out });
+        Object.assign(unit, { hash, asked, facts, paths: { other: facts.made.other ? out.other : null, white: facts.made.white ? out.white : null, site: null, person: null }, searched: undefined, posts: {} });
+        delete unit.unusable;
+      }
+      const plan = postSearchPlan(path, unit.facts!, unit.paths!);
+      const placement = searchPlace(unit.facts!.size.width, unit.facts!.size.height);
+      const searched = JSON.stringify([plan, placement, TONE_RULE]);
+      if (unit.searched !== searched) {
+        unit.searched = searched;
+        unit.posts = {};
+      }
+      unit.posts = Object.fromEntries(refs.filter((p) => p in unit.posts).map((p) => [p, unit.posts[p]]));
+      const unread = refs.filter((p) => !(p in unit.posts));
+      if (!unread.length) continue;
+      if (called) return wait();
+      const batch = unread.slice(0, Math.min(POSTS_PER_CALL, Math.max(1, pick.batch ?? POSTS_PER_CALL)));
+      const { posts } = await askPostLogos(io, { clientId: client.id, posts: batch, placement, plan });
+      batch.forEach((p, i) => { unit.posts[p] = posts[i] ?? null; });
+      called = true;
+      if (unread.length > batch.length) return wait();
+    } catch (e) {
+      // A file that is gone from storage is no candidate.
+      if (e instanceof NotInStorage) {
+        unit.unusable = e.message;
+        continue;
+      }
+      if (!(e instanceof PictureError)) throw e;
+      if (e.why === "unavailable") {
+        // As for the set: a read the service did not answer in time is asked again with half as many posts, down to one.
+        if (e.route === "post-logos") pick.batch = Math.max(1, Math.floor((pick.batch ?? POSTS_PER_CALL) / 2));
+        return { status: "waiting", reason: "picture_service", recheckMinutes: 10, result: { ...base, pick: { ...pick, open: true } } };
+      }
+      // The service could not use this file (no ink, pixels it cannot read) or turned the call away: it is no candidate.
+      // The set is settled already, so a candidate never fails the step.
+      unit.unusable = e.message;
+      continue;
+    }
+  }
+  // A standing choice the service can no longer read is compared with nothing: the client keeps it.
+  if (standing && pick.units[standing.logo.path]?.unusable) return done();
+
+  // The count (logoPick.ts, postsCarrying). The logo the client has counts every post it is found on, whatever a candidate scores there.
+  // A candidate counts a post only where it is found, scores higher than the client's logo and is the candidate that matches the post best.
+  // So a second file of the same logo takes no post from the logo, and a mark that matches a part of the logo a post really carries gets nothing for that post.
+  const tone = toneWork(base);
+  const usable = candidates.filter((c) => !pick.units[c.file.path]?.unusable);
+  // The logo the client has, post by post: what its set read. A standing choice also has its own search at the model's spot (above),
+  // while its set is read at the place measured from its posts, so it counts a post either read finds it on (eitherRead). Its posts
+  // are then never fewer than its set shows, and a logo its set finds on its posts is not taken for one the posts do not carry.
+  const setPosts = tone && tone.of === settings.logo_path ? tone.posts : undefined;
+  const ownPosts = standing ? pick.units[standing.logo.path]?.posts : undefined;
+  const carried = postsCarrying([refs.map((p) => eitherRead(ownPosts?.[p], setPosts?.[p])), ...usable.map((c) => refs.map((p) => pick.units[c.file.path]?.posts[p]))]);
+  const current = carried.counts[0];
+  pick.counts = { [settings.logo_path]: current, ...Object.fromEntries(candidates.map((c) => [c.file.path, 0])), ...Object.fromEntries(usable.map((c, i) => [c.file.path, carried.counts[i + 1]])) };
+  // The choice: a logo the posts carry is never replaced; one they do not carry gives way to the candidate they carry (chooseLogo).
+  const chosenPath = chooseLogo(current, usable.map((c) => ({ id: c.file.path, found: pick.counts![c.file.path] })));
+  pick.chosen = chosenPath;
+  const chosen = usable.find((c) => c.file.path === chosenPath);
+
+  /** The place of the mark at `index` of the count, from the rectangles of the posts that match it best (`by`), each as shares of its own post; and a short hash of those rectangles. */
+  const imaging = await deps.imaging();
+  const rectsOf = (index: number, posts: Record<string, PostLogo | null> | undefined) => refs.flatMap((p, i) => {
+    const got = posts?.[p];
+    return carried.by[i] === index && got && got.found ? [{ post: p, rect: got.rect }] : [];
+  });
+  const sigOf = (rects: Array<{ post: string; rect: FoundAt["rect"] }>) => textHash(JSON.stringify(rects.map((r) => [r.post, r.rect.x, r.rect.y, r.rect.width, r.rect.height])));
+  const measure = async (rects: Array<{ post: string; rect: FoundAt["rect"] }>): Promise<Placement | null> => {
+    const at: FoundAt[] = [];
+    for (const r of rects) {
+      const frame = await imaging.postSize(db, r.post).catch(() => null);
+      if (frame) at.push({ rect: r.rect, frame });
+    }
+    return measuredPlacement(at);
+  };
+  const old = settings.derived ?? {};
+
+  if (!chosen) {
+    // A choice that stands keeps its logo, and its place follows the posts: when they are learned again and carry it elsewhere,
+    // the place is measured again from where it is found now. The file and the place then never part, with nobody doing anything.
+    if (!standing) return done();
+    const rects = rectsOf(0, pick.units[standing.logo.path]?.posts);
+    const from = sigOf(rects);
+    if (!rects.length || (pick.placed?.of === settings.logo_path && pick.placed.from === from)) return done();
+    const measured = await measure(rects);
+    pick.placed = { of: settings.logo_path, from };
+    if (!measured || samePlacement(settings.placement, measured)) return done();
+    const now = deps.now().toISOString();
+    const record: LogoPick = { ...standing, placement: measured, placement_from: "logo_on_posts", found: current, posts: refs.length, at: now };
+    const { data: wrote, error: writeError } = await db.rpc("lifecycle_write_design_settings", {
+      p_client: client.id, p_logo_path: settings.logo_path, p_placement: measured, p_background: settings.background, p_reference_paths: settings.reference_paths,
+      p_derived: { ...old, placement_from: "logo_on_posts", at: now, logo_pick: record },
+    });
+    if (writeError) throw new Error(`Could not save the design settings: ${writeError.message}`);
+    const result: Record<string, unknown> = { ...base, written: wrote === true, placement: measured, placement_from: "logo_on_posts", pick };
+    // A person's row appeared in between: it is theirs.
+    if (wrote !== true) return { status: "done", result };
+    // The set was read at the old place: it is not settled for the new one, and the next look reads the posts there and settles it again.
+    if (tone) {
+      const { settled: _settled, ...unsettled } = tone;
+      result.tone = unsettled;
+    }
+    return { status: "waiting", reason: "in_progress", recheckMinutes: 1, result };
+  }
+
+  // A change. The chosen mark's place comes from the rectangles of the posts that count for it.
+  const index = usable.indexOf(chosen) + 1;
+  const rects = rectsOf(index, pick.units[chosen.file.path].posts);
+  const read0 = placementFor(spot, chosen.file.width / Math.max(1, chosen.file.height));
+  const measured = await measure(rects);
+  const placement = measured ?? read0.placement;
+  const placementFrom: LogoPick["placement_from"] = measured ? "logo_on_posts" : read0.from;
+  pick.placed = { of: chosen.file.path, from: sigOf(rects) };
+  const b = client.brand_identity ?? {};
+  // By the rule every lifecycle row gets (writeDesignSettings): held to the file's weakest whole part. A file recorded without its parts has its one ink.
+  const background = pickBackground([b.primary_color, b.secondary_color, b.accent_color], chosen.file.inks?.length ? chosen.file.inks : chosen.file.ink ? [chosen.file.ink] : null, chosen.file.own);
+  const now = deps.now().toISOString();
+  const record: LogoPick = {
+    rule: LOGO_PICK_RULE, for: main, from: chosen.address, logo: chosen.file,
+    placement, placement_from: placementFrom, found: pick.counts[chosen.file.path], posts: refs.length, over: { path: settings.logo_path, found: current }, at: now,
+  };
+  // The read of where the posts carry the logo is about the posts, whichever file is the logo: it stays, with what it was made for.
+  const derived = {
+    logo_from: chosen.address, logo_file: chosen.file.converted, placement_from: placementFrom, logo_read: old.logo_read ?? null,
+    logo_read_for: old.logo_read_for ?? spotInputs(client, ctx.rows.get("design_refs")), background_from: background.from, at: now, logo_pick: record,
+  };
+  // The logo that was replaced is a candidate from now on. What its set's work read is the same search, so it is kept as that candidate's work.
+  if (!standing && tone && tone.of === settings.logo_path && tone.facts && tone.paths && !tone.paths.site && !tone.paths.person && samePlacement(settings.placement, searchPlace(tone.facts.size.width, tone.facts.size.height))) {
+    const paths0: SetPaths = { other: tone.paths.other, white: tone.paths.white, site: null, person: null };
+    pick.units[settings.logo_path] = {
+      hash: tone.hash, asked: JSON.stringify([settings.logo_path, TONE_RULE]), facts: tone.facts, paths: paths0,
+      searched: JSON.stringify([postSearchPlan(settings.logo_path, tone.facts, paths0), searchPlace(tone.facts.size.width, tone.facts.size.height), TONE_RULE]), posts: { ...tone.posts },
+    };
+  }
+  const { data: wrote, error: writeError } = await db.rpc("lifecycle_write_design_settings", {
+    p_client: client.id, p_logo_path: chosen.file.path, p_placement: placement, p_background: background.hex, p_reference_paths: settings.reference_paths, p_derived: derived,
+  });
+  if (writeError) throw new Error(`Could not save the design settings: ${writeError.message}`);
+  const result = { ...base, written: wrote === true, logo_path: chosen.file.path, placement, placement_from: placementFrom, background: background.hex, background_from: background.from, pick };
+  // A person's row appeared in between: it is theirs.
+  if (wrote !== true) return { status: "done", result };
+  // The set of the new logo is made by the next look, a minute from now.
+  return { status: "waiting", reason: "in_progress", recheckMinutes: 1, result };
 }
 
 export const STEPS: Record<string, StepDef> = {
@@ -656,7 +1071,7 @@ export const STEPS: Record<string, StepDef> = {
         if ("url" in logo) url = logo.url;
         else {
           const path = `${client.id}/brand/logo-site-${textHash(logo.svg)}.svg`;
-          const { error } = await db.storage.from("generated-media").upload(path, new TextEncoder().encode(logo.svg), { contentType: "image/svg+xml", upsert: true });
+          const { error } = await db.storage.from("generated-media").upload(path, new TextEncoder().encode(standaloneSvg(logo.svg)), { contentType: "image/svg+xml", upsert: true });
           if (!error) url = db.storage.from("generated-media").getPublicUrl(path).data.publicUrl;
         }
         if (url && url !== str(client.logo_url)) fields.logo_url = url;
@@ -665,23 +1080,13 @@ export const STEPS: Record<string, StepDef> = {
       // from the page already read: nothing more is fetched and no model is asked. The main logo is left out,
       // at most six are kept, and an inline SVG is stored so it has an address. The design_settings step
       // decides whether any of them is the client's logo (_shared/design/logoTone.ts, sameLogo).
-      const logoFiles: string[] = [];
-      if (!textOnly) {
-        const main = str(fields.logo_url) || str(client.logo_url);
-        for (const file of logoFilesOnPage(page.html, new URL(website).origin)) {
-          if (logoFiles.length >= MAX_SITE_LOGOS) break;
-          let url: string | null = null;
-          if ("url" in file) url = file.url;
-          else {
-            const path = `${client.id}/brand/logo-site-${textHash(file.svg)}.svg`;
-            const address = db.storage.from("generated-media").getPublicUrl(path).data.publicUrl;
-            if (address === main || logoFiles.includes(address)) continue;
-            const { error } = await db.storage.from("generated-media").upload(path, new TextEncoder().encode(file.svg), { contentType: "image/svg+xml", upsert: true });
-            if (!error) url = address;
-          }
-          if (url && url !== main && !logoFiles.includes(url)) logoFiles.push(url);
-        }
-      }
+      // Beside them, the marks that can be the client's logo itself (logoPick.ts): only those the page ties to its own brand.
+      const mainLogo = str(fields.logo_url) || str(client.logo_url);
+      const keptSvgs = new Map<string, string | null>();
+      const marks = textOnly ? { files: [], own: [] } : {
+        files: await markAddresses(db, client.id, logoFilesOnPage(page.html, new URL(website).origin), mainLogo, keptSvgs),
+        own: await markAddresses(db, client.id, ownMarksOnPage(page.html, new URL(website).origin), mainLogo, keptSvgs),
+      };
       const stored = client.location && typeof client.location === "object" ? client.location : null;
       const better = !textOnly && replacesLocation(stored, { source: location.source, website: key });
       if (better) {
@@ -704,7 +1109,10 @@ export const STEPS: Record<string, StepDef> = {
           timezone: textOnly ? null : location.timezone, timezone_source: textOnly ? null : location.source, country, language,
           logo: logo ? ("url" in logo ? "file" : "inline_svg") : "none",
           written: written.written, kept: written.skipped,
-          logo_files: logoFiles,
+          logo_files: marks.files,
+          logo_own: marks.own,
+          // Which listing made the list (research.ts): a list from before a change of the listing is known to be older.
+          logo_marks: LOGO_MARKS_RULE,
           // The profiles the homepage links to, for the accounts step; another client's, on a page of its site.
           site_profiles: textOnly ? [] : siteProfileLinks(page.html),
           ...(textOnly ? { parent_page: true } : {}),
@@ -1294,6 +1702,12 @@ export const STEPS: Record<string, StepDef> = {
   // ends in the website's other logo files, a person's second file and the
   // version of the tone rule, so the set follows each of them and every
   // client gets one with nobody doing anything.
+  //
+  // Last, the logo itself (17 Nov 2026, pickLogo above): every mark the
+  // homepage ties to its own brand is looked for on the client's posts. A
+  // logo the posts carry stays; one they do not carry gives way to the mark
+  // they do, with its place from where it was found. The key of a row the
+  // lifecycle wrote ends in that rule's version.
   design_settings: {
     policy: {},
     async inputs(db, client, rows) {
@@ -1307,7 +1721,7 @@ export const STEPS: Record<string, StepDef> = {
       if (!str(client.logo_url)) return null;
       if (!libraryPaths(client.design_references, client.harvested_design_references).length) return null;
       const b = client.brand_identity ?? {};
-      return `${spotInputs(client, refs)}|colors:${[b.primary_color, b.secondary_color, b.accent_color].join(",")}${toneKeyTail(site, data)}`;
+      return `${spotInputs(client, refs)}|colors:${[b.primary_color, b.secondary_color, b.accent_color].join(",")}${toneKeyTail(site, data)}|pick:${LOGO_PICK_RULE}`;
     },
     async run(db, client, ctx) {
       const { data: existing, error } = await db.from("design_brand_settings").select(SETTINGS_COLUMNS).eq("client_id", client.id).maybeSingle();
@@ -1315,12 +1729,30 @@ export const STEPS: Record<string, StepDef> = {
       // A row a person set: its logo file, placement, background and date are theirs and are never written.
       // The set is made from their file and their posts by the same rule, and stored beside them.
       if (existing?.source === "person") return settleLogoSet(db, client, ctx, existing as SettingsRow, { kept: "person" });
+      const prev = ctx.previous?.result;
+      const before = toneWork(prev);
+      // The work on the logo the client's posts show is carried through every wait, so nothing is asked twice.
+      // Work from before the step's inputs changed is marked, so what it listed or could not fetch is asked for again.
+      const open = pickWork(prev);
+      const older = open ? null : pickWork(ctx.rows.get("design_settings")?.result);
+      const carried: PickWork | null = open ?? (older ? { ...older, before: true } : null);
+      const carry = carried ? { pick: carried } : {};
+      const current = !!existing && !!before && before.of === existing.logo_path;
+      const settledBefore = current && !!(before.settled || before.unusable);
+      // The set is settled and the candidates are still being read: straight on with them.
+      if (settledBefore && open?.open && open.of === existing.logo_path) return pickLogo(db, client, ctx, withoutPick(prev), false);
+      let set: StepOutcome;
       // The settings, unless an earlier run on these same inputs wrote them for the logo the row still names.
-      const before = toneWork(ctx.previous?.result);
-      if (existing && before && before.of === existing.logo_path) return settleLogoSet(db, client, ctx, existing as SettingsRow, settingsOf(ctx.previous?.result));
-      const made = await writeDesignSettings(db, client, ctx, (existing ?? null) as SettingsRow | null);
-      if ("outcome" in made) return made.outcome;
-      return settleLogoSet(db, client, ctx, made.row, made.settings);
+      if (current) set = await settleLogoSet(db, client, ctx, existing as SettingsRow, { ...settingsOf(prev), ...carry });
+      else {
+        const made = await writeDesignSettings(db, client, ctx, (existing ?? null) as SettingsRow | null);
+        if ("outcome" in made) return made.outcome;
+        set = await settleLogoSet(db, client, ctx, made.row, { ...made.settings, ...carry });
+      }
+      if (set.status !== "done") return set;
+      // The set is made. Now the logo itself: is it the mark the client's posts carry (logoPick.ts)?
+      // A run that may have made the set's last calls converts and reads no candidate: that starts with the next look.
+      return pickLogo(db, client, ctx, withoutPick(set.result), !settledBefore);
     },
   },
 

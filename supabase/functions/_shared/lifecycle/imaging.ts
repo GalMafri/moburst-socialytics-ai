@@ -10,6 +10,7 @@ import { Image } from "https://deno.land/x/imagescript@1.3.0/mod.ts";
 import { svgToPng } from "../render/resvg.ts";
 import { cutLogo } from "../design-system/logoAsset.ts";
 import { anthropicMessages } from "../anthropic.ts";
+import { imageSize } from "../design/logoPick.ts";
 import { generatedMediaPath, inkColor, logoNormalization, logoSpotPrompt, parseLogoSpot, pngSize, type LogoSpot } from "./designSettings.ts";
 import { wholeInks } from "../design/logoTone.ts";
 
@@ -181,6 +182,17 @@ export async function fileHash(db: Db, path: string): Promise<string> {
   const { data, error } = await db.storage.from(BUCKET).download(path);
   if (error || !data) throw new Error(`The logo file could not be read: ${error?.message ?? "missing"}`);
   return sha(new Uint8Array(await data.arrayBuffer()));
+}
+
+/**
+ * The width and height of one of the client's posts, read from its file
+ * header (nothing is decoded). Null when the post cannot be read or is not
+ * a picture: it is then left out of what is measured.
+ */
+export async function postSize(db: Db, path: string): Promise<[number, number] | null> {
+  const { data, error } = await db.storage.from("design-references").download(path);
+  if (error || !data) return null;
+  return imageSize(new Uint8Array(await data.arrayBuffer()));
 }
 
 function base64(bytes: Uint8Array): string {

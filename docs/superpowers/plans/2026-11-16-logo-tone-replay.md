@@ -262,3 +262,149 @@ The five files on the six confirmed pages, each looked at at full size beside th
 | European Wax Center | 1,200 by 315, own ground light | shape 1.000, overlap 1.000 | refused: same ground | The stored file again. |
 
 What this shows and what it does not. No file passed, so no wrong logo would have been taken from these pages. The test met one real second file of a brand and refused it only for its width, so the website path has still not given any client a second file, and a right pass has not been seen. One made copy was confirmed by the way: the brand's own file for light pictures keeps the red mark and turns the wordmark dark, which is what the making rule's copy does for that logo. The proof on every client's stored website address is step 5 of the release order.
+
+## The logo the client's posts show: replay on the 14 clients (17 Nov 2026)
+
+Spec: section 12 of `docs/superpowers/specs/2026-11-16-logo-tone-design.md`. Script: `server/scripts/tone-replay.ts`, with the candidate files written by `supabase/tests/tools/site-logos.ts`.
+
+- Run: on the tree of commit `22974210` (`npx tsx server/scripts/tone-replay.ts`), exit 0, 0 rows differ of 169 (14 choices, 14 sets, 115 posts, 26 designs). A logo was found on 41 of 115 posts and 14 of 26 designs pass. Slowest locate with templates 7,298 ms, slowest read of one post 24,057 ms, on a laptop that was also running other work.
+- Where: a laptop, Node 22 for the replay and Deno 2.9 for the site read. No model, no provider, no call to the live picture service (the service's own functions run in the script), nothing written to the product.
+- Candidates: each client's stored website address, fetched directly (`site-logos.ts`, no scraping service). The files are the product's own `logoFilesOnPage` and `logoPng` output, kept in a scratch folder. Posts: the files on disk beside the earlier replays, with the counts in the table (12 for the first client, which is all of its posts). Designs: yesterday's 9 of the first client, and the 17 stored designs of the 16 Nov record.
+- Expected values: the first client's posts and designs from the diagnosis of 16 Nov (`yesterday-diag/wordmark-result.json`, measured with the search alone, not with this rule): the wordmark found on 10 of 12 posts, and on 3 of the 9 designs. Its placement and canvas ground were worked out by hand from the same measurements (below). The other clients' rows are the 16 Nov record's. The choice for a client with no candidate that differs from its stored file is expected not to change.
+
+### What each client gets
+
+| Client | Row | Logo today | Posts | Candidates (direct read of the homepage) | Shown on posts: today's logo, candidates | Result |
+|---|---|---|---|---|---|---|
+| Twos | lifecycle | the round icon its site serves as a file (1170 by 1200) | 12 | 1: the wordmark, an inline SVG in the header's link to the home page | 0 of 12 (best 0.501); wordmark 10 of 12 (0.815 to 0.992) | **Changes to the wordmark.** Placement center, width 0.148, top 0.902; background #0071FA; canvas ground #5D4E4B from 6 posts |
+| Yangra | lifecycle | a white stacked lockup (285 by 150) | 8 | 1: an inline SVG kept in a data address (the site's whole logo), listed since this build | 2 of 8; candidate 2 of 8 (0.766, 0.792) | Equal counts: keeps its logo (first rule; under the revised count the candidate has 0, next section) |
+| European Wax Center | lifecycle | wordmark, black | 8 | 2: its black and its standard wordmark | 0 of 8; 0 and 0 (best 0.261) | The posts show none: keeps its logo |
+| Buzznow | lifecycle | mark and wordmark | 8 | 1: the glasses mark alone | 6 of 8; 0 (best 0.354) | Keeps its logo |
+| Adaptive Sound Technologies, BetterBee, Olo, PrepSmart Recipes, Uproar by Moburst | lifecycle | the page's own first logo | 16, 7, 8, 8, 6 | 0 other than the stored file | 5, 0, 3, 3 and 2 | Nothing to compare: keeps its logo |
+| DermaAngel US | lifecycle | wordmark | 8 | 0 usable: the site's firewall turns a direct read of its SVG files away ("not a kind of file the design path uses") | 2 of 8 | Not proved here (below) |
+| Kitcaster by Moburst | lifecycle | a thin-lettered lockup | 6 | none looked for: its website is a page on another client's site | 0 of 6 (0.468 to 0.568) | Never looked at, by rule (below) |
+| Pay The Pyper | lifecycle, logo given by a person | the person's file | 4 | 1, not looked for | 4 of 4 | Never changed |
+| Bader Law, Moburst | person | the person's file | 8, 8 | not looked for | n/a | Never changed |
+
+### The first client: yesterday's 9 designs under the wordmark
+
+The logo is the wordmark; each design is searched where the new settings put it (center, 0.148, top 0.902), as a job started from them would send it, over the canvas ground #5D4E4B. Pass, fail and file are compared exactly. The score of a design is recorded and not compared for a logo the rule chose, because it moves with the placement the rule gives (the choice's row pins that placement exactly).
+
+| Job and design | Expected (diagnosis, old placement) | Got | Time | Same |
+|---|---|---|---|---|
+| 8b0145f4 design-1 | fail (0.341) | fail (0.338, at 0.42 of the usual width) | 1,690 ms | yes |
+| 8b0145f4 design-2 | fail (0.301) | fail (0.293, 0.48) | 1,776 ms | yes |
+| 8b0145f4 design-3 | fail (0.343) | fail (0.343, 0.45) | 1,703 ms | yes |
+| 4d9f1b10 design-1 | fail (0.370) | fail (0.370, 0.49) | 1,709 ms | yes |
+| 4d9f1b10 design-2 | fail (0.345) | fail (0.288, 0.43) | 1,739 ms | yes |
+| 4d9f1b10 design-3 | fail (0.327) | fail (0.325, 0.43) | 1,687 ms | yes |
+| df0c0a54 design-1 | pass, stored (0.962) | pass, stored (0.976, 1.17) | 1,799 ms | yes |
+| df0c0a54 design-2 | pass, stored (0.968) | pass, stored (0.982, 1.17) | 1,760 ms | yes |
+| df0c0a54 design-3 | pass, stored (0.952) | pass, stored (0.971, 1.17) | 2,019 ms | yes |
+
+Under the icon the same 9 designs all failed locate (0.29 to 0.44). What this says and does not say: it says that the three designs in which the model kept the brand's wordmark are found, and the six in which it drew something else are not found, under the logo the posts carry. Whether the model keeps the wordmark more often with a canvas that carries it needs new paid designs and is not proved.
+
+The 12 posts: found on 10 (0.815, 0.816, 0.955, 0.952, 0.992, 0.953, 0.986, 0.987, 0.979, 0.945), not found on 2 (0.456 and 0.440, shown at 0.47 and 0.49 of the usual width). Two of the 10 are white posts that carry a blue "quotes of" lockup whose shape the wordmark's copy matches (0.992 and 0.986).
+
+The placement expected by hand from the diagnosis' rectangles (10 found, each as a share of its post's own width): widths 0.085 to 0.177 with a middle of 0.126; the usual width must hold 0.177 within 1.2 of it and 0.085 within 0.55 of it, which is a width between 0.1475 and 0.1545; the middle is below, so 0.148 (up to rounding). Top: the middle top is 0.902. Anchor center: the middle of every rectangle lies within 0.01 of the post's middle. The canvas ground expected by hand: of the 10 found posts, those the white wordmark shows on (contrast 3 or more against white: 6 posts remain, because the two white posts and the two light tan ones fall out), the ground with the smallest sum of distances to the others is #5D4E4B. The first run of the build had given #4F4E3A and 9 found posts, under a placement from before the width rule was corrected; it is not an expected value.
+
+### Looked at
+
+Every logo file and canvas the rule produces, at full size: the wordmark file (1,200 by 403, white ink) beside the stored icon; the wordmark as it is drawn on the canvas (160 by 54 pixels on a 1,080 pixel canvas) over #5D4E4B and over #0071FA, enlarged with no smoothing: clean, no halo, the counter of the "o" open. Six of the posts' found rectangles cut at their own pixels and enlarged to 1,240 pixels wide: the same white wordmark on a tan road, a dark road, green, and a dark brown floor; and the blue "quotes of" lockup on white. The icon of the stored file is a black circle with a speech bubble and appears on none of the 12 posts. Yangra's candidate (a navy lockup with the sun) and its stored file (white stacked lockup) were looked at beside six of its posts. Correction, 17 Nov after the review: the first version of this sentence said the posts show the horizontal lockup. That was wrong. Looked at again at full size with both rectangles drawn, the two posts where the candidate is found (0.766 and 0.792) show the stacked lockup, where the stored file is found at 0.973 and 0.969; the candidate's rectangle covers only the word "Yangra" and an empty stretch of ground to its left. Under the count of the revised rule those two posts are the stored logo's and the candidate has none (next section).
+
+### What this does not prove
+
+- DermaAngel US: no candidate could be read here because its host answers a direct request for its SVG files with a firewall page. The lifecycle makes the same direct request for files, so this may also hold in the product; whether the product's request is turned away is not known. Its stored logo is shown on 2 of 8 posts.
+- Kitcaster by Moburst, the second client of the class "the stored file is on none of the posts although a logo was read on them" (0 of 6): its stored website address is a page on another client's site, so the rule is not applied and its logo does not change. The fix for it is its own website address, not a rule on posts.
+- The homepages were fetched directly from a laptop. The lifecycle reads a client's homepage through the scraping service when it has a key, so a page that serves its header only to a browser may list more or fewer marks there.
+- Counts for Yangra's candidate and for Buzznow's and European Wax Center's are the first run's values, not measured independently before the run.
+- The service's own speed is not measured here.
+
+## The logo the client's posts show: replay on the live reference posts, after the review (17 Nov 2026)
+
+Rule: section 12 as revised after the review (the count by best score, a carried logo never replaced, only the brand's own marks as candidates, no SVG the page would color). Script: `server/scripts/tone-replay.ts`, unchanged in method.
+
+- Posts: each row's live `reference_paths`, exported read only through the Lovable connector and fetched from the public bucket, 159 posts for the 14 rows (12 for each of the six lifecycle clients the first run held 8 of). This replaces the posts on disk of the first run, which held 8 of the 12 live posts for Buzznow, DermaAngel US, European Wax Center, Olo, PrepSmart Recipes and Yangra.
+- Expected values: the posts, and how many posts the client's logo is found on, are the live step's own reads (`result.tone.posts` of each `design_settings` row), so every "current" count below is checked against what the product measured. Files, canvas and ground: `chooseSet` over those reads. The first client's posts, place, canvas and designs: as in the section above.
+- Candidates: each row's stored website address, fetched directly (`site-logos.ts`), listed by `ownMarksOnPage`.
+- Result, run at `6e9d2194`: exit 0, 0 of 244 rows differ. 15 entries, 10 choices looked at, 1 logo changed, 13 settings, 159 posts with a logo found on 60, 43 designs of which 30 pass. (This line first pointed to "the commit's proof", and the commit held no numbers. The re-check ran the same manifest at the same head and got the same rows.)
+
+| Client | Row | Live posts | Posts that count for today's logo | Candidates | Found on, and posts that count for it | Result |
+|---|---|---|---|---|---|---|
+| Twos | lifecycle | 12 | 0 (best 0.501) | 1: the wordmark, inline SVG in the header's home link | found 10, counts 10 (0.815 to 0.992) | **Changes to the wordmark**: center, width 0.148, top 0.902; background #0071FA; canvas ground #5D4E4B |
+| Yangra | lifecycle | 12 | 2 (0.973, 0.969) | 1: the site's whole logo, an SVG kept in a data address | found 2 (0.766, 0.792), counts 0: on both posts the stored logo scores higher | Keeps its logo |
+| Buzznow | lifecycle | 12 | 10 | 1: the glasses mark alone | 0 (best 0.354) | Keeps its logo |
+| European Wax Center | lifecycle | 12 | 0 | 1: its black wordmark (the second listed file is the stored one) | 0 (best 0.261) | Keeps its logo: no candidate carried |
+| Adaptive Sound Technologies, BetterBee, Olo, PrepSmart Recipes, Uproar by Moburst | lifecycle | 16, 7, 12, 12, 6 | 5, 0, 8, 4, 2 | none other than the stored file | n/a | Keeps its logo |
+| DermaAngel US | lifecycle | 12 | 3 | 1 listed, not read in this run: its host answered the laptop's request for its SVG with a firewall page | n/a | Not proved by this run. Corrected after the re-check: this cell said the client keeps its logo "even if fetched", which the code of this run did not hold. The candidate is replayed in the next section. |
+| Kitcaster by Moburst | lifecycle | 6 | 0 | not looked for: its website is a page on another client's site | n/a | Never looked at, by rule |
+| Pay The Pyper | lifecycle, logo given by a person | 4 | 4 | not looked for | n/a | Never changed |
+| Bader Law, Moburst | person | 16, 16 | n/a | not looked for | n/a | Never changed |
+
+What changed against the first run: Yangra's candidate counts 0 where it tied at 2, and the live posts change no client's result. Corrected after the re-check: this paragraph went on to say that a candidate could no longer take the place of a logo two posts carry, "which covers DermaAngel US whatever its host answers the product". Both halves were wrong for the code of this run. The count gave each post to the mark with the highest score, the client's own logo included, so a second file of the same logo could take the logo's posts by any margin. And the product does get files from that host: the re-check read the live row and found it written again on 17 Nov at 10:31 Israel time from the site's own SVG (`derived.logo_file` is `from_svg`), through the same read a candidate goes through. The next section holds the corrected rule and that client's candidate. The one logo that changes is the first client's, looked at at full size beside its posts again for this run (the wordmark over #5D4E4B; its posts' rectangles on the tan road and on the white post with the blue "quotes of" lockup), and the 9 designs of 16 Nov give the same rows as above under the live manifest: 3 pass (0.976, 0.982, 0.971 at 1.17 of the usual width), 6 fail (0.288 to 0.370).
+
+What this run does not prove: whether the edge runtime reads the first client's homepage the way a laptop does (the release's check S3b reads it from the step's own result), and whether the model keeps the wordmark where a canvas carries it (the paid request of the release order, an owner decision).
+
+## The logo the client's posts show: replay after the re-check (17 Nov 2026)
+
+Rule: section 12 as corrected after the re-check (spec items 3 and 4; plan Rulings 73, 74 and 79 to 81; numbered 64, 65 and 70 to 72 before the merge with main). The logo the client has counts every post it is found on, whatever a candidate scores there, and a logo found on two posts or more is never replaced. A candidate counts a post only where it is found, scores higher than the client's logo (found or not) and no other candidate scores higher. Script: `server/scripts/tone-replay.ts`, unchanged in method.
+
+- Manifest: the live manifest of the section above, with one change. DermaAngel US now has the candidate its homepage lists: the white file of its wordmark (`https://www.derma-angel.com/assets/img/layout/logo-w.svg`, a brand's own mark by `ownMarksOnPage`).
+- How the candidate was read: one direct GET of that public file with the browser header the product's website read sends (`BROWSER_UA`): 200, `image/svg+xml`, 7,415 bytes, the same bytes the re-check had fetched. Converted by the design path's own conversion (`imaging.ts`, `logoPng`: drawn 1,200 pixels wide, trimmed to its ink), from a store kept in memory: 1,181 by 224, white ink, own ground dark. The conversion was checked against the product: the site's `logo.svg` through the same call gives the live stored logo byte for byte (the same SHA-256, which is also the hash in the stored file's name).
+- Looked at at full size beside the stored logo, on one dark ground: the same wordmark, white where the stored file is teal. The two files have the same shape on every one of their 264,544 pixels (no difference in any alpha value).
+- Expected row, written before the run (13:27:25 Israel time, the run started at 13:27:32): chosen null, the stored logo 3, the candidate 0. Every other expected value is unchanged from the section above.
+- Result: exit 0, 0 of 244 rows differ. 15 entries, 10 choices looked at, 1 logo changed, 13 settings, 159 posts with a logo found on 60, 43 designs of which 30 pass. Slowest locate 8,062 ms, slowest read of one post 6,832 ms, on a laptop that was running another replay at the same time. Every row gives what the run at `6e9d2194` gave, except the one row that gained the candidate.
+
+| Client | Row | Live posts | Today's logo is found on | Candidates | Candidate: found on, counts | Result |
+|---|---|---|---|---|---|---|
+| Twos | lifecycle | 12 | 0 (best 0.501) | 1: the wordmark, inline SVG in the header's home link | found 10, counts 10 (0.815 to 0.992) | **Changes to the wordmark**: center, width 0.148, top 0.902; background #0071FA; canvas ground #5D4E4B |
+| DermaAngel US | lifecycle | 12 | 3 (0.907, 0.944, 0.900) | 1: the same wordmark in white | found on the same 3, counts 0: it scores higher on none of them | Keeps its logo |
+| Yangra | lifecycle | 12 | 2 (0.973, 0.969) | 1: the site's whole logo, an SVG kept in a data address | found 2 (0.766, 0.792), counts 0 | Keeps its logo |
+| Buzznow | lifecycle | 12 | 10 | 1: the glasses mark alone | found 0 (best 0.354) | Keeps its logo |
+| European Wax Center | lifecycle | 12 | 0 | 1: its black wordmark | found 0 (best 0.261) | Keeps its logo: no candidate carried |
+| Adaptive Sound Technologies, BetterBee, Olo, PrepSmart Recipes, Uproar by Moburst | lifecycle | 16, 7, 12, 12, 6 | 5, 0, 8, 4, 2 | none other than the stored file | n/a | Keeps its logo |
+| Kitcaster by Moburst | lifecycle | 6 | 0 | not looked for: its website is a page on another client's site | n/a | Never looked at, by rule |
+| Pay The Pyper | lifecycle, logo given by a person | 4 | 4 | not looked for | n/a | Never changed |
+| Bader Law, Moburst | person | 16, 16 | n/a | not looked for | n/a | Never changed |
+
+The first client's 9 designs of 16 Nov under the wordmark give the rows of the first section again: 3 pass (0.976, 0.982, 0.971), 6 fail (0.288 to 0.370).
+
+### The two files of one logo, to six places
+
+The stored logo against the white file on the three posts that carry the logo, measured with the replay's own reads:
+
+| Post | Stored logo | White file as the product converts it | White file as a softer raster (the re-check's own file, 193 pixels enlarged to 1,200) |
+|---|---|---|---|
+| 6th | 0.906901 | 0.906890 | 0.920069 |
+| 8th | 0.943629 | 0.943629 | 0.965763 |
+| 9th | 0.899972 | 0.899957 | 0.926734 |
+
+On the other 9 posts neither file is found (0.209 to 0.417, the two files within 0.00001 of each other).
+
+| Rule | White file as converted | White file as a softer raster |
+|---|---|---|
+| As built at `6e9d2194` (the re-check's two runs, from the same scores) | stored 3, candidate 0: the logo stayed by 0.00001 on two posts and by the tie rule on the third | stored 0, candidate 3: the logo would have been replaced |
+| As corrected (run on this tree) | stored 3, candidate 0: keeps its logo | stored 3, candidate 3: keeps its logo |
+
+The softer raster is not what the product makes from this file. It is in the table because a small PNG of the same logo on some other client's site would be read like that, and the result must not turn on it.
+
+### The class rule on the 14 homepages
+
+`ownPaint` now takes a class as a paint only when the SVG's own style names it. Checked on the 14 homepages the site read kept (`site-logos.ts`, 17 Nov): the brand's own marks listed are the same as before on every page. The three inline SVGs among them (the first client's wordmark, Bader Law's and Yangra's) use no class and no style, and still count.
+
+### What this run does not prove
+
+- Whether the edge runtime reads the first client's homepage the way a laptop does (release check S3b reads it from the step's own result).
+- Whether the model keeps the wordmark where a canvas carries it (the paid request of the release order, an owner decision).
+- That the product's own request for the white file is answered at release. Its request for a logo file carries a shorter user agent than the one used here, and that host turned the laptop away with it twice on 17 Nov (the site read of the section above, and the re-check). The product's own request for `logo.svg` on the same host was answered that morning, as the re-check read from the live row. If the product is turned away, the file is no candidate and the client keeps its logo. If it is answered, the result is the row above.
+
+## The replay after the merge with main at `22adbca1` (17 Nov 2026)
+
+Run: `npx tsx server/scripts/tone-replay.ts` on the tree of commit `4ce38b09` (the merge, the lock file and plan Ruling 84), both manifests at the same time on a laptop running other work. No model call. The only network reads are GETs of the product's public storage, for the stored copies of each live set in main's manifest. Nothing was written outside a scratch folder. No manifest and no expected value was changed for this run. The script is the merged one (plan Ruling 82).
+
+- The manifest of the section above (15 entries): exit 0, 0 of 244 rows differ (13 settings, 14 choices, 15 sets, 159 posts, 43 designs; 8 minutes 17 seconds). The first client changes to its wordmark, which 10 of its 12 posts carry while its icon is found on none: center, 0.148 wide, top 0.902, on #0071FA. Every other client keeps its logo. A logo was found on 60 of 159 posts, and 30 of 43 designs pass. Every row has the result it had in the run of the section above. A design row now also records main's three facts (the picture's ground, the weakest part there, and why a design is made again); no design of this manifest is lost on its ground.
+- Main's manifest of its second review (29 entries): exit 0, 0 of 407 rows differ (25 settings, 29 sets, 270 posts, 14 windows, 69 designs; 10 minutes 19 seconds). 50 of 69 designs pass and 7 are made again as lost. Every row's expected value and result equal those of main's own second run.
+
+Slowest locate 9.9 s and slowest read of one post 11.7 s, with the two runs sharing the laptop.
+
+What this run does not prove. No entry holds a standing logo, so the count of plan Ruling 84 is proved by its tests alone (`logoPick.test.ts` and `steps.test.ts`), and by no row here. No entry has both a chosen logo and a live row, so no window row was run beside a chosen logo.

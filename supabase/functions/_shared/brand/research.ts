@@ -381,21 +381,38 @@ export function logoOnPage(html: string, baseUrl: string): LogoFound {
 }
 
 /**
- * The other logo files a page shows, for a brand's own second logo (the
- * logo in the tone its main file was not made for, 16 Nov 2026). Looked at,
- * in this order: the first <header>, the first <nav> outside it, the first
- * <footer>. Inside each, in page order: every <img> whose class, alt, id or
- * source says "logo" in any letter case, and the header's first <img>
- * whatever it is called (the element logoOnPage already trusts); and every
- * inline <svg> whose class, aria-label or id says "logo", under 200,000
- * characters and with something drawn in it. Addresses are made absolute and
- * repeats are dropped. Logos in the body of a page are left out, as in
- * logoOnPage: they are usually the press and client logos a brand shows off.
- * Reads only the page it is given: nothing is fetched and no model is asked.
- * Whether any of these files is the client's logo is decided elsewhere, by
- * comparing it with the stored one (_shared/design/logoTone.ts, sameLogo).
+ * The version of the listing below. The website read records it beside the
+ * list (brand_read's logo_marks), so a list made before a change of the
+ * listing is known to be an older one.
  */
-export function logoFilesOnPage(html: string, baseUrl: string): Array<{ url: string } | { svg: string }> {
+export const LOGO_MARKS_RULE = 1;
+
+/**
+ * The marks a page serves for its own brand, besides the one logoOnPage
+ * keeps. They have two uses: a brand's own second logo (the logo in the tone
+ * its main file was not made for, 16 Nov 2026), and the candidates for the
+ * client's logo, which is the mark its own posts carry (17 Nov 2026,
+ * _shared/design/logoPick.ts). Looked at, in this order: the first <header>,
+ * the first <nav> outside it, the first <footer>. Inside each, in page
+ * order:
+ *   every <img> whose class, alt, id or source says "logo" in any letter
+ *     case, and the header's first <img> whatever it is called (the element
+ *     logoOnPage already trusts);
+ *   every inline <svg> whose class, aria-label or id says "logo";
+ *   every <img> and inline <svg> inside a link to the site's home page (an
+ *     <a> whose address is "/", or the site's own origin): where a site puts
+ *     its own mark, whatever the mark is called.
+ * An inline SVG counts only under 200,000 characters and with something
+ * drawn in it, and the same drawing at two sizes counts once. After those
+ * comes the logo the page's schema.org data names. Addresses are made
+ * absolute and repeats are dropped. Logos in the body of a page are left
+ * out, as in logoOnPage: they are usually the press and client logos a brand
+ * shows off. Reads only the page it is given: nothing is fetched and no
+ * model is asked. What any of these files is for the client is decided
+ * elsewhere, by comparing it with the stored logo (logoTone.ts, sameLogo)
+ * and by looking for it on the client's own posts (logoPick.ts).
+ */
+function pageMarks(html: string, baseUrl: string): Array<{ file: PageMark; own: boolean }> {
   const abs = (u: string) => resolveUrl(u.replace(/\\\//g, "/").replace(/&amp;/g, "&").replace(/\\u0026/g, "&"), baseUrl);
   const header = /<header\b[\s\S]*?<\/header>/i.exec(html);
   const inHeader = (at: number) => !!header && at >= header.index && at < header.index + header[0].length;
@@ -404,37 +421,212 @@ export function logoFilesOnPage(html: string, baseUrl: string): Array<{ url: str
     if (!inHeader(m.index ?? 0)) { nav = m[0]; break; }
   }
   const footer = html.match(/<footer\b[\s\S]*?<\/footer>/i)?.[0] ?? null;
-  const found: Array<{ url: string } | { svg: string }> = [];
-  const seen = new Set<string>();
-  const add = (key: string, file: { url: string } | { svg: string }) => {
-    if (seen.has(key)) return;
-    seen.add(key);
-    found.push(file);
+  const found: Array<{ file: PageMark; own: boolean }> = [];
+  const seen = new Map<string, { file: PageMark; own: boolean }>();
+  // A mark met twice is listed once, where it was first met, and is the brand's own when either place says so.
+  const add = (key: string, file: PageMark, own: boolean) => {
+    const before = seen.get(key);
+    if (before) {
+      before.own ||= own;
+      return;
+    }
+    const entry = { file, own };
+    seen.set(key, entry);
+    found.push(entry);
   };
   const says = (text: string) => /logo/i.test(text);
+  const site = hostOf(baseUrl);
+  /** A link to the site's home page: its own host, the root path, no query. A link that only jumps within the page is not one. */
+  const toHome = (href: string) => {
+    if (!site || !href || href.startsWith("#")) return false;
+    try {
+      const u = new URL(abs(href));
+      return /^https?:$/.test(u.protocol) && u.hostname.toLowerCase().replace(/^www\./, "") === site && u.pathname === "/" && !u.search;
+    } catch {
+      return false;
+    }
+  };
   for (const [section, isHeader] of [[header?.[0] ?? null, true], [nav, false], [footer, false]] as const) {
     if (!section) continue;
+    // Where the section's links to the home page begin and end.
+    const home: Array<[number, number]> = [];
+    for (const a of section.matchAll(/<a\b[^>]*>[\s\S]*?<\/a>/gi)) {
+      const href = a[0].match(/^<a\b[^>]*?\shref=["']([^"']*)["']/i)?.[1];
+      if (href !== undefined && toHome(href)) home.push([a.index ?? 0, (a.index ?? 0) + a[0].length]);
+    }
+    const inHome = (at: number) => home.some(([from, to]) => at >= from && at < to);
     let firstImg = isHeader;
     for (const m of section.matchAll(/<img\b[^>]*>|<svg\b[\s\S]*?<\/svg>/gi)) {
-      const tag = m[0];
+      const tag = dataAddressSvg(m[0]);
+      const homeMark = inHome(m.index ?? 0);
+      // Tied to the brand by a fact of the page: the header is the site's own, and so is a link to its home page.
+      const tied = isHeader || homeMark;
       if (/^<img/i.test(tag)) {
         const first = firstImg;
         firstImg = false;
         const src = imgSource(tag);
         if (!src) continue;
         const marked = [...tag.matchAll(/\s(?:class|alt|id)=["']([^"']*)["']/gi)].some((a) => says(a[1])) || says(src);
-        if (!first && !marked) continue;
+        if (!first && !marked && !homeMark) continue;
         const url = abs(src);
-        add(`url:${url}`, { url });
+        add(`url:${url}`, { url }, tied);
       } else {
         const open = tag.match(/^<svg\b[^>]*>/i)?.[0] ?? "";
         const marked = [...open.matchAll(/\s(?:class|aria-label|id)=["']([^"']*)["']/gi)].some((a) => says(a[1]));
-        if (!marked || tag.length >= 200_000 || !/<(?:path|text|polygon|rect|circle|g)\b/i.test(tag)) continue;
-        add(`svg:${tag}`, { svg: tag });
+        if ((!marked && !homeMark) || tag.length >= 200_000 || !/<(?:path|text|polygon|rect|circle|g)\b/i.test(tag)) continue;
+        // The same drawing at another size (a phone header and a desktop one) is one mark.
+        // A data address is a file of its own, which no style of the page reaches; an SVG written out in the page must be painted by its own text.
+        add(`svg:${tag.replace(open, open.replace(/\s(?:width|height)=["'][^"']*["']/gi, ""))}`, { svg: tag }, tied && (tag !== m[0] || ownPaint(tag)));
       }
     }
   }
+  const ld = schemaLogo(html);
+  if (ld) {
+    const url = abs(ld);
+    add(`url:${url}`, { url }, true);
+  }
   return found;
+}
+
+/** A mark a page serves: a file by its address, or an inline SVG by its text. */
+export type PageMark = { url: string } | { svg: string };
+
+/** The marks a page serves for its own brand, as the comment above lists them: the wide list, for a brand's second logo file. */
+export function logoFilesOnPage(html: string, baseUrl: string): PageMark[] {
+  return pageMarks(html, baseUrl).map((m) => m.file);
+}
+
+/**
+ * The marks that can be the client's logo itself (17 Nov 2026,
+ * _shared/design/logoPick.ts): those of logoFilesOnPage that the page ties
+ * to its own brand by an exact fact, in the same order. A mark counts when
+ * it is in the first <header>, or inside a link to the site's home page
+ * wherever that link is (the nav, the footer), or is the logo the page's
+ * schema.org record names. A logo the nav or the footer merely names (a
+ * partner's, a payment badge, an app store badge) is not one: it stays in
+ * the wide list, where it is taken only when it is the stored logo in
+ * another tone (logoTone.ts, sameLogo). An inline SVG written out in the
+ * page counts only when it is painted by its own text (ownPaint); one a
+ * page keeps in a data address is a file of its own and always is.
+ */
+export function ownMarksOnPage(html: string, baseUrl: string): PageMark[] {
+  return pageMarks(html, baseUrl).filter((m) => m.own).map((m) => m.file);
+}
+
+/** The shapes an SVG paints. */
+const SVG_SHAPES = new Set(["path", "rect", "circle", "ellipse", "polygon", "polyline", "line", "text"]);
+
+/**
+ * The classes an SVG's own <style> paints: every class named by a rule of
+ * that style whose declarations set a `fill` or a `stroke` (other than
+ * `inherit`). A class is named by a rule when one selector of the rule's
+ * list is that class alone (`.name`): such a rule paints every shape that
+ * has the class, wherever it stands. A selector that asks for more (an
+ * element around the shape, a state, a second class) may not hold for a
+ * shape that merely has the class, so it names none, and so does a rule
+ * inside a condition (`@media`, `@supports`). Read from the text of the
+ * style; a style kept in a CDATA section is read the same way.
+ */
+function ownStyleClasses(svg: string): Set<string> {
+  const classes = new Set<string>();
+  for (const style of svg.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)) {
+    const css = style[1].replace(/<!\[CDATA\[|\]\]>/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ").replace(/@[^{};]*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/g, " ");
+    for (const rule of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if (!/(?:^|[;\s])(?:fill|stroke)\s*:\s*(?!inherit\b)[^;\s]/i.test(rule[2])) continue;
+      for (const selector of rule[1].split(",")) {
+        const name = selector.trim().match(/^\.(-?[_a-zA-Z][\w-]*)$/)?.[1];
+        if (name) classes.add(name);
+      }
+    }
+  }
+  return classes;
+}
+
+/**
+ * Whether an SVG written out in a page is painted by its own text. Inside a
+ * page an inline SVG can take its colors from the page: `currentColor`, a
+ * page variable, or shapes with no paint of their own that a style sheet of
+ * the page colors. Drawn as a file of its own, such a mark comes out black
+ * whatever color the brand shows it in, so it is no file to make a client's
+ * logo from. Exact facts of the text, nothing drawn and nothing measured:
+ *   it names neither `currentColor` nor a `var(--…)`;
+ *   every <use> points at something the text itself holds;
+ *   every shape (path, rect, circle, ellipse, polygon, polyline, line,
+ *     text) outside a <clipPath> has a paint set inside the SVG: a `fill` or
+ *     `stroke` attribute or style on the shape or on an element around it
+ *     (other than `inherit`), or a class that the SVG's own <style> names
+ *     with a fill or a stroke (ownStyleClasses). A class that no rule of
+ *     the SVG's own style paints is one only a style of the page could
+ *     color, so it is no paint.
+ * An SVG this leaves out that would have drawn right keeps the client's
+ * logo as it is: the rule errs toward changing nothing.
+ */
+export function ownPaint(svg: string): boolean {
+  if (/currentcolor|var\(\s*--/i.test(svg)) return false;
+  for (const use of svg.matchAll(/<use\b[^>]*?\s(?:xlink:)?href=["']([^"']*)["']/gi)) {
+    if (!use[1].startsWith("#")) return false;
+    const id = use[1].slice(1);
+    if (!id || ![...svg.matchAll(/\sid=["']([^"']*)["']/gi)].some((m) => m[1] === id)) return false;
+  }
+  const styled = ownStyleClasses(svg);
+  const paints = (attrs: string) =>
+    /\s(?:fill|stroke)\s*=\s*["']\s*(?!inherit\b)[^"'\s]/i.test(attrs) ||
+    /\sstyle\s*=\s*["'][^"']*\b(?:fill|stroke)\s*:\s*(?!inherit\b)[^;"'\s]/i.test(attrs) ||
+    (attrs.match(/\sclass\s*=\s*["']([^"']*)["']/i)?.[1] ?? "").split(/\s+/).some((name) => styled.has(name));
+  const open: Array<{ name: string; painted: boolean; clip: boolean }> = [];
+  for (const m of svg.matchAll(/<(\/?)([a-zA-Z][\w:-]*)\b([^>]*?)(\/?)>/g)) {
+    const name = m[2].toLowerCase();
+    if (m[1]) {
+      while (open.length && open.pop()!.name !== name) { /* closes what was left open inside it */ }
+      continue;
+    }
+    const around = open[open.length - 1];
+    const painted = !!around?.painted || paints(` ${m[3]}`);
+    const clip = !!around?.clip || name === "clippath";
+    if (SVG_SHAPES.has(name) && !clip && !painted) return false;
+    if (!m[4]) open.push({ name, painted, clip });
+  }
+  return true;
+}
+
+/**
+ * An SVG a page keeps inside a data address (a style's background image, as
+ * page builders write it) has its quotes and other characters escaped with
+ * %XX, and drawn as it stands it is no SVG. When the opening tag's
+ * attributes are escaped that way the text is unescaped, and nothing else is
+ * changed; an SVG written out in the page is returned as it is.
+ */
+export function dataAddressSvg(svg: string): string {
+  if (!/^<svg\b[^>]*\s[\w:.-]+=%22/i.test(svg)) return svg;
+  try {
+    return decodeURIComponent(svg);
+  } catch {
+    return svg.replace(/%22/g, '"');
+  }
+}
+
+/**
+ * An inline SVG as a file of its own. Inside a page an <svg> needs no
+ * namespace; as a file it does, and without one the drawing cannot be read
+ * (the renderer finds no root). Only the declarations the page left out are
+ * added to the opening tag: nothing of the drawing is touched.
+ */
+export function standaloneSvg(svg: string): string {
+  const open = svg.match(/^\s*<svg\b[^>]*>/i)?.[0];
+  if (!open) return svg;
+  let add = "";
+  if (!/\sxmlns=/i.test(open)) add += ' xmlns="http://www.w3.org/2000/svg"';
+  if (/\sxlink:/i.test(svg) && !/\sxmlns:xlink=/i.test(open)) add += ' xmlns:xlink="http://www.w3.org/1999/xlink"';
+  return add ? svg.replace(open, open.replace(/^(\s*<svg)/i, `$1${add}`)) : svg;
+}
+
+/** A site's host without "www.", lower case; null for an address that is none. */
+function hostOf(url: string): string | null {
+  try {
+    return new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return null;
+  }
 }
 
 /** An <img>'s source: src, else the first srcset entry. Data URLs are left out. */

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
-import { fetchSiteHtml, researchBrand, extractImageUrls, logoFilesOnPage, logoOnPage, parseBrandReply, parseSocialBrandReply, readSocialBrand, siteTextExcerpt, visionImageType } from "../../../functions/_shared/brand/research";
+import { fetchSiteHtml, researchBrand, extractImageUrls, logoFilesOnPage, logoOnPage, ownMarksOnPage, ownPaint, standaloneSvg, parseBrandReply, parseSocialBrandReply, readSocialBrand, siteTextExcerpt, visionImageType } from "../../../functions/_shared/brand/research";
 
 const BASE = "https://www.example.com";
 
@@ -59,9 +59,133 @@ describe("logoFilesOnPage", () => {
       { url: "https://www.example.com/img/LOGO-white.png?v=2&w=300" },
     ]);
   });
+  it("lists a mark inside a link to the home page, whatever it is called, the same inline SVG once, and the schema.org logo last", () => {
+    const mark = (w: number, h: number) => `<svg width="${w}" height="${h}" viewBox="0 0 579 194" fill="white" aria-hidden="true"><g><path d="M1 1h5v5z"/></g></svg>`;
+    const html = `<html><head><script type="application/ld+json">{"@type":"Organization","logo":"https://cdn.example.com/icon.svg"}</script></head><body>
+      <header>
+        <button aria-label="Open menu"><svg viewBox="0 0 24 24"><path d="M4 7h16"/></svg></button>
+        <a href="/" aria-label="Brand">${mark(76, 25)}</a>
+        <a href="/pricing"><svg viewBox="0 0 9 9"><path d="M0 0"/></svg></a>
+        <a href="#"><svg viewBox="0 0 7 7"><path d="M0 0"/></svg></a>
+      </header>
+      <main><a href="/"><img src="/hero-mark.png"></a></main>
+      <footer>
+        <a href="https://example.com/">${mark(92, 31)}</a>
+        <a href="https://www.example.com"><img src="/footer-mark.png"></a>
+        <a href="/?lang=fr"><img src="/flags/fr.png"></a>
+        <a href="https://partner.test/"><img src="/partner.png"></a>
+      </footer>
+    </body></html>`;
+    expect(logoFilesOnPage(html, BASE)).toEqual([
+      { svg: mark(76, 25) },
+      { url: "https://www.example.com/footer-mark.png" },
+      { url: "https://cdn.example.com/icon.svg" },
+    ]);
+  });
+  it("reads a mark a site draws as a data address in a link to the home page as the SVG it is", () => {
+    // Page builders write the mark into a style as a data address with the quotes escaped; as listed it would never draw.
+    const html = `<body><nav><a href="./"><div style="background-image:url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 10 10%22><path d=%22M0 0h10v10z%22/></svg>')"></div></a></nav></body>`;
+    expect(logoFilesOnPage(html, BASE)).toEqual([{ svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M0 0h10v10z"/></svg>` }]);
+    // An ordinary inline SVG is not touched.
+    const plain = `<nav><a href="/"><svg viewBox="0 0 5 5"><path d="M0 0h5v5z" fill="#1d2%2f"/></svg></a></nav>`;
+    expect(logoFilesOnPage(plain, BASE)).toEqual([{ svg: `<svg viewBox="0 0 5 5"><path d="M0 0h5v5z" fill="#1d2%2f"/></svg>` }]);
+  });
   it("gives nothing for a page with no header, nav or footer, and never a logo from the page's body", () => {
     expect(logoFilesOnPage(`<body><img class="logo" src="/press.png"><svg class="logo"><path d="M0 0"/></svg></body>`, BASE)).toEqual([]);
     expect(logoFilesOnPage("", BASE)).toEqual([]);
+  });
+});
+
+describe("ownMarksOnPage", () => {
+  it("keeps only the marks the page ties to its own brand: the header's, a link to the home page's, and the schema.org logo", () => {
+    const mark = `<svg viewBox="0 0 579 194" fill="white"><g><path d="M1 1h5v5z"/></g></svg>`;
+    const html = `<html><head><script type="application/ld+json">{"@type":"Organization","logo":"https://cdn.example.com/icon.svg"}</script></head><body>
+      <header><a href="/">${mark}</a><img class="logo" src="/logo-dark.svg"></header>
+      <nav><a href="/"><img src="/nav-mark.png"></a><img class="partner-logo" src="/partner-logo.png"></nav>
+      <footer>
+        <img class="logo" src="/visa-logo.png">
+        <a href="https://bbb.test/"><img src="/bbb-logo.png"></a>
+        <img alt="App Store logo" src="/app-store-logo.svg">
+        <a href="https://www.example.com/"><img src="/footer-mark.png"></a>
+      </footer>
+    </body></html>`;
+    // The wide list, for a brand's second file, still holds the footer's and the nav's named logos.
+    expect(logoFilesOnPage(html, BASE).map((f) => ("url" in f ? f.url.replace("https://www.example.com", "") : "svg"))).toEqual([
+      "svg", "/logo-dark.svg", "/nav-mark.png", "/partner-logo.png", "/visa-logo.png", "/bbb-logo.png", "/app-store-logo.svg", "/footer-mark.png", "https://cdn.example.com/icon.svg",
+    ]);
+    // The candidates for the client's logo itself: no partner, payment or store badge.
+    expect(ownMarksOnPage(html, BASE)).toEqual([
+      { svg: mark },
+      { url: "https://www.example.com/logo-dark.svg" },
+      { url: "https://www.example.com/nav-mark.png" },
+      { url: "https://www.example.com/footer-mark.png" },
+      { url: "https://cdn.example.com/icon.svg" },
+    ]);
+  });
+  it("counts a file the footer names as the brand's own once the schema.org record names it too", () => {
+    const html = `<html><head><script type="application/ld+json">{"@type":"Organization","logo":"/img/brand-logo.png"}</script></head><body><footer><img class="logo" src="/img/brand-logo.png"></footer></body></html>`;
+    expect(ownMarksOnPage(html, BASE)).toEqual([{ url: "https://www.example.com/img/brand-logo.png" }]);
+  });
+  it("leaves out an inline SVG that takes its color from the page, and keeps one a data address holds", () => {
+    // Drawn as a file of its own this mark would come out black, whatever color the page gives it.
+    const page = `<header><a href="/"><svg viewBox="0 0 10 10"><path fill="currentColor" d="M0 0h10v10z"/></svg></a></header>`;
+    expect(logoFilesOnPage(page, BASE)).toHaveLength(1);
+    expect(ownMarksOnPage(page, BASE)).toEqual([]);
+    const bare = `<header><a href="/"><svg class="logo" viewBox="0 0 10 10"><path d="M0 0h10v10z"/></svg></a></header>`;
+    expect(ownMarksOnPage(bare, BASE)).toEqual([]);
+    // A data address is a file of its own: no style of the page reaches into it, so what it draws is what the page shows.
+    const data = `<body><nav><a href="./"><div style="background-image:url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 10 10%22><path d=%22M0 0h10v10z%22/></svg>')"></div></a></nav></body>`;
+    expect(ownMarksOnPage(data, BASE)).toEqual([{ svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M0 0h10v10z"/></svg>` }]);
+  });
+});
+
+describe("ownPaint", () => {
+  it("holds when every shape is painted by the SVG's own text", () => {
+    expect(ownPaint(`<svg viewBox="0 0 9 9" fill="white"><g><path d="M0 0"/></g></svg>`)).toBe(true);
+    expect(ownPaint(`<svg viewBox="0 0 9 9" fill="none"><g fill="#0071FA"><path d="M0 0"/><rect width="2" height="2"></rect></g><circle r="2" stroke="#000"/></svg>`)).toBe(true);
+    expect(ownPaint(`<svg viewBox="0 0 9 9"><path style="fill:#fff" d="M0 0"/><text fill="#111">Brand</text></svg>`)).toBe(true);
+    // Its own style sheet colors the classes it names.
+    expect(ownPaint(`<svg viewBox="0 0 9 9"><defs><style>.a{fill:#fff}</style></defs><path class="a" d="M0 0"/></svg>`)).toBe(true);
+    // Each class a shape has is looked up by name: a list of selectors, one class of several on the shape, a class on the group around it.
+    expect(ownPaint(`<svg viewBox="0 0 9 9"><style>.a, .b { stroke: #111 } .c{opacity:.5}</style><path class="c b" d="M0 0"/><g class="a"><rect width="2" height="2"/></g></svg>`)).toBe(true);
+    // As a drawing program writes it: the style in a CDATA section, with a comment.
+    expect(ownPaint(`<svg viewBox="0 0 9 9"><style type="text/css"><![CDATA[ /* brand */ .st0{fill:#0071FA;} ]]></style><path class="st0" d="M0 0"/></svg>`)).toBe(true);
+    // A shape that only cuts another (a clip path) is not painted.
+    expect(ownPaint(`<svg viewBox="0 0 9 9"><clipPath id="c"><rect width="9" height="9"/></clipPath><path fill="#fff" clip-path="url(#c)" d="M0 0"/></svg>`)).toBe(true);
+    expect(ownPaint(`<svg viewBox="0 0 9 9"><symbol id="m"><path fill="#fff" d="M0 0"/></symbol><use href="#m"/></svg>`)).toBe(true);
+  });
+  it("fails when the page would color it: currentColor, a page variable, a shape with no paint, a class no style of its own names, a drawing kept elsewhere", () => {
+    expect(ownPaint(`<svg viewBox="0 0 9 9"><path fill="currentColor" d="M0 0"/></svg>`)).toBe(false);
+    expect(ownPaint(`<svg viewBox="0 0 9 9" style="color:CurrentColor"><path fill="#fff" d="M0 0"/></svg>`)).toBe(false);
+    expect(ownPaint(`<svg viewBox="0 0 9 9"><path fill="var(--brand)" d="M0 0"/></svg>`)).toBe(false);
+    expect(ownPaint(`<svg viewBox="0 0 9 9"><path d="M0 0"/></svg>`)).toBe(false);
+    expect(ownPaint(`<svg viewBox="0 0 9 9"><g fill="#fff"><path d="M0 0"/></g><path fill-rule="evenodd" d="M1 1"/></svg>`)).toBe(false);
+    expect(ownPaint(`<svg viewBox="0 0 9 9"><path class="logo-fill" d="M0 0"/></svg>`)).toBe(false);
+    expect(ownPaint(`<svg viewBox="0 0 9 9"><style>.a{opacity:.5}</style><path class="a" d="M0 0"/></svg>`)).toBe(false);
+    // Its own style paints class a. The shape has class b, which only a style of the page could color.
+    expect(ownPaint(`<svg viewBox="0 0 9 9"><style>.a{fill:#f00}</style><path class="b" d="M0 0"/></svg>`)).toBe(false);
+    expect(ownPaint(`<svg viewBox="0 0 9 9"><style>.a{fill:#f00}.b{opacity:.5}</style><path class="a" d="M0 0"/><path class="b" d="M1 1"/></svg>`)).toBe(false);
+    // A rule that paints a class only inside another element, or only in a state, does not paint a shape that merely has the class.
+    expect(ownPaint(`<svg viewBox="0 0 9 9"><style>.dark .a{fill:#fff}</style><path class="a" d="M0 0"/></svg>`)).toBe(false);
+    expect(ownPaint(`<svg viewBox="0 0 9 9"><style>.a:hover{fill:#fff}</style><path class="a" d="M0 0"/></svg>`)).toBe(false);
+    expect(ownPaint(`<svg viewBox="0 0 9 9"><style>@media (min-width: 900px) { .a { fill: #fff } }</style><path class="a" d="M0 0"/></svg>`)).toBe(false);
+    // A rule that sets something that only sounds like a paint (fill-rule, stroke-width) paints nothing.
+    expect(ownPaint(`<svg viewBox="0 0 9 9"><style>.a{fill-rule:evenodd;stroke-width:2}</style><path class="a" d="M0 0"/></svg>`)).toBe(false);
+    expect(ownPaint(`<svg viewBox="0 0 9 9"><use href="#site-logo"/></svg>`)).toBe(false);
+    expect(ownPaint(`<svg viewBox="0 0 9 9"><use xlink:href="/sprite.svg#logo"/></svg>`)).toBe(false);
+    expect(ownPaint(`<svg viewBox="0 0 9 9"><path fill="inherit" d="M0 0"/></svg>`)).toBe(false);
+  });
+});
+
+describe("standaloneSvg", () => {
+  it("adds the namespace an inline SVG leaves out, and nothing else", () => {
+    expect(standaloneSvg(`<svg width="76" viewBox="0 0 5 5" fill="white"><path d="M0 0h5v5z"/></svg>`)).toBe(`<svg xmlns="http://www.w3.org/2000/svg" width="76" viewBox="0 0 5 5" fill="white"><path d="M0 0h5v5z"/></svg>`);
+    expect(standaloneSvg(`<svg viewBox="0 0 5 5"><use xlink:href="#a"/></svg>`)).toBe(`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 5 5"><use xlink:href="#a"/></svg>`);
+  });
+  it("leaves an SVG that is already a file of its own exactly as it is", () => {
+    const whole = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 5 5"><path d="M0 0h5v5z"/></svg>`;
+    expect(standaloneSvg(whole)).toBe(whole);
+    expect(standaloneSvg("not an svg")).toBe("not an svg");
   });
 });
 
