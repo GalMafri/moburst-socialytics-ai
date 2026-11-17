@@ -376,7 +376,8 @@ async function writeDesignSettings(db: Db, client: ClientRow, ctx: StepContext, 
   }
   const { placement, from } = placementFor(spot, logo.width / Math.max(1, logo.height));
   const b = client.brand_identity ?? {};
-  const background = pickBackground([b.primary_color, b.secondary_color, b.accent_color], logo.ink);
+  // Held to the logo's weakest whole part, never to the average of its ink (17 Nov 2026).
+  const background = pickBackground([b.primary_color, b.secondary_color, b.accent_color], logo.inks?.length ? logo.inks : logo.ink ? [logo.ink] : null, logo.own);
   const paths = libraryPaths(client.design_references, client.harvested_design_references);
   const unchanged = !!kept && existing?.logo_path === logo.path && existing.background === background.hex && samePlacement(existing.placement, placement);
   const at = unchanged && typeof existing?.derived?.at === "string" ? existing.derived.at : deps.now().toISOString();

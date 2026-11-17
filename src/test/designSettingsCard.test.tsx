@@ -88,7 +88,7 @@ const lifecycleRow = (logo_set: unknown) => ({
   derived: { at: '2026-10-19T12:00:00Z', placement_from: 'client_posts', background_from: 'neutral' }, logo_set,
 });
 const logoSet = (over: Record<string, unknown> = {}) => ({
-  of: LOGO, rule: 1, own: 'light', both: false, other: { path: OTHER, from: 'made', size: [300, 87] }, white: { path: WHITE }, made: { other: OTHER, white: WHITE }, site: null,
+  of: LOGO, rule: 2, own: 'light', both: false, inks: [[23, 87, 132]], other: { path: OTHER, from: 'made', size: [300, 87] }, white: { path: WHITE }, made: { other: OTHER, white: WHITE }, site: null,
   posts: { read: 16, found: 5, shown: { stored: 0, other: 4, white: 1 } }, canvas: { file: 'other', ground: '#0F294C', from: 'client_posts' }, at: '2026-11-16T09:00:00.000Z', ...over,
 });
 /** The tile with this label: its picture's address, its ground, and every word in it. */

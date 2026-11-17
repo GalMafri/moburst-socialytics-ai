@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   contrast, generatedMediaPath, inkColor, libraryPaths, logoNormalization, logoStorePlan, parseLogoSpot, personKey, personOther, pickBackground, placementFor, pngSize, readInputs,
-  referencePaths, storedSpotRead, toneKeyTail, toPlacement,
+  referencePaths, storedSpotRead, toneKeyTail, toPlacement, weakestContrast,
 } from "../../../functions/_shared/lifecycle/designSettings";
 
 describe("placement", () => {
@@ -27,12 +27,29 @@ describe("placement", () => {
 describe("background", () => {
   it("takes the brand color that sets the logo's ink off best", () => {
     // A white logo: the dark navy wins over the bright accents.
-    expect(pickBackground(["#3bd4ff", "#0c1d2f", "#ffcc00"], [255, 255, 255])).toEqual({ hex: "#0C1D2F", from: "brand_color" });
+    expect(pickBackground(["#3bd4ff", "#0c1d2f", "#ffcc00"], [[255, 255, 255]])).toEqual({ hex: "#0C1D2F", from: "brand_color" });
     expect(contrast([0, 0, 0], [255, 255, 255])).toBeCloseTo(21, 0);
   });
   it("falls back to a neutral ground when no brand color reaches 3:1", () => {
-    expect(pickBackground(["#ffffff", "#f5f5f5"], [250, 250, 250])).toEqual({ hex: "#0B0E1A", from: "neutral" });
+    expect(pickBackground(["#ffffff", "#f5f5f5"], [[250, 250, 250]])).toEqual({ hex: "#0B0E1A", from: "neutral" });
     expect(pickBackground(["#123456", "#abcdef"], null)).toEqual({ hex: "#123456", from: "brand_color" });
+    expect(pickBackground(["#123456", "#abcdef"], [])).toEqual({ hex: "#123456", from: "brand_color" });
+  });
+  it("holds a brand color to the logo's weakest whole part, never to the average of its ink", () => {
+    // Two green letters and a near-black one. Their average stands out on the near-black brand color; the near-black letter does not.
+    const inks: Array<[number, number, number]> = [[59, 172, 85], [26, 25, 25]];
+    expect(contrast([51, 136, 70], [26, 26, 26])).toBeGreaterThan(3);
+    expect(weakestContrast(inks, [26, 26, 26])).toBeLessThan(1.1);
+    expect(weakestContrast([], [26, 26, 26])).toBe(Infinity);
+    // No brand color shows every part: the neutral of the ground the file was made for.
+    expect(pickBackground(["#6BE468", "#02473D", "#1A1A1A"], inks, "light")).toEqual({ hex: "#FFFFFF", from: "neutral" });
+    // Without the file's own ground, the neutral its weakest part shows best on.
+    expect(pickBackground(["#6BE468", "#02473D", "#1A1A1A"], inks)).toEqual({ hex: "#FFFFFF", from: "neutral" });
+    // An orange and purple mark with a black wordmark: its brand orange hides the orange half.
+    expect(pickBackground(["#ff9d2f", "#5a19e9", "#a98cf7"], [[255, 146, 44], [0, 0, 0], [73, 0, 208]], "light")).toEqual({ hex: "#FFFFFF", from: "neutral" });
+    // A brand color every part shows on is still taken, the one the weakest part shows best on.
+    expect(pickBackground(["#233a5e", "#2ec4f1", "#f7c948"], [[252, 222, 65], [251, 103, 115], [253, 253, 253]], "dark")).toEqual({ hex: "#233A5E", from: "brand_color" });
+    expect(pickBackground(["#d40f3d", "#ff6f91", "#ffcfda"], [[17, 18, 24]], "light")).toEqual({ hex: "#FFCFDA", from: "brand_color" });
   });
   it("averages only the logo's visible ink", () => {
     expect(inkColor([255, 0, 0, 255, 0, 0, 255, 0])).toEqual([255, 0, 0]);
@@ -118,7 +135,7 @@ describe("logoStorePlan", () => {
 describe("the stored read of the logo's spot", () => {
   const INPUTS = "refs:2026-10-19T10:00:00.000Z|logo:https://brand.test/logo.svg";
   const OLD_KEY = `${INPUTS}|colors:#111111,#222222,#333333`;
-  const NEW_KEY = `${OLD_KEY}|site:|other:|tone:1`;
+  const NEW_KEY = `${OLD_KEY}|site:|other:|tone:2`;
   const READ = { shown: true, at: "bottom-center" as const, width: 0.14 };
   const done = (inputs_key: string) => ({ inputs_key, done_at: "2026-11-01T08:00:00.000Z" });
 
@@ -126,9 +143,9 @@ describe("the stored read of the logo's spot", () => {
     expect(readInputs(OLD_KEY)).toBe(INPUTS);
     expect(readInputs(NEW_KEY)).toBe(INPUTS);
     // A logo address may hold a bar: the parts end at the colors.
-    expect(readInputs("refs:r|logo:https://x.test/a|b.png|colors:,,|site:|other:|tone:1")).toBe("refs:r|logo:https://x.test/a|b.png");
+    expect(readInputs("refs:r|logo:https://x.test/a|b.png|colors:,,|site:|other:|tone:2")).toBe("refs:r|logo:https://x.test/a|b.png");
     expect(readInputs("person")).toBeNull();
-    expect(readInputs("person|logo:c1/logo.png|refs:r|site:|other:|tone:1")).toBeNull();
+    expect(readInputs("person|logo:c1/logo.png|refs:r|site:|other:|tone:2")).toBeNull();
     expect(readInputs("")).toBeNull();
     expect(readInputs(null)).toBeNull();
   });
@@ -177,28 +194,28 @@ describe("the tone part of the step's key", () => {
   const person = { path: "c1/design-settings/logo-other-9.png", of: LOGO, at: "2026-11-16T09:00:00+00:00" };
 
   it("gives the key a tail that changes with the website's logo files and a person's second file in use", () => {
-    expect(toneKeyTail(undefined, null)).toBe("|site:|other:|tone:1");
-    expect(toneKeyTail([], { logo_path: LOGO, logo_set: null })).toBe("|site:|other:|tone:1");
+    expect(toneKeyTail(undefined, null)).toBe("|site:|other:|tone:2");
+    expect(toneKeyTail([], { logo_path: LOGO, logo_set: null })).toBe("|site:|other:|tone:2");
     const one = toneKeyTail(["https://brand.test/logo-white.svg"], null);
-    expect(one).toMatch(/^\|site:[0-9a-z]{4,8}\|other:\|tone:1$/);
+    expect(one).toMatch(/^\|site:[0-9a-z]{4,8}\|other:\|tone:2$/);
     expect(toneKeyTail(["https://brand.test/logo-white.svg", "https://brand.test/b.png"], null)).not.toBe(one);
     expect(toneKeyTail(["https://brand.test/logo-white.svg"], null)).toBe(one);
     // Not a list of addresses: nothing.
-    expect(toneKeyTail("x", null)).toBe("|site:|other:|tone:1");
+    expect(toneKeyTail("x", null)).toBe("|site:|other:|tone:2");
     // A person's second file, while it belongs to the row's logo.
-    expect(toneKeyTail([], { logo_path: LOGO, logo_set: { person } })).toBe(`|site:|other:${person.path}|tone:1`);
-    expect(toneKeyTail([], { logo_path: "c1/newer-logo.png", logo_set: { person } })).toBe("|site:|other:|tone:1");
+    expect(toneKeyTail([], { logo_path: LOGO, logo_set: { person } })).toBe(`|site:|other:${person.path}|tone:2`);
+    expect(toneKeyTail([], { logo_path: "c1/newer-logo.png", logo_set: { person } })).toBe("|site:|other:|tone:2");
   });
 
   it("gives a person's row a key that changes with its logo and its second file", () => {
     const row = { logo_path: LOGO, placement: { anchor: "center" as const, width: 0.3, top: 0.05 }, logo_set: null };
     const key = personKey(row, "2026-10-19T10:00:00.000Z", []);
-    expect(key).toBe(`person|logo:${LOGO}|refs:2026-10-19T10:00:00.000Z|at:center,0.3,0.05,|site:|other:|tone:1`);
+    expect(key).toBe(`person|logo:${LOGO}|refs:2026-10-19T10:00:00.000Z|at:center,0.3,0.05,|site:|other:|tone:2`);
     // Their logo, the posts as last learned, the website's logo files and their second file each move it.
     expect(personKey({ ...row, logo_path: "c1/newer-logo.png" }, "2026-10-19T10:00:00.000Z", [])).not.toBe(key);
     expect(personKey(row, "2026-11-10T10:00:00.000Z", [])).not.toBe(key);
     expect(personKey(row, "2026-10-19T10:00:00.000Z", ["https://brand.test/logo-white.svg"])).not.toBe(key);
-    expect(personKey({ ...row, logo_set: { person } }, "2026-10-19T10:00:00.000Z", [])).toBe(`person|logo:${LOGO}|refs:2026-10-19T10:00:00.000Z|at:center,0.3,0.05,|site:|other:${person.path}|tone:1`);
+    expect(personKey({ ...row, logo_set: { person } }, "2026-10-19T10:00:00.000Z", [])).toBe(`person|logo:${LOGO}|refs:2026-10-19T10:00:00.000Z|at:center,0.3,0.05,|site:|other:${person.path}|tone:2`);
     // Where they put the logo is where their posts are searched, so it is part of the key too.
     expect(personKey({ ...row, placement: { anchor: "left" as const, width: 0.3, top: 0.05, left: 0.05 } }, "2026-10-19T10:00:00.000Z", [])).toContain("|at:left,0.3,0.05,0.05|");
     // Their background is not: a job reads it from the row itself.

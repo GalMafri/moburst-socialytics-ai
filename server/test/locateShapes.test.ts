@@ -23,15 +23,17 @@ const OTHER = "c1/design-settings/logo-other.png";
 const WHITE = "c1/design-settings/logo-white.png";
 
 const GROUNDS = ["#FFFFFF", "#ffffff", "#0B0E1A", "#0b0e1a", "#FAFAFA", "#10141F", "#7F7F7F", "#2A95FD"];
+// The stored file's whole parts: one dark ink, one white ink, a mid-tone that shows on both neutrals, and two inks no one neutral shows whole.
+const INKS: Array<Array<[number, number, number]>> = [[[20, 30, 60]], [[255, 255, 255]], [[40, 120, 235]], [[59, 172, 85], [26, 25, 25]]];
 
 describe("every request a logo set can lead to is one the service accepts", () => {
   it("accepts the locate request of every set a job can read", () => {
     let jobs = 0;
     const refused: string[] = [];
     for (const own of ["light", "dark"] as const) for (const both of [true, false]) for (const from of [null, "made", "site", "person"] as const) for (const white of [false, true])
-      for (const source of ["lifecycle", "person"]) for (const file of ["stored", "other", "white"] as const) for (const groundFrom of ["client_posts", "settings", "pole"]) for (const ground of GROUNDS) for (const background of GROUNDS) {
+      for (const source of ["lifecycle", "person"]) for (const file of ["stored", "other", "white"] as const) for (const groundFrom of ["client_posts", "settings", "pole"]) for (const ground of GROUNDS) for (const background of GROUNDS) for (const inks of INKS) {
         const set = {
-          of: OF, rule: 1, own, both, other: from ? { path: OTHER, from, size: [300, 90] } : null, white: white ? { path: WHITE } : null,
+          of: OF, rule: 2, own, both, inks, other: from ? { path: OTHER, from, size: [300, 90] } : null, white: white ? { path: WHITE } : null,
           made: { other: null, white: null }, site: null, ...(from === "person" ? { person: { path: OTHER, of: OF, at: "t" } } : {}),
           posts: { read: 0, found: 0, shown: { stored: 0, other: 0, white: 0 } }, canvas: { file, ground, from: groundFrom }, at: "t",
         };
@@ -42,9 +44,11 @@ describe("every request a logo set can lead to is one the service accepts", () =
         if (plan.shape !== "set") { refused.push(`${JSON.stringify(set.canvas)}: no set in the plan`); continue; }
         const body = {
           job: "j", step: "locate", design: link("d.png"), placement, scales: [0.5, 1.5],
-          templates: plan.templates.map((t) => ({ file: t.file, logo: link(t.path), ground: t.ground, ...(t.fixed ? { fixed: true } : {}) })),
+          templates: plan.templates.map((t) => ({ file: t.file, logo: link(t.path), ground: t.ground, ...(t.fixed ? { fixed: true } : {}), ...(t.names ? { names: t.names } : {}) })),
           compare: plan.compare.map((c) => ({ file: c.file, logo: link(c.path) })),
         };
+        // Every template of a set made under the rule of 17 Nov says which other files may be stamped with it.
+        if (!plan.templates.every((t) => Array.isArray(t.names))) refused.push(`${JSON.stringify(set.canvas)}: a template with no list of names`);
         const parsed = locateBody.safeParse(body);
         if (!parsed.success) refused.push(`own ${own}, both ${both}, other ${from}, ${source}, ${job.logos.canvas} on ${job.background}: ${parsed.error.issues[0].message}`);
       }

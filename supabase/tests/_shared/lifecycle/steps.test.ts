@@ -843,10 +843,10 @@ describe("design_settings", () => {
     derived: { logo_from: LOGO_URL, logo_file: "from_svg", placement_from: "client_posts", logo_read: SPOT, background_from: "brand_color", at: "2026-10-20T08:00:00.000Z" },
     confirmed_at: "2026-10-20T08:00:00.000Z", updated_at: "2026-10-20T08:00:00.000Z", logo_set: null, ...over,
   });
-  /** What the service answers about the stored file: a dark logo, both copies made. */
+  /** What the service answers about the stored file: a logo of one ink that shows whole on the rows' background (6.2:1 on #0C1D2F), both copies made. */
   const FACTS = {
     size: { width: 600, height: 200 }, own: "light" as const, both: false, made: { other: { turned: 1 }, white: { turned: 1 } }, site: null, person: null,
-    inks: { stored: [{ color: [20, 30, 60], share: 1 }], other: [{ color: [255, 255, 255], share: 1 }], white: [{ color: [255, 255, 255], share: 1 }] },
+    inks: { stored: [{ color: [120, 150, 255], share: 1 }], other: [{ color: [255, 255, 255], share: 1 }], white: [{ color: [255, 255, 255], share: 1 }] },
   };
   const found = (shows: "stored" | "other" | "white", ground = [16, 40, 76]) => ({ found: true, score: 0.95, matched: shows, rect: { x: 1, y: 2, width: 100, height: 33 }, gaps: { [shows]: 20 }, shows, ground, flat: 0.99 });
   const MISSED = { found: false, score: 0.3 };
@@ -879,7 +879,7 @@ describe("design_settings", () => {
   };
 
   /** Fakes for everything the step calls outside the database; `seen` records each call. */
-  function world(opts: { row?: Record<string, unknown> | null; shows?: Record<string, unknown>; facts?: Record<string, unknown>; picture?: (route: string) => void; site?: Record<string, string | null>; gone?: string[]; given?: Record<string, (a: Record<string, unknown>, db: ReturnType<typeof dbWith>) => unknown> } = {}) {
+  function world(opts: { row?: Record<string, unknown> | null; shows?: Record<string, unknown>; facts?: Record<string, unknown>; logo?: Record<string, unknown>; picture?: (route: string) => void; site?: Record<string, string | null>; gone?: string[]; given?: Record<string, (a: Record<string, unknown>, db: ReturnType<typeof dbWith>) => unknown> } = {}) {
     const db = dbWith({ design_brand_settings: opts.row === null ? [] : [opts.row ?? stored()] }, { ...rpcs, ...(opts.given ?? {}) });
     const seen = { key: 0, spot: 0, logoPng: [] as string[], hash: [] as string[], calls: [] as Array<{ route: string; body: Record<string, unknown> }> };
     deps.now = () => new Date(T);
@@ -887,7 +887,7 @@ describe("design_settings", () => {
     deps.imaging = (async () => ({
       logoPng: async (_db: unknown, _client: string, url: string) => {
         seen.logoPng.push(url);
-        if (url === LOGO_URL) return { path: LOGO, width: 600, height: 200, ink: [255, 255, 255] as [number, number, number], converted: "from_svg" as const };
+        if (url === LOGO_URL) return { path: LOGO, width: 600, height: 200, ink: [255, 255, 255] as [number, number, number], converted: "from_svg" as const, ...(opts.logo ?? {}) };
         const path = opts.site?.[url];
         if (path === undefined) throw new Error("The logo file answered 404.");
         return path ? { path, width: 600, height: 200, ink: null, converted: "kept" as const } : null;
@@ -936,7 +936,7 @@ describe("design_settings", () => {
     // A row a person set has a key of its own, and the step makes its logo set and writes nothing else (16 Nov 2026; its own block is below).
     const { db, row: settings } = world({ row: theirs() });
     const untouched = structuredClone(settings());
-    expect(await STEPS.design_settings.inputs(db, c(), refs)).toBe(`person|logo:c1/their-logo.png|refs:${T}|at:left,0.3,0.05,0.05|site:|other:|tone:1`);
+    expect(await STEPS.design_settings.inputs(db, c(), refs)).toBe(`person|logo:c1/their-logo.png|refs:${T}|at:left,0.3,0.05,0.05|site:|other:|tone:2`);
     const outs = await drive(db, c(), rowsOf(row("design_refs", { result: { synthesized_at: T } })));
     expect(outs.at(-1)).toMatchObject({ status: "done", result: { kept: "person", tone: { of: "c1/their-logo.png", settled: T } } });
     const { logo_set, ...after } = settings();
@@ -947,11 +947,11 @@ describe("design_settings", () => {
 
   it("keys a lifecycle row on its posts, logo and colors, then the website's logo files, a person's second file and the tone rule", async () => {
     const { db } = world();
-    expect(await STEPS.design_settings.inputs(db, c(), refs)).toBe(`${INPUTS}${COLORS}|site:|other:|tone:1`);
+    expect(await STEPS.design_settings.inputs(db, c(), refs)).toBe(`${INPUTS}${COLORS}|site:|other:|tone:2`);
     const withSite = rowsOf(row("design_refs", { result: { synthesized_at: T } }), row("brand_read", { result: { logo_files: ["https://brand.test/logo-white.svg"] } }));
-    expect(await STEPS.design_settings.inputs(db, c(), withSite)).toMatch(/\|site:[0-9a-z]+\|other:\|tone:1$/);
+    expect(await STEPS.design_settings.inputs(db, c(), withSite)).toMatch(/\|site:[0-9a-z]+\|other:\|tone:2$/);
     db.tables.design_brand_settings[0].logo_set = { person: { path: "c1/design-settings/logo-other-9.png", of: LOGO, at: T } };
-    expect(await STEPS.design_settings.inputs(db, c(), refs)).toBe(`${INPUTS}${COLORS}|site:|other:c1/design-settings/logo-other-9.png|tone:1`);
+    expect(await STEPS.design_settings.inputs(db, c(), refs)).toBe(`${INPUTS}${COLORS}|site:|other:c1/design-settings/logo-other-9.png|tone:2`);
   });
 
   it("derives the logo file, the placement from the client's posts and the background from the brand colors", async () => {
@@ -976,6 +976,30 @@ describe("design_settings", () => {
     expect(write.args.p_derived.at).toBe("2026-10-20T08:00:00.000Z");
     expect(settings().derived.at).toBe("2026-10-20T08:00:00.000Z");
     expect(settings()).toMatchObject({ logo_path: LOGO, placement: PLACEMENT, background: "#0C1D2F" });
+  });
+
+  it("writes the background again by the logo's weakest whole part when the rule changes, makes the set again, and calls no model", async () => {
+    // Two white letters and a dim blue one. Their average stands out on the brand's navy, where the dim blue letter has 2.9:1.
+    const logo = { ink: [190, 195, 205], inks: [[255, 255, 255], [60, 100, 160]], own: "dark" };
+    // The row and the step as the rule of 16 Nov left them: the navy background, a set of that rule, a finished step on its key.
+    const old = { of: LOGO, rule: 1, own: "dark", both: false, other: null, white: null, made: MADE, site: null, posts: { read: 2, found: 0, shown: { stored: 0, other: 0, white: 0 } }, canvas: { file: "stored", ground: "#0C1D2F", from: "settings" }, at: "2026-11-16T09:00:00.000Z" };
+    const { db, seen, row: settings } = world({
+      logo, row: stored({ logo_set: old, derived: { ...stored().derived, logo_read_for: INPUTS } }),
+      facts: { own: "dark", inks: { stored: [{ color: [255, 255, 255], share: 0.7 }, { color: [60, 100, 160], share: 0.3 }], other: null, white: null }, made: { other: null, white: null } },
+    });
+    const rows = before({ inputs_key: `${INPUTS}${COLORS}|site:|other:|tone:1`, result: { written: true, logo_path: LOGO, tone: { of: LOGO, settled: "2026-11-16T09:00:00.000Z" } } });
+    // The key moved with the rule, so the step runs with nobody doing anything.
+    expect(await STEPS.design_settings.inputs(db, c(), rows)).toBe(`${INPUTS}${COLORS}|site:|other:|tone:2`);
+    const outs = await drive(db, c(), rows);
+    expect(outs.at(-1)).toMatchObject({ status: "done", result: { written: true, background: "#0B0E1A", background_from: "neutral" } });
+    // The stored read of the logo's spot is reused: no model and no key.
+    expect(seen.spot).toBe(0);
+    expect(seen.key).toBe(0);
+    // The settings: the same logo and placement, the neutral of the file's own ground behind it.
+    expect(settings()).toMatchObject({ logo_path: LOGO, placement: PLACEMENT, background: "#0B0E1A", source: "lifecycle" });
+    expect(settings().derived).toMatchObject({ background_from: "neutral", logo_read: SPOT, logo_read_for: INPUTS, at: T });
+    // The set of the new rule, with the file's inks, resting on the background it shows whole on.
+    expect(settings().logo_set).toMatchObject({ of: LOGO, rule: 2, inks: [[255, 255, 255], [60, 100, 160]], canvas: { file: "stored", ground: "#0B0E1A", from: "settings" }, at: T });
   });
 
   it("reuses a stored read that found no spot", async () => {
@@ -1026,7 +1050,7 @@ describe("design_settings", () => {
     expect(db.rpcCalls.filter((r) => r.name === "lifecycle_write_design_settings")).toHaveLength(1);
     // The set: the copy two posts show, on the canvas, on the ground they have.
     expect(settings().logo_set).toMatchObject({
-      of: LOGO, rule: 1, own: "light", other: { path: MADE.other, from: "made", size: [600, 200] }, white: null, made: MADE,
+      of: LOGO, rule: 2, own: "light", other: { path: MADE.other, from: "made", size: [600, 200] }, white: null, made: MADE,
       posts: { read: 9, found: 3, shown: { stored: 1, other: 2, white: 0 } }, canvas: { file: "other", from: "client_posts" }, at: T,
     });
     expect(outs.at(-1)!.result!.tone).toMatchObject({ of: LOGO, hash: HASH, settled: T });
@@ -1194,8 +1218,8 @@ describe("design_settings", () => {
       const { db } = world({ row: theirs() });
       // No learned references yet, no website logo, no library: a lifecycle row would wait; a person's row has what it needs.
       const bare = client({ logo_url: null, harvested_design_references: [], design_references: null });
-      expect(await STEPS.design_settings.inputs(db, bare, new Map())).toBe("person|logo:c1/their-logo.png|refs:|at:left,0.3,0.05,0.05|site:|other:|tone:1");
-      expect(await STEPS.design_settings.inputs(db, bare, refs)).toBe(`person|logo:c1/their-logo.png|refs:${T}|at:left,0.3,0.05,0.05|site:|other:|tone:1`);
+      expect(await STEPS.design_settings.inputs(db, bare, new Map())).toBe("person|logo:c1/their-logo.png|refs:|at:left,0.3,0.05,0.05|site:|other:|tone:2");
+      expect(await STEPS.design_settings.inputs(db, bare, refs)).toBe(`person|logo:c1/their-logo.png|refs:${T}|at:left,0.3,0.05,0.05|site:|other:|tone:2`);
     });
 
     it("makes the set for a person's row and leaves the logo, placement, background and date exactly as they are", async () => {

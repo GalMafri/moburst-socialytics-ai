@@ -51,8 +51,8 @@ export type CanvasResult = { rect: Rect; canvas: Size; mask: Size };
 /** A file of a client's logo set: the stored file, the file for the ground the stored file was not made for, the logo in white. */
 export type LogoFileName = "stored" | "other" | "white";
 export type Ground = "light" | "dark";
-/** One file to look for: its name in the set, its signed GET link, the color it is laid over, and whether it is a person's file. */
-export type LogoTemplate = { file: LogoFileName; logo: string; ground: Rgb; fixed?: boolean };
+/** One file to look for: its name in the set, its signed GET link, the color it is laid over, whether it is a person's file, and the other files that may be named when it is the match (absent: every file may be). */
+export type LogoTemplate = { file: LogoFileName; logo: string; ground: Rgb; fixed?: boolean; names?: LogoFileName[] };
 export type LogoCompare = { file: LogoFileName; logo: string };
 /** One color of a logo file and its share of the file's ink. */
 export type Ink = { color: Rgb; share: number };

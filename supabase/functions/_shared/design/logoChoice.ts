@@ -18,7 +18,7 @@ function hexRgb(hex: string): Rgb {
 /** What locate is asked for a job, with storage paths where the request has links. */
 export type LocatePlan =
   | { shape: "one"; logo: string; background: Rgb }
-  | { shape: "set"; templates: Array<{ file: LogoFileName; path: string; ground: Rgb; fixed?: true }>; compare: Array<{ file: LogoFileName; path: string }> };
+  | { shape: "set"; templates: Array<{ file: LogoFileName; path: string; ground: Rgb; fixed?: true; names?: LogoFileName[] }>; compare: Array<{ file: LogoFileName; path: string }> };
 
 /** The part of a job's input locate reads. */
 export type LocateInput = { logo_path: string; generate: { background: string }; logos?: JobLogos | null };
@@ -29,7 +29,10 @@ export type LocateInput = { logo_path: string; generate: { background: string };
  * generate.background are that pair), then the template for the ground the
  * canvas file does not cover, when the set has one. A person's file is
  * marked, so it is never compared by color. The files of the set that are in
- * no template, and are not a person's, are compared.
+ * no template, and are not a person's, are compared. A job started under
+ * the rule of 17 Nov 2026 carries, for each template, the other files that
+ * may be stamped when it is the match (the files that serve the ground it
+ * covers), and they are sent with it; a job from before sends none.
  */
 export function locatePlan(input: LocateInput): LocatePlan {
   const logos = input.logos;
@@ -37,10 +40,10 @@ export function locatePlan(input: LocateInput): LocatePlan {
   const canvasPath = logos?.files?.[logos.canvas];
   if (!logos || !canvasPath) return { shape: "one", logo: input.logo_path, background };
   const fixed = new Set(logos.fixed ?? []);
-  const template = (file: LogoFileName, path: string, ground: Rgb) => ({ file, path, ground, ...(fixed.has(file) ? { fixed: true as const } : {}) });
-  const templates = [template(logos.canvas, canvasPath, background)];
+  const template = (file: LogoFileName, path: string, ground: Rgb, names?: LogoFileName[]) => ({ file, path, ground, ...(fixed.has(file) ? { fixed: true as const } : {}), ...(Array.isArray(names) ? { names } : {}) });
+  const templates = [template(logos.canvas, canvasPath, background, logos.names?.canvas)];
   const secondPath = logos.second ? logos.files[logos.second.file] : undefined;
-  if (logos.second && secondPath) templates.push(template(logos.second.file, secondPath, hexRgb(logos.second.ground)));
+  if (logos.second && secondPath) templates.push(template(logos.second.file, secondPath, hexRgb(logos.second.ground), logos.names?.second));
   const compare: Array<{ file: LogoFileName; path: string }> = [];
   for (const file of ["stored", "other", "white"] as const) {
     const path = logos.files[file];

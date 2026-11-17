@@ -258,6 +258,28 @@ describe("POST /api/picture/locate with a logo set", () => {
     expect(lines[1]).toMatchObject({ in: { design: "320x240", template0: "40x16", "compare.white": "40x16" } });
   });
 
+  it("names only the matched file or a file its template lists, and still answers every distance", async () => {
+    // A mid-tone file drawn in white on a dark picture: the white file is the closest in color.
+    const stored = inked(shape, [40, 120, 235]), white = inked(shape, [255, 255, 255]);
+    const { call } = await store(whiteOn([10, 12, 30]), { stored, white });
+    const template = (names?: string[]) => [{ file: "stored", logo: `${GET}stored.png`, ground: DARK, ...(names ? { names } : {}) }];
+    const compare = [{ file: "white", logo: `${GET}white.png` }];
+    // No list, as a job from before 17 Nov sends it: answered as before.
+    expect(result((await call("locate", { ...base, templates: template(), compare })).json).file).toBe("white");
+    // The list names the white file: it may be stamped.
+    expect(result((await call("locate", { ...base, templates: template(["white"]), compare })).json).file).toBe("white");
+    // An empty list: the matched file is stamped, and the white file's distance is still answered.
+    const held = await call("locate", { ...base, templates: template([]), compare });
+    expect(held.status).toBe(200);
+    expect(result(held.json).file).toBe("stored");
+    expect(result(held.json).gaps!.white).toBeLessThan(result(held.json).gaps!.stored!);
+    expect(held.json).toEqual({ ok: true, result: locateTemplates(whiteOn([10, 12, 30]), [{ file: "stored", raster: stored, ground: DARK, names: [] }], [{ file: "white", raster: white }], placement, scales), ms: 5 });
+    // A name that is no file of a set is a body that is not well formed.
+    const bad = await call("locate", { ...base, templates: template(["blue"]), compare });
+    expect(bad.status).toBe(400);
+    expect(String(bad.json.reason)).toContain("templates.0.names.0");
+  });
+
   it("names a person's file when its template matched and compares nothing", async () => {
     const { call } = await store(whiteOn([10, 12, 30]), { stored: shape, other: inked(shape, [255, 255, 255]), white: inked(shape, [250, 250, 250]) });
     const templates = [{ file: "stored", logo: `${GET}stored.png`, ground: LIGHT }, { file: "other", logo: `${GET}other.png`, ground: DARK, fixed: true }];

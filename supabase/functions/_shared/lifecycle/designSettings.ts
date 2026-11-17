@@ -98,25 +98,39 @@ export function contrast(a: [number, number, number], b: [number, number, number
   return (x + 0.05) / (y + 0.05);
 }
 
+/** The lowest contrast any of the inks has with a color: how well the weakest part of a logo shows there. Infinity for no ink. */
+export function weakestContrast(inks: Array<[number, number, number]>, ground: [number, number, number]): number {
+  let least = Infinity;
+  for (const ink of inks) least = Math.min(least, contrast(ink, ground));
+  return least;
+}
+
 /**
- * The background behind the logo: the brand color that sets the logo's ink
- * off best, when it reaches 3:1; otherwise a near-black or white, whichever
- * contrasts more.
+ * The background behind the logo. `inks` are the colors of the logo file's
+ * whole parts (_shared/design/logoTone.ts, wholeInks), and a color is held
+ * to the part that shows worst on it: the brand color on which the weakest
+ * part has the highest contrast, when that is 3:1 or more; otherwise the
+ * neutral of the ground the file was made for (`own`), or, when that is not
+ * known, the neutral its weakest part shows better on. The average of the
+ * ink is never the measure (17 Nov 2026): a logo of two green letters and a
+ * near-black one averaged to a color that stands out on near-black, where
+ * one letter of three does not show.
  */
-export function pickBackground(brandColors: Array<string | null | undefined>, ink: [number, number, number] | null): { hex: string; from: "brand_color" | "neutral" } {
+export function pickBackground(brandColors: Array<string | null | undefined>, inks: Array<[number, number, number]> | null, own?: "light" | "dark"): { hex: string; from: "brand_color" | "neutral" } {
   const colors = brandColors.map((c) => (c ? String(c).trim() : "")).filter((c) => rgb(c));
-  if (!ink) {
+  if (!inks || !inks.length) {
     // No ink to measure against: the darkest brand color reads as a ground.
     const darkest = [...colors].sort((p, q) => luminance(rgb(p)!) - luminance(rgb(q)!))[0];
     return darkest ? { hex: darkest.toUpperCase(), from: "brand_color" } : { hex: NEUTRAL_DARK, from: "neutral" };
   }
   let best: { hex: string; ratio: number } | null = null;
   for (const c of colors) {
-    const ratio = contrast(rgb(c)!, ink);
+    const ratio = weakestContrast(inks, rgb(c)!);
     if (!best || ratio > best.ratio) best = { hex: c, ratio };
   }
   if (best && best.ratio >= 3) return { hex: best.hex.toUpperCase(), from: "brand_color" };
-  const dark = contrast(rgb(NEUTRAL_DARK)!, ink), light = contrast(rgb(NEUTRAL_LIGHT)!, ink);
+  if (own) return { hex: own === "light" ? NEUTRAL_LIGHT : NEUTRAL_DARK, from: "neutral" };
+  const dark = weakestContrast(inks, rgb(NEUTRAL_DARK)!), light = weakestContrast(inks, rgb(NEUTRAL_LIGHT)!);
   return { hex: dark >= light ? NEUTRAL_DARK : NEUTRAL_LIGHT, from: "neutral" };
 }
 
@@ -211,9 +225,12 @@ export function generatedMediaPath(url: string | null | undefined, projectUrl: s
 /**
  * The version of the logo tone rule (_shared/design/logoTone.ts, TONE_RULE).
  * It is part of the step's key, so every client's set is made once when the
- * rule arrives and again if the rule ever changes.
+ * rule arrives and again when the rule changes. Version 2 (17 Nov 2026): the
+ * settings background and the canvas ground are chosen against every whole
+ * part of the file, so every stored background and set is made again once,
+ * with no model call (the stored read of the logo's spot is reused).
  */
-export const LOGO_TONE_RULE = 1;
+export const LOGO_TONE_RULE = 2;
 
 /**
  * The parts of a lifecycle row's key that the read of the logo's spot

@@ -13,7 +13,7 @@ const SITE = "c1/design-settings/logo-site-bbbb.png";
 const AT = "2026-11-16T09:00:00.000Z";
 
 const set = (over: Record<string, unknown> = {}) => ({
-  of: LOGO, rule: 1, own: "light", both: false, other: null, white: null, made: { other: OTHER, white: WHITE }, site: null,
+  of: LOGO, rule: 2, own: "light", both: false, inks: [[23, 87, 132]], other: null, white: null, made: { other: OTHER, white: WHITE }, site: null,
   posts: { read: 8, found: 0, shown: { stored: 0, other: 0, white: 0 } }, canvas: { file: "stored", ground: "#FFCFDA", from: "settings" }, at: AT, ...over,
 });
 const row = (logo_set: unknown, over: Record<string, unknown> = {}) => ({ logo_path: LOGO, background: "#FFCFDA", source: "lifecycle", logo_set, ...over });
@@ -27,7 +27,9 @@ describe("the card's view of a logo set", () => {
     expect(view(null)).toEqual(NOTHING);
     expect(view(undefined)).toEqual(NOTHING);
     expect(view(set({ of: "c1/older-logo.png" }))).toEqual(NOTHING);
-    expect(view({ ...set(), rule: 2 })).toEqual(NOTHING);
+    // A set made by another version of the rule is not shown: the lifecycle makes it again.
+    expect(view({ ...set(), rule: 1 })).toEqual(NOTHING);
+    expect(view({ ...set(), rule: 3 })).toEqual(NOTHING);
     // A person's second file saved before any set was made: nothing yet.
     expect(view({ person: { path: PERSON, of: LOGO, at: AT } })).toEqual(NOTHING);
   });

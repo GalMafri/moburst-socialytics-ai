@@ -156,7 +156,7 @@ export function pictureRoutes(deps: PictureRouteDeps): Hono {
     }
     // A job that carries a logo set: one or two templates, and the files to compare by color.
     const templates: TemplateIn[] = [];
-    for (const [i, t] of (body.templates ?? []).entries()) templates.push({ file: t.file, raster: await io.input(`template${i}`, t.logo), ground: t.ground, fixed: t.fixed });
+    for (const [i, t] of (body.templates ?? []).entries()) templates.push({ file: t.file, raster: await io.input(`template${i}`, t.logo), ground: t.ground, fixed: t.fixed, names: t.names });
     const compare: CompareIn[] = [];
     for (const c of body.compare ?? []) compare.push({ file: c.file, raster: await io.input(`compare.${c.file}`, c.logo) });
     return locateTemplates(design, templates, compare, body.placement, body.scales);

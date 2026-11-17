@@ -42,6 +42,23 @@ describe("the locate request for a job", () => {
     });
   });
 
+  it("sends with each template the other files that may be stamped when it is the match", () => {
+    // A set started under the rule of 17 Nov carries the lists: the white file serves the dark ground the copy's template covers.
+    const names = { canvas: [], second: ["white" as const] };
+    expect(locatePlan({ logo_path: STORED, generate: { background: "#E8E8E8" }, logos: logos({ names }) })).toEqual({
+      shape: "set",
+      templates: [{ file: "stored", path: STORED, ground: [232, 232, 232], names: [] }, { file: "other", path: OTHER, ground: [11, 14, 26], names: ["white"] }],
+      compare: [{ file: "white", path: WHITE }],
+    });
+    // One template: its own list.
+    expect(locatePlan({ logo_path: STORED, generate: { background: "#0B0E1A" }, logos: logos({ files: { stored: STORED, white: WHITE }, second: null, names: { canvas: ["white"], second: [] } }) })).toEqual({
+      shape: "set", templates: [{ file: "stored", path: STORED, ground: [11, 14, 26], names: ["white"] }], compare: [{ file: "white", path: WHITE }],
+    });
+    // A job started before the lists existed sends none, and is answered as it was.
+    const before = locatePlan({ logo_path: STORED, generate: { background: "#F7E8E5" }, logos: logos() });
+    expect(before.shape === "set" && before.templates.every((t) => !("names" in t))).toBe(true);
+  });
+
   it("marks a person's file and never compares it", () => {
     const person = "c1/design-settings/logo-other-9.png";
     expect(locatePlan({ logo_path: STORED, generate: { background: "#FFFFFF" }, logos: logos({ files: { stored: STORED, other: person, white: WHITE }, fixed: ["other"] }) })).toEqual({
@@ -99,7 +116,7 @@ describe("a stored design checked against the client's live set", () => {
     const row = {
       logo_path: STORED, background: "#FFFFFF",
       logo_set: {
-        of: STORED, rule: 1, own: "light", both: false, other: { path: OTHER, from: "made", size: [300, 87] }, white: null, made: { other: OTHER, white: null }, site: null,
+        of: STORED, rule: 2, own: "light", both: false, inks: [[23, 87, 132]], other: { path: OTHER, from: "made", size: [300, 87] }, white: null, made: { other: OTHER, white: null }, site: null,
         posts: { read: 16, found: 5, shown: { stored: 0, other: 5, white: 0 } }, canvas: { file: "other", ground: "#0F294C", from: "client_posts" }, at: "2026-11-16T09:00:00.000Z",
       },
     };
@@ -108,11 +125,11 @@ describe("a stored design checked against the client's live set", () => {
     const input = checkInput(row, job)!;
     expect(input).toEqual({
       logo_path: OTHER, generate: { background: "#0F294C" }, placement,
-      logos: { files: { stored: STORED, other: OTHER }, canvas: "other", second: { file: "stored", ground: "#FFFFFF" }, fixed: [] },
+      logos: { files: { stored: STORED, other: OTHER }, canvas: "other", second: { file: "stored", ground: "#FFFFFF" }, fixed: [], names: { canvas: [], second: [] } },
     });
     expect(locatePlan(input)).toEqual({
       shape: "set",
-      templates: [{ file: "other", path: OTHER, ground: [15, 41, 76] }, { file: "stored", path: STORED, ground: [255, 255, 255] }],
+      templates: [{ file: "other", path: OTHER, ground: [15, 41, 76], names: [] }, { file: "stored", path: STORED, ground: [255, 255, 255], names: [] }],
       compare: [],
     });
     expect(checkInput({ ...row, logo_set: null }, job)).toBeNull();

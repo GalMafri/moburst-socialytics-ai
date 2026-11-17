@@ -8,7 +8,7 @@ import { logoFound } from "../../../functions/_shared/design/logoMatch";
 import { contrast } from "../../../functions/_shared/lifecycle/designSettings";
 import type { LogoFileName, LogoSetResult, Placement, PostLogo, Rgb } from "../../../functions/_shared/picture/contract";
 import {
-  DARK, LIGHT, chooseSet, colorGap, figure, groundAround, isSmall, jobLogos, nameFile, ownGround, partsOf, postSearchPlan, sameLogo, searchTemplates, showsOn, stampRect, wholeExposedInks,
+  DARK, LIGHT, chooseSet, colorGap, figure, groundAround, isSmall, jobLogos, nameFile, ownGround, partsOf, postSearchPlan, restGround, sameLogo, searchTemplates, showsOn, showsWhole, stampRect, wholeExposedInks, wholeInks,
   type Found, type LogoSet, type Raster, type SetPaths,
 } from "../../../functions/_shared/design/logoTone";
 import { blank, box, drawLogo, flat, inked, mark } from "./draw";
@@ -97,6 +97,33 @@ describe("a file's figure on a ground", () => {
     expect(LIGHT).toEqual([255, 255, 255]);
   });
 
+  it("takes the one neutral a file shows whole on as its own, before the figure", () => {
+    // 94 pixels of a mid-tone that shows on both neutrals, and a near-black part of 6 pixels that does not touch it.
+    const MID: Rgb = [40, 120, 235], NEAR_BLACK: Rgb = [26, 25, 25];
+    const parts = partsOf(box(box(blank(102, 3), 0, 1, 94, 2, MID), 95, 1, 101, 2, NEAR_BLACK));
+    // By the figure alone the file would be made for dark pictures: 90% of its ink shows best there, and its near-black part does not show there at all.
+    expect(figure(parts, DARK)).toBeGreaterThan(figure(parts, LIGHT));
+    expect(contrast(NEAR_BLACK, DARK)).toBeLessThan(1.2);
+    expect(ownGround(parts)).toBe("light");
+    // It does not serve the dark ground either: a file shows on a ground when its figure is 3 or more and every whole part has 3:1 there.
+    expect(figure(parts, DARK)).toBeGreaterThan(3);
+    expect(showsOn(parts, "dark")).toBe(false);
+    expect(showsOn(parts, "light")).toBe(true);
+    // The other way round: a white part of 6 pixels beside the mid-tone makes the file one for dark pictures only.
+    const light = partsOf(box(box(blank(102, 3), 0, 1, 94, 2, MID), 95, 1, 101, 2, [250, 250, 250]));
+    expect(ownGround(light)).toBe("dark");
+    expect(showsOn(light, "light")).toBe(false);
+    // A file that shows whole on both neutrals keeps the ground with the higher figure, and serves the other one too.
+    const mid = partsOf(box(blank(102, 3), 0, 1, 100, 2, MID));
+    expect(ownGround(mid)).toBe("dark");
+    expect(showsOn(mid, "light")).toBe(true);
+    // So does a file that shows whole on neither: two letters under 3:1 on white and a near-black one.
+    const neither = partsOf(box(box(blank(102, 3), 0, 1, 70, 2, [59, 172, 85]), 71, 1, 101, 2, NEAR_BLACK));
+    expect(contrast([59, 172, 85], LIGHT)).toBeLessThan(3);
+    expect(ownGround(neither)).toBe("light");
+    expect(showsOn(neither, "dark")).toBe(false);
+  });
+
   it("lists the whole exposed parts with their share of the ink", () => {
     // A 20 by 10 box (200 pixels) with a 4 by 4 inside part, and a single pixel far away (a small part).
     const r = box(box(box(blank(40, 12), 1, 1, 21, 11, [30, 60, 200]), 5, 4, 9, 8, [250, 250, 250]), 30, 5, 31, 6, [200, 30, 30]);
@@ -110,6 +137,37 @@ describe("a file's figure on a ground", () => {
     expect(inks[0].share).toBeCloseTo(184 / 201, 10);
     // A copy's colors stand in for the parts' own.
     expect(wholeExposedInks(parts, [[1, 2, 3], [4, 5, 6], [7, 8, 9]])[0].color).toEqual([1, 2, 3]);
+  });
+});
+
+describe("a file shown whole on a color", () => {
+  // Two letters in a mid green and one near-black letter between them: made for light pictures.
+  const GREEN: Rgb = [40, 140, 70], NEAR_BLACK: Rgb = [26, 25, 25];
+  const threeLetters = box(box(box(blank(64, 20), 2, 2, 20, 18, GREEN), 24, 2, 40, 18, NEAR_BLACK), 44, 2, 62, 18, GREEN);
+
+  it("reads the colors of a file's whole exposed parts once each, and its own ground", () => {
+    expect(wholeInks(threeLetters)).toEqual({ inks: [GREEN, NEAR_BLACK], own: "light" });
+    expect(wholeInks(box(blank(20, 10), 2, 2, 18, 8, [255, 255, 255]))).toEqual({ inks: [[255, 255, 255]], own: "dark" });
+    expect(wholeInks(blank(8, 8))).toEqual({ inks: [], own: "light" });
+  });
+
+  it("holds a file to its weakest whole part: the average of its ink says nothing", () => {
+    const { inks } = wholeInks(threeLetters);
+    // The near-black letter vanishes on a near-black ground that the two green letters stand out on.
+    expect(contrast(GREEN, [26, 26, 26])).toBeGreaterThan(3);
+    expect(contrast(NEAR_BLACK, [26, 26, 26])).toBeLessThan(1.1);
+    expect(showsWhole(inks, [26, 26, 26])).toBe(false);
+    expect(showsWhole(inks, [255, 255, 255])).toBe(true);
+    expect(showsWhole([], [26, 26, 26])).toBe(true);
+  });
+
+  it("rests a file on the settings background when it shows whole there, and on the neutral of its own ground when it does not", () => {
+    const { inks, own } = wholeInks(threeLetters);
+    expect(restGround(inks, "#fafafa", own)).toEqual({ ground: "#FAFAFA", from: "settings" });
+    expect(restGround(inks, "#1A1A1A", own)).toEqual({ ground: "#FFFFFF", from: "pole" });
+    expect(restGround([[255, 255, 255]], "#ffffff", "dark")).toEqual({ ground: "#0B0E1A", from: "pole" });
+    // A background that is no color says nothing: the own neutral.
+    expect(restGround(inks, "blue", own)).toEqual({ ground: "#FFFFFF", from: "pole" });
   });
 });
 
@@ -286,6 +344,35 @@ describe("the search over one or two templates", () => {
     expect(nameFile(design, again, fromStored, [{ file: "white", raster: white }], ["stored", "stored", "other", "white"]).file).toBe("white");
   });
 
+  it("stamps only a file that serves the ground the matched template covers, whatever a color distance says", () => {
+    // A two-ink file made for light pictures and its copy for dark ones: one small dark part turned white.
+    const stored = box(inked(shape, [60, 170, 90]), 25, 1, 28, 4, [24, 28, 40]);
+    const copy = box(inked(shape, [60, 170, 90]), 25, 1, 28, 4, [255, 255, 255]);
+    // Drawn on a dark picture with the small part left as dark as the ground: the copy's template still matches, and the stored file is closer in color.
+    const ground: Rgb = [20, 24, 36];
+    const design = drawLogo(flat(W, H, ground), box(inked(shape, [60, 170, 90]), 25, 1, 28, 4, ground), drawn);
+    const templates = (names?: LogoFileName[]) => [
+      { file: "other" as const, raster: copy, ground: DARK, ...(names ? { names } : {}) },
+      { file: "stored" as const, raster: stored, ground: LIGHT, ...(names ? { names: [] as LogoFileName[] } : {}) },
+    ];
+    const found = searchTemplates(design, templates(), placement, scales);
+    expect(found.matched).toBe("other");
+    expect(found.score).toBeGreaterThanOrEqual(0.75);
+    // With no list, as a job from before this rule sends it: the closest in color, which here is a file made for light pictures.
+    const before = nameFile(design, found, templates(), [], ["other", "stored", "other", "white"]);
+    expect(before.file).toBe("stored");
+    // With the list: the stored file does not serve the dark ground, so the copy is stamped. Both distances are still measured.
+    const named = nameFile(design, found, templates([]), [], ["other", "stored", "other", "white"]);
+    expect(named.file).toBe("other");
+    expect(named.gaps.stored).toBeLessThan(named.gaps.other!);
+    // A file the list names may win.
+    expect(nameFile(design, found, templates(["stored"]), [], ["other", "stored", "other", "white"]).file).toBe("stored");
+    // A file to compare is held to the same list.
+    const white = { file: "white" as const, raster: stored };
+    expect(nameFile(design, found, templates([]), [white], ["other", "stored", "other", "white"]).file).toBe("other");
+    expect(nameFile(design, found, templates(["white"]), [white], ["other", "stored", "other", "white"]).file).toBe("white");
+  });
+
   it("names a person's file when its template matched and measures nothing", () => {
     const design = whiteOn([10, 12, 30]);
     const templates = [
@@ -331,8 +418,8 @@ function facts(over: Partial<LogoSetResult> = {}): LogoSetResult {
   };
 }
 /** A post with a found logo that shows `shows` on `ground`. */
-function post(shows: LogoFileName, ground: Rgb = [16, 40, 76], flat = 0.9): PostLogo {
-  return { found: true, score: 0.95, matched: shows === "white" ? "stored" : shows, rect: { x: 10, y: 10, width: 100, height: 30 }, gaps: { [shows]: 12 }, shows, ground, flat };
+function post(shows: LogoFileName, ground: Rgb = [16, 40, 76], flat = 0.9, matched: LogoFileName = shows === "white" ? "stored" : shows): PostLogo {
+  return { found: true, score: 0.95, matched, rect: { x: 10, y: 10, width: 100, height: 30 }, gaps: { [shows]: 12 }, shows, ground, flat };
 }
 const MISSED: PostLogo = { found: false, score: 0.31 };
 const choose = (over: Partial<Parameters<typeof chooseSet>[0]> = {}): LogoSet =>
@@ -346,7 +433,11 @@ describe("which files a client's set holds", () => {
     expect(none.white).toBeNull();
     expect(none.made).toEqual(MADE);
     expect(none.posts).toEqual({ read: 2, found: 1, shown: { stored: 1, other: 0, white: 0 } });
-    expect(none).toMatchObject({ of: OF, rule: 1, own: "light", both: false, site: null, at: AT });
+    expect(none).toMatchObject({ of: OF, rule: 2, own: "light", both: false, site: null, at: AT });
+    // The colors of the stored file's whole parts are kept, each once, for the ground a design starts from.
+    expect(none.inks).toEqual([[20, 30, 60]]);
+    const twoParts = facts({ inks: { stored: [{ color: [20, 30, 60], share: 0.4 }, { color: [120, 200, 90], share: 0.3 }, { color: [20, 30, 60], share: 0.3 }], other: null, white: null } });
+    expect(choose({ facts: twoParts }).inks).toEqual([[20, 30, 60], [120, 200, 90]]);
 
     const shown = choose({ posts: [post("other"), post("stored"), post("white")] });
     expect(shown.other).toEqual({ path: MADE.other, from: "made", size: [300, 90] });
@@ -395,37 +486,76 @@ describe("which file the canvas carries, and on what ground", () => {
     expect(choose({ posts: [post("other", [10, 20, 30], 0.7), post("other", [40, 20, 30], 0.7)] }).canvas.ground).toBe("#0A141E");
   });
 
-  it("leaves out a ground the canvas file's weakest part does not show on", () => {
+  it("puts the grounds the canvas file shows whole on first", () => {
     // White ink does not show on the pale ground two posts have; it does on the third.
     expect(contrast([255, 255, 255], [199, 171, 134])).toBeLessThan(3);
     const set = choose({ posts: [post("other", [199, 171, 134]), post("other", [199, 171, 134]), post("other", [42, 100, 200], 0.2)] });
     expect(set.canvas).toEqual({ file: "other", ground: "#2A64C8", from: "client_posts" });
-    // A file of two inks is held to the weaker one.
+  });
+
+  it("uses a ground the client's posts show the file on under 3:1 when they show it on no other", () => {
+    // A file of two inks made for light pictures. Its posts show it on a light gray where the green has under 3:1.
     const twoInks = facts({ inks: { stored: [{ color: [20, 30, 60], share: 0.6 }, { color: [120, 200, 90], share: 0.4 }], other: null, white: null }, made: { other: null, white: null } });
     expect(contrast([20, 30, 60], [210, 215, 220])).toBeGreaterThan(3);
     expect(contrast([120, 200, 90], [210, 215, 220])).toBeLessThan(3);
-    expect(choose({ facts: twoInks, paths: NO_PATHS, posts: [post("stored", [210, 215, 220])] }).canvas).toEqual({ file: "stored", ground: "#FAFAFA", from: "settings" });
-  });
-
-  it("falls back to the settings background for the stored file and to a neutral for another file", () => {
-    const pale: Rgb = [240, 240, 240];
-    // The stored file's own posts give no usable ground: the row's background.
-    expect(choose({ posts: [MISSED] }).canvas).toEqual({ file: "stored", ground: "#FAFAFA", from: "settings" });
-    // The white file: the dark neutral.
-    expect(choose({ posts: [post("white", pale)] }).canvas).toEqual({ file: "white", ground: "#0B0E1A", from: "pole" });
-    // The copy of a file made for light: it serves the dark ground.
-    expect(choose({ posts: [post("other", pale)] }).canvas).toEqual({ file: "other", ground: "#0B0E1A", from: "pole" });
-    // The copy of a file made for dark: it serves the light ground.
-    const forDark = facts({ own: "dark", inks: { stored: [{ color: [255, 255, 255], share: 1 }], other: [{ color: [11, 14, 26], share: 1 }], white: null }, made: { other: { turned: 1 }, white: null } });
-    expect(choose({ facts: forDark, paths: { ...NO_PATHS, other: MADE.other }, posts: [post("other", [20, 20, 20])] }).canvas).toEqual({ file: "other", ground: "#FFFFFF", from: "pole" });
-  });
-
-  it("keeps a person's file and background as the canvas, whatever the posts show", () => {
-    const set = choose({ source: "person", background: "#0c1d2f", posts: [post("other"), post("other"), post("white")] });
-    expect(set.canvas).toEqual({ file: "stored", ground: "#0C1D2F", from: "settings" });
-    // The files their posts show are still in the set, so a design drawn that way is recognized.
+    // The brand shows its logo there: the bar does not overrule the brand's own posts.
+    expect(choose({ facts: twoInks, paths: NO_PATHS, posts: [post("stored", [210, 215, 220]), post("stored", [212, 215, 220], 0.4)] }).canvas).toEqual({ file: "stored", ground: "#D2D7DC", from: "client_posts" });
+    // The same file with a dark settings background and as many posts for its copy: the stored file, on the ground its own posts have.
+    const withCopy = facts({ inks: { stored: [{ color: [60, 170, 90], share: 0.76 }, { color: [26, 25, 25], share: 0.24 }], other: [{ color: [60, 170, 90], share: 0.76 }, { color: [255, 255, 255], share: 0.24 }], white: null }, made: { other: { turned: 0.24 }, white: null } });
+    const set = choose({ facts: withCopy, paths: { ...NO_PATHS, other: MADE.other }, background: "#1A1A1A", posts: [post("stored", [232, 232, 232]), post("stored", [232, 232, 232]), post("other", [26, 26, 26]), post("other", [26, 26, 26])] });
+    expect(set.canvas).toEqual({ file: "stored", ground: "#E8E8E8", from: "client_posts" });
     expect(set.other?.from).toBe("made");
-    expect(set.white).toEqual({ path: MADE.white });
+  });
+
+  it("never carries a file on a ground where a whole part of it is no longer a part of its own, even when posts show it there", () => {
+    // Two inks. On the dark blue two posts have, the near-black ink is within 16 per channel of the ground: it vanishes into it.
+    const twoInks = facts({ inks: { stored: [{ color: [20, 30, 60], share: 0.6 }, { color: [120, 200, 90], share: 0.4 }], other: null, white: null }, made: { other: null, white: null } });
+    expect(contrast([20, 30, 60], [24, 34, 64])).toBeLessThan(1.2);
+    // The posts on the ground that hides a part are the majority; the one under 3:1 that hides nothing is used.
+    const mixed = choose({ facts: twoInks, paths: NO_PATHS, background: "#FFFFFF", posts: [post("stored", [24, 34, 64]), post("stored", [24, 34, 64]), post("stored", [210, 215, 220], 0.4)] });
+    expect(mixed.canvas).toEqual({ file: "stored", ground: "#D2D7DC", from: "client_posts" });
+    // Posts only on grounds that hide a part say nothing usable: the file rests where rule 2 puts it (the green has under 3:1 on the white background, so its own neutral).
+    const only = choose({ facts: twoInks, paths: NO_PATHS, background: "#FFFFFF", posts: [post("stored", [24, 34, 64]), post("stored", [24, 34, 64])] });
+    expect(only.canvas).toEqual({ file: "stored", ground: "#FFFFFF", from: "pole" });
+    // A ground a part is only weak on (2.37:1 here, a part of its own at 17 or more in a channel) is still the brand's own.
+    const weak = choose({ facts: twoInks, paths: NO_PATHS, background: "#FFFFFF", posts: [post("stored", [210, 215, 220])] });
+    expect(weak.canvas).toEqual({ file: "stored", ground: "#D2D7DC", from: "client_posts" });
+  });
+
+  it("counts a post for a file's ground only when that file's own search found the logo there", () => {
+    // A cyan file made for dark pictures. On one post a darker logo was found by the copy's search, and the stored file is only the closest in color.
+    const cyan = facts({ own: "dark", inks: { stored: [{ color: [0, 193, 213], share: 1 }], other: [{ color: [11, 14, 26], share: 1 }], white: [{ color: [255, 255, 255], share: 1 }] } });
+    const set = choose({ facts: cyan, background: "#0B0E1A", posts: [post("stored", [213, 238, 245], 0.99, "other")] });
+    // The post still says the stored file is the closest, so no copy is used. It says nothing about where the stored file sits.
+    expect(set.posts.shown).toEqual({ stored: 1, other: 0, white: 0 });
+    expect(set.other).toBeNull();
+    expect(set.canvas).toEqual({ file: "stored", ground: "#0B0E1A", from: "settings" });
+    // The white file has no search of its own: it counts when it is the closest in color.
+    const white = choose({ facts: cyan, background: "#0B0E1A", posts: [post("white", [1, 100, 120]), post("white", [1, 100, 120])] });
+    expect(white.canvas).toEqual({ file: "white", ground: "#016478", from: "client_posts" });
+  });
+
+  it("rests the stored file on the settings background only when every whole part shows there, and another file on the neutral of the ground it serves", () => {
+    // No post says where the stored file sits: the row's background, on which its one ink shows.
+    expect(choose({ posts: [MISSED] }).canvas).toEqual({ file: "stored", ground: "#FAFAFA", from: "settings" });
+    // A background chosen for the average of two inks, where the near-black one has 1.01:1: the file's own neutral.
+    const twoInks = facts({ inks: { stored: [{ color: [60, 170, 90], share: 0.76 }, { color: [26, 25, 25], share: 0.24 }], other: null, white: null }, made: { other: null, white: null } });
+    expect(contrast([26, 25, 25], [26, 26, 26])).toBeLessThan(1.1);
+    expect(choose({ facts: twoInks, paths: NO_PATHS, background: "#1A1A1A", posts: [MISSED] }).canvas).toEqual({ file: "stored", ground: "#FFFFFF", from: "pole" });
+    // A file other than the stored one whose posts do not count for its ground: the neutral of the ground it serves.
+    expect(choose({ posts: [post("other", [240, 240, 240], 0.9, "stored")] }).canvas).toEqual({ file: "other", ground: "#0B0E1A", from: "pole" });
+    const forDark = facts({ own: "dark", inks: { stored: [{ color: [255, 255, 255], share: 1 }], other: [{ color: [11, 14, 26], share: 1 }], white: null }, made: { other: { turned: 1 }, white: null } });
+    expect(choose({ facts: forDark, paths: { ...NO_PATHS, other: MADE.other }, posts: [post("other", [20, 20, 20], 0.9, "stored")] }).canvas).toEqual({ file: "other", ground: "#FFFFFF", from: "pole" });
+  });
+
+  it("keeps a person's file as the canvas whatever the posts show, on their background when their file shows whole there", () => {
+    const whiteLogo = facts({ own: "dark", inks: { stored: [{ color: [255, 255, 255], share: 1 }], other: [{ color: [11, 14, 26], share: 1 }], white: null }, made: { other: { turned: 1 }, white: null } });
+    const set = choose({ source: "person", background: "#0c1d2f", facts: whiteLogo, paths: { ...NO_PATHS, other: MADE.other }, posts: [post("other", [240, 240, 240]), post("other", [240, 240, 240])] });
+    expect(set.canvas).toEqual({ file: "stored", ground: "#0C1D2F", from: "settings" });
+    // The file their posts show is still in the set, so a design drawn that way is recognized.
+    expect(set.other?.from).toBe("made");
+    // A background their file does not show whole on: a design starts from the file's own neutral. Nothing of theirs is written.
+    expect(choose({ source: "person", background: "#0c1d2f", posts: [post("other"), post("other")] }).canvas).toEqual({ file: "stored", ground: "#FFFFFF", from: "pole" });
   });
 });
 
@@ -449,8 +579,10 @@ describe("the searches a post gets", () => {
 
 describe("what a job reads from the set", () => {
   const row = (set: unknown, over: Record<string, unknown> = {}) => ({ logo_path: OF, background: "#FAFAFA", logo_set: set, ...over });
+  /** A set for a file of one dark ink made for light pictures; `over.own: "dark"` makes it one white ink unless inks are given. */
   const stored = (over: Partial<LogoSet> = {}): LogoSet => ({
-    of: OF, rule: 1, own: "light", both: false, other: null, white: null, made: { other: null, white: null }, site: null,
+    of: OF, rule: 2, own: "light", both: false, other: null, white: null, made: { other: null, white: null }, site: null,
+    inks: over.both ? [[40, 120, 235]] : over.own === "dark" ? [[255, 255, 255]] : [[20, 30, 60]],
     posts: { read: 0, found: 0, shown: { stored: 0, other: 0, white: 0 } }, canvas: { file: "stored", ground: "#FAFAFA", from: "settings" }, at: AT, ...over,
   });
   const made = { path: MADE.other, from: "made" as const, size: [300, 90] as [number, number] };
@@ -459,27 +591,38 @@ describe("what a job reads from the set", () => {
     // The copy on the canvas: the stored file covers its own ground second.
     expect(jobLogos(row(stored({ other: made, canvas: { file: "other", ground: "#0F294C", from: "client_posts" } })))).toEqual({
       logo_path: MADE.other, background: "#0F294C",
-      logos: { files: { stored: OF, other: MADE.other }, canvas: "other", second: { file: "stored", ground: "#FFFFFF" }, fixed: [] },
+      logos: { files: { stored: OF, other: MADE.other }, canvas: "other", second: { file: "stored", ground: "#FFFFFF" }, fixed: [], names: { canvas: [], second: [] } },
     });
     // The stored file on the canvas: the copy covers the other ground.
     expect(jobLogos(row(stored({ other: made })))).toEqual({
       logo_path: OF, background: "#FAFAFA",
-      logos: { files: { stored: OF, other: MADE.other }, canvas: "stored", second: { file: "other", ground: "#0B0E1A" }, fixed: [] },
+      logos: { files: { stored: OF, other: MADE.other }, canvas: "stored", second: { file: "other", ground: "#0B0E1A" }, fixed: [], names: { canvas: [], second: [] } },
     });
-    // A file that shows on both grounds, with its white copy on the canvas: the stored file covers the light ground.
+    // A file that shows on both grounds, with its white copy on the canvas: the stored file covers the light ground, and may be stamped on a dark one too.
     expect(jobLogos(row(stored({ own: "dark", both: true, white: { path: MADE.white }, canvas: { file: "white", ground: "#2A95FD", from: "client_posts" } })))).toEqual({
       logo_path: MADE.white, background: "#2A95FD",
-      logos: { files: { stored: OF, white: MADE.white }, canvas: "white", second: { file: "stored", ground: "#FFFFFF" }, fixed: [] },
+      logos: { files: { stored: OF, white: MADE.white }, canvas: "white", second: { file: "stored", ground: "#FFFFFF" }, fixed: [], names: { canvas: ["stored"], second: [] } },
     });
-    // Nothing serves the light ground: one template.
-    expect(jobLogos(row(stored({ own: "dark", white: { path: MADE.white } })))?.logos).toEqual({ files: { stored: OF, white: MADE.white }, canvas: "stored", second: null, fixed: [] });
+    // Nothing serves the light ground: one template. The white file serves the dark ground the stored file is on.
+    expect(jobLogos(row(stored({ own: "dark", white: { path: MADE.white } }), { background: "#0B0E1A" }))?.logos).toEqual({ files: { stored: OF, white: MADE.white }, canvas: "stored", second: null, fixed: [], names: { canvas: ["white"], second: [] } });
     // The stored file serves both grounds with no other file: it is the second template too, over the neutral its canvas color does not sit on.
     expect(jobLogos(row(stored({ own: "dark", both: true }), { background: "#101820" }))?.logos.second).toEqual({ file: "stored", ground: "#FFFFFF" });
-    // A person's file is marked.
+    // A person's file is marked, and is never in a list of names.
     const person = { path: "c1/design-settings/logo-other-9.png", of: OF, at: AT };
-    expect(jobLogos(row(stored({ other: { path: person.path, from: "person", size: [500, 200] }, person })))?.logos).toEqual({
-      files: { stored: OF, other: person.path }, canvas: "stored", second: { file: "other", ground: "#0B0E1A" }, fixed: ["other"],
+    expect(jobLogos(row(stored({ other: { path: person.path, from: "person", size: [500, 200] }, white: { path: MADE.white }, person })))?.logos).toEqual({
+      files: { stored: OF, other: person.path, white: MADE.white }, canvas: "stored", second: { file: "other", ground: "#0B0E1A" }, fixed: ["other"], names: { canvas: [], second: ["white"] },
     });
+  });
+
+  it("gives every ground a file of the set serves a template", () => {
+    // A file made for light pictures whose posts show it in white and never as its copy: the white file takes the dark ground.
+    expect(jobLogos(row(stored({ white: { path: MADE.white } })))?.logos).toEqual({
+      files: { stored: OF, white: MADE.white }, canvas: "stored", second: { file: "white", ground: "#0B0E1A" }, fixed: [], names: { canvas: [], second: [] },
+    });
+    // With a second file, that file takes the dark ground and the white file may be stamped there.
+    expect(jobLogos(row(stored({ other: made, white: { path: MADE.white } })))?.logos).toMatchObject({ second: { file: "other", ground: "#0B0E1A" }, names: { canvas: [], second: ["white"] } });
+    // The white file never takes the light ground.
+    expect(jobLogos(row(stored({ own: "dark", white: { path: MADE.white } }), { background: "#0B0E1A" }))?.logos.second).toBeNull();
   });
 
   it("covers the ground a both-grounds file's canvas color sits on, and searches the other one second", () => {
@@ -508,23 +651,32 @@ describe("what a job reads from the set", () => {
     }
   });
 
-  it("keeps the spec's templates for a file that shows on one ground only, wherever its settings background sits", () => {
-    // Its own ground is light and its settings background is dark: the second file still searches the dark ground.
-    expect(jobLogos(row(stored({ other: { path: MADE.other, from: "made", size: [300, 90] } }), { background: "#1A1A1A" }))?.logos.second).toEqual({ file: "other", ground: "#0B0E1A" });
-    // With no second file there is one template, as before.
-    expect(jobLogos(row(stored(), { background: "#1A1A1A" }))?.logos.second).toBeNull();
+  it("never starts a design from the stored file on a background one of its whole parts does not show on", () => {
+    // Two green letters and a near-black one, made for light pictures, on a near-black settings background: the canvas is the file's own neutral.
+    const twoInks = stored({ other: { path: MADE.other, from: "made", size: [300, 90] }, inks: [[40, 140, 70], [26, 25, 25]] });
+    const job = jobLogos(row(twoInks, { background: "#1A1A1A" }))!;
+    expect(job).toMatchObject({ logo_path: OF, background: "#FFFFFF" });
+    // The first template is then the stored file on a light ground, and the copy still searches the dark one.
+    expect(job.logos.second).toEqual({ file: "other", ground: "#0B0E1A" });
+    // The same row once its settings background is one the file shows whole on.
+    expect(jobLogos(row(twoInks, { background: "#F4F4F4" }))?.background).toBe("#F4F4F4");
+    // A set whose ground came from an older background, or that says the file rests on its neutral, is read against the row as it is now.
+    expect(jobLogos(row({ ...twoInks, canvas: { file: "stored", ground: "#FFFFFF", from: "pole" } }, { background: "#F4F4F4" }))?.background).toBe("#F4F4F4");
+    expect(jobLogos(row({ ...twoInks, canvas: { file: "stored", ground: "#F4F4F4", from: "settings" } }, { background: "#1A1A1A" }))?.background).toBe("#FFFFFF");
+    // A row a person set is held to the same rule, and nothing of theirs is written.
+    expect(jobLogos(row(twoInks, { source: "person", background: "#1A1A1A" }))).toMatchObject({ logo_path: OF, background: "#FFFFFF" });
   });
 
-  it("reads a settings background from the row itself, and a person's row always starts from their own file and background", () => {
+  it("reads a settings background from the row itself, and a person's row always starts from their own file", () => {
     // The canvas ground of a set that came from the settings is the row's background: a background changed since is used at once.
-    expect(jobLogos(row(stored({ other: made }), { background: "#101010" }))).toMatchObject({ logo_path: OF, background: "#101010" });
+    expect(jobLogos(row(stored({ other: made }), { background: "#f0f0f0" }))).toMatchObject({ logo_path: OF, background: "#F0F0F0" });
     // A ground from the client's posts is the set's own.
     expect(jobLogos(row(stored({ other: made, canvas: { file: "stored", ground: "#F7E8E5", from: "client_posts" } }), { background: "#101010" }))?.background).toBe("#F7E8E5");
     // A person's row: their file on their background, whatever the set's canvas says, and the set's files are still carried.
-    const theirs = jobLogos(row(stored({ other: made, canvas: { file: "other", ground: "#0F294C", from: "client_posts" } }), { source: "person", background: "#0c1d2f" }));
+    const theirs = jobLogos(row(stored({ own: "dark", other: made, canvas: { file: "other", ground: "#F2EADF", from: "client_posts" } }), { source: "person", background: "#0c1d2f" }));
     expect(theirs).toEqual({
       logo_path: OF, background: "#0C1D2F",
-      logos: { files: { stored: OF, other: MADE.other }, canvas: "stored", second: { file: "other", ground: "#0B0E1A" }, fixed: [] },
+      logos: { files: { stored: OF, other: MADE.other }, canvas: "stored", second: { file: "other", ground: "#FFFFFF" }, fixed: [], names: { canvas: [], second: [] } },
     });
   });
 
@@ -533,7 +685,10 @@ describe("what a job reads from the set", () => {
     expect(jobLogos(row(undefined))).toBeNull();
     expect(jobLogos(row("x"))).toBeNull();
     expect(jobLogos(row(stored(), { logo_path: "c1/another.png" }))).toBeNull();
-    expect(jobLogos(row({ ...stored(), rule: 2 }))).toBeNull();
+    // A set made by the rule of 16 Nov is not read: its canvas ground was chosen without testing each part.
+    expect(jobLogos(row({ ...stored(), rule: 1 }))).toBeNull();
+    expect(jobLogos(row({ ...stored(), rule: 3 }))).toBeNull();
+    expect(jobLogos(row({ ...stored(), inks: undefined }))).toBeNull();
     expect(jobLogos(row(stored({ canvas: { file: "other", ground: "#0F294C", from: "client_posts" } })))).toBeNull();
     expect(jobLogos(row(stored({ canvas: { file: "stored", ground: "blue", from: "settings" } })))).toBeNull();
     const person = { path: "c1/design-settings/logo-other-9.png", from: "person" as const, size: [500, 200] as [number, number] };

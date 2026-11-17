@@ -254,12 +254,12 @@ describe("startOption and the client's logo set", () => {
   const WHITE = "c1/design-settings/logo-0123456789abcdef-white.png";
   /** A set that belongs to the row's logo: the copy for dark pictures on the canvas, on a ground the client's posts have. */
   const set = (over: Partial<LogoSet> = {}): LogoSet => ({
-    of: "c1/logo.png", rule: 1, own: "light", both: false,
+    of: "c1/logo.png", rule: 2, own: "light", both: false, inks: [[23, 87, 132]],
     other: { path: OTHER, from: "made", size: [701, 251] }, white: { path: WHITE }, made: { other: OTHER, white: WHITE }, site: null,
     posts: { read: 8, found: 5, shown: { stored: 1, other: 3, white: 1 } },
     canvas: { file: "other", ground: "#0F294C", from: "client_posts" }, at: "2026-11-16T09:00:00.000Z", ...over,
   });
-  const LOGOS = { files: { stored: "c1/logo.png", other: OTHER, white: WHITE }, canvas: "other", second: { file: "stored", ground: "#FFFFFF" }, fixed: [] };
+  const LOGOS = { files: { stored: "c1/logo.png", other: OTHER, white: WHITE }, canvas: "other", second: { file: "stored", ground: "#FFFFFF" }, fixed: [], names: { canvas: ["white"], second: [] } };
   const world = (row: Settings, tables: Record<string, unknown[]> = {}) => {
     const db = fakeDb({ canva_finish_jobs: [], ...tables });
     db.uploads.set(`${BUCKET}/c1/logo.png`, pngHeader(701, 251));
@@ -300,7 +300,8 @@ describe("startOption and the client's logo set", () => {
   });
 
   it("starts a job with the one file when there is no set or the set belongs to another logo", async () => {
-    for (const logo_set of [undefined, null, set({ of: "c1/older-logo.png" }), { ...set(), rule: 2 }]) {
+    // A set of the rule of 16 Nov is not read: it is made again by the lifecycle's next look.
+    for (const logo_set of [undefined, null, set({ of: "c1/older-logo.png" }), { ...set(), rule: 1 }, { ...set(), rule: 3 }]) {
       const row = { ...settings, logo_set } as Settings;
       const db = world(row);
       await startOption(db, request(), row, "Northwind Hockey", 0, 0);
@@ -338,6 +339,61 @@ describe("startOption and the client's logo set", () => {
     }
   });
 
+  it("never starts a design from the stored file on a background one of its whole parts does not show on", async () => {
+    // Two green letters and a near-black one on a near-black settings background (the row of 16 Nov), with the copy for dark pictures in the set.
+    const dark = { ...settings, background: "#1A1A1A" };
+    const twoInks = set({ inks: [[59, 172, 85], [26, 25, 25]], white: null, made: { other: OTHER, white: null }, canvas: { file: "stored", ground: "#1A1A1A", from: "settings" } });
+    const db = world({ ...dark, logo_set: twoInks });
+    await startOption(db, request(), { ...dark, logo_set: twoInks }, "Northwind Hockey", 0, 0);
+    const [job] = db.tables.canva_finish_jobs;
+    // The canvas is the stored file on the neutral of its own ground, and locate looks for it there and for the copy on a dark one.
+    expect(job.input.logo_path).toBe("c1/logo.png");
+    expect(job.input.generate.background).toBe("#FFFFFF");
+    expect(job.input.logos).toEqual({ files: { stored: "c1/logo.png", other: OTHER }, canvas: "stored", second: { file: "other", ground: "#0B0E1A" }, fixed: [], names: { canvas: [], second: [] } });
+    // Its posts show the stored file on a light gray: the canvas is that ground, whatever the settings background is.
+    const fromPosts = { ...twoInks, canvas: { file: "stored", ground: "#E8E8E8", from: "client_posts" } };
+    const again = world({ ...dark, logo_set: fromPosts });
+    await startOption(again, request(), { ...dark, logo_set: fromPosts } as Settings, "Northwind Hockey", 0, 0);
+    expect(again.tables.canva_finish_jobs[0].input.generate.background).toBe("#E8E8E8");
+  });
+
+  it("starts a job with one file on a ground every whole part of that file shows on, read from the file itself", async () => {
+    // Two green letters and a near-black one, as the pixels of the stored file.
+    const letters = (() => {
+      const w = 64, h = 20, px = new Uint8Array(w * h * 4);
+      const fill = (x0: number, x1: number, color: number[]) => { for (let y = 2; y < 18; y++) for (let x = x0; x < x1; x++) px.set([...color, 255], (y * w + x) * 4); };
+      fill(2, 20, [40, 140, 70]); fill(24, 40, [26, 25, 25]); fill(44, 62, [40, 140, 70]);
+      const out = new Uint8Array(24 + px.length);
+      out.set(pngHeader(w, h));
+      out.set(px, 24);
+      return out;
+    })();
+    const start = async (row: Settings) => {
+      const db = world(row, { design_brand_settings: [{ ...row }] });
+      db.uploads.set(`${BUCKET}/c1/logo.png`, letters);
+      const used = await startOption(db, request(), row, "Northwind Hockey", 0, 0);
+      return { job: db.tables.canva_finish_jobs[0], used, stored: db.tables.design_brand_settings[0] };
+    };
+    // No set yet, a set of the rule before, a set for another logo: the job has the one file, and the near-black settings
+    // background would hide a letter of it. The job starts from the neutral of the ground the file was made for.
+    for (const logo_set of [null, { ...set(), rule: 1 }, set({ of: "c1/older-logo.png" })]) {
+      const row = { ...settings, background: "#1A1A1A", logo_set } as Settings;
+      const { job, used, stored } = await start(row);
+      expect("logos" in job.input).toBe(false);
+      expect(job.input.logo_path).toBe("c1/logo.png");
+      expect(job.input.generate.background).toBe("#FFFFFF");
+      // Nothing of the settings is changed by it.
+      expect(used.background).toBe("#1A1A1A");
+      expect(stored.background).toBe("#1A1A1A");
+    }
+    // A background the file shows whole on is where it starts.
+    expect((await start({ ...settings, background: "#f4f4f0", logo_set: null } as Settings)).job.input.generate.background).toBe("#F4F4F0");
+    // A person's row by the same rule; their background is never written.
+    const theirs = await start({ ...settings, source: "person", background: "#1A1A1A", logo_set: null } as Settings);
+    expect(theirs.job.input.generate.background).toBe("#FFFFFF");
+    expect(theirs.stored.background).toBe("#1A1A1A");
+  });
+
   it("keeps the set through a design's start when the stored logo is already its ink alone", async () => {
     // A lifecycle row whose file was not looked at yet: the fitting pass finds nothing to trim, and the path stays.
     const row = { ...settings, source: "lifecycle", derived: { placement_from: "default" }, logo_set: set() } as Settings;
@@ -361,7 +417,8 @@ describe("startOption and the client's logo set", () => {
     expect(used.logo_path).toMatch(/^c1\/design-settings\/logo-site-[0-9a-f]{16}\.png$/);
     expect(job.input.logo_path).toBe(used.logo_path);
     expect(job.input.logo_size).toEqual([320, 128]);
-    expect(job.input.generate.background).toBe("#0B0E1A");
+    // The one file is near black and the settings background is the dark neutral: the job starts from the neutral of the file's own ground.
+    expect(job.input.generate.background).toBe("#FFFFFF");
     expect("logos" in job.input).toBe(false);
   });
 });

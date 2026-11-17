@@ -8,8 +8,9 @@
 // be negative (a logo can sit past the page edge), JPEG quality 1 to 100. A
 // read that asks for a band or an area must also say where to put it. A
 // locate body is one of two shapes, never a mix: one logo over one
-// background, or one or two templates and a list of files to compare. The
-// shapes follow the contract's request types.
+// background, or one or two templates and a list of files to compare. A
+// template may list the other files that may be named when it is the match
+// (17 Nov 2026). The shapes follow the contract's request types.
 
 import { z } from "zod";
 import { inStorage } from "../storage.ts";
@@ -46,7 +47,7 @@ function fileRules(templates: Named[], compare: Named[], key: string, ctx: z.Ref
 /** The eight bodies, for a service that reads and writes under `storage`. */
 export function pictureSchemas(storage: string) {
   const stored = z.string().refine((link) => inStorage(link, storage), "The link is not in the product's storage.");
-  const template = z.strictObject({ file: fileName, logo: stored, ground: rgb, fixed: z.boolean().optional() });
+  const template = z.strictObject({ file: fileName, logo: stored, ground: rgb, fixed: z.boolean().optional(), names: z.array(fileName).max(3).optional() });
   const templates = z.array(template).min(1).max(2);
   const compare = z.array(z.strictObject({ file: fileName, logo: stored })).max(3);
 

@@ -139,6 +139,38 @@ Against the run at the end of the build, row by row and apart from times: 141 ro
 
 No client's templates changed. The one client whose stored logo shows on both grounds carries its white copy on the canvas, which the new rule for the covered ground does not touch. A reviewer's other proposal, the covered ground read from the canvas color for every stored file, was measured on the two stored designs of the client it would change (a scratch run with the service's own `locateTemplates`): the stored file over #FFFFFF as the second template scores 0.369 and 0.332 where the copy over #0B0E1A scores 0.971 and 0.980, so both designs would go from pass to fail. It was not built.
 
+## The run of 17 Nov 2026 (the logo on the ground it was made for)
+
+Spec section 11 and its second pass. Run: `npx tsx server/scripts/tone-replay.ts` on the tree of the commit that adds this section, exit 0, 4 minutes 49 seconds on a laptop that was running other work. No model call, no network, nothing written outside a scratch folder. Manifest: the 14 entries of the 16 Nov run with their recorded files, the brand colors of each lifecycle row (read from the live rows, read only), and one new entry for the client of 16 Nov (its 18 designs that failed, the 2 designs of the job that ended ready and the picture delivered, from the stored files).
+
+Result: 0 rows differ of 181 (15 sets, 13 settings backgrounds, 115 posts, 38 designs). A logo was found on 35 of 115 posts. 30 of 38 designs pass.
+
+The earlier 142 rows against the run of 16 Nov, row by row: 140 keep their result (found or not and the file a post shows, pass or fail and the file stamped, the files of a set, its canvas file and ground). Two sets have another canvas, and both were wrong:
+
+| Client | Canvas on 16 Nov | Canvas now | Why the 16 Nov row was wrong |
+|---|---|---|---|
+| The client of 16 Nov | stored file on #1A1A1A | stored file on #E8E8E8, from its light posts | The near-black letter has 1.01:1 on #1A1A1A: two letters of three on every canvas. |
+| The orange and purple mark | stored file on #FF9D2F | stored file on #FFFFFF | The orange half of the mark (37.1% of its ink) has 1.08:1 on #FF9D2F. |
+
+Their stored designs keep pass or fail and the file stamped. The first template is laid over the new ground, so its score moved: the first client's two designs 0.614 and 0.617 to 0.362 and 0.331 (the second template, 0.971 and 0.980, is what passes them, as before); the second client's design-1 0.373 to 0.426 (fail) and design-2 0.827 to 0.761 (pass, 0.011 over the bar: it was scored before against a template with the orange half missing).
+
+The settings background, as the lifecycle writes it now (held to the file's weakest whole part): 10 of the 13 rows (the 12 lifecycle clients and the second entry of the client of 16 Nov) keep their background; the three that change are two entries of the client of 16 Nov and the orange and purple mark. The client of 16 Nov goes from #1A1A1A (weakest part 1.01:1) to #FFFFFF (2.91:1). The orange and purple mark goes from #FF9D2F (1.08:1) to #FFFFFF (2.23:1, the best either neutral gives it: its wordmark is black and the mark is orange and purple).
+
+The 21 designs of the client of 16 Nov, each with its expected result written before the run:
+
+| Designs | Expected | Got |
+|---|---|---|
+| 18 designs of 6 options (all failed on 16 Nov: 0.39 to 0.48) | found, the stored file stamped | 18 of 18 found with the stored file over #E8E8E8, 0.833 to 0.979; the second template (the copy over #0B0E1A) 0.297 to 0.474 |
+| cf6cbd60 design-1 (the near-black letter drawn white on a dark band) | found, the copy with the white letter stamped | found, copy, 0.397 and 0.962 |
+| cf6cbd60 design-2 (delivered with two letters of three on a dark band) | not found | not found, 0.407 and 0.471 |
+| cf6cbd60 delivered picture | not found | not found, 0.344 and 0.451 |
+
+The score of the second template of the delivered picture had no expected value of its own when the manifest was written (a placeholder of 0 was replaced by the measured 0.451 before this run; the expectation that mattered, not found, was written first).
+
+Slowest locate 7.3 s, slowest read of one post 7.4 s, on a loaded laptop. The service's own speed is not measured here.
+
+The sets and canvases were looked at at full size, cropped 1:1 around the logo, for all 15 manifest entries and the copy with the white letter on #0B0E1A. Every whole part of each file shows on its canvas ground. The live rows of 17 Nov for Olo and DermaAngel hold another canvas file and ground than this manifest, which uses the files of 16 Nov: those two are not re-measured here.
+
 ## The website second-file proof, first run
 
 Tool: `supabase/tests/tools/site-logos.ts`, run under Deno on 16 Nov 2026. It fetched each homepage directly, listed the page's logo and its other logo files with the product's own `logoOnPage` and `logoFilesOnPage`, converted each with the product's own `logoPng` into a store kept in memory, and ran `sameLogo` against the client's stored logo. No model, no scraping service, nothing written to the product.

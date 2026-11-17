@@ -11,7 +11,7 @@ import { STORY_PAGE, STORY_SURFACE, isStoryPost, storyLogoPlacement } from "../d
 import { videoRouteFor } from "../video/kit.ts";
 import { pngSize } from "../picture/headers.ts";
 import { settleLogo } from "../design/logoFit.ts";
-import { jobLogos } from "../design/logoTone.ts";
+import { jobLogos, restGround } from "../design/logoTone.ts";
 
 export const BUCKET = "generated-media";
 
@@ -58,10 +58,35 @@ export interface DesignRequest {
 
 export { pngSize } from "../picture/headers.ts";
 
-async function logoSize(admin: any, path: string): Promise<[number, number]> {
+async function logoBytes(admin: any, path: string): Promise<Uint8Array> {
   const { data, error } = await admin.storage.from(BUCKET).download(path);
   if (error || !data) throw new Error(`Could not read the logo file: ${error?.message ?? "missing"}`);
-  return pngSize(new Uint8Array(await data.arrayBuffer()));
+  return new Uint8Array(await data.arrayBuffer());
+}
+
+async function logoSize(admin: any, path: string): Promise<[number, number]> {
+  return pngSize(await logoBytes(admin, path));
+}
+
+/**
+ * Where a still starts when its job has the one file (no current set: none
+ * settled yet, a set of an earlier rule, or the logo changed since). The
+ * file's whole parts are read from its own pixels, and it rests where a set
+ * would rest it (logoTone.ts, restGround): on the settings background when
+ * every whole part shows there, else on the neutral of the ground it was
+ * made for. So a canvas, and the one template locate lays over the same
+ * color, never carries the file on a ground chosen for the average of its
+ * ink, whatever the row holds at this moment and whoever set it (17 Nov
+ * 2026). Nothing of the row is written. A file whose pixels cannot be read
+ * starts on the background as it is.
+ */
+async function oneFileGround(bytes: Uint8Array, background: string): Promise<string> {
+  try {
+    const whole = await (await import("../lifecycle/imaging.ts")).logoWhole(bytes);
+    return whole ? restGround(whole.inks, background, whole.own).ground : background;
+  } catch {
+    return background;
+  }
 }
 
 /**
@@ -95,10 +120,11 @@ async function insertJobs(admin: any, requestId: string, optionIndex: number, ro
  * (16 Nov 2026): the canvas carries the file most of the client's posts show,
  * on the ground they show it on, and the job carries the set (input.logos)
  * for locate. With no current set (none settled yet, or the logo changed
- * since, as when it was trimmed at this very start) the job has the one file
- * and the settings background, exactly as before, and nothing waits. The
- * settings handed back are never changed by this, and a video keeps the
- * stored file.
+ * since, as when it was trimmed at this very start) the job has the one
+ * file, on the settings background when every whole part of the file shows
+ * there and otherwise on the neutral of its own ground (oneFileGround), and
+ * nothing waits. The settings handed back are never changed by this, and a
+ * video keeps the stored file.
  */
 export async function startOption(admin: any, req: DesignRequest, given: Settings, brandName: string, briefIndex: number, optionIndex: number): Promise<Settings> {
   const brief = req.briefs[briefIndex % req.briefs.length];
@@ -108,7 +134,10 @@ export async function startOption(admin: any, req: DesignRequest, given: Setting
   const tone = jobLogos(settings);
   const logoPath = tone?.logo_path ?? settings.logo_path;
   // The size of the file the canvas carries, read from the file itself.
-  const [lw, lh] = await logoSize(admin, logoPath);
+  const file = await logoBytes(admin, logoPath);
+  const [lw, lh] = pngSize(file);
+  // The color the canvas starts from: the set's, or for a job with one file where that file shows whole.
+  const background = tone?.background ?? await oneFileGround(file, settings.background);
   const slides = req.kind === "carousel" && brief.slides?.length ? brief.slides : [brief];
   const carousel = req.kind === "carousel" && slides.length > 1;
   // A Story is drawn on its own 9:16 page, as a Story, with the client's logo spot moved into Meta's safe band.
@@ -133,7 +162,7 @@ export async function startOption(admin: any, req: DesignRequest, given: Setting
       // The posts this design builds on, as the planner chose them for this
       // post; a brief from before that choice existed uses the first three.
       generate: {
-        brand_name: brandName, platform: req.platform ?? "social", concept: slide.picture, background: tone?.background ?? settings.background, refs: brief.refs?.length ? brief.refs : settings.reference_paths.slice(0, 3),
+        brand_name: brandName, platform: req.platform ?? "social", concept: slide.picture, background, refs: brief.refs?.length ? brief.refs : settings.reference_paths.slice(0, 3),
         ...(story ? { size: { ...STORY_PAGE }, surface: STORY_SURFACE } : {}),
         // The person's note, so the image model sees it and a retry of the job keeps it.
         ...(req.note?.trim() ? { note: req.note.trim() } : {}),

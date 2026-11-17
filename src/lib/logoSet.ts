@@ -14,7 +14,7 @@
 // it.
 
 import type { LogoSet } from "../../supabase/functions/_shared/design/logoTone";
-import { NEUTRAL_DARK, NEUTRAL_LIGHT, personOther } from "../../supabase/functions/_shared/lifecycle/designSettings";
+import { LOGO_TONE_RULE, NEUTRAL_DARK, NEUTRAL_LIGHT, personOther } from "../../supabase/functions/_shared/lifecycle/designSettings";
 
 export interface LogoTile {
   key: "light" | "dark" | "white";
@@ -50,7 +50,7 @@ const STORED = "The client's logo file";
  */
 export function logoSetView(row: LogoSetRow | null | undefined): LogoSetView {
   const set = row?.logo_set as Partial<LogoSet> | null | undefined;
-  if (!row || !set || typeof set !== "object" || set.of !== row.logo_path || set.rule !== 1 || (set.own !== "light" && set.own !== "dark")) return { tiles: [], control: null };
+  if (!row || !set || typeof set !== "object" || set.of !== row.logo_path || set.rule !== LOGO_TONE_RULE || (set.own !== "light" && set.own !== "dark")) return { tiles: [], control: null };
   const own = set.own;
   const person = personOther(row);
   // A person's file the set still names after it was removed is no longer the client's second file.

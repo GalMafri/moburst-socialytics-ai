@@ -615,7 +615,7 @@ async function locateRequest(admin: any, plan: LocatePlan, a: { job: string; ste
   if (plan.shape === "one") return { ...common, logo: await signedRead(admin, BUCKET, plan.logo), background: plan.background };
   return {
     ...common,
-    templates: await Promise.all(plan.templates.map(async (t) => ({ file: t.file, logo: await signedRead(admin, BUCKET, t.path), ground: t.ground, ...(t.fixed ? { fixed: true } : {}) }))) as [LogoTemplate] | [LogoTemplate, LogoTemplate],
+    templates: await Promise.all(plan.templates.map(async (t) => ({ file: t.file, logo: await signedRead(admin, BUCKET, t.path), ground: t.ground, ...(t.fixed ? { fixed: true } : {}), ...(t.names ? { names: t.names } : {}) }))) as [LogoTemplate] | [LogoTemplate, LogoTemplate],
     compare: await Promise.all(plan.compare.map(async (c) => ({ file: c.file, logo: await signedRead(admin, BUCKET, c.path) }))),
   };
 }

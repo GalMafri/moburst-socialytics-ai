@@ -11,6 +11,7 @@ import { svgToPng } from "../render/resvg.ts";
 import { cutLogo } from "../design-system/logoAsset.ts";
 import { anthropicMessages } from "../anthropic.ts";
 import { generatedMediaPath, inkColor, logoNormalization, logoSpotPrompt, parseLogoSpot, pngSize, type LogoSpot } from "./designSettings.ts";
+import { wholeInks } from "../design/logoTone.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -26,6 +27,9 @@ export interface LogoFile {
   width: number;
   height: number;
   ink: [number, number, number] | null;
+  /** The colors of the file's whole parts and the ground it was made for (logoTone.ts, wholeInks): what the settings background is chosen against. Absent when the pixels cannot be read. */
+  inks?: Array<[number, number, number]>;
+  own?: "light" | "dark";
   converted: "kept" | "from_svg" | "from_raster";
 }
 
@@ -116,12 +120,31 @@ export async function logoPng(db: Db, clientId: string, logoUrl: string): Promis
   }
   // A logo whose pixels cannot be read still places; the background then follows the darkest brand color.
   let ink: [number, number, number] | null = null;
+  let whole: { inks: Array<[number, number, number]>; own: "light" | "dark" } | null = null;
   try {
-    ink = inkColor((fit.unchanged && fit.image ? fit.image : await Image.decode(png)).bitmap);
+    const image = fit.unchanged && fit.image ? fit.image : await Image.decode(png);
+    ink = inkColor(image.bitmap);
+    // The file's whole parts, read from the stored pixels: a background is held to the part that shows worst on it.
+    whole = wholeInks({ width: image.width, height: image.height, data: image.bitmap });
   } catch {
     ink = null;
+    whole = null;
   }
-  return { path, width: size[0], height: size[1], ink, converted };
+  return { path, width: size[0], height: size[1], ink, ...(whole ? { inks: whole.inks, own: whole.own } : {}), converted };
+}
+
+/**
+ * The colors of a stored logo PNG's whole parts and the ground it was made
+ * for (logoTone.ts, wholeInks), read from its pixels: what a design that
+ * starts with the one file tests the settings background against (jobs.ts).
+ * Null when the file has no whole part to test. A file that cannot be
+ * decoded throws.
+ */
+export async function logoWhole(png: Uint8Array): Promise<{ inks: Array<[number, number, number]>; own: "light" | "dark" } | null> {
+  const image = await Image.decode(png);
+  if (image.bitmap.length < image.width * image.height * 4) return null;
+  const whole = wholeInks({ width: image.width, height: image.height, data: image.bitmap });
+  return whole.inks.length ? whole : null;
 }
 
 /**
