@@ -1,7 +1,7 @@
 // @vitest-environment node
 // Node, not jsdom: the client sets AbortSignal.timeout, which jsdom lacks and Deno has.
 import { describe, expect, it, vi } from "vitest";
-import { PictureError, callPicture, notePicture, pictureCheckCount, signedRead, signedWrite } from "../../../functions/_shared/picture/client";
+import { NotInStorage, PictureError, callPicture, notePicture, pictureCheckCount, signedRead, signedWrite } from "../../../functions/_shared/picture/client";
 import { PICTURE_OPEN_TIMEOUT_MS, type FinishRequest } from "../../../functions/_shared/picture/contract";
 
 const body: FinishRequest = {
@@ -315,6 +315,21 @@ describe("signed URLs", () => {
     }) } };
     await expect(signedRead(admin, "b", "c/missing.png")).rejects.toThrow("Could not prepare c/missing.png for the picture service: Object not found");
     await expect(signedWrite(admin, "b", "c/out.png")).rejects.toThrow("Could not prepare c/out.png for the picture service: no URL");
+  });
+  it("says a file is not in storage only when storage answered and refused its path", async () => {
+    const withError = (error: Record<string, unknown>) => ({ storage: { from: () => ({ createSignedUrl: async () => ({ data: null, error }) }) } });
+    // Storage answered: the file is not there.
+    for (const status of [400, 404]) {
+      const refused = await signedRead(withError({ message: "Object not found", status }), "b", "c/gone.jpg").catch((e) => e);
+      expect(refused).toBeInstanceOf(NotInStorage);
+      expect(refused.message).toBe("Could not prepare c/gone.jpg for the picture service: Object not found");
+    }
+    // Storage could not answer right now, or said nothing of why: never taken as a missing file.
+    for (const error of [{ message: "fetch failed" }, { message: "busy", status: 429 }, { message: "timeout", status: 408 }, { message: "bad gateway", status: 502 }]) {
+      const failed = await signedRead(withError(error), "b", "c/a.jpg").catch((e) => e);
+      expect(failed).toBeInstanceOf(Error);
+      expect(failed).not.toBeInstanceOf(NotInStorage);
+    }
   });
 });
 

@@ -10,6 +10,10 @@
 //   POST {action:"advance", job_id}   one job, in a request of its own (operational secret)
 //   POST {action:"picture_check", count}  the finish call for the newest done designs, answered
 //                                     at once with each call's time (operational secret)
+//   POST {action:"tone_check", client_id, designs?}  the live logo set and one read of posts for
+//                                     one client, or with `designs` the live locate on its newest
+//                                     stored designs; writes nothing to a job or a client
+//                                     (operational secret)
 //
 // Every picture is made, read and resized by the picture service on Vercel
 // (_shared/picture/client.ts, 12 Nov 2026); this worker never decodes one.
@@ -32,9 +36,14 @@ import { copyMatches, logoCheckPrompt, marksPrompt, parseLogoCheck, parseMarks, 
 import { LOGO_SCALES, logoFound } from "../_shared/design/logoMatch.ts";
 import { STORY_SURFACE, storyTextBand } from "../_shared/design/story.ts";
 import { callPicture, notePicture, pictureCheckCount, signedRead, signedWrite } from "../_shared/picture/client.ts";
+import type { LocateRequest, LogoTemplate } from "../_shared/picture/contract.ts";
 import { heldWork } from "../_shared/canva/hold.ts";
 import { DESIGN_LIMITS, MAX_DESIGN_ATTEMPTS, type StepResult, Stopped, advanceDesignJob } from "../_shared/design/advance.ts";
-import { type GenerateDeps, runGenerate, runUnlogo } from "../_shared/design/modelSteps.ts";
+import { type GenerateDeps, OF_THE_DESIGN, runGenerate, runUnlogo } from "../_shared/design/modelSteps.ts";
+import { type LocatePlan, checkInput, locatePlan, logoState, stampFile } from "../_shared/design/logoChoice.ts";
+import { jobLogos, postSearchPlan } from "../_shared/design/logoTone.ts";
+import { POSTS_PER_CALL, askLogoSet, askPostLogos, liveIo } from "../_shared/design/logoSetWork.ts";
+import { personOther } from "../_shared/lifecycle/designSettings.ts";
 import { logoAreaRect } from "../_shared/picture/geometry.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
@@ -77,6 +86,9 @@ Deno.serve(async (req) => {
     if (body?.action === "tick") return background(runPass(admin));
     if (body?.action === "advance" && typeof body.job_id === "string") return background(advanceOne(admin, body.job_id));
     if (body?.action === "picture_check") return json(await pictureCheck(admin, pictureCheckCount(body.count)));
+    if (body?.action === "tone_check" && typeof body.client_id === "string") {
+      return json(await toneCheck(admin, body.client_id, body.designs === undefined || body.designs === null ? null : pictureCheckCount(body.designs)));
+    }
     return json({ error: "Unknown action." }, 400);
   } catch (err) {
     console.error("[design-worker]", err instanceof Error ? err.message : err);
@@ -254,31 +266,29 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       await renewLease(admin, job);
       const g: GenerateInput = job.input.generate;
       // The service finds the logo on the design, near the client's usual spot for it (usual).
-      const { result: found, ms } = await callPicture(admin, "locate", {
-        job: job.id,
-        step: "locate",
-        design: await signedRead(admin, BUCKET, s.design_path),
-        logo: await signedRead(admin, BUCKET, job.input.logo_path),
-        placement: job.input.placement,
-        background: hexRgb(g.background),
-        scales: LOGO_SCALES,
-      });
+      // A job with one file sends that file over its background, as always. A job that
+      // carries its client's logo set (input.logos) sends the canvas file first, then the
+      // file for the other ground, and the service also names the file closest in color
+      // to what the model drew (_shared/design/logoChoice.ts).
+      const plan = locatePlan({ logo_path: job.input.logo_path, generate: g, logos: job.input.logos });
+      const { result: found, ms } = await callPicture(admin, "locate", await locateRequest(admin, plan, { job: job.id, step: "locate", designPath: s.design_path, placement: job.input.placement }));
       notePicture(s, "locate", ms);
-      const [W, H] = found.frame;
       const usual = found.usual;
       s.logo_score = Math.round(found.score * 1000) / 1000;
+      // The one test, whatever the job sent: the better match is the logo at a size the client uses.
       if (!logoFound(found, usual.width)) {
         // No logo at the client's usual spot, or one at a size the client never
         // uses: designed again, the way every other check sends a design back,
         // so the reason is kept and a carousel cover takes its slides with it
         // (slides drawn on a cover sent back here used to keep following it).
-        const why = `logo match ${s.logo_score} at ${(found.width / usual.width).toFixed(2)} of the usual width`;
+        const each = plan.shape === "set" && found.scores ? ` (each file: ${found.scores.map((v) => v.toFixed(3)).join(", ")})` : "";
+        const why = `logo match ${s.logo_score} at ${(found.width / usual.width).toFixed(2)} of the usual width${each}`;
         console.warn(`[design-worker] job ${job.id}: ${why}; designing again.`);
         await designAgain(admin, job, why);
         return "next";
       }
-      s.logo_rect = { x: found.x, y: found.y, width: found.width, height: found.height };
-      s.logo_frame = [W, H];
+      // Where the logo was drawn, and for a job with a set the file finish stamps there.
+      Object.assign(s, logoState(job.input, found));
       job.step = s.nologo_path ? "finish" : "unlogo";
       return "next";
     }
@@ -342,7 +352,8 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
         job: job.id,
         step: "finish",
         picture: await signedRead(admin, BUCKET, s.nologo_path),
-        logo: await signedRead(admin, BUCKET, job.input.logo_path),
+        // The file locate named for this design, or the job's own logo.
+        logo: await signedRead(admin, BUCKET, stampFile(job.input, s)),
         rect: s.logo_rect,
         frame: s.logo_frame,
         output: { width: ow, height: oh },
@@ -421,7 +432,7 @@ async function designAgain(admin: any, job: Job, reason: string): Promise<void> 
   const s = job.state;
   // Why each earlier design was made again, kept for review.
   s.redesigns = [...(Array.isArray(s.redesigns) ? s.redesigns : []), reason].slice(-5);
-  for (const k of ["design_path", "logo_rect", "logo_frame", "logo_score", "logo_check", "nologo_path", "unlogos", "final_path", "read", "band_read", "marks_check", "marks_where", "mark_cleans"]) delete s[k];
+  for (const k of ["design_path", "logo_check", ...OF_THE_DESIGN]) delete s[k];
   job.step = "generate";
   if ((job.slide_count ?? 1) > 1 && (job.slide_index ?? 0) === 0 && job.design_request_id) {
     // The cover's old design is gone from its record before any slide can look for it.
@@ -512,7 +523,7 @@ async function pictureCheck(admin: any, count: number): Promise<{ elapsed_ms: nu
         job: r.id,
         step: "picture_check",
         picture: await signedRead(admin, BUCKET, r.state.nologo_path),
-        logo: await signedRead(admin, BUCKET, r.input.logo_path),
+        logo: await signedRead(admin, BUCKET, stampFile(r.input, r.state)),
         rect: r.state.logo_rect,
         frame: r.state.logo_frame,
         output: { width: ow, height: oh },
@@ -527,6 +538,86 @@ async function pictureCheck(admin: any, count: number): Promise<{ elapsed_ms: nu
     ? { job: jobs[i].id as string, ms: x.value, ok: true }
     : { job: jobs[i].id as string, ms: took[i], ok: false, reason: x.reason instanceof Error ? x.reason.message : String(x.reason) });
   return { elapsed_ms: Date.now() - started, results };
+}
+
+/**
+ * The deployed picture service tried on one client's logo set, with nothing
+ * written to a job or a client (the release's proof with no spend, spec
+ * 2026-11-16-logo-tone-design.md, section 10).
+ *
+ * Without `designs`: the live logo-set call for the client's stored logo
+ * (its two copies go under picture-check/tone/, so no product file changes)
+ * and one post-logos call for the first four of its posts, with each call's
+ * time: the service's speed on these searches.
+ *
+ * With `designs`: the live locate on the client's newest ended still
+ * designs, each asked the way a job started from the client's set as it is
+ * now would ask (the job's own placement), with the matched file, the named
+ * file, each score, the time and whether the one test (logoFound) holds. A
+ * client with no current set answers that and calls nothing.
+ */
+async function toneCheck(admin: any, clientId: string, designs: number | null): Promise<Record<string, unknown>> {
+  const started = Date.now();
+  const { data: row, error } = await admin.from("design_brand_settings").select("source, logo_path, placement, background, reference_paths, logo_set").eq("client_id", clientId).maybeSingle();
+  if (error) throw new Error(`Could not read the design settings: ${error.message}`);
+  if (!row) return { elapsed_ms: Date.now() - started, settings: false };
+  const reason = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+  if (designs === null) {
+    const io = liveIo(admin);
+    const person = personOther(row)?.path ?? null;
+    const out = { other: `picture-check/tone/${clientId}-other.png`, white: `picture-check/tone/${clientId}-white.png` };
+    try {
+      const set = await askLogoSet(io, { clientId, logoPath: row.logo_path, site: [], person, out });
+      const plan = postSearchPlan(row.logo_path, set.facts, { other: set.facts.made.other ? out.other : null, white: set.facts.made.white ? out.white : null, site: null, person: set.facts.person ? person : null });
+      const posts: string[] = (Array.isArray(row.reference_paths) ? row.reference_paths : []).slice(0, POSTS_PER_CALL);
+      const read = posts.length ? await askPostLogos(io, { clientId, posts, placement: row.placement, plan }) : { posts: [], ms: 0 };
+      return {
+        elapsed_ms: Date.now() - started, ok: true,
+        logo_set: { ms: set.ms, facts: set.facts },
+        post_logos: { ms: read.ms, posts: posts.map((path, i) => ({ path, result: read.posts[i] ?? null })) },
+      };
+    } catch (e) {
+      return { elapsed_ms: Date.now() - started, ok: false, reason: reason(e) };
+    }
+  }
+
+  if (!jobLogos(row)) return { elapsed_ms: Date.now() - started, set: false };
+  const { data: rows, error: jobsError } = await admin.from("canva_finish_jobs").select("id, input, state, status")
+    .eq("client_id", clientId).in("status", ["done", "failed", "canceled"])
+    .not("state->>design_path", "is", null)
+    .order("created_at", { ascending: false }).limit(designs * 3);
+  if (jobsError) throw new Error(`Could not read the client's designs: ${jobsError.message}`);
+  // Video jobs are left out, as in picture_check.
+  const jobs = (rows ?? []).filter((r: any) => r.input?.kind !== "video" && r.input?.placement && r.state?.design_path).slice(0, designs);
+  const results = await Promise.all(jobs.map(async (r: any) => {
+    const t = Date.now();
+    try {
+      const plan = locatePlan(checkInput(row, r)!);
+      const { result: found, ms } = await callPicture(admin, "locate", await locateRequest(admin, plan, { job: r.id, step: "tone_check", designPath: r.state.design_path, placement: r.input.placement }));
+      return {
+        job: r.id as string, status: r.status as string, ms, ok: true,
+        found: logoFound(found, found.usual.width), score: Math.round(found.score * 1000) / 1000,
+        matched: found.matched ?? null, file: found.file ?? null,
+        scores: (found.scores ?? []).map((v) => Math.round(v * 1000) / 1000),
+        gaps: Object.fromEntries(Object.entries(found.gaps ?? {}).map(([file, gap]) => [file, Math.round((gap as number) * 10) / 10])),
+      };
+    } catch (e) {
+      return { job: r.id as string, status: r.status as string, ms: Date.now() - t, ok: false, reason: reason(e) };
+    }
+  }));
+  return { elapsed_ms: Date.now() - started, set: true, results };
+}
+
+/** The locate request for a plan (_shared/design/logoChoice.ts), with every stored path signed for the service to read. */
+async function locateRequest(admin: any, plan: LocatePlan, a: { job: string; step: string; designPath: string; placement: LocateRequest["placement"] }): Promise<LocateRequest> {
+  const common = { job: a.job, step: a.step, design: await signedRead(admin, BUCKET, a.designPath), placement: a.placement, scales: LOGO_SCALES };
+  if (plan.shape === "one") return { ...common, logo: await signedRead(admin, BUCKET, plan.logo), background: plan.background };
+  return {
+    ...common,
+    templates: await Promise.all(plan.templates.map(async (t) => ({ file: t.file, logo: await signedRead(admin, BUCKET, t.path), ground: t.ground, ...(t.fixed ? { fixed: true } : {}) }))) as [LogoTemplate] | [LogoTemplate, LogoTemplate],
+    compare: await Promise.all(plan.compare.map(async (c) => ({ file: c.file, logo: await signedRead(admin, BUCKET, c.path) }))),
+  };
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

@@ -23,8 +23,11 @@ export const MAX_GENERATIONS = 3;
 /** Removals of the model's logo drawing for one design before the job fails. */
 export const MAX_UNLOGO = 4;
 
-/** What a later step found on a design: all of it goes when a new design is made. */
-const OF_THE_DESIGN = ["logo_rect", "logo_frame", "logo_score", "nologo_path", "unlogos", "final_path", "read", "band_read", "marks_check", "marks_where", "mark_cleans"];
+/** What a later step found on a design: all of it goes when a new design is made. The five keys after logo_score are what locate kept for a job that carries a logo set (logoChoice.ts). */
+export const OF_THE_DESIGN = [
+  "logo_rect", "logo_frame", "logo_score", "logo_file", "logo_named", "logo_matched", "logo_scores", "logo_gaps",
+  "nologo_path", "unlogos", "final_path", "read", "band_read", "marks_check", "marks_where", "mark_cleans",
+];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ModelJob = { id: string; client_id: string; step: string; state: any };

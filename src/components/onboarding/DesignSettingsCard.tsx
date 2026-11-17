@@ -6,6 +6,16 @@
  * colors) and they are in place from then on. A person may change any of them
  * here; the lifecycle never replaces settings a person saved.
  *
+ * Under the logo file the card shows the client's logo set once the
+ * lifecycle has made it (16 Nov 2026): the logo for light and for dark
+ * pictures and the logo in white, each only when a file serves it, with
+ * where each file came from. No tile is ever empty, and nothing says how a
+ * design is started. Each design carries the one its picture calls for. One
+ * quiet control beside the tiles lets the team choose a file of their own
+ * for the pictures the client's logo file was not made for, or take it out
+ * again; that acts at once, is no part of Save, and leaves the settings
+ * whose they are.
+ *
  * The client's own posts the designs follow are not set here: they refresh
  * on their own every week, on every client's row, and staff keep or leave out
  * posts on the Brand references card (design: docs/superpowers/specs/
@@ -34,6 +44,7 @@ import { fileKey, useQuietUpload } from "@/hooks/useQuietUpload";
 import { DEFAULT_DESIGN_BACKGROUND } from "@/lib/designReferences";
 import { referencesFor } from "../../../supabase/functions/_shared/design-prompts/designRefs";
 import { logoStorePlan } from "../../../supabase/functions/_shared/lifecycle/designSettings";
+import { logoOtherPath, logoSetView } from "@/lib/logoSet";
 
 type Anchor = "left" | "center" | "right";
 type Spot = `${"top" | "bottom"}-${Anchor}`;
@@ -202,6 +213,39 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
     void logo.send(file);
   };
 
+  // The client's logo set, once the lifecycle has made it. A person's own second file is put there or removed
+  // through set_design_logo_other, which writes nothing else: the logo, placement and background stay whose they are.
+  const { tiles, control } = useMemo(() => logoSetView(data?.settings ?? null), [data?.settings]);
+  const [unnamed, setUnnamed] = useState<{ name: string; path: string } | null>(null);
+  const [refusedOther, setRefusedOther] = useState<string | null>(null);
+  const [removing, setRemoving] = useState(false);
+  const nameOther = useCallback(async (name: string, path: string | null) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await sendQuietly(() => (supabase.rpc as any)("set_design_logo_other", { p_client: clientId, p_path: path }), { again: writeResendable });
+    // Stored and not named yet: the file stays chosen, shown as not uploaded yet.
+    setUnnamed(error && path ? { name, path } : null);
+    if (!error) void qc.invalidateQueries({ queryKey: ["design-settings-full", clientId] });
+  }, [clientId, qc]);
+  const uploadOther = useCallback(async (file: File) => {
+    const png = await asPng(file);
+    return supabase.storage.from("generated-media").upload(logoOtherPath(clientId, fileKey(file)), png, { contentType: "image/png", upsert: true });
+  }, [clientId]);
+  const otherUploaded = useCallback((file: File) => { void nameOther(file.name, logoOtherPath(clientId, fileKey(file))); }, [clientId, nameOther]);
+  const other = useQuietUpload(uploadOther, otherUploaded);
+  const chooseOther = (file: File) => {
+    if (!/^image\/(png|jpeg|webp)$/.test(file.type)) { setRefusedOther(file.name); return; }
+    setRefusedOther(null);
+    setUnnamed(null);
+    void other.send(file);
+  };
+  const removeOther = async () => {
+    setRemoving(true);
+    await nameOther("", null);
+    setRemoving(false);
+  };
+  const otherWaiting = other.pending && !other.uploading ? other.pending.name : unnamed?.name ?? null;
+  const publicUrl = (path: string) => supabase.storage.from("generated-media").getPublicUrl(path).data.publicUrl;
+
   const placement = toPlacement(spot, widthPct, edgePct, logoAspect);
   // A new row needs the client's posts; a stored one already has them, kept current by the lifecycle.
   const complete = !!logoPath && HEX.test(background) && (!!data?.settings || (data?.paths.length ?? 0) > 0);
@@ -267,7 +311,7 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
               </Button>
               <input id="design-logo" type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; if (f) chooseLogo(f); e.target.value = ""; }} />
             </div>
-            <p className="t-label">The exact file placed on every design, best as a PNG with a transparent background.</p>
+            <p className="t-label">The client's logo file, best as a PNG with a transparent background.</p>
             {refusedLogo && <p className="t-secondary" role="status">{refusedLogo} is not a PNG, JPG or WebP image, so the current logo stays.</p>}
             {logo.pending && !logo.uploading && (
               <div className="flex items-center gap-2" role="status">
@@ -276,6 +320,42 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
               </div>
             )}
           </div>
+
+          {tiles.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-x-4 gap-y-3">
+                {tiles.map((t) => (
+                  <div key={t.key} data-logo-tile={t.key} className="w-40 space-y-1.5">
+                    <p className="t-label">{t.label}</p>
+                    <div data-logo-ground className="h-14 w-40 rounded-[12px] flex items-center justify-center p-2 border border-white/10" style={{ background: t.ground }}>
+                      <img src={publicUrl(t.path)} alt="" className="max-h-full max-w-full object-contain" />
+                    </div>
+                    <p className="t-label">{t.caption}</p>
+                  </div>
+                ))}
+              </div>
+              <p className="t-label">Each design carries the one its picture calls for.</p>
+              {control && (
+                <div className="flex flex-wrap items-center gap-x-5">
+                  <Button asChild variant="link" size="sm" className="px-0" disabled={other.uploading}>
+                    <label htmlFor="design-logo-other" className="cursor-pointer">
+                      {other.uploading ? <Loader2 className="animate-spin" /> : <ImageUp />}
+                      {control.label}
+                    </label>
+                  </Button>
+                  {control.removable && <Button variant="link" size="sm" className="px-0" disabled={removing} onClick={() => void removeOther()}>Remove your team's file</Button>}
+                </div>
+              )}
+              <input id="design-logo-other" aria-label="A second logo file" type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; if (f) chooseOther(f); e.target.value = ""; }} />
+              {refusedOther && <p className="t-secondary" role="status">{refusedOther} is not a PNG, JPG or WebP image, so nothing changes.</p>}
+              {otherWaiting && (
+                <div className="flex items-center gap-2" role="status">
+                  <span className="t-secondary truncate">{otherWaiting} is not uploaded yet.</span>
+                  <Button variant="outline" size="sm" onClick={() => void (other.pending ? other.again() : unnamed ? nameOther(unnamed.name, unnamed.path) : null)}>Upload</Button>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="space-y-2">

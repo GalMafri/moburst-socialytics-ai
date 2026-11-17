@@ -56,7 +56,7 @@ describe("the picture service's place in the app's Vercel project", () => {
 
   it("gets only /api/health and /api/picture/*, and every other path is served as before", () => {
     expect(rewritten("/api/health")).toBe("/api/picture");
-    for (const route of ["canvas", "locate", "read", "finish", "transcode", "title-read"]) expect(rewritten(`/api/picture/${route}`)).toBe("/api/picture");
+    for (const route of ["canvas", "locate", "read", "finish", "transcode", "title-read", "logo-set", "post-logos"]) expect(rewritten(`/api/picture/${route}`)).toBe("/api/picture");
     // The app's own pages, the API keys page among them, and anything else under /api.
     for (const page of ["/", "/api-keys", "/api-keys/new", "/api", "/api/healthz", "/api/health/x", "/api/keys", "/calendar", "/clients/abc/strategy"]) expect(rewritten(page), page).toBe("/index.html");
     // Hashed assets are files or nothing: a missing one is never answered with the page.

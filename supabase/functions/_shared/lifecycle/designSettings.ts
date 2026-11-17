@@ -11,6 +11,7 @@
 
 import { LOGO_SPOTS } from "../canva/options.ts";
 import { referencesFor } from "../design-prompts/designRefs.ts";
+import { textHash } from "./names.ts";
 
 export type Spot = typeof LOGO_SPOTS[number];
 export type Anchor = "left" | "center" | "right";
@@ -203,4 +204,85 @@ export function generatedMediaPath(url: string | null | undefined, projectUrl: s
   const prefix = `${base}/storage/v1/object/public/generated-media/`;
   if (!base || !u.startsWith(prefix)) return null;
   try { return decodeURIComponent(u.slice(prefix.length).split("?")[0]); } catch { return null; }
+}
+
+// ── The design_settings step's key, and the read it may reuse ───────────────
+
+/**
+ * The version of the logo tone rule (_shared/design/logoTone.ts, TONE_RULE).
+ * It is part of the step's key, so every client's set is made once when the
+ * rule arrives and again if the rule ever changes.
+ */
+export const LOGO_TONE_RULE = 1;
+
+/**
+ * The parts of a lifecycle row's key that the read of the logo's spot
+ * depends on: the client's posts and its logo, "refs:<x>|logo:<y>". Null for
+ * any other key (a person's row has a key of its own).
+ */
+export function readInputs(key: string | null | undefined): string | null {
+  return /^(refs:[\s\S]*?\|logo:[\s\S]*?)\|colors:/.exec(String(key ?? ""))?.[1] ?? null;
+}
+
+/**
+ * The stored read of where the client's posts put the logo, when it is
+ * current for these inputs: { read } (read may be null, a read that found no
+ * spot and stands for the default placement). Null when the model must be
+ * asked.
+ *
+ * The read is a paid model call about the client's posts and its logo, and
+ * nothing else. It is reused when the settings row is the lifecycle's and
+ * holds a read made for exactly these inputs (derived.logo_read_for). A read
+ * from before that record existed is reused only when the step's own row
+ * finished (done_at) on a key with the same posts and logo: a run that
+ * failed or waited under a changed key clears done_at, so done_at says a run
+ * finished on the key the row holds.
+ */
+export function storedSpotRead(
+  row: { source?: string | null; derived?: Record<string, unknown> | null } | null | undefined,
+  step: { inputs_key: string | null; done_at: string | null } | null | undefined,
+  inputs: string,
+): { read: LogoSpot | null } | null {
+  const derived = row?.derived;
+  if (!row || row.source !== "lifecycle" || !derived || typeof derived !== "object" || !("logo_read" in derived)) return null;
+  const read = (derived.logo_read ?? null) as LogoSpot | null;
+  if ("logo_read_for" in derived) return derived.logo_read_for === inputs ? { read } : null;
+  return step?.done_at && readInputs(step.inputs_key) === inputs ? { read } : null;
+}
+
+/**
+ * A person's own second logo file (design_brand_settings.logo_set.person,
+ * written by set_design_logo_other), while it is in use: it belongs to the
+ * main logo it was put beside, so it counts only while the row still names
+ * that logo. Null otherwise.
+ */
+export function personOther(row: { logo_path?: string | null; logo_set?: unknown } | null | undefined): { path: string; of: string; at?: string } | null {
+  const person = (row?.logo_set as { person?: { path?: unknown; of?: unknown; at?: unknown } } | null | undefined)?.person;
+  if (!row || !person || typeof person.path !== "string" || !person.path || person.of !== row.logo_path) return null;
+  return person as { path: string; of: string; at?: string };
+}
+
+/**
+ * The end of the design_settings step's key: the website's other logo files
+ * (brand_read's logo_files, as a short hash), a person's second file in
+ * use, and the version of the tone rule. So a set is made again when any of
+ * the three changes, and never otherwise.
+ */
+export function toneKeyTail(siteFiles: unknown, row: { logo_path?: string | null; logo_set?: unknown } | null | undefined): string {
+  const files = Array.isArray(siteFiles) ? siteFiles.filter((f): f is string => typeof f === "string" && !!f) : [];
+  return `|site:${files.length ? textHash(files.join("\n")) : ""}|other:${personOther(row)?.path ?? ""}|tone:${LOGO_TONE_RULE}`;
+}
+
+/**
+ * The design_settings step's key for a row a person set (owner decision 2):
+ * their logo file, the client's posts as last learned, where they put the
+ * logo (their posts are searched near it), then the same tail as every key.
+ * It needs no website logo, so the step reads it before its other
+ * conditions. Their background is not part of it: a design reads it from
+ * the row itself.
+ */
+export function personKey(row: { logo_path: string; placement?: Placement | null; logo_set?: unknown }, refsPart: string, siteFiles: unknown): string {
+  const p = row.placement;
+  const at = p ? [p.anchor, p.width, p.top, p.left ?? ""].join(",") : "";
+  return `person|logo:${row.logo_path}|refs:${refsPart}|at:${at}${toneKeyTail(siteFiles, row)}`;
 }

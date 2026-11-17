@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
-import { fetchSiteHtml, researchBrand, extractImageUrls, logoOnPage, parseBrandReply, parseSocialBrandReply, readSocialBrand, siteTextExcerpt, visionImageType } from "../../../functions/_shared/brand/research";
+import { fetchSiteHtml, researchBrand, extractImageUrls, logoFilesOnPage, logoOnPage, parseBrandReply, parseSocialBrandReply, readSocialBrand, siteTextExcerpt, visionImageType } from "../../../functions/_shared/brand/research";
 
 const BASE = "https://www.example.com";
 
@@ -19,6 +19,49 @@ describe("logoOnPage", () => {
   it("keeps an inline SVG marked as the logo, and falls back to the touch icon", () => {
     expect(logoOnPage(`<header><svg class="site-logo" viewBox="0 0 10 10"><path d="M0 0h10v10z"/></svg></header>`, BASE)).toMatchObject({ svg: expect.stringContaining("<path") });
     expect(logoOnPage(`<link rel="apple-touch-icon" href="/icon.png"><body></body>`, BASE)).toEqual({ url: "https://www.example.com/icon.png" });
+  });
+});
+
+describe("logoFilesOnPage", () => {
+  it("lists the header's, then the nav's, then the footer's logo images and marked inline SVGs, in page order, without data addresses and without repeats", () => {
+    const html = `<html><body>
+      <nav class="top"><img class="nav-logo" src="/nav-logo.png"></nav>
+      <header>
+        <a href="/"><img alt="Home" srcset="/brand-mark.png 1x, /brand-mark@2x.png 2x"></a>
+        <img class="Site-LOGO" src="/logo-dark.svg">
+        <svg class="logo logo--light" viewBox="0 0 10 10"><path d="M0 0h10v10z"/></svg>
+        <img src="/hero.jpg">
+        <img id="logo-inline" src="data:image/png;base64,AAAA">
+        <img alt="Company logo" src="/logo-dark.svg">
+        <nav><img src="/menu-logo.png"></nav>
+        <svg aria-label="menu" viewBox="0 0 4 4"><path d="M0 0"/></svg>
+        <svg id="empty-logo"></svg>
+      </header>
+      <main><img class="logo" src="/press/bloomberg.png"></main>
+      <footer>
+        <svg aria-label="Company Logo" viewBox="0 0 8 8"><rect width="8" height="8"/></svg>
+        <img src="/img/LOGO-white.png?v=2&amp;w=300">
+        <img class="logo" src="/nav-logo.png">
+        <img src="/badge.png">
+      </footer>
+      <footer><img class="logo" src="/second-footer-logo.png"></footer>
+    </body></html>`;
+    expect(logoFilesOnPage(html, BASE)).toEqual([
+      // The header: its first image whatever it is called, then every image and inline SVG marked as a logo, in page order.
+      { url: "https://www.example.com/brand-mark.png" },
+      { url: "https://www.example.com/logo-dark.svg" },
+      { svg: `<svg class="logo logo--light" viewBox="0 0 10 10"><path d="M0 0h10v10z"/></svg>` },
+      { url: "https://www.example.com/menu-logo.png" },
+      // The first nav outside the header.
+      { url: "https://www.example.com/nav-logo.png" },
+      // The first footer.
+      { svg: `<svg aria-label="Company Logo" viewBox="0 0 8 8"><rect width="8" height="8"/></svg>` },
+      { url: "https://www.example.com/img/LOGO-white.png?v=2&w=300" },
+    ]);
+  });
+  it("gives nothing for a page with no header, nav or footer, and never a logo from the page's body", () => {
+    expect(logoFilesOnPage(`<body><img class="logo" src="/press.png"><svg class="logo"><path d="M0 0"/></svg></body>`, BASE)).toEqual([]);
+    expect(logoFilesOnPage("", BASE)).toEqual([]);
   });
 });
 

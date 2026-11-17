@@ -1,0 +1,548 @@
+// @vitest-environment node
+// A logo file read as parts, the figure it has on a light and on a dark
+// ground, and everything the logo set decides from them. Every raster is
+// drawn here, in made-up neutral colors.
+import { describe, expect, it } from "vitest";
+import { canvasLogoRect, resampleRGBA } from "../../../functions/_shared/canva/brief";
+import { logoFound } from "../../../functions/_shared/design/logoMatch";
+import { contrast } from "../../../functions/_shared/lifecycle/designSettings";
+import type { LogoFileName, LogoSetResult, Placement, PostLogo, Rgb } from "../../../functions/_shared/picture/contract";
+import {
+  DARK, LIGHT, chooseSet, colorGap, figure, groundAround, isSmall, jobLogos, nameFile, ownGround, partsOf, postSearchPlan, sameLogo, searchTemplates, showsOn, stampRect, wholeExposedInks,
+  type Found, type LogoSet, type Raster, type SetPaths,
+} from "../../../functions/_shared/design/logoTone";
+import { blank, box, drawLogo, flat, inked, mark } from "./draw";
+
+describe("a logo file's parts", () => {
+  it("joins pixels within 16 per channel into one part, by edges and never by corners", () => {
+    const gradient = blank(400, 1);
+    for (let x = 0; x < 400; x++) gradient.data.set([Math.round((x * 255) / 399), 90, 90, 255], x * 4);
+    expect(partsOf(gradient).parts).toHaveLength(1);
+
+    const halves = box(box(blank(20, 10), 0, 0, 10, 10, [200, 200, 200]), 10, 0, 20, 10, [40, 40, 40]);
+    const two = partsOf(halves);
+    expect(two.parts).toHaveLength(2);
+    expect(two.parts[0].touches.get(1)).toBe(10);
+    expect(two.parts[1].touches.get(0)).toBe(10);
+
+    const corners = box(box(blank(4, 4), 0, 0, 2, 2, [120, 120, 120]), 2, 2, 4, 4, [120, 120, 120]);
+    const apart = partsOf(corners);
+    expect(apart.parts).toHaveLength(2);
+    expect(apart.parts[0].touches.size).toBe(0);
+    expect(apart.parts[1].touches.size).toBe(0);
+  });
+
+  it("numbers parts in the order their first pixel is met, and averages a part's color by alpha", () => {
+    const r = blank(6, 2);
+    // Row 0: a part at x = 4. Row 1: a part at x = 0 and 1 (one solid pixel, one at alpha 51).
+    box(r, 4, 0, 5, 1, [10, 20, 30]);
+    box(r, 0, 1, 1, 2, [100, 100, 100], 255);
+    box(r, 1, 1, 2, 2, [110, 110, 110], 51);
+    const { parts, label, ink } = partsOf(r);
+    expect(parts.map((p) => p.id)).toEqual([0, 1]);
+    expect(parts[0].color).toEqual([10, 20, 30]);
+    // (100 * 1 + 110 * 0.2) / 1.2 = 101.67
+    expect(parts[1].color).toEqual([102, 102, 102]);
+    expect(parts[1].ink).toBeCloseTo(1.2, 10);
+    expect(ink).toBeCloseTo(2.2, 10);
+    expect(label[4]).toBe(0);
+    expect(label[6]).toBe(1);
+    expect(label[0]).toBe(-1);
+  });
+
+  it("leaves out pixels fainter than alpha 16", () => {
+    const r = box(box(blank(3, 1), 0, 0, 1, 1, [9, 9, 9], 15), 1, 0, 2, 1, [9, 9, 9], 16);
+    const { parts, label } = partsOf(r);
+    expect(parts).toHaveLength(1);
+    expect([label[0], label[1], label[2]]).toEqual([-1, 0, -1]);
+  });
+
+  it("knows an exposed part from an inside one", () => {
+    const r = box(box(blank(14, 14), 1, 1, 13, 13, [30, 60, 200]), 5, 5, 9, 9, [250, 250, 250]);
+    const { parts } = partsOf(r);
+    expect(parts).toHaveLength(2);
+    expect(parts[0].exposed).toBe(true);
+    expect(parts[1].exposed).toBe(false);
+    expect(parts[1].touches.get(0)).toBe(16);
+    // A part on the file's edge is exposed too.
+    expect(partsOf(box(blank(4, 4), 0, 0, 4, 4, [1, 2, 3])).parts[0].exposed).toBe(true);
+  });
+});
+
+describe("a file's figure on a ground", () => {
+  /** Two exposed parts that do not touch: `faint` pixels of a color near white, the rest near black, 100 pixels in all. */
+  const twoParts = (faint: number): Raster => box(box(blank(102, 3), 0, 1, faint, 2, [235, 235, 235]), faint + 1, 1, 101, 2, [20, 20, 20]);
+
+  it("takes the figure at the part where more than 10% of the exposed ink has been passed", () => {
+    const low = contrast([235, 235, 235], LIGHT), high = contrast([20, 20, 20], LIGHT);
+    expect(low).toBeLessThan(1.3);
+    expect(high).toBeGreaterThan(8);
+    // 5% of the ink is faint on white: the figure is the dark part's contrast.
+    expect(figure(partsOf(twoParts(5)), LIGHT)).toBeCloseTo(high, 10);
+    // 15% is faint: more than 10% is passed inside the faint part.
+    expect(figure(partsOf(twoParts(15)), LIGHT)).toBeCloseTo(low, 10);
+    expect(figure(partsOf(blank(4, 4)), LIGHT)).toBe(0);
+  });
+
+  it("takes the ground with the higher figure as the file's own, and light when equal", () => {
+    const black = partsOf(box(blank(8, 8), 1, 1, 7, 7, [0, 0, 0]));
+    const white = partsOf(box(blank(8, 8), 1, 1, 7, 7, [255, 255, 255]));
+    expect(ownGround(black)).toBe("light");
+    expect(ownGround(white)).toBe("dark");
+    expect(ownGround(partsOf(blank(8, 8)))).toBe("light");
+    expect(showsOn(black, "light")).toBe(true);
+    expect(showsOn(black, "dark")).toBe(false);
+    expect(showsOn(white, "dark")).toBe(true);
+    expect(DARK).toEqual([11, 14, 26]);
+    expect(LIGHT).toEqual([255, 255, 255]);
+  });
+
+  it("lists the whole exposed parts with their share of the ink", () => {
+    // A 20 by 10 box (200 pixels) with a 4 by 4 inside part, and a single pixel far away (a small part).
+    const r = box(box(box(blank(40, 12), 1, 1, 21, 11, [30, 60, 200]), 5, 4, 9, 8, [250, 250, 250]), 30, 5, 31, 6, [200, 30, 30]);
+    const parts = partsOf(r);
+    expect(parts.parts).toHaveLength(3);
+    expect(isSmall(parts, parts.parts[2])).toBe(true);
+    expect(isSmall(parts, parts.parts[1])).toBe(false);
+    const inks = wholeExposedInks(parts);
+    expect(inks).toHaveLength(1);
+    expect(inks[0].color).toEqual([30, 60, 200]);
+    expect(inks[0].share).toBeCloseTo(184 / 201, 10);
+    // A copy's colors stand in for the parts' own.
+    expect(wholeExposedInks(parts, [[1, 2, 3], [4, 5, 6], [7, 8, 9]])[0].color).toEqual([1, 2, 3]);
+  });
+});
+
+describe("the same logo in another tone", () => {
+  const stored = mark(120, 48, [24, 28, 40]);
+  const parts = partsOf(stored);
+
+  it("knows the same logo in another tone and refuses another logo, a copy on the same ground and a narrower file", () => {
+    expect(sameLogo(stored, parts, inked(stored, [255, 255, 255]))).toEqual({ same: true, overlap: 1 });
+
+    // Redrawn at 61% of the width: the same shape, and too small to stamp.
+    const narrow: Raster = { width: 73, height: 29, data: resampleRGBA(inked(stored, [255, 255, 255]).data, 120, 48, 73, 29) };
+    const smaller = sameLogo(stored, parts, narrow);
+    expect(smaller.same).toBe(false);
+    expect(smaller.overlap).toBeGreaterThanOrEqual(0.9);
+
+    // Another logo that fills the same box.
+    const another = box(box(blank(120, 48), 0, 0, 120, 12, [255, 255, 255]), 50, 12, 70, 48, [255, 255, 255]);
+    const different = sameLogo(stored, parts, another);
+    expect(different.same).toBe(false);
+    expect(different.overlap).toBeLessThan(0.9);
+
+    // The same logo in another dark ink is made for the same ground.
+    expect(sameLogo(stored, parts, inked(stored, [60, 20, 20]))).toEqual({ same: false, overlap: 1 });
+
+    // A file of another shape.
+    expect(sameLogo(stored, parts, mark(120, 60, [255, 255, 255])).same).toBe(false);
+  });
+});
+
+describe("the color distance between a file and a picture", () => {
+  const file = mark(40, 16, [100, 100, 100]);
+  const rect = { x: 30, y: 20, width: 80, height: 32 };
+  const pictureWith = (color: Rgb) => drawLogo(flat(160, 100, [10, 12, 30]), file, rect, color);
+
+  it("measures the color distance over the file's solid ink only, and skips pixels off the picture", () => {
+    expect(colorGap(pictureWith([100, 100, 100]), file, rect)).toBe(0);
+    expect(colorGap(pictureWith([103, 104, 100]), file, rect)).toBeCloseTo(5, 10);
+    // Ink under alpha 128 is not measured: a faint bar over the ground does not move the distance.
+    const faint = box({ width: 40, height: 16, data: new Uint8ClampedArray(file.data) }, 36, 0, 40, 8, [250, 0, 0], 100);
+    expect(colorGap(pictureWith([100, 100, 100]), faint, rect)).toBe(0);
+    // A rectangle that runs off the picture is measured over the part that is on it.
+    const off = { x: 120, y: 20, width: 80, height: 32 };
+    const picture = drawLogo(flat(160, 100, [10, 12, 30]), file, off, [100, 100, 100]);
+    expect(colorGap(picture, file, off)).toBe(0);
+    expect(colorGap(picture, file, { x: 400, y: 20, width: 80, height: 32 })).toBe(Infinity);
+  });
+
+  it("says a post shows the file closest to it in color, and the stored file when equal", () => {
+    const stored = file, white = inked(file, [200, 200, 200]);
+    const found: Found = { index: 0, matched: "stored", rect, score: 0.9, usual: rect, scores: [0.9] };
+    const templates = [{ file: "stored" as const, raster: stored, ground: DARK }];
+    const compare = [{ file: "white" as const, raster: white }];
+    const order = ["stored", "other", "white"] as const;
+    const closer = nameFile(pictureWith([160, 160, 160]), found, templates, compare, [...order]);
+    expect(closer.file).toBe("white");
+    expect(closer.gaps.white).toBeLessThan(closer.gaps.stored!);
+    const equal = nameFile(pictureWith([150, 150, 150]), found, templates, compare, [...order]);
+    expect(equal.gaps.stored).toBe(equal.gaps.white);
+    expect(equal.file).toBe("stored");
+    // With the white file first in the order, the same tie goes to it.
+    expect(nameFile(pictureWith([150, 150, 150]), found, templates, compare, ["white", "stored", "other"]).file).toBe("white");
+  });
+});
+
+describe("the ground around a found logo", () => {
+  it("takes the ground around the found logo from outside its rectangle, as a real pixel", () => {
+    // The left 100 columns are one color, the rest another; the logo sits on the left part.
+    const twoColors = () => box(flat(200, 120, [200, 60, 40]), 0, 0, 100, 120, [20, 40, 90]);
+    const rect = { x: 20, y: 40, width: 60, height: 20 };
+    const got = groundAround(drawLogo(twoColors(), mark(40, 16, [255, 255, 255]), rect), rect)!;
+    expect(got.ground).toEqual([20, 40, 90]);
+    // The widened rectangle runs from x = 5 to 95 and y = 30 to 70: every sampled pixel is on the left color.
+    expect(got.flat).toBe(1);
+
+    // Moved right, the widened rectangle crosses onto the other color: the ground is still the color most of it has.
+    const across = { x: 30, y: 40, width: 60, height: 20 };
+    const second = groundAround(drawLogo(twoColors(), mark(40, 16, [255, 255, 255]), across), across)!;
+    expect(second.ground).toEqual([20, 40, 90]);
+    let left = 0, all = 0;
+    for (let y = 30; y < 70; y += 2) for (let x = 15; x < 105; x += 2) {
+      if (x >= 30 && x < 90 && y >= 40 && y < 60) continue;
+      all++;
+      if (x < 100) left++;
+    }
+    expect(second.flat).toBeCloseTo(left / all, 10);
+    // The logo's own pixels are never sampled, whatever color they are.
+    expect(groundAround(drawLogo(flat(200, 120, [20, 40, 90]), flat(4, 4, [255, 255, 255]), rect), rect)).toEqual({ ground: [20, 40, 90], flat: 1 });
+    // Nothing to sample: the rectangle covers the picture.
+    expect(groundAround(flat(20, 10, [1, 2, 3]), { x: -40, y: -40, width: 400, height: 400 })).toBeNull();
+  });
+});
+
+describe("the search over one or two templates", () => {
+  const W = 320, H = 240;
+  const placement: Placement = { anchor: "left", left: 0.1875, width: 0.25, top: 0.125 };
+  const scales: [number, number] = [0.45, 1.35];
+  const shape = mark(40, 16, [24, 28, 40]);
+  const usual = canvasLogoRect(placement, 40, 16, W, H);
+  const drawn = { x: usual.x + 6, y: usual.y + 4, width: Math.round(usual.width * 0.8), height: Math.round((usual.width * 0.8 * 16) / 40) };
+  const whiteOn = (ground: Rgb) => drawLogo(flat(W, H, ground), shape, drawn, [255, 255, 255]);
+
+  it("answers the better of two templates, the first when equal, with each score", () => {
+    const design = whiteOn([10, 12, 30]);
+    const stored = { file: "stored" as const, raster: shape, ground: LIGHT };
+    const other = { file: "other" as const, raster: inked(shape, [255, 255, 255]), ground: DARK };
+    const found = searchTemplates(design, [stored, other], placement, scales);
+    expect(found.index).toBe(1);
+    expect(found.matched).toBe("other");
+    expect(found.scores).toHaveLength(2);
+    expect(found.score).toBe(found.scores[1]);
+    expect(found.scores[1]).toBeGreaterThanOrEqual(0.75);
+    expect(found.scores[1]).toBeGreaterThan(found.scores[0]);
+    expect(found.usual).toEqual(usual);
+    expect(logoFound({ width: found.rect.width, score: found.score }, found.usual.width)).toBe(true);
+    expect(Math.abs(found.rect.x - drawn.x)).toBeLessThanOrEqual(2);
+    expect(Math.abs(found.rect.width - drawn.width)).toBeLessThanOrEqual(3);
+
+    // The same pixels under two names: the first wins.
+    const twice = searchTemplates(design, [{ ...other, file: "stored" }, other], placement, scales);
+    expect(twice.scores[0]).toBe(twice.scores[1]);
+    expect(twice.matched).toBe("stored");
+    expect(twice.index).toBe(0);
+
+    // One template.
+    const one = searchTemplates(design, [other], placement, scales);
+    expect(one.scores).toEqual([found.scores[1]]);
+    expect(one.rect).toEqual(found.rect);
+  });
+
+  it("prefers a template that passes the size test over a higher score at an end of the sizes searched", () => {
+    // The logo drawn in white at a size the client uses, and beside it a small light block that a half-inked
+    // second file matches exactly, and only at the smallest size searched.
+    const design = box(whiteOn([10, 12, 30]), 22, 20, 40, 34, [255, 255, 255]);
+    const stored = { file: "stored" as const, raster: inked(shape, [255, 255, 255]), ground: DARK };
+    const other = { file: "other" as const, raster: box(blank(40, 16), 0, 0, 20, 16, [255, 255, 255]), ground: DARK };
+    const pass = (f: Found) => logoFound({ width: f.rect.width, score: f.score }, f.usual.width);
+    // Alone, the second file scores higher than the first and fails the size half of the one test.
+    const alone = searchTemplates(design, [other], placement, scales);
+    const first = searchTemplates(design, [stored], placement, scales);
+    expect(alone.score).toBeGreaterThan(first.score);
+    expect(pass(alone)).toBe(false);
+    expect(pass(first)).toBe(true);
+    // Together: the match that is the logo by the one test is answered, with both scores.
+    const found = searchTemplates(design, [stored, other], placement, scales);
+    expect(found).toMatchObject({ index: 0, matched: "stored", score: first.score, rect: first.rect });
+    expect(found.scores).toEqual([first.score, alone.score]);
+    expect(pass(found)).toBe(true);
+    expect(searchTemplates(design, [other, stored], placement, scales)).toMatchObject({ index: 1, matched: "stored", scores: [alone.score, first.score] });
+    // When no template passes, the better score is answered as before.
+    const none = box(flat(W, H, [10, 12, 30]), 22, 20, 40, 34, [255, 255, 255]);
+    const best = searchTemplates(none, [stored, other], placement, scales);
+    expect(best.matched).toBe("other");
+    expect(pass(best)).toBe(false);
+  });
+
+  it("names the white file when the drawn logo is white on a mid-tone ground, whichever template matched", () => {
+    // A mid-tone file that shows on both grounds, drawn in white on a mid-tone picture.
+    const mid: Rgb = [40, 120, 235];
+    const stored = inked(shape, mid), white = inked(shape, [255, 255, 255]);
+    const design = whiteOn([150, 110, 80]);
+    const templates = [{ file: "white" as const, raster: white, ground: [42, 149, 253] as Rgb }, { file: "stored" as const, raster: stored, ground: LIGHT }];
+    const found = searchTemplates(design, templates, placement, scales);
+    expect(found.score).toBeGreaterThanOrEqual(0.75);
+    const named = nameFile(design, found, templates, [], [found.matched, "stored", "other", "white"]);
+    expect(named.file).toBe("white");
+    expect(named.gaps.white).toBeLessThan(named.gaps.stored!);
+
+    // The stored file's own template matches the same drawing (the score compares light and dark, never color), and the white file is still named.
+    const fromStored = [{ file: "stored" as const, raster: stored, ground: DARK }];
+    const again = searchTemplates(design, fromStored, placement, scales);
+    expect(again.matched).toBe("stored");
+    expect(again.score).toBeGreaterThanOrEqual(0.75);
+    expect(nameFile(design, again, fromStored, [{ file: "white", raster: white }], ["stored", "stored", "other", "white"]).file).toBe("white");
+  });
+
+  it("names a person's file when its template matched and measures nothing", () => {
+    const design = whiteOn([10, 12, 30]);
+    const templates = [
+      { file: "stored" as const, raster: shape, ground: LIGHT },
+      { file: "other" as const, raster: inked(shape, [255, 255, 255]), ground: DARK, fixed: true },
+    ];
+    const found = searchTemplates(design, templates, placement, scales);
+    expect(found.matched).toBe("other");
+    expect(nameFile(design, found, templates, [{ file: "white", raster: inked(shape, [250, 250, 250]) }], ["other", "stored", "other", "white"])).toEqual({ file: "other", gaps: {} });
+
+    // When the stored file's template matched, a person's file is left out of the comparison.
+    const dark = drawLogo(flat(W, H, [250, 250, 250]), shape, drawn, [24, 28, 40]);
+    const onLight = searchTemplates(dark, templates, placement, scales);
+    expect(onLight.matched).toBe("stored");
+    const named = nameFile(dark, onLight, templates, [], ["stored", "stored", "other", "white"]);
+    expect(named.file).toBe("stored");
+    expect(Object.keys(named.gaps)).toEqual(["stored"]);
+  });
+
+  it("gives a file of another shape its own height around the same center, and nothing for a file of the same shape", () => {
+    const rect = { x: 100, y: 50, width: 200, height: 80 };
+    expect(stampRect(rect, blank(40, 16), blank(40, 16))).toBeNull();
+    expect(stampRect(rect, blank(40, 16), blank(400, 168))).toEqual({ x: 100, y: 48, width: 200, height: 84 });
+    expect(stampRect(rect, blank(40, 16), blank(80, 30))).toEqual({ x: 100, y: 53, width: 200, height: 75 });
+  });
+});
+
+// ── The choice ──────────────────────────────────────────────────────────────
+
+const OF = "c1/design-settings/logo-site-aaaa.png";
+const MADE = { other: "c1/design-settings/logo-0123456789abcdef-other.png", white: "c1/design-settings/logo-0123456789abcdef-white.png" };
+const NO_PATHS: SetPaths = { other: null, white: null, site: null, person: null };
+const AT = "2026-11-16T09:00:00.000Z";
+
+/** What the service answered about a stored file: a dark one-color logo with both copies made, unless said otherwise. */
+function facts(over: Partial<LogoSetResult> = {}): LogoSetResult {
+  return {
+    size: { width: 300, height: 90 }, own: "light", both: false,
+    made: { other: { turned: 1 }, white: { turned: 1 } },
+    site: null, person: null,
+    inks: { stored: [{ color: [20, 30, 60], share: 1 }], other: [{ color: [255, 255, 255], share: 1 }], white: [{ color: [255, 255, 255], share: 1 }] },
+    ...over,
+  };
+}
+/** A post with a found logo that shows `shows` on `ground`. */
+function post(shows: LogoFileName, ground: Rgb = [16, 40, 76], flat = 0.9): PostLogo {
+  return { found: true, score: 0.95, matched: shows === "white" ? "stored" : shows, rect: { x: 10, y: 10, width: 100, height: 30 }, gaps: { [shows]: 12 }, shows, ground, flat };
+}
+const MISSED: PostLogo = { found: false, score: 0.31 };
+const choose = (over: Partial<Parameters<typeof chooseSet>[0]> = {}): LogoSet =>
+  chooseSet({ of: OF, source: "lifecycle", background: "#fafafa", facts: facts(), paths: { ...NO_PATHS, ...MADE }, posts: [], at: AT, ...over });
+
+describe("which files a client's set holds", () => {
+  it("uses a copy only when a post shows it", () => {
+    // A post in a third color is closer to the stored file: the copy is left out, and kept on record.
+    const none = choose({ posts: [post("stored"), MISSED, null] });
+    expect(none.other).toBeNull();
+    expect(none.white).toBeNull();
+    expect(none.made).toEqual(MADE);
+    expect(none.posts).toEqual({ read: 2, found: 1, shown: { stored: 1, other: 0, white: 0 } });
+    expect(none).toMatchObject({ of: OF, rule: 1, own: "light", both: false, site: null, at: AT });
+
+    const shown = choose({ posts: [post("other"), post("stored"), post("white")] });
+    expect(shown.other).toEqual({ path: MADE.other, from: "made", size: [300, 90] });
+    expect(shown.white).toEqual({ path: MADE.white });
+    expect(shown.posts.shown).toEqual({ stored: 1, other: 1, white: 1 });
+
+    // A copy the rule dropped does not exist, whatever a post says.
+    const dropped = choose({ facts: facts({ made: { other: { turned: 1 }, white: null } }), paths: { ...NO_PATHS, other: MADE.other }, posts: [post("white")] });
+    expect(dropped.white).toBeNull();
+    expect(dropped.made).toEqual({ other: MADE.other, white: null });
+  });
+
+  it("puts a person's file second and the website file after it, and takes a white copy only from the stored file", () => {
+    const person = "c1/design-settings/logo-other-9.png", site = "c1/design-settings/logo-site-bbbb.png";
+    const both = facts({ site: { index: 2, overlap: 0.97, size: { width: 640, height: 190 } }, person: { size: { width: 500, height: 200 } } });
+    // A brand's own file needs no post to show it.
+    const withPerson = choose({ facts: both, paths: { ...MADE, site, person } });
+    expect(withPerson.other).toEqual({ path: person, from: "person", size: [500, 200] });
+    expect(withPerson.site).toBe(site);
+    expect(withPerson.made).toEqual(MADE);
+    expect("person" in withPerson).toBe(false);
+    const withSite = choose({ facts: { ...both, person: null }, paths: { ...MADE, site, person: null } });
+    expect(withSite.other).toEqual({ path: site, from: "site", size: [640, 190] });
+    // The white file is the stored file's white copy, and still needs a post.
+    expect(withSite.white).toBeNull();
+    expect(choose({ facts: { ...both, person: null }, paths: { ...MADE, site, person: null }, posts: [post("white")] }).white).toEqual({ path: MADE.white });
+  });
+});
+
+describe("which file the canvas carries, and on what ground", () => {
+  it("carries the file most found posts show, and the stored file on a tie or with no found post", () => {
+    expect(choose({ posts: [post("other"), post("other"), post("stored")] }).canvas.file).toBe("other");
+    expect(choose({ posts: [post("other"), post("stored")] }).canvas.file).toBe("stored");
+    expect(choose({ posts: [post("white"), post("white"), post("other"), post("other")] }).canvas.file).toBe("other");
+    expect(choose({ posts: [post("white"), post("white"), post("other")] }).canvas.file).toBe("white");
+    expect(choose({ posts: [MISSED, null] }).canvas).toEqual({ file: "stored", ground: "#FAFAFA", from: "settings" });
+  });
+
+  it("takes the most typical ground the canvas file shows on, then the flatter one, then the earlier post", () => {
+    // Five grounds, two of them the same: that one is closest to the others.
+    const five = choose({ posts: [post("other", [59, 56, 73]), post("other", [59, 57, 70]), post("other", [12, 42, 80]), post("other", [15, 41, 76], 0.5), post("other", [15, 41, 76], 0.8)] });
+    expect(five.canvas).toEqual({ file: "other", ground: "#0F294C", from: "client_posts" });
+    // Two grounds at equal sums: the flatter.
+    expect(choose({ posts: [post("other", [10, 20, 30], 0.4), post("other", [40, 20, 30], 0.7)] }).canvas.ground).toBe("#28141E");
+    // Equal flatness: the earlier post.
+    expect(choose({ posts: [post("other", [10, 20, 30], 0.7), post("other", [40, 20, 30], 0.7)] }).canvas.ground).toBe("#0A141E");
+  });
+
+  it("leaves out a ground the canvas file's weakest part does not show on", () => {
+    // White ink does not show on the pale ground two posts have; it does on the third.
+    expect(contrast([255, 255, 255], [199, 171, 134])).toBeLessThan(3);
+    const set = choose({ posts: [post("other", [199, 171, 134]), post("other", [199, 171, 134]), post("other", [42, 100, 200], 0.2)] });
+    expect(set.canvas).toEqual({ file: "other", ground: "#2A64C8", from: "client_posts" });
+    // A file of two inks is held to the weaker one.
+    const twoInks = facts({ inks: { stored: [{ color: [20, 30, 60], share: 0.6 }, { color: [120, 200, 90], share: 0.4 }], other: null, white: null }, made: { other: null, white: null } });
+    expect(contrast([20, 30, 60], [210, 215, 220])).toBeGreaterThan(3);
+    expect(contrast([120, 200, 90], [210, 215, 220])).toBeLessThan(3);
+    expect(choose({ facts: twoInks, paths: NO_PATHS, posts: [post("stored", [210, 215, 220])] }).canvas).toEqual({ file: "stored", ground: "#FAFAFA", from: "settings" });
+  });
+
+  it("falls back to the settings background for the stored file and to a neutral for another file", () => {
+    const pale: Rgb = [240, 240, 240];
+    // The stored file's own posts give no usable ground: the row's background.
+    expect(choose({ posts: [MISSED] }).canvas).toEqual({ file: "stored", ground: "#FAFAFA", from: "settings" });
+    // The white file: the dark neutral.
+    expect(choose({ posts: [post("white", pale)] }).canvas).toEqual({ file: "white", ground: "#0B0E1A", from: "pole" });
+    // The copy of a file made for light: it serves the dark ground.
+    expect(choose({ posts: [post("other", pale)] }).canvas).toEqual({ file: "other", ground: "#0B0E1A", from: "pole" });
+    // The copy of a file made for dark: it serves the light ground.
+    const forDark = facts({ own: "dark", inks: { stored: [{ color: [255, 255, 255], share: 1 }], other: [{ color: [11, 14, 26], share: 1 }], white: null }, made: { other: { turned: 1 }, white: null } });
+    expect(choose({ facts: forDark, paths: { ...NO_PATHS, other: MADE.other }, posts: [post("other", [20, 20, 20])] }).canvas).toEqual({ file: "other", ground: "#FFFFFF", from: "pole" });
+  });
+
+  it("keeps a person's file and background as the canvas, whatever the posts show", () => {
+    const set = choose({ source: "person", background: "#0c1d2f", posts: [post("other"), post("other"), post("white")] });
+    expect(set.canvas).toEqual({ file: "stored", ground: "#0C1D2F", from: "settings" });
+    // The files their posts show are still in the set, so a design drawn that way is recognized.
+    expect(set.other?.from).toBe("made");
+    expect(set.white).toEqual({ path: MADE.white });
+  });
+});
+
+describe("the searches a post gets", () => {
+  it("gives the stored file both grounds when it shows on both, and no second template when nothing serves the other ground", () => {
+    const noCopy = { made: { other: null, white: { turned: 1 } }, inks: { stored: [{ color: [40, 120, 235] as Rgb, share: 1 }], other: null, white: [{ color: [255, 255, 255] as Rgb, share: 1 }] } };
+    const both = postSearchPlan(OF, facts({ own: "dark", both: true, ...noCopy }), { ...NO_PATHS, white: MADE.white });
+    expect(both.searches).toEqual([{ file: "stored", path: OF, ground: [11, 14, 26] }, { file: "stored", path: OF, ground: [255, 255, 255] }]);
+    expect(both.compare).toEqual([{ file: "white", path: MADE.white }]);
+
+    const one = postSearchPlan(OF, facts({ own: "dark", both: false, ...noCopy }), { ...NO_PATHS, white: MADE.white });
+    expect(one.searches).toEqual([{ file: "stored", path: OF, ground: [11, 14, 26] }]);
+
+    // The made copy searches the other ground; a website file comes before it, a person's file before both.
+    expect(postSearchPlan(OF, facts(), { ...NO_PATHS, ...MADE }).searches[1]).toEqual({ file: "other", path: MADE.other, ground: [11, 14, 26] });
+    expect(postSearchPlan(OF, facts(), { ...MADE, site: "c1/s.png", person: null }).searches[1]).toEqual({ file: "other", path: "c1/s.png", ground: [11, 14, 26] });
+    expect(postSearchPlan(OF, facts(), { ...MADE, site: "c1/s.png", person: "c1/p.png" }).searches[1]).toEqual({ file: "other", path: "c1/p.png", ground: [11, 14, 26], fixed: true });
+    expect(postSearchPlan(OF, facts(), NO_PATHS).compare).toEqual([]);
+  });
+});
+
+describe("what a job reads from the set", () => {
+  const row = (set: unknown, over: Record<string, unknown> = {}) => ({ logo_path: OF, background: "#FAFAFA", logo_set: set, ...over });
+  const stored = (over: Partial<LogoSet> = {}): LogoSet => ({
+    of: OF, rule: 1, own: "light", both: false, other: null, white: null, made: { other: null, white: null }, site: null,
+    posts: { read: 0, found: 0, shown: { stored: 0, other: 0, white: 0 } }, canvas: { file: "stored", ground: "#FAFAFA", from: "settings" }, at: AT, ...over,
+  });
+  const made = { path: MADE.other, from: "made" as const, size: [300, 90] as [number, number] };
+
+  it("builds the job's templates, compare list and fixed list from a set", () => {
+    // The copy on the canvas: the stored file covers its own ground second.
+    expect(jobLogos(row(stored({ other: made, canvas: { file: "other", ground: "#0F294C", from: "client_posts" } })))).toEqual({
+      logo_path: MADE.other, background: "#0F294C",
+      logos: { files: { stored: OF, other: MADE.other }, canvas: "other", second: { file: "stored", ground: "#FFFFFF" }, fixed: [] },
+    });
+    // The stored file on the canvas: the copy covers the other ground.
+    expect(jobLogos(row(stored({ other: made })))).toEqual({
+      logo_path: OF, background: "#FAFAFA",
+      logos: { files: { stored: OF, other: MADE.other }, canvas: "stored", second: { file: "other", ground: "#0B0E1A" }, fixed: [] },
+    });
+    // A file that shows on both grounds, with its white copy on the canvas: the stored file covers the light ground.
+    expect(jobLogos(row(stored({ own: "dark", both: true, white: { path: MADE.white }, canvas: { file: "white", ground: "#2A95FD", from: "client_posts" } })))).toEqual({
+      logo_path: MADE.white, background: "#2A95FD",
+      logos: { files: { stored: OF, white: MADE.white }, canvas: "white", second: { file: "stored", ground: "#FFFFFF" }, fixed: [] },
+    });
+    // Nothing serves the light ground: one template.
+    expect(jobLogos(row(stored({ own: "dark", white: { path: MADE.white } })))?.logos).toEqual({ files: { stored: OF, white: MADE.white }, canvas: "stored", second: null, fixed: [] });
+    // The stored file serves both grounds with no other file: it is the second template too, over the neutral its canvas color does not sit on.
+    expect(jobLogos(row(stored({ own: "dark", both: true }), { background: "#101820" }))?.logos.second).toEqual({ file: "stored", ground: "#FFFFFF" });
+    // A person's file is marked.
+    const person = { path: "c1/design-settings/logo-other-9.png", of: OF, at: AT };
+    expect(jobLogos(row(stored({ other: { path: person.path, from: "person", size: [500, 200] }, person })))?.logos).toEqual({
+      files: { stored: OF, other: person.path }, canvas: "stored", second: { file: "other", ground: "#0B0E1A" }, fixed: ["other"],
+    });
+  });
+
+  it("covers the ground a both-grounds file's canvas color sits on, and searches the other one second", () => {
+    const both = (own: "light" | "dark", canvas: LogoSet["canvas"]) => stored({ own, both: true, canvas });
+    const second = (set: LogoSet, over: Record<string, unknown> = {}) => jobLogos(row(set, over))?.logos.second;
+    // A row the lifecycle wrote, its canvas ground from the client's posts: the stored file on white already is the light search.
+    expect(second(both("dark", { file: "stored", ground: "#FFFFFF", from: "client_posts" }))).toEqual({ file: "stored", ground: "#0B0E1A" });
+    // Its canvas ground from the settings, read from the row, in either letter case.
+    expect(second(both("dark", { file: "stored", ground: "#FFFFFF", from: "settings" }), { background: "#FFFFFF" })).toEqual({ file: "stored", ground: "#0B0E1A" });
+    expect(second(both("dark", { file: "stored", ground: "#FFFFFF", from: "settings" }), { background: "#ffffff" })).toEqual({ file: "stored", ground: "#0B0E1A" });
+    expect(second(both("light", { file: "stored", ground: "#0B0E1A", from: "settings" }), { background: "#0B0E1A" })).toEqual({ file: "stored", ground: "#FFFFFF" });
+    // A row a person set: their file on their background.
+    expect(second(both("dark", { file: "stored", ground: "#FFFFFF", from: "settings" }), { source: "person", background: "#ffffff" })).toEqual({ file: "stored", ground: "#0B0E1A" });
+    expect(second(both("light", { file: "stored", ground: "#0B0E1A", from: "settings" }), { source: "person", background: "#0B0E1A" })).toEqual({ file: "stored", ground: "#FFFFFF" });
+    // A ground near a neutral sits on that neutral's side, so the two templates never search one side twice.
+    expect(second(both("dark", { file: "stored", ground: "#FAFAFA", from: "client_posts" }))).toEqual({ file: "stored", ground: "#0B0E1A" });
+    expect(second(both("light", { file: "stored", ground: "#10141F", from: "client_posts" }))).toEqual({ file: "stored", ground: "#FFFFFF" });
+    // With a second file for the ground the stored file was not made for, that file takes that ground.
+    const made2 = { path: MADE.other, from: "made" as const, size: [300, 90] as [number, number] };
+    expect(second({ ...both("dark", { file: "stored", ground: "#0B0E1A", from: "settings" }), other: made2 }, { background: "#0B0E1A" })).toEqual({ file: "other", ground: "#FFFFFF" });
+    expect(second({ ...both("dark", { file: "stored", ground: "#FFFFFF", from: "settings" }), other: made2 }, { background: "#FFFFFF" })).toEqual({ file: "stored", ground: "#0B0E1A" });
+    // No template is ever the first one again: the same file over the same color.
+    for (const own of ["light", "dark"] as const) for (const ground of ["#FFFFFF", "#0B0E1A", "#7F7F7F", "#2A95FD"]) {
+      const job = jobLogos(row(both(own, { file: "stored", ground, from: "client_posts" })))!;
+      expect(job.logos.second).not.toEqual({ file: "stored", ground: job.background });
+    }
+  });
+
+  it("keeps the spec's templates for a file that shows on one ground only, wherever its settings background sits", () => {
+    // Its own ground is light and its settings background is dark: the second file still searches the dark ground.
+    expect(jobLogos(row(stored({ other: { path: MADE.other, from: "made", size: [300, 90] } }), { background: "#1A1A1A" }))?.logos.second).toEqual({ file: "other", ground: "#0B0E1A" });
+    // With no second file there is one template, as before.
+    expect(jobLogos(row(stored(), { background: "#1A1A1A" }))?.logos.second).toBeNull();
+  });
+
+  it("reads a settings background from the row itself, and a person's row always starts from their own file and background", () => {
+    // The canvas ground of a set that came from the settings is the row's background: a background changed since is used at once.
+    expect(jobLogos(row(stored({ other: made }), { background: "#101010" }))).toMatchObject({ logo_path: OF, background: "#101010" });
+    // A ground from the client's posts is the set's own.
+    expect(jobLogos(row(stored({ other: made, canvas: { file: "stored", ground: "#F7E8E5", from: "client_posts" } }), { background: "#101010" }))?.background).toBe("#F7E8E5");
+    // A person's row: their file on their background, whatever the set's canvas says, and the set's files are still carried.
+    const theirs = jobLogos(row(stored({ other: made, canvas: { file: "other", ground: "#0F294C", from: "client_posts" } }), { source: "person", background: "#0c1d2f" }));
+    expect(theirs).toEqual({
+      logo_path: OF, background: "#0C1D2F",
+      logos: { files: { stored: OF, other: MADE.other }, canvas: "stored", second: { file: "other", ground: "#0B0E1A" }, fixed: [] },
+    });
+  });
+
+  it("starts a job with one file when the set belongs to another logo, has another rule, or names a person's file that was removed", () => {
+    expect(jobLogos(row(null))).toBeNull();
+    expect(jobLogos(row(undefined))).toBeNull();
+    expect(jobLogos(row("x"))).toBeNull();
+    expect(jobLogos(row(stored(), { logo_path: "c1/another.png" }))).toBeNull();
+    expect(jobLogos(row({ ...stored(), rule: 2 }))).toBeNull();
+    expect(jobLogos(row(stored({ canvas: { file: "other", ground: "#0F294C", from: "client_posts" } })))).toBeNull();
+    expect(jobLogos(row(stored({ canvas: { file: "stored", ground: "blue", from: "settings" } })))).toBeNull();
+    const person = { path: "c1/design-settings/logo-other-9.png", from: "person" as const, size: [500, 200] as [number, number] };
+    // Removed: the row's person key is gone, the set still names the file until it is settled again.
+    expect(jobLogos(row(stored({ other: person })))).toBeNull();
+    // Put beside another main logo.
+    expect(jobLogos(row(stored({ other: person, person: { path: person.path, of: "c1/older.png", at: AT } })))).toBeNull();
+    // Replaced by another file.
+    expect(jobLogos(row(stored({ other: person, person: { path: "c1/design-settings/logo-other-10.png", of: OF, at: AT } })))).toBeNull();
+    expect(jobLogos(row(stored()))).not.toBeNull();
+  });
+});

@@ -380,6 +380,63 @@ export function logoOnPage(html: string, baseUrl: string): LogoFound {
   return null;
 }
 
+/**
+ * The other logo files a page shows, for a brand's own second logo (the
+ * logo in the tone its main file was not made for, 16 Nov 2026). Looked at,
+ * in this order: the first <header>, the first <nav> outside it, the first
+ * <footer>. Inside each, in page order: every <img> whose class, alt, id or
+ * source says "logo" in any letter case, and the header's first <img>
+ * whatever it is called (the element logoOnPage already trusts); and every
+ * inline <svg> whose class, aria-label or id says "logo", under 200,000
+ * characters and with something drawn in it. Addresses are made absolute and
+ * repeats are dropped. Logos in the body of a page are left out, as in
+ * logoOnPage: they are usually the press and client logos a brand shows off.
+ * Reads only the page it is given: nothing is fetched and no model is asked.
+ * Whether any of these files is the client's logo is decided elsewhere, by
+ * comparing it with the stored one (_shared/design/logoTone.ts, sameLogo).
+ */
+export function logoFilesOnPage(html: string, baseUrl: string): Array<{ url: string } | { svg: string }> {
+  const abs = (u: string) => resolveUrl(u.replace(/\\\//g, "/").replace(/&amp;/g, "&").replace(/\\u0026/g, "&"), baseUrl);
+  const header = /<header\b[\s\S]*?<\/header>/i.exec(html);
+  const inHeader = (at: number) => !!header && at >= header.index && at < header.index + header[0].length;
+  let nav: string | null = null;
+  for (const m of html.matchAll(/<nav\b[\s\S]*?<\/nav>/gi)) {
+    if (!inHeader(m.index ?? 0)) { nav = m[0]; break; }
+  }
+  const footer = html.match(/<footer\b[\s\S]*?<\/footer>/i)?.[0] ?? null;
+  const found: Array<{ url: string } | { svg: string }> = [];
+  const seen = new Set<string>();
+  const add = (key: string, file: { url: string } | { svg: string }) => {
+    if (seen.has(key)) return;
+    seen.add(key);
+    found.push(file);
+  };
+  const says = (text: string) => /logo/i.test(text);
+  for (const [section, isHeader] of [[header?.[0] ?? null, true], [nav, false], [footer, false]] as const) {
+    if (!section) continue;
+    let firstImg = isHeader;
+    for (const m of section.matchAll(/<img\b[^>]*>|<svg\b[\s\S]*?<\/svg>/gi)) {
+      const tag = m[0];
+      if (/^<img/i.test(tag)) {
+        const first = firstImg;
+        firstImg = false;
+        const src = imgSource(tag);
+        if (!src) continue;
+        const marked = [...tag.matchAll(/\s(?:class|alt|id)=["']([^"']*)["']/gi)].some((a) => says(a[1])) || says(src);
+        if (!first && !marked) continue;
+        const url = abs(src);
+        add(`url:${url}`, { url });
+      } else {
+        const open = tag.match(/^<svg\b[^>]*>/i)?.[0] ?? "";
+        const marked = [...open.matchAll(/\s(?:class|aria-label|id)=["']([^"']*)["']/gi)].some((a) => says(a[1]));
+        if (!marked || tag.length >= 200_000 || !/<(?:path|text|polygon|rect|circle|g)\b/i.test(tag)) continue;
+        add(`svg:${tag}`, { svg: tag });
+      }
+    }
+  }
+  return found;
+}
+
 /** An <img>'s source: src, else the first srcset entry. Data URLs are left out. */
 function imgSource(tag: string): string | null {
   const src = tag.match(/\ssrc=["']([^"']+)["']/i)?.[1] ?? tag.match(/\ssrcset=["']([^"'\s,]+)/i)?.[1] ?? null;

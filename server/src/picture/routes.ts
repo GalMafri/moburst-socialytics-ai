@@ -1,9 +1,10 @@
 // server/src/picture/routes.ts
 //
-// The six picture routes (12 Nov 2026), mounted at PICTURE_API_BASE behind
-// the door (app.ts). Every call has one shape: check the body, read and
-// decode its pictures from storage, run the operation, encode and store the
-// outputs, answer. A body that is not well formed answers 400 naming its
+// The eight picture routes (canvas, locate, read, finish, transcode,
+// title-read since 12 Nov 2026; logo-set and post-logos since 16 Nov),
+// mounted at PICTURE_API_BASE behind the door (app.ts). Every call has one
+// shape: check the body, read and decode its pictures from storage, run the
+// operation, encode and store the outputs, answer. A body that is not well formed answers 400 naming its
 // first bad field; storage that cannot give or take a picture right now (a
 // network error, a 429 or a 5xx) answers 503 with the reason, so the
 // worker's retry covers it and the job waits; a picture storage refuses (a
@@ -18,11 +19,13 @@
 import { Hono } from "hono";
 import type { z } from "zod";
 import { READ_JPEG_QUALITY, type PictureRoute, type PictureResults, type Size } from "../../../supabase/functions/_shared/picture/contract.ts";
+import type { CompareIn, TemplateIn } from "../../../supabase/functions/_shared/design/logoTone.ts";
 import type { Log } from "../log.ts";
 import { fetchBytes, putBytes, StorageError, type Fetcher } from "../storage.ts";
 import { generationCanvas } from "./canvas.ts";
 import { finishPicture } from "./finish.ts";
 import { locateLogo } from "./locate.ts";
+import { locateTemplates, logoSet, postLogo, UnusableLogo } from "./tone.ts";
 import { decodeRaster, encodeJpeg, encodePng, type Raster } from "./raster.ts";
 import { readPictures } from "./read.ts";
 import { pictureSchemas } from "./schemas.ts";
@@ -44,6 +47,8 @@ const READ_JPEG: Encoding = { type: "jpeg", quality: READ_JPEG_QUALITY };
 /** Reads inputs and writes outputs for one call, noting each size for the log line. */
 type Io = {
   input(name: string, url: string): Promise<Raster>;
+  /** A picture the call can do without: null when storage refuses it (a missing or expired file) or its bytes are not a picture. Storage that cannot answer right now still fails the call, so the caller's retry covers it. */
+  maybe(name: string, url: string): Promise<Raster | null>;
   output(name: string, url: string, picture: Raster, encoding: Encoding): Promise<number>;
 };
 
@@ -66,7 +71,7 @@ function metaOf(raw: unknown): { job?: unknown; step?: unknown } {
 
 export function pictureRoutes(deps: PictureRouteDeps): Hono {
   const { fetchImpl, log, now, storageTimeoutMs } = deps;
-  const { canvasBody, finishBody, locateBody, readBody, titleReadBody, transcodeBody } = pictureSchemas(deps.storage);
+  const { canvasBody, finishBody, locateBody, logoSetBody, postLogosBody, readBody, titleReadBody, transcodeBody } = pictureSchemas(deps.storage);
   const app = new Hono();
 
   function route<S extends z.ZodType, R extends PictureRoute>(name: R, schema: S, work: (body: z.output<S>, io: Io) => Promise<PictureResults[R]>): void {
@@ -107,6 +112,14 @@ export function pictureRoutes(deps: PictureRouteDeps): Hono {
           sizesIn[inputName] = `${picture.width}x${picture.height}`;
           return picture;
         },
+        async maybe(inputName, url) {
+          try {
+            return await io.input(inputName, url);
+          } catch (err) {
+            if (err instanceof Refusal || (err instanceof StorageError && !err.transient)) return null;
+            throw err;
+          }
+        },
         async output(outputName, url, picture, encoding) {
           const bytes = encoding.type === "png" ? await encodePng(picture) : await encodeJpeg(picture, encoding.quality);
           await putBytes(url, bytes, encoding.type === "png" ? "image/png" : "image/jpeg", fetchImpl, limit);
@@ -120,7 +133,7 @@ export function pictureRoutes(deps: PictureRouteDeps): Hono {
         return answer(200, { ok: true, result });
       } catch (err) {
         if (err instanceof StorageError) return answer(err.transient ? 503 : 200, { ok: false, reason: err.message });
-        if (err instanceof Refusal) return answer(200, { ok: false, reason: err.message });
+        if (err instanceof Refusal || err instanceof UnusableLogo) return answer(200, { ok: false, reason: err.message });
         return answer(500, { ok: false, reason: NOT_FINISHED }, { error: err instanceof Error ? err.message : String(err) });
       }
     });
@@ -136,8 +149,17 @@ export function pictureRoutes(deps: PictureRouteDeps): Hono {
 
   route("locate", locateBody, async (body, io) => {
     const design = await io.input("design", body.design);
-    const logo = await io.input("logo", body.logo);
-    return locateLogo(design, logo, body.placement, body.background, body.scales);
+    // A job with one file: answered exactly as before.
+    if (body.logo !== undefined && body.background !== undefined) {
+      const logo = await io.input("logo", body.logo);
+      return locateLogo(design, logo, body.placement, body.background, body.scales);
+    }
+    // A job that carries a logo set: one or two templates, and the files to compare by color.
+    const templates: TemplateIn[] = [];
+    for (const [i, t] of (body.templates ?? []).entries()) templates.push({ file: t.file, raster: await io.input(`template${i}`, t.logo), ground: t.ground, fixed: t.fixed });
+    const compare: CompareIn[] = [];
+    for (const c of body.compare ?? []) compare.push({ file: c.file, raster: await io.input(`compare.${c.file}`, c.logo) });
+    return locateTemplates(design, templates, compare, body.placement, body.scales);
   });
 
   route("read", readBody, async (body, io) => {
@@ -176,6 +198,33 @@ export function pictureRoutes(deps: PictureRouteDeps): Hono {
     const { box, read } = titleRead(layer);
     if (read) await io.output("out", body.out, read, READ_JPEG);
     return { layer: sizeOf(layer), box, read: read ? sizeOf(read) : null };
+  });
+
+  route("logo-set", logoSetBody, async (body, io) => {
+    const logo = await io.input("logo", body.logo);
+    const site: Array<Raster | null> = [];
+    for (const [i, link] of (body.site ?? []).entries()) site.push(await io.maybe(`site${i}`, link));
+    // A person's second file that cannot be read is left out like a website file: the set is made without it.
+    const person = body.person ? await io.maybe("person", body.person) : null;
+    const made = logoSet(logo, site, person);
+    // A copy the rule dropped is the stored file again: nothing is written for it.
+    if (made.other) await io.output("other", body.out.other, made.other, PNG);
+    if (made.white) await io.output("white", body.out.white, made.white, PNG);
+    return made.result;
+  });
+
+  route("post-logos", postLogosBody, async (body, io) => {
+    const searches: TemplateIn[] = [];
+    for (const [i, t] of body.searches.entries()) searches.push({ file: t.file, raster: await io.input(`search${i}`, t.logo), ground: t.ground, fixed: t.fixed });
+    const compare: CompareIn[] = [];
+    for (const c of body.compare) compare.push({ file: c.file, raster: await io.input(`compare.${c.file}`, c.logo) });
+    // One post at a time, so only one is decoded at once. A post that cannot be read is null in its place.
+    const posts: PictureResults["post-logos"]["posts"] = [];
+    for (const [i, link] of body.posts.entries()) {
+      const post = await io.maybe(`post${i}`, link);
+      posts.push(post ? postLogo(post, searches, compare, body.placement, body.scales) : null);
+    }
+    return { posts };
   });
 
   return app;

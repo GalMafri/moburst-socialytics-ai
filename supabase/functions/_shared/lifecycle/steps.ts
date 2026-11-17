@@ -33,7 +33,7 @@ import { defaultSproutCustomerId } from "../sprout/customer.ts";
 import { listCustomerProfiles } from "../sprout/profiles.ts";
 import { listBrandPosts, MAX_POST_PAGES, POSTS_YEAR_DAYS } from "../sprout/posts.ts";
 import { searchWebsite, searchWebsiteByName, statedWebsite, webReader } from "../sprout/website.ts";
-import { fetchSiteHtml, logoOnPage, normalizeWebsite, openaiKeyFor, ResearchError, researchBrand } from "../brand/research.ts";
+import { fetchSiteHtml, logoFilesOnPage, logoOnPage, normalizeWebsite, openaiKeyFor, ResearchError, researchBrand } from "../brand/research.ts";
 import { anthropicKey, briefFromStrategyDoc, derivePillars, isGenericPillars, pageEvidence, PillarsError, type PillarClient, type PillarPost } from "../brand/pillars.ts";
 import { fetchSiteText, identifyCompetitors, IdentifyError } from "../competitive/identify.ts";
 import { detectCompetitorHandles } from "../competitive/detectHandles.ts";
@@ -46,7 +46,7 @@ import { followerMarkets, pageOf, runSocialRead, socialResult, socialVersionKey,
 import { liveSocialIO } from "./socialIO.ts";
 import { linksTo, siteLinkSet } from "./siteLinks.ts";
 import { matchProfiles, platformsOf, profileKeyOf, profileListKey, siteProfileLinks, type SproutProfile } from "./accounts.ts";
-import { libraryPaths, MAX_REFS, pickBackground, placementFor } from "./designSettings.ts";
+import { libraryPaths, MAX_REFS, personKey, personOther, pickBackground, placementFor, storedSpotRead, toneKeyTail, type LogoSpot, type Placement } from "./designSettings.ts";
 import { referencesFor } from "../design-prompts/designRefs.ts";
 import { lifecycleMayWrite, setBy, sourceOf, writeClientFields } from "./fields.ts";
 import { parentPageFor, sameSiteClient } from "./parentPage.ts";
@@ -64,6 +64,10 @@ import { advancePublicRead, POLL_MINUTES } from "../strategy/publicRead.ts";
 import { desiredProfiles, profileInputs, profilesKey, syncProfiles } from "../strategy/profiles.ts";
 import { apifyClient, APIFY_TOKEN_ENV } from "../apify/client.ts";
 import type { StepOutcome, StepPolicy, StepRow } from "./policy.ts";
+import { PictureError } from "../picture/client.ts";
+import type { LogoSetResult, PostLogo } from "../picture/contract.ts";
+import { chooseSet, postSearchPlan, TONE_RULE, type SetPaths } from "../design/logoTone.ts";
+import { askLogoSet, askPostLogos, liveIo, POSTS_PER_CALL, type PictureIo } from "../design/logoSetWork.ts";
 import { clipText } from "../text/clip.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -80,6 +84,9 @@ export const CLIENT_COLUMNS = [
   // The day a new look began in the client's posts (design_refs): brand_read reads the site again for it.
   "look_since:design_style_synthesis->look_change->>since",
 ].join(", ");
+
+/** The most other logo files kept from a client's website (brand_read), and so the most the picture service is sent for one logo set. */
+export const MAX_SITE_LOGOS = 6;
 
 export interface StepContext {
   force: boolean;
@@ -130,6 +137,8 @@ export const deps = {
   syncTrackedHandles,
   refsIO: () => liveRefsIO(),
   imaging: () => import("./imaging.ts"),
+  /** The picture service, for a client's logo set (design_settings). */
+  picture: (db: Db): PictureIo => liveIo(db),
   claudeMessages: anthropicMessages,
   trendIO: (): ProfileIO => ({
     ownPosts: (db, client, snapshots, now) => ownPosts(db, client, snapshots, now),
@@ -281,6 +290,223 @@ async function notNowPlatforms(db: Db, clientId: string): Promise<string[]> {
 }
 
 /** Steps in the order a new client goes through them. */
+// ── design_settings: the settings, and the client's logo set ────────────────
+
+/** A client's design settings row, as the design_settings step reads it. */
+interface SettingsRow {
+  source: string;
+  logo_path: string;
+  placement: Placement;
+  background: string;
+  reference_paths: string[];
+  derived?: Record<string, unknown> | null;
+  logo_set?: unknown;
+}
+const SETTINGS_COLUMNS = "source, logo_path, placement, background, reference_paths, derived, logo_set";
+
+/**
+ * The step's work on a client's logo set, kept in its result between runs so
+ * nothing is asked twice: the logo the work is for, the stored path of each
+ * of the website's logo files by its address (null for one that could not be
+ * fetched or converted), what the service answered about the files with a
+ * signature of what it was asked with, and what each post gave with a
+ * signature of what it was searched with. A changed signature asks again.
+ */
+interface ToneWork {
+  of: string;
+  hash?: string;
+  site: Record<string, string | null>;
+  asked?: string;
+  facts?: LogoSetResult;
+  paths?: SetPaths;
+  searched?: string;
+  posts: Record<string, PostLogo | null>;
+  /** How many posts the next read holds: fewer than POSTS_PER_CALL after a read the service did not answer in time. */
+  batch?: number;
+  settled?: string;
+  unusable?: string;
+  ms?: { logo_set?: number; post_logos?: number };
+}
+
+function toneWork(result: Record<string, unknown> | null | undefined): ToneWork | null {
+  const t = result?.tone as Partial<ToneWork> | null | undefined;
+  if (!t || typeof t !== "object" || typeof t.of !== "string") return null;
+  return { ...t, of: t.of, site: t.site && typeof t.site === "object" ? t.site : {}, posts: t.posts && typeof t.posts === "object" ? t.posts : {} };
+}
+
+/** The parts of a lifecycle row's key the read of the logo's spot depends on (designSettings.ts, readInputs). */
+function spotInputs(client: ClientRow, refs: StepRow | undefined): string {
+  return `refs:${refs?.result?.synthesized_at ?? refs?.done_at}|logo:${client.logo_url}`;
+}
+
+function samePlacement(a: Placement | null | undefined, b: Placement): boolean {
+  return !!a && a.anchor === b.anchor && a.width === b.width && a.top === b.top && (a.left ?? null) === (b.left ?? null);
+}
+
+/** The settings keys of the step's result, as they were before the logo set. */
+const SETTINGS_KEYS = ["written", "logo_path", "placement", "placement_from", "background", "background_from", "references"] as const;
+function settingsOf(result: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  return Object.fromEntries(SETTINGS_KEYS.filter((k) => result && k in result).map((k) => [k, result![k]]));
+}
+
+/**
+ * The settings of a row the lifecycle writes: the logo file, where the
+ * client's posts put it, the background from the brand colors, written
+ * through lifecycle_write_design_settings as before. The read of the logo's
+ * spot is the one paid model call here, and a stored read that is current
+ * for the client's posts and logo is reused (designSettings.ts,
+ * storedSpotRead), so the model, and its key, are asked for only when a read
+ * is needed. The date the settings were derived on moves only when
+ * something in them did.
+ */
+async function writeDesignSettings(db: Db, client: ClientRow, ctx: StepContext, existing: SettingsRow | null): Promise<{ outcome: StepOutcome } | { row: SettingsRow; settings: Record<string, unknown> }> {
+  const imaging = await deps.imaging();
+  const logo = await imaging.logoPng(db, client.id, String(client.logo_url));
+  if (!logo) return { outcome: { status: "waiting", reason: "logo_file", result: { logo_url: client.logo_url } } };
+  // Where the client's own posts put the logo, read from its posts, not its uploads.
+  const posts = referencesFor([], (Array.isArray(client.harvested_design_references) ? client.harvested_design_references : []).filter((r: { upload?: boolean }) => !r?.upload), MAX_REFS, null);
+  const inputs = spotInputs(client, ctx.rows.get("design_refs"));
+  const kept = storedSpotRead(existing, ctx.rows.get("design_settings") ?? null, inputs);
+  let spot: LogoSpot | null = null;
+  if (kept) spot = kept.read;
+  else if (posts.length) {
+    const key = await deps.anthropicKey(db);
+    if (!key) return { outcome: { status: "failed", error: "The AI connection is not configured." } };
+    spot = await imaging.readLogoSpot(db, client.name, posts, key);
+  }
+  const { placement, from } = placementFor(spot, logo.width / Math.max(1, logo.height));
+  const b = client.brand_identity ?? {};
+  const background = pickBackground([b.primary_color, b.secondary_color, b.accent_color], logo.ink);
+  const paths = libraryPaths(client.design_references, client.harvested_design_references);
+  const unchanged = !!kept && existing?.logo_path === logo.path && existing.background === background.hex && samePlacement(existing.placement, placement);
+  const at = unchanged && typeof existing?.derived?.at === "string" ? existing.derived.at : deps.now().toISOString();
+  const derived = { logo_from: client.logo_url, logo_file: logo.converted, placement_from: from, logo_read: spot, logo_read_for: inputs, background_from: background.from, at };
+  const { data: wrote, error: writeError } = await db.rpc("lifecycle_write_design_settings", {
+    p_client: client.id, p_logo_path: logo.path, p_placement: placement, p_background: background.hex, p_reference_paths: paths, p_derived: derived,
+  });
+  if (writeError) throw new Error(`Could not save the design settings: ${writeError.message}`);
+  const settings = { written: wrote === true, logo_path: logo.path, placement, placement_from: from, background: background.hex, background_from: background.from, references: paths.length };
+  // A person's row appeared in between: it is theirs, and this run ends as it always did.
+  if (wrote !== true) return { outcome: { status: "done", result: settings } };
+  return { row: { source: "lifecycle", logo_path: logo.path, placement, background: background.hex, reference_paths: paths.slice(0, MAX_REFS), logo_set: existing?.logo_set ?? null }, settings };
+}
+
+/**
+ * The client's logo set, made from its stored logo and its own posts with
+ * no model call (spec: docs/superpowers/specs/2026-11-16-logo-tone-design.md,
+ * section 4). In order, each part kept between runs:
+ *   the website's other logo files, converted like the main logo, one to a
+ *     run (each decodes an image here);
+ *   the files: one logo-set call makes the two recolored copies and tests
+ *     the website files;
+ *   the posts: post-logos calls, four posts to a call, one call to a run;
+ *   the choice (chooseSet), and its write, which holds only while the logo
+ *     and a person's second file are what this run read.
+ * While work remains the step waits a minute and is looked at again, so no
+ * run holds more than one such call. A service that is unavailable is a
+ * quiet wait of ten minutes, and the next read of posts then holds half as
+ * many, down to one; a call it refuses is a failure with the
+ * lifecycle's own backoff; a logo it cannot use ends the step with no set.
+ * In every case designs start with the one file, as before, until a set is
+ * settled. `settings` are the result keys the step always had.
+ */
+async function settleLogoSet(db: Db, client: ClientRow, ctx: StepContext, row: SettingsRow, settings: Record<string, unknown>): Promise<StepOutcome> {
+  const same = toneWork(ctx.previous?.result);
+  const kept = same ?? toneWork(ctx.rows.get("design_settings")?.result);
+  const tone: ToneWork = { of: row.logo_path, hash: kept?.hash, site: {}, asked: kept?.asked, facts: kept?.facts, paths: kept?.paths, searched: kept?.searched, posts: { ...(kept?.posts ?? {}) }, ms: kept?.ms };
+  // A smaller read is kept only while the inputs stay the same; new inputs start from four posts again.
+  if (same?.batch) tone.batch = same.batch;
+  const result = () => ({ ...settings, tone });
+  const wait = (): StepOutcome => ({ status: "waiting", reason: "in_progress", recheckMinutes: 1, result: result() });
+
+  // The website's other logo files. A file that could not be fetched is tried again when the step's inputs next change, never while they stay the same.
+  const listed = ctx.rows.get("brand_read")?.result?.logo_files;
+  const addresses: string[] = (Array.isArray(listed) ? listed : []).filter((a): a is string => typeof a === "string" && !!a).slice(0, MAX_SITE_LOGOS);
+  for (const a of addresses) {
+    const path = kept?.site[a];
+    if (typeof path === "string" || (path === null && same)) tone.site[a] = path;
+  }
+  const unconverted = addresses.filter((a) => !(a in tone.site));
+  if (unconverted.length) {
+    const imaging = await deps.imaging();
+    try {
+      tone.site[unconverted[0]] = (await imaging.logoPng(db, client.id, unconverted[0]))?.path ?? null;
+    } catch {
+      tone.site[unconverted[0]] = null;
+    }
+    if (unconverted.length > 1) return wait();
+  }
+  const sitePaths = [...new Set(addresses.map((a) => tone.site[a]).filter((p): p is string => !!p && p !== row.logo_path))];
+
+  const person = personOther(row);
+  const refs = (Array.isArray(row.reference_paths) ? row.reference_paths : []).slice(0, MAX_REFS);
+  const io = deps.picture(db);
+  try {
+    // The files.
+    const asked = JSON.stringify([row.logo_path, sitePaths, person?.path ?? null, TONE_RULE]);
+    if (tone.asked !== asked || !tone.facts || !tone.paths) {
+      const hash = await (await deps.imaging()).fileHash(db, row.logo_path);
+      const out = { other: `${client.id}/design-settings/logo-${hash}-other.png`, white: `${client.id}/design-settings/logo-${hash}-white.png` };
+      const { facts, ms } = await askLogoSet(io, { clientId: client.id, logoPath: row.logo_path, site: sitePaths, person: person?.path ?? null, out });
+      tone.hash = hash;
+      tone.asked = asked;
+      tone.facts = facts;
+      tone.paths = {
+        other: facts.made.other ? out.other : null,
+        white: facts.made.white ? out.white : null,
+        site: facts.site ? sitePaths[facts.site.index] ?? null : null,
+        person: facts.person ? person?.path ?? null : null,
+      };
+      tone.ms = { ...(tone.ms ?? {}), logo_set: ms };
+    }
+    // The posts.
+    const plan = postSearchPlan(row.logo_path, tone.facts, tone.paths);
+    const searched = JSON.stringify([plan, [row.placement.anchor, row.placement.width, row.placement.top, row.placement.left ?? null], TONE_RULE]);
+    if (tone.searched !== searched) {
+      tone.searched = searched;
+      tone.posts = {};
+    }
+    tone.posts = Object.fromEntries(refs.filter((p) => p in tone.posts).map((p) => [p, tone.posts[p]]));
+    const unread = refs.filter((p) => !(p in tone.posts));
+    if (unread.length) {
+      const batch = unread.slice(0, Math.min(POSTS_PER_CALL, Math.max(1, tone.batch ?? POSTS_PER_CALL)));
+      const { posts, ms } = await askPostLogos(io, { clientId: client.id, posts: batch, placement: row.placement, plan });
+      batch.forEach((p, i) => { tone.posts[p] = posts[i] ?? null; });
+      // A batch with no post left in storage made no call, and has no time to keep.
+      if (ms) tone.ms = { ...(tone.ms ?? {}), post_logos: ms };
+      if (unread.length > batch.length) return wait();
+    }
+  } catch (e) {
+    if (!(e instanceof PictureError)) throw e;
+    if (e.why === "unavailable") {
+      // A read of posts the service did not answer in time is asked again with half as many posts, down to one,
+      // so a slow service or a logo that is slow to search for still gets its set, with nobody changing anything.
+      if (e.route === "post-logos") tone.batch = Math.max(1, Math.floor((tone.batch ?? POSTS_PER_CALL) / 2));
+      return { status: "waiting", reason: "picture_service", recheckMinutes: 10, result: result() };
+    }
+    // The service ran and could not use the stored logo (its pixels cannot be read, or it has no ink): no set, and designs run with the one file.
+    if (e.why === "unusable" && e.route === "logo-set") {
+      tone.unusable = e.message;
+      return { status: "done", result: result() };
+    }
+    return { status: "failed", error: e.message };
+  }
+
+  // The choice, and its write.
+  const set = chooseSet({
+    of: row.logo_path, source: row.source === "person" ? "person" : "lifecycle", background: row.background,
+    facts: tone.facts, paths: tone.paths, posts: refs.map((p) => tone.posts[p] ?? null), at: deps.now().toISOString(),
+  });
+  const { data: settled, error } = await db.rpc("settle_design_logo_set", {
+    p_client: client.id, p_of: row.logo_path, p_person: (row.logo_set as { person?: unknown } | null | undefined)?.person ?? null, p_set: set,
+  });
+  if (error) throw new Error(`Could not save the logo set: ${error.message}`);
+  // The logo or a person's second file changed while the set was being made: theirs wins, and the next look reads the row again.
+  if (settled !== true) return wait();
+  tone.settled = set.at;
+  return { status: "done", result: result() };
+}
+
 export const STEPS: Record<string, StepDef> = {
   // A website for a client that has none and that nobody set (spec:
   // docs/superpowers/specs/2026-11-02-sprout-auto-onboarding-design.md,
@@ -434,6 +660,27 @@ export const STEPS: Record<string, StepDef> = {
         }
         if (url && url !== str(client.logo_url)) fields.logo_url = url;
       }
+      // The other logo files the page shows (a brand's own logo for the ground its main file was not made for),
+      // from the page already read: nothing more is fetched and no model is asked. The main logo is left out,
+      // at most six are kept, and an inline SVG is stored so it has an address. The design_settings step
+      // decides whether any of them is the client's logo (_shared/design/logoTone.ts, sameLogo).
+      const logoFiles: string[] = [];
+      if (!textOnly) {
+        const main = str(fields.logo_url) || str(client.logo_url);
+        for (const file of logoFilesOnPage(page.html, new URL(website).origin)) {
+          if (logoFiles.length >= MAX_SITE_LOGOS) break;
+          let url: string | null = null;
+          if ("url" in file) url = file.url;
+          else {
+            const path = `${client.id}/brand/logo-site-${textHash(file.svg)}.svg`;
+            const address = db.storage.from("generated-media").getPublicUrl(path).data.publicUrl;
+            if (address === main || logoFiles.includes(address)) continue;
+            const { error } = await db.storage.from("generated-media").upload(path, new TextEncoder().encode(file.svg), { contentType: "image/svg+xml", upsert: true });
+            if (!error) url = address;
+          }
+          if (url && url !== main && !logoFiles.includes(url)) logoFiles.push(url);
+        }
+      }
       const stored = client.location && typeof client.location === "object" ? client.location : null;
       const better = !textOnly && replacesLocation(stored, { source: location.source, website: key });
       if (better) {
@@ -456,6 +703,7 @@ export const STEPS: Record<string, StepDef> = {
           timezone: textOnly ? null : location.timezone, timezone_source: textOnly ? null : location.source, country, language,
           logo: logo ? ("url" in logo ? "file" : "inline_svg") : "none",
           written: written.written, kept: written.skipped,
+          logo_files: logoFiles,
           // The profiles the homepage links to, for the accounts step; another client's, on a page of its site.
           site_profiles: textOnly ? [] : siteProfileLinks(page.html),
           ...(textOnly ? { parent_page: true } : {}),
@@ -1036,42 +1284,42 @@ export const STEPS: Record<string, StepDef> = {
   // (confirmed_by null). Designs are made only when someone asks: a post's
   // own button or the week's design button (Lital, 2 Nov; the automatic
   // designs are gone). Settings a person confirmed or changed are never
-  // replaced.
+  // replaced: the row keeps its logo, placement, background and date, and
+  // only its logo set is made (owner decision 2, 16 Nov 2026).
+  //
+  // The same step then makes the client's logo set (16 Nov 2026): the logo
+  // files for light and dark pictures and what a design starts from, from
+  // the stored logo and the client's own posts, with no model call. Its key
+  // ends in the website's other logo files, a person's second file and the
+  // version of the tone rule, so the set follows each of them and every
+  // client gets one with nobody doing anything.
   design_settings: {
     policy: {},
     async inputs(db, client, rows) {
       const refs = rows.get("design_refs");
+      const site = rows.get("brand_read")?.result?.logo_files;
+      const { data, error } = await db.from("design_brand_settings").select("source, logo_path, placement, logo_set").eq("client_id", client.id).maybeSingle();
+      if (error) throw new Error(`Could not read the design settings: ${error.message}`);
+      // A row a person set has its logo, its place and its posts already: it waits for nothing (owner decision 2).
+      if (data?.source === "person") return personKey(data, String(refs?.result?.synthesized_at ?? refs?.done_at ?? ""), site);
       if (!refs || !refs.done_at) return null;
       if (!str(client.logo_url)) return null;
       if (!libraryPaths(client.design_references, client.harvested_design_references).length) return null;
-      const { data, error } = await db.from("design_brand_settings").select("source").eq("client_id", client.id).maybeSingle();
-      if (error) throw new Error(`Could not read the design settings: ${error.message}`);
-      if (data?.source === "person") return "person";
       const b = client.brand_identity ?? {};
-      return `refs:${refs.result?.synthesized_at ?? refs.done_at}|logo:${client.logo_url}|colors:${[b.primary_color, b.secondary_color, b.accent_color].join(",")}`;
+      return `${spotInputs(client, refs)}|colors:${[b.primary_color, b.secondary_color, b.accent_color].join(",")}${toneKeyTail(site, data)}`;
     },
-    async run(db, client) {
-      const { data: existing, error } = await db.from("design_brand_settings").select("source").eq("client_id", client.id).maybeSingle();
+    async run(db, client, ctx) {
+      const { data: existing, error } = await db.from("design_brand_settings").select(SETTINGS_COLUMNS).eq("client_id", client.id).maybeSingle();
       if (error) throw new Error(`Could not read the design settings: ${error.message}`);
-      if (existing?.source === "person") return { status: "done", result: { kept: "person" } };
-      const key = await deps.anthropicKey(db);
-      if (!key) return { status: "failed", error: "The AI connection is not configured." };
-      const imaging = await deps.imaging();
-      const logo = await imaging.logoPng(db, client.id, String(client.logo_url));
-      if (!logo) return { status: "waiting", reason: "logo_file", result: { logo_url: client.logo_url } };
-      // Where the client's own posts put the logo, read from its posts, not its uploads.
-      const posts = referencesFor([], (Array.isArray(client.harvested_design_references) ? client.harvested_design_references : []).filter((r: { upload?: boolean }) => !r?.upload), MAX_REFS, null);
-      const spot = posts.length ? await imaging.readLogoSpot(db, client.name, posts, key) : null;
-      const { placement, from } = placementFor(spot, logo.width / Math.max(1, logo.height));
-      const b = client.brand_identity ?? {};
-      const background = pickBackground([b.primary_color, b.secondary_color, b.accent_color], logo.ink);
-      const paths = libraryPaths(client.design_references, client.harvested_design_references);
-      const derived = { logo_from: client.logo_url, logo_file: logo.converted, placement_from: from, logo_read: spot, background_from: background.from, at: deps.now().toISOString() };
-      const { data: wrote, error: writeError } = await db.rpc("lifecycle_write_design_settings", {
-        p_client: client.id, p_logo_path: logo.path, p_placement: placement, p_background: background.hex, p_reference_paths: paths, p_derived: derived,
-      });
-      if (writeError) throw new Error(`Could not save the design settings: ${writeError.message}`);
-      return { status: "done", result: { written: wrote === true, logo_path: logo.path, placement, placement_from: from, background: background.hex, background_from: background.from, references: paths.length } };
+      // A row a person set: its logo file, placement, background and date are theirs and are never written.
+      // The set is made from their file and their posts by the same rule, and stored beside them.
+      if (existing?.source === "person") return settleLogoSet(db, client, ctx, existing as SettingsRow, { kept: "person" });
+      // The settings, unless an earlier run on these same inputs wrote them for the logo the row still names.
+      const before = toneWork(ctx.previous?.result);
+      if (existing && before && before.of === existing.logo_path) return settleLogoSet(db, client, ctx, existing as SettingsRow, settingsOf(ctx.previous?.result));
+      const made = await writeDesignSettings(db, client, ctx, (existing ?? null) as SettingsRow | null);
+      if ("outcome" in made) return made.outcome;
+      return settleLogoSet(db, client, ctx, made.row, made.settings);
     },
   },
 

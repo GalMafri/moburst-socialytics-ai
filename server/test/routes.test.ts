@@ -1,7 +1,7 @@
 // @vitest-environment node
 // server/test/routes.test.ts
 //
-// The six picture routes end to end (12 Nov 2026): each call goes through
+// The picture routes end to end (12 Nov 2026; eight since 16 Nov): each call goes through
 // createApp and app.request, reads its inputs from a fake store keyed by
 // URL, and the bytes it writes back are checked against the operation's own
 // output on the same decoded inputs. The canvas and finish cases run once at
@@ -10,7 +10,9 @@
 import { describe, expect, it } from "vitest";
 import { canvasLogoRect } from "../../supabase/functions/_shared/canva/brief.ts";
 import { PUBLIC_DEFAULTS } from "../../public-env.ts";
-import { PICTURE_CALL_HEADER, READ_JPEG_QUALITY, type Placement } from "../../supabase/functions/_shared/picture/contract.ts";
+import { PICTURE_CALL_HEADER, READ_JPEG_QUALITY, type LocateResult, type LogoSetResult, type Placement, type PostLogo, type Rgb } from "../../supabase/functions/_shared/picture/contract.ts";
+import { partsOf, wholeExposedInks } from "../../supabase/functions/_shared/design/logoTone.ts";
+import { blank, box, drawLogo, flat, inked, mark } from "../../supabase/tests/_shared/design/draw.ts";
 import { createApp } from "../src/app.ts";
 import { generationCanvas } from "../src/picture/canvas.ts";
 import { finishPicture } from "../src/picture/finish.ts";
@@ -18,6 +20,7 @@ import { locateLogo } from "../src/picture/locate.ts";
 import { readPictures } from "../src/picture/read.ts";
 import { decodeRaster, encodeJpeg, encodePng, raster, type Raster } from "../src/picture/raster.ts";
 import { titleRead } from "../src/picture/title.ts";
+import { locateTemplates } from "../src/picture/tone.ts";
 import { pagePicture, ringAndBarLogo, wideLogo } from "./fixtures.ts";
 
 const BIG = 60_000;
@@ -184,6 +187,311 @@ describe("POST /api/picture/locate", () => {
     expect(expected.frame).toEqual([320, 240]);
     expect(Object.keys(puts)).toEqual([]);
     expect(lines[0]).toMatchObject({ route: "locate", ok: true, in: { design: "320x240", logo: "40x16" }, out: {} });
+    // An old request is answered with exactly the old fields.
+    expect(Object.keys(json.result as object)).toEqual(["x", "y", "width", "height", "score", "usual", "frame"]);
+  });
+});
+
+describe("POST /api/picture/locate with a logo set", () => {
+  const W = 320, H = 240;
+  const placement: Placement = { anchor: "left", left: 0.1875, width: 0.25, top: 0.125 };
+  const scales: [number, number] = [0.45, 1.35];
+  const shape = mark(40, 16, [24, 28, 40]);
+  const usual = canvasLogoRect(placement, 40, 16, W, H);
+  const drawn = { x: usual.x + 6, y: usual.y + 4, width: Math.round(usual.width * 0.8), height: Math.round((usual.width * 0.8 * 16) / 40) };
+  const LIGHT: Rgb = [255, 255, 255], DARK: Rgb = [11, 14, 26];
+  const whiteOn = (ground: Rgb) => drawLogo(flat(W, H, ground), shape, drawn, [255, 255, 255]);
+  const base = { ...meta, design: `${GET}design.png`, placement, scales };
+  /** A store with the design and each named logo file as a PNG. */
+  async function store(design: Raster, logos: Record<string, Raster>) {
+    const files: Record<string, Uint8Array> = { "design.png": await encodePng(design) };
+    for (const [name, r] of Object.entries(logos)) files[`${name}.png`] = await encodePng(r);
+    return harness(files);
+  }
+  const result = (json: Record<string, unknown>) => json.result as LocateResult;
+
+  it("answers the better of two templates, the first when equal, with each score", async () => {
+    const design = whiteOn([10, 12, 30]);
+    const white = inked(shape, [255, 255, 255]);
+    const { call, lines, puts } = await store(design, { stored: shape, other: white, again: white });
+    const templates = [{ file: "stored", logo: `${GET}stored.png`, ground: LIGHT }, { file: "other", logo: `${GET}other.png`, ground: DARK }];
+    const { status, json } = await call("locate", { ...base, templates, compare: [] });
+
+    const expected = locateTemplates(design, [{ file: "stored", raster: shape, ground: LIGHT }, { file: "other", raster: white, ground: DARK }], [], placement, scales);
+    expect(status).toBe(200);
+    expect(json).toEqual({ ok: true, result: expected, ms: 5 });
+    const got = result(json);
+    expect(got.matched).toBe("other");
+    expect(got.file).toBe("other");
+    expect(got.scores).toHaveLength(2);
+    expect(got.score).toBe(got.scores![1]);
+    expect(got.scores![1]).toBeGreaterThanOrEqual(0.75);
+    expect(got.scores![1]).toBeGreaterThan(got.scores![0]);
+    expect(got.usual).toEqual(usual);
+    expect(got.frame).toEqual([W, H]);
+    expect(got).not.toHaveProperty("stamp");
+    expect(Object.keys(puts)).toEqual([]);
+    // The line names each template's size, and never a link.
+    expect(lines[0]).toMatchObject({ route: "locate", ok: true, in: { design: "320x240", template0: "40x16", template1: "40x16" }, out: {} });
+    expect(JSON.stringify(lines)).not.toContain("http");
+
+    // The same pixels under two names: the first template wins.
+    const twice = await call("locate", { ...base, templates: [{ file: "stored", logo: `${GET}again.png`, ground: DARK }, { file: "other", logo: `${GET}other.png`, ground: DARK }], compare: [] });
+    expect(result(twice.json).scores![0]).toBe(result(twice.json).scores![1]);
+    expect(result(twice.json).matched).toBe("stored");
+  });
+
+  it("names the white file when the drawn logo is white on a mid-tone ground, whichever template matched", async () => {
+    const stored = inked(shape, [40, 120, 235]), white = inked(shape, [255, 255, 255]);
+    const { call, lines } = await store(whiteOn([150, 110, 80]), { stored, white });
+    // The white file is on the canvas; the stored file covers the light ground.
+    const canvasWhite = await call("locate", { ...base, templates: [{ file: "white", logo: `${GET}white.png`, ground: [42, 149, 253] }, { file: "stored", logo: `${GET}stored.png`, ground: LIGHT }], compare: [] });
+    expect(result(canvasWhite.json).file).toBe("white");
+    expect(result(canvasWhite.json).gaps!.white).toBeLessThan(result(canvasWhite.json).gaps!.stored!);
+    // The stored file's own template matches the same drawing, and the white file is still named.
+    const canvasStored = await call("locate", { ...base, templates: [{ file: "stored", logo: `${GET}stored.png`, ground: DARK }], compare: [{ file: "white", logo: `${GET}white.png` }] });
+    const got = result(canvasStored.json);
+    expect(got.matched).toBe("stored");
+    expect(got.score).toBeGreaterThanOrEqual(0.75);
+    expect(got.file).toBe("white");
+    expect(got.gaps!.white).toBeLessThan(got.gaps!.stored!);
+    expect(lines[1]).toMatchObject({ in: { design: "320x240", template0: "40x16", "compare.white": "40x16" } });
+  });
+
+  it("names a person's file when its template matched and compares nothing", async () => {
+    const { call } = await store(whiteOn([10, 12, 30]), { stored: shape, other: inked(shape, [255, 255, 255]), white: inked(shape, [250, 250, 250]) });
+    const templates = [{ file: "stored", logo: `${GET}stored.png`, ground: LIGHT }, { file: "other", logo: `${GET}other.png`, ground: DARK, fixed: true }];
+    const { status, json } = await call("locate", { ...base, templates, compare: [{ file: "white", logo: `${GET}white.png` }] });
+    expect(status).toBe(200);
+    expect(result(json).matched).toBe("other");
+    expect(result(json).file).toBe("other");
+    expect(result(json).gaps).toEqual({});
+  });
+
+  it("takes one template", async () => {
+    const design = whiteOn([10, 12, 30]);
+    const white = inked(shape, [255, 255, 255]);
+    const { call } = await store(design, { other: white });
+    const { status, json } = await call("locate", { ...base, templates: [{ file: "other", logo: `${GET}other.png`, ground: DARK }], compare: [] });
+    expect(status).toBe(200);
+    expect(json).toEqual({ ok: true, result: locateTemplates(design, [{ file: "other", raster: white, ground: DARK }], [], placement, scales), ms: 5 });
+    expect(result(json).scores).toHaveLength(1);
+    expect(result(json).file).toBe("other");
+  });
+
+  it("answers the rectangle to stamp when the named file has another shape", async () => {
+    // The stored mid-tone file matches a logo drawn in white; the closest file in color is a white file of slightly other proportions.
+    const stored = inked(shape, [40, 120, 235]), tall = mark(80, 34, [255, 255, 255]);
+    const { call } = await store(whiteOn([10, 12, 30]), { stored, tall });
+    const { json } = await call("locate", { ...base, templates: [{ file: "stored", logo: `${GET}stored.png`, ground: DARK }], compare: [{ file: "other", logo: `${GET}tall.png` }] });
+    const got = result(json);
+    expect(got.matched).toBe("stored");
+    expect(got.file).toBe("other");
+    const height = Math.round((got.width * 34) / 80);
+    expect(got.stamp).toEqual({ x: got.x, y: Math.round(got.y + got.height / 2 - height / 2), width: got.width, height });
+    expect(got.stamp!.height).not.toBe(got.height);
+  });
+
+  it("takes the same file in two templates when their grounds differ", async () => {
+    const stored = inked(shape, [40, 120, 235]);
+    const { call } = await store(whiteOn([10, 12, 30]), { stored });
+    const { status, json } = await call("locate", { ...base, templates: [{ file: "stored", logo: `${GET}stored.png`, ground: DARK }, { file: "stored", logo: `${GET}stored.png`, ground: LIGHT }], compare: [] });
+    expect(status).toBe(200);
+    expect(result(json).matched).toBe("stored");
+    expect(result(json).scores![0]).toBeGreaterThan(result(json).scores![1]);
+    expect(Object.keys(result(json).gaps!)).toEqual(["stored"]);
+  });
+
+  it("refuses a locate body with both a logo and templates, a compare file that is also a template, and two templates of one file on one ground", async () => {
+    const { call, fetched } = await store(whiteOn([10, 12, 30]), { stored: shape });
+    const t = (file: string, ground: Rgb = DARK) => ({ file, logo: `${GET}stored.png`, ground });
+    const refused = async (body: Record<string, unknown>) => {
+      const { status, json } = await call("locate", { ...base, ...body });
+      expect(status).toBe(400);
+      return String(json.reason).replace("The request is not well formed: ", "");
+    };
+    expect(await refused({ logo: `${GET}stored.png`, background: DARK, templates: [t("stored")], compare: [] })).toBe("templates");
+    expect(await refused({})).toBe("logo");
+    expect(await refused({ logo: `${GET}stored.png` })).toBe("background");
+    expect(await refused({ templates: [t("stored")] })).toBe("compare");
+    expect(await refused({ templates: [t("stored")], compare: [{ file: "stored", logo: `${GET}stored.png` }] })).toBe("compare.0.file");
+    expect(await refused({ templates: [t("stored")], compare: [{ file: "white", logo: `${GET}stored.png` }, { file: "white", logo: `${GET}stored.png` }] })).toBe("compare.1.file");
+    expect(await refused({ templates: [t("stored"), t("stored")], compare: [] })).toBe("templates.1.file");
+    expect(await refused({ templates: [], compare: [] })).toBe("templates");
+    expect(await refused({ templates: [t("stored"), t("other"), t("white")], compare: [] })).toBe("templates");
+    expect(await refused({ templates: [t("logo")], compare: [] })).toBe("templates.0.file");
+    expect(await refused({ templates: [{ ...t("stored"), logo: "https://evil.example/a.png" }], compare: [] })).toBe("templates.0.logo");
+    expect(await refused({ templates: [{ ...t("stored"), extra: 1 }], compare: [] })).toBe("templates.0");
+    expect(fetched).toEqual([]);
+  });
+});
+
+describe("POST /api/picture/logo-set", () => {
+  const set = { job: "client-1", step: "design_settings" };
+  const out = { other: `${PUT}other.png`, white: `${PUT}white.png` };
+  /** A dark one-color logo with one soft column at its right edge. */
+  const dark = () => box(mark(120, 48, [24, 28, 40]), 119, 0, 120, 21, [24, 28, 40], 90);
+  const result = (json: Record<string, unknown>) => json.result as LogoSetResult;
+
+  it("writes the copies and says which it dropped", async () => {
+    const stored = dark();
+    const { call, puts, lines } = harness({ "logo.png": await encodePng(stored) });
+    const { status, json } = await call("logo-set", { ...set, logo: `${GET}logo.png`, out });
+    expect(status).toBe(200);
+    expect(result(json)).toEqual({
+      size: { width: 120, height: 48 }, own: "light", both: false,
+      made: { other: { turned: 1 }, white: null }, site: null, person: null,
+      inks: { stored: wholeExposedInks(partsOf(stored)), other: wholeExposedInks(partsOf(stored)).map((ink) => ({ ...ink, color: [255, 255, 255] })), white: null },
+    });
+    // The copy for the dark ground: every ink pixel white, every alpha as stored. The white copy is the same file, so it is not written.
+    expect(Object.keys(puts)).toEqual(["other.png"]);
+    expect(puts["other.png"].contentType).toBe("image/png");
+    const copy = await decoded(puts["other.png"]);
+    expect([copy.width, copy.height]).toEqual([120, 48]);
+    let ink = 0;
+    for (let i = 0; i < stored.data.length; i += 4) {
+      expect(copy.data[i + 3]).toBe(stored.data[i + 3]);
+      if (stored.data[i + 3] < 16) continue;
+      ink++;
+      expect([copy.data[i], copy.data[i + 1], copy.data[i + 2]]).toEqual([255, 255, 255]);
+    }
+    expect(ink).toBeGreaterThan(1000);
+    expect(lines[0]).toMatchObject({ route: "logo-set", job: "client-1", step: "design_settings", ok: true, in: { logo: "120x48" }, out: { other: `120x48, ${puts["other.png"].bytes.length} B` } });
+
+    // The same request again writes the same bytes.
+    const first = Buffer.from(puts["other.png"].bytes);
+    await call("logo-set", { ...set, logo: `${GET}logo.png`, out });
+    expect(puts["other.png"].bytes.equals(first)).toBe(true);
+  });
+
+  it("writes both copies for a logo of a color that shows on dark and a black letter", async () => {
+    const stored = box(box(blank(60, 20), 2, 2, 30, 18, [40, 170, 120]), 34, 2, 58, 18, [0, 0, 0]);
+    const { call, puts } = harness({ "logo.png": await encodePng(stored) });
+    const { json } = await call("logo-set", { ...set, logo: `${GET}logo.png`, out });
+    expect(result(json).made.other!.turned).toBeCloseTo(384 / 832, 10);
+    expect(result(json).made.white).toEqual({ turned: 1 });
+    expect(result(json).inks.other).toEqual([{ color: [40, 170, 120], share: 448 / 832 }, { color: [255, 255, 255], share: 384 / 832 }]);
+    expect(result(json).inks.white!.map((ink) => ink.color)).toEqual([[255, 255, 255], [255, 255, 255]]);
+    expect(Object.keys(puts).sort()).toEqual(["other.png", "white.png"]);
+  });
+
+  it("names the website file that passed", async () => {
+    const stored = dark();
+    const white = inked(mark(240, 96, [255, 255, 255]), [255, 255, 255]);
+    const files = {
+      "logo.png": await encodePng(stored),
+      // Another logo that fills the same box, the same logo in white and larger, and the same logo in white but narrower than the stored file.
+      "another.png": await encodePng(box(box(blank(120, 48), 0, 0, 120, 12, [255, 255, 255]), 50, 12, 70, 48, [255, 255, 255])),
+      "white.png": await encodePng(white),
+      "narrow.png": await encodePng(mark(80, 32, [255, 255, 255])),
+    };
+    const { call, lines } = harness(files);
+    const { status, json } = await call("logo-set", { ...set, logo: `${GET}logo.png`, site: [`${GET}another.png`, `${GET}white.png`, `${GET}narrow.png`], out });
+    expect(status).toBe(200);
+    expect(result(json).site).toMatchObject({ index: 1, size: { width: 240, height: 96 } });
+    expect(result(json).site!.overlap).toBeGreaterThanOrEqual(0.9);
+    // The second file's inks are the website file's own, and the made copy is still made and recorded.
+    expect(result(json).inks.other).toEqual(wholeExposedInks(partsOf(white)));
+    expect(result(json).made.other).toEqual({ turned: 1 });
+    expect(lines[0]).toMatchObject({ in: { logo: "120x48", site0: "120x48", site1: "240x96", site2: "80x32" } });
+  });
+
+  it("leaves out a website file it cannot read, and still answers", async () => {
+    const { call } = harness({ "logo.png": await encodePng(dark()), "notes.txt": new TextEncoder().encode("just some words"), "white.png": await encodePng(mark(120, 48, [255, 255, 255])) });
+    const { status, json } = await call("logo-set", { ...set, logo: `${GET}logo.png`, site: [`${GET}missing.png`, `${GET}notes.txt`, `${GET}white.png`], out });
+    expect(status).toBe(200);
+    expect(result(json).site).toMatchObject({ index: 2 });
+    // Storage that cannot answer right now is still a 503: the caller's retry covers it.
+    expect((await call("logo-set", { ...set, logo: `${GET}logo.png`, site: [`${GET}down`], out })).status).toBe(503);
+  });
+
+  it("answers a person's file with its size and its inks, before a website file", async () => {
+    const person = mark(200, 90, [250, 250, 250]);
+    const { call } = harness({ "logo.png": await encodePng(dark()), "person.png": await encodePng(person), "white.png": await encodePng(mark(120, 48, [255, 255, 255])) });
+    const { json } = await call("logo-set", { ...set, logo: `${GET}logo.png`, site: [`${GET}white.png`], person: `${GET}person.png`, out });
+    expect(result(json).person).toEqual({ size: { width: 200, height: 90 } });
+    expect(result(json).site).toMatchObject({ index: 0 });
+    expect(result(json).inks.other).toEqual(wholeExposedInks(partsOf(person)));
+  });
+
+  it("makes the set without a person's file it cannot read", async () => {
+    const { call } = harness({ "logo.png": await encodePng(dark()), "notes.txt": new TextEncoder().encode("just some words") });
+    for (const person of [`${GET}missing.png`, `${GET}notes.txt`]) {
+      const { status, json } = await call("logo-set", { ...set, logo: `${GET}logo.png`, person, out });
+      expect(status).toBe(200);
+      expect(result(json)).toMatchObject({ own: "light", person: null, made: { other: { turned: 1 } } });
+    }
+    // Storage that cannot answer right now is still a 503: the caller's retry covers it.
+    expect((await call("logo-set", { ...set, logo: `${GET}logo.png`, person: `${GET}down`, out })).status).toBe(503);
+  });
+
+  it("answers with a reason when the logo has no ink", async () => {
+    const { call, puts } = harness({ "logo.png": await encodePng(blank(40, 16)) });
+    expect(await call("logo-set", { ...set, logo: `${GET}logo.png`, out })).toEqual({ status: 200, json: { ok: false, reason: "The logo file has no ink." } });
+    expect(Object.keys(puts)).toEqual([]);
+  });
+
+  it("refuses a body with more than six website files or no place for a copy", async () => {
+    const { call, fetched } = harness({});
+    const seven = Array.from({ length: 7 }, (_, i) => `${GET}s${i}.png`);
+    expect(await call("logo-set", { ...set, logo: `${GET}logo.png`, site: seven, out })).toEqual({ status: 400, json: { ok: false, reason: "The request is not well formed: site" } });
+    expect(await call("logo-set", { ...set, logo: `${GET}logo.png`, out: { other: `${PUT}o.png` } })).toEqual({ status: 400, json: { ok: false, reason: "The request is not well formed: out.white" } });
+    expect(fetched).toEqual([]);
+  });
+});
+
+describe("POST /api/picture/post-logos", () => {
+  const set = { job: "client-1", step: "design_settings" };
+  const W = 320, H = 240;
+  const placement: Placement = { anchor: "left", left: 0.1875, width: 0.25, top: 0.125 };
+  const scales: [number, number] = [0.45, 1.35];
+  const shape = mark(40, 16, [24, 28, 40]);
+  const usual = canvasLogoRect(placement, 40, 16, W, H);
+  const drawn = { x: usual.x + 6, y: usual.y + 4, width: Math.round(usual.width * 0.8), height: Math.round((usual.width * 0.8 * 16) / 40) };
+  const searches = [{ file: "stored", logo: `${GET}stored.png`, ground: [255, 255, 255] }, { file: "other", logo: `${GET}other.png`, ground: [11, 14, 26] }];
+
+  it("answers each post, and null for one it cannot read", async () => {
+    const files = {
+      "stored.png": await encodePng(shape),
+      "other.png": await encodePng(inked(shape, [255, 255, 255])),
+      "white-on-dark.png": await encodePng(drawLogo(flat(W, H, [16, 40, 76]), shape, drawn, [255, 255, 255])),
+      "no-logo.png": await encodePng(pagePicture(W, H, 7)),
+    };
+    const { call, lines, puts } = harness(files);
+    const { status, json } = await call("post-logos", { ...set, posts: [`${GET}white-on-dark.png`, `${GET}missing.jpg`, `${GET}no-logo.png`], placement, scales, searches, compare: [] });
+    expect(status).toBe(200);
+    const posts = (json.result as { posts: Array<PostLogo | null> }).posts;
+    expect(posts).toHaveLength(3);
+    const found = posts[0] as Extract<PostLogo, { found: true }>;
+    expect(found).toMatchObject({ found: true, matched: "other", shows: "other", ground: [16, 40, 76] });
+    // The found rectangle is within two pixels of the drawn one, so a few of the logo's own edge pixels are among those sampled around it.
+    expect(found.flat).toBeGreaterThan(0.95);
+    expect(found.score).toBeGreaterThanOrEqual(0.75);
+    expect(found.gaps.other).toBeLessThan(found.gaps.stored!);
+    expect(Math.abs(found.rect.x - drawn.x)).toBeLessThanOrEqual(2);
+    expect(posts[1]).toBeNull();
+    expect(posts[2]).toEqual({ found: false, score: expect.any(Number) });
+    expect((posts[2] as { score: number }).score).toBeLessThan(0.75);
+    expect(Object.keys(puts)).toEqual([]);
+    expect(lines[0]).toMatchObject({ route: "post-logos", job: "client-1", ok: true, in: { search0: "40x16", search1: "40x16", post0: "320x240", post2: "320x240" } });
+    expect(lines[0].in).not.toHaveProperty("post1");
+  }, BIG);
+
+  it("says a post shows a person's file when its search matched, and measures nothing", async () => {
+    const files = { "stored.png": await encodePng(shape), "other.png": await encodePng(inked(shape, [255, 255, 255])), "post.png": await encodePng(drawLogo(flat(W, H, [16, 40, 76]), shape, drawn, [255, 255, 255])) };
+    const { call } = harness(files);
+    const { json } = await call("post-logos", { ...set, posts: [`${GET}post.png`], placement, scales, searches: [searches[0], { ...searches[1], fixed: true }], compare: [] });
+    expect((json.result as { posts: PostLogo[] }).posts[0]).toMatchObject({ found: true, matched: "other", shows: "other", gaps: {} });
+  }, BIG);
+
+  it("refuses more than four posts", async () => {
+    const { call, fetched } = harness({});
+    const five = Array.from({ length: 5 }, (_, i) => `${GET}p${i}.jpg`);
+    expect(await call("post-logos", { ...set, posts: five, placement, scales, searches, compare: [] })).toEqual({ status: 400, json: { ok: false, reason: "The request is not well formed: posts" } });
+    expect(await call("post-logos", { ...set, posts: [], placement, scales, searches, compare: [] })).toMatchObject({ status: 400 });
+    expect(await call("post-logos", { ...set, posts: [five[0]], placement, scales, searches: [searches[0], searches[0]], compare: [] })).toEqual({ status: 400, json: { ok: false, reason: "The request is not well formed: searches.1.file" } });
+    expect(await call("post-logos", { ...set, posts: [five[0]], placement, scales, searches, compare: [{ file: "other", logo: `${GET}other.png` }] })).toEqual({ status: 400, json: { ok: false, reason: "The request is not well formed: compare.0.file" } });
+    expect(fetched).toEqual([]);
   });
 });
 

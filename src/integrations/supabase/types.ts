@@ -1853,6 +1853,7 @@ export type Database = {
           confirmed_by: string | null
           derived: Json | null
           logo_path: string
+          logo_set: Json | null
           placement: Json
           reference_paths: string[]
           source: string
@@ -1865,6 +1866,7 @@ export type Database = {
           confirmed_by?: string | null
           derived?: Json | null
           logo_path: string
+          logo_set?: Json | null
           placement: Json
           reference_paths: string[]
           source?: string
@@ -1877,6 +1879,7 @@ export type Database = {
           confirmed_by?: string | null
           derived?: Json | null
           logo_path?: string
+          logo_set?: Json | null
           placement?: Json
           reference_paths?: string[]
           source?: string
@@ -4882,6 +4885,19 @@ export type Database = {
           report_kind: string
           schedule_id: string
         }[]
+      }
+      set_design_logo_other: {
+        Args: { p_client: string; p_path: string | null }
+        Returns: undefined
+      }
+      settle_design_logo_set: {
+        Args: {
+          p_client: string
+          p_of: string
+          p_person: Json | null
+          p_set: Json
+        }
+        Returns: boolean
       }
       sprout_brand_decline: {
         Args: {

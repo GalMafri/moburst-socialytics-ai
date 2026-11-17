@@ -166,10 +166,22 @@ function withoutLinks(reason: string): string {
   return reason.replace(/https?:\/\/\S+/g, "a link");
 }
 
-/** A short-lived link the picture service reads a stored file from. */
+/**
+ * A stored file storage will make no link for because it is not there:
+ * storage answered and refused the path (a 4xx other than 408 and 429).
+ * Storage that could not answer right now, or an error with no status, is
+ * never this, so a file is not taken for missing on a bad moment.
+ */
+export class NotInStorage extends Error {}
+
+/** A short-lived link the picture service reads a stored file from. Throws NotInStorage for a file that is not there. */
 export async function signedRead(admin: any, bucket: string, path: string, seconds = 600): Promise<string> {
   const { data, error } = await admin.storage.from(bucket).createSignedUrl(path, seconds);
-  if (error || !data?.signedUrl) throw new Error(`Could not prepare ${path} for the picture service: ${error?.message ?? "no URL"}`);
+  if (error || !data?.signedUrl) {
+    const message = `Could not prepare ${path} for the picture service: ${error?.message ?? "no URL"}`;
+    const status = Number((error as { status?: unknown } | null)?.status);
+    throw status >= 400 && status < 500 && status !== 408 && status !== 429 ? new NotInStorage(message) : new Error(message);
+  }
   return data.signedUrl;
 }
 

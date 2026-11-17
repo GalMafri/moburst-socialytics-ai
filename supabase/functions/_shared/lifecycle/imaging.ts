@@ -148,6 +148,18 @@ export async function refitStoredLogo(db: Db, clientId: string, path: string): P
   return { path: to, width: size[0], height: size[1] };
 }
 
+/**
+ * The first 16 hex characters of the SHA-256 of a stored logo file: the
+ * name its recolored copies are stored under, beside it
+ * (<client>/design-settings/logo-<hash>-other.png and -white.png). A file
+ * that cannot be read throws: nothing is known about it.
+ */
+export async function fileHash(db: Db, path: string): Promise<string> {
+  const { data, error } = await db.storage.from(BUCKET).download(path);
+  if (error || !data) throw new Error(`The logo file could not be read: ${error?.message ?? "missing"}`);
+  return sha(new Uint8Array(await data.arrayBuffer()));
+}
+
 function base64(bytes: Uint8Array): string {
   let bin = "";
   for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);

@@ -18,6 +18,10 @@ There is no shared secret. A worker opens a call in the database before each att
 
 A claimed call still cannot send the service anywhere: every link in a request must be in the product's own storage (`PRODUCT_STORAGE` in `src/storage.ts`, from `../public-env.ts`), no redirect is followed, and one call's reads and writes share a 45 second limit. A link anywhere else answers 400 before anything is fetched. A well-formed id the database did not claim leaves one log line, without the id.
 
+## The logo set
+
+Two routes serve the lifecycle's `design_settings` step (spec: docs/superpowers/specs/2026-11-16-logo-tone-design.md). `logo-set` takes a client's stored logo and answers its own ground, the two recolored copies the making rule gives (written to the two links it was handed), and which of the website's logo files is the same logo for the other ground. `post-logos` takes one to four of the client's own posts and says, for each, whether its logo was found and which file it is closest to in color. `locate` also takes one or two templates in place of one logo and names the file to stamp. Everything that decides is in `supabase/functions/_shared/design/logoTone.ts` and `logoCopies.ts`. `scripts/tone-replay.ts <manifest.json>` runs stored designs and posts through the same code against an expected result per row; its manifest is exported read-only and never committed.
+
 ## Checks
 
 ```

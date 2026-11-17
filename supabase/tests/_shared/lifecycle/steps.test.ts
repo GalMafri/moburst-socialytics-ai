@@ -2,7 +2,9 @@ import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { deps, settled, siteKey, STEPS, weeksFor } from "../../../functions/_shared/lifecycle/steps";
 import { fakeDb, writeClientRpc } from "../../../functions/_shared/lifecycle/fakeDb";
-import type { StepRow } from "../../../functions/_shared/lifecycle/policy";
+import { rowAfter, type StepRow } from "../../../functions/_shared/lifecycle/policy";
+import { NotInStorage, PictureError } from "../../../functions/_shared/picture/client";
+import { textHash } from "../../../functions/_shared/lifecycle/names";
 
 const original = { ...deps };
 afterEach(() => { Object.assign(deps, original); vi.restoreAllMocks(); });
@@ -253,6 +255,35 @@ describe("brand_read", () => {
     const again = await STEPS.brand_read.run(dbWith({ clients: [d] }), d, ctx());
     expect((again as { result: { written: string[] } }).result.written).toEqual(["location"]);
     expect(d.field_sources.timezone).toMatchObject({ from: "post_text" });
+  });
+  it("keeps the list of the website's logo files, without the main one, at most six", async () => {
+    const imgs = (names: string[]) => names.map((n) => `<img class="logo" src="/${n}.png">`).join("");
+    const html = `<html lang="en-US"><body><header><img src="/logo.png">${imgs(["logo-white", "a", "b"])}<svg class="logo" viewBox="0 0 2 2"><path d="M0 0h2v2z"/></svg></header><footer>1250 Broadway, New York, NY 10001 ${imgs(["logo", "c", "d", "e", "f"])}</footer></body></html>`;
+    const c = client({ name: "Northwind", website_url: "https://www.northwind.test/", field_sources: person("brand_identity"), brand_identity: BRAND, logo_url: "https://www.northwind.test/old-logo.png" });
+    const db = dbWith({ clients: [c] });
+    deps.fetchSiteHtml = async () => ({ html, via: "direct" as const });
+    deps.researchBrand = fail("the brand read");
+    const fetched = vi.spyOn(globalThis, "fetch");
+    const out = await STEPS.brand_read.run(db, c, ctx()) as { status: string; result: { logo_files: string[]; model_read: boolean } };
+    // The header's first image is the main logo this run writes: it is left out, here and where the footer repeats it.
+    expect(c.logo_url).toBe("https://www.northwind.test/logo.png");
+    const svgPath = `c1/brand/logo-site-${textHash(`<svg class="logo" viewBox="0 0 2 2"><path d="M0 0h2v2z"/></svg>`)}.svg`;
+    expect(out.result.logo_files).toEqual([
+      "https://www.northwind.test/logo-white.png", "https://www.northwind.test/a.png", "https://www.northwind.test/b.png",
+      `https://project.test/storage/v1/object/public/generated-media/${svgPath}`,
+      "https://www.northwind.test/c.png", "https://www.northwind.test/d.png",
+    ]);
+    // An inline SVG is stored so it has an address; no page is fetched for the list and no model is called.
+    expect(db.uploads.has(`generated-media/${svgPath}`)).toBe(true);
+    expect(fetched).not.toHaveBeenCalled();
+    expect(out.result.model_read).toBe(false);
+
+    // A logo a person set is the main one: the site's own header logo is then one of the other files.
+    const p = client({ name: "Northwind", website_url: "https://www.northwind.test/", field_sources: person("brand_identity", "logo_url"), brand_identity: BRAND, logo_url: "https://www.northwind.test/logo-white.png" });
+    const kept = await STEPS.brand_read.run(dbWith({ clients: [p] }), p, ctx()) as { result: { logo_files: string[] } };
+    expect(kept.result.logo_files.slice(0, 3)).toEqual(["https://www.northwind.test/logo.png", "https://www.northwind.test/a.png", "https://www.northwind.test/b.png"]);
+    expect(kept.result.logo_files).toHaveLength(6);
+    expect(p.logo_url).toBe("https://www.northwind.test/logo-white.png");
   });
   it("tries again quietly when the site cannot be read", async () => {
     const { ResearchError } = await import("../../../functions/_shared/brand/research");
@@ -521,10 +552,22 @@ describe("a page on another client's site is used for text only", () => {
       status: "done",
       result: {
         website: "moburst.com/services/organic/podcast-booking", fetched_via: "direct", model_read: false,
-        timezone: null, timezone_source: null, country: null, language: "en", logo: "none", written: [], kept: [], site_profiles: [], parent_page: true,
+        timezone: null, timezone_source: null, country: null, language: "en", logo: "none", written: [], kept: [], logo_files: [], site_profiles: [], parent_page: true,
       },
     });
     expect(c).toMatchObject({ logo_url: null, brand_identity: null, location: null, timezone: "UTC", geo: "" });
+    expect(db.uploads.size).toBe(0);
+  });
+  it("takes none from a text-only page", async () => {
+    // A client whose website is a page of another client's site: that page's header and footer carry the other client's logos, marked as such.
+    const parent = { id: "p", name: "Northwind", website_url: "https://www.northwind.test", archived_at: null, demo_job_id: null };
+    const c = client({ id: "c1", name: "Northwind Radio", website_url: "https://www.northwind.test/services/radio/" });
+    const db = dbWith({ clients: [parent, c] });
+    const page = `<html lang="en-US"><body><header><img class="logo" src="/logo.png"></header><h1>Radio</h1><footer><img class="logo" src="/logo-white.png"><svg class="logo"><path d="M0 0"/></svg></footer></body></html>`;
+    deps.fetchSiteHtml = async () => ({ html: page, via: "direct" as const });
+    deps.researchBrand = fail("the brand read");
+    const out = await STEPS.brand_read.run(db, c, ctx()) as { result: { logo_files: string[] } };
+    expect(out.result.logo_files).toEqual([]);
     expect(db.uploads.size).toBe(0);
   });
   it("brand_read asks the model only for the page's language, and takes nothing else it reads", async () => {
@@ -622,6 +665,8 @@ describe("a plain-domain client is unchanged by the parent-page rule", () => {
       result: {
         website: "olo.com", fetched_via: "direct", model_read: true, timezone: "America/New_York", timezone_source: "page_footer", country: "US", language: "en",
         logo: "file", written: ["brand_identity", "logo_url", "location", "timezone"], kept: [], site_profiles: ["linkedin:olo"],
+        // The page's header image is not the logo the read chose, so it is kept as one of the site's other logo files (16 Nov 2026).
+        logo_files: [`${c.website_url}logo.png`],
       },
     });
     expect(c).toMatchObject({ brand_identity: BRAND, logo_url: "https://www.olo.com/logo.svg", timezone: "America/New_York", location: { source: "page_footer", website: "olo.com" } });
@@ -782,25 +827,409 @@ describe("brief, pillars and keywords from the LinkedIn page", () => {
 
 describe("design_settings", () => {
   const refs = rowsOf(row("design_refs", { result: { synthesized_at: T } }));
-  const c = () => client({ logo_url: "https://moburst.com/logo.svg", brand_identity: { ...BRAND, secondary_color: "#0c1d2f" }, harvested_design_references: [{ path: "c1/social-a.jpg" }, { path: "c1/social-b.jpg" }] });
+  const LOGO_URL = "https://brand.test/logo.svg";
+  const LOGO = "c1/design-settings/logo-site-1.png";
+  const HASH = "0123456789abcdef";
+  const MADE = { other: `c1/design-settings/logo-${HASH}-other.png`, white: `c1/design-settings/logo-${HASH}-white.png` };
+  const SPOT = { shown: true, at: "top-center" as const, width: 0.3 };
+  const PLACEMENT = { anchor: "center", width: 0.3, top: 0.04 };
+  const INPUTS = `refs:${T}|logo:${LOGO_URL}`;
+  const COLORS = "|colors:#3bd4ff,#0c1d2f,#ff6671";
+  const posts = (n: number) => Array.from({ length: n }, (_, i) => ({ path: `c1/social-${i}.jpg` }));
+  const c = (over: Record<string, unknown> = {}) => client({ logo_url: LOGO_URL, brand_identity: { ...BRAND, secondary_color: "#0c1d2f" }, harvested_design_references: posts(2), ...over });
+  /** The settings row as the lifecycle wrote it for this client, before the logo set existed. */
+  const stored = (over: Record<string, unknown> = {}) => ({
+    client_id: "c1", source: "lifecycle", logo_path: LOGO, placement: { ...PLACEMENT }, background: "#0C1D2F", reference_paths: ["c1/social-0.jpg", "c1/social-1.jpg"],
+    derived: { logo_from: LOGO_URL, logo_file: "from_svg", placement_from: "client_posts", logo_read: SPOT, background_from: "brand_color", at: "2026-10-20T08:00:00.000Z" },
+    confirmed_at: "2026-10-20T08:00:00.000Z", updated_at: "2026-10-20T08:00:00.000Z", logo_set: null, ...over,
+  });
+  /** What the service answers about the stored file: a dark logo, both copies made. */
+  const FACTS = {
+    size: { width: 600, height: 200 }, own: "light" as const, both: false, made: { other: { turned: 1 }, white: { turned: 1 } }, site: null, person: null,
+    inks: { stored: [{ color: [20, 30, 60], share: 1 }], other: [{ color: [255, 255, 255], share: 1 }], white: [{ color: [255, 255, 255], share: 1 }] },
+  };
+  const found = (shows: "stored" | "other" | "white", ground = [16, 40, 76]) => ({ found: true, score: 0.95, matched: shows, rect: { x: 1, y: 2, width: 100, height: 33 }, gaps: { [shows]: 20 }, shows, ground, flat: 0.99 });
+  const MISSED = { found: false, score: 0.3 };
+
+  /** A row a person set: their own logo file, placement, background and posts. */
+  const theirs = (over: Record<string, unknown> = {}) => ({
+    client_id: "c1", source: "person", logo_path: "c1/their-logo.png", placement: { anchor: "left", width: 0.3, top: 0.05, left: 0.05 }, background: "#0C1D2F",
+    reference_paths: ["c1/new-0.jpg", "c1/new-1.jpg", "c1/new-2.jpg"], derived: null, confirmed_at: "2026-10-01T08:00:00.000Z", confirmed_by: "person-1", updated_at: "2026-10-01T08:00:00.000Z", logo_set: null, ...over,
+  });
+
+  /** The database functions the step calls, written the way the migrations have them. */
+  const rpcs = {
+    lifecycle_write_design_settings: (a: Record<string, unknown>, db: ReturnType<typeof dbWith>) => {
+      const rows = (db.tables.design_brand_settings ??= []);
+      const at = rows.find((r) => r.client_id === a.p_client);
+      const values = { logo_path: a.p_logo_path, placement: a.p_placement, background: a.p_background, reference_paths: (a.p_reference_paths as string[]).slice(0, 16), derived: a.p_derived, confirmed_at: T, updated_at: T };
+      if (!at) { rows.push({ client_id: a.p_client, source: "lifecycle", logo_set: null, ...values }); return true; }
+      if (at.source !== "lifecycle") return false;
+      Object.assign(at, values);
+      return true;
+    },
+    settle_design_logo_set: (a: Record<string, unknown>, db: ReturnType<typeof dbWith>) => {
+      const at = (db.tables.design_brand_settings ?? []).find((r) => r.client_id === a.p_client);
+      const person = (at?.logo_set as { person?: unknown } | null)?.person ?? null;
+      if (!at || at.logo_path !== a.p_of || JSON.stringify(person) !== JSON.stringify(a.p_person ?? null)) return false;
+      const { person: _dropped, ...set } = a.p_set as Record<string, unknown>;
+      at.logo_set = { ...set, ...(person ? { person } : {}) };
+      return true;
+    },
+  };
+
+  /** Fakes for everything the step calls outside the database; `seen` records each call. */
+  function world(opts: { row?: Record<string, unknown> | null; shows?: Record<string, unknown>; facts?: Record<string, unknown>; picture?: (route: string) => void; site?: Record<string, string | null>; gone?: string[]; given?: Record<string, (a: Record<string, unknown>, db: ReturnType<typeof dbWith>) => unknown> } = {}) {
+    const db = dbWith({ design_brand_settings: opts.row === null ? [] : [opts.row ?? stored()] }, { ...rpcs, ...(opts.given ?? {}) });
+    const seen = { key: 0, spot: 0, logoPng: [] as string[], hash: [] as string[], calls: [] as Array<{ route: string; body: Record<string, unknown> }> };
+    deps.now = () => new Date(T);
+    deps.anthropicKey = async () => { seen.key++; return "key"; };
+    deps.imaging = (async () => ({
+      logoPng: async (_db: unknown, _client: string, url: string) => {
+        seen.logoPng.push(url);
+        if (url === LOGO_URL) return { path: LOGO, width: 600, height: 200, ink: [255, 255, 255] as [number, number, number], converted: "from_svg" as const };
+        const path = opts.site?.[url];
+        if (path === undefined) throw new Error("The logo file answered 404.");
+        return path ? { path, width: 600, height: 200, ink: null, converted: "kept" as const } : null;
+      },
+      readLogoSpot: async () => { seen.spot++; return SPOT; },
+      fileHash: async (_db: unknown, path: string) => { seen.hash.push(path); return HASH; },
+    })) as never;
+    deps.picture = (() => ({
+      call: async (route: string, body: Record<string, unknown>) => {
+        opts.picture?.(route);
+        seen.calls.push({ route, body });
+        if (route === "logo-set") return { result: { ...FACTS, ...(opts.facts ?? {}) }, ms: 40 };
+        return { result: { posts: (body.posts as string[]).map((link) => opts.shows?.[link.replace("design-references/", "")] ?? MISSED) }, ms: 900 };
+      },
+      read: async (bucket: string, path: string) => {
+        // A file that is gone from storage: what signedRead gives for it.
+        if (opts.gone?.includes(path)) throw new NotInStorage(`Could not prepare ${path} for the picture service: Object not found`);
+        return `${bucket}/${path}`;
+      },
+      write: async (bucket: string, path: string) => `put:${bucket}/${path}`,
+    })) as never;
+    return { db, seen, row: () => db.tables.design_brand_settings[0] };
+  }
+
+  type Out = { status: string; result?: Record<string, any>; recheckMinutes?: number; reason?: string; error?: string }; // eslint-disable-line @typescript-eslint/no-explicit-any
+  /** The step run the way the runner runs it, one look after another, until it stops waiting on its own work. */
+  async function drive(db: ReturnType<typeof dbWith>, cl: Record<string, unknown>, rows: Map<string, StepRow>, most = 12): Promise<Out[]> {
+    const outs: Out[] = [];
+    for (let i = 0; i < most; i++) {
+      const key = await STEPS.design_settings.inputs(db, cl, rows);
+      const prev = rows.get("design_settings") ?? null;
+      const out = await STEPS.design_settings.run(db, cl, { force: false, previous: prev && prev.inputs_key === key ? prev : null, rows }) as Out;
+      outs.push(out);
+      rows.set("design_settings", rowAfter(prev, { client_id: "c1", step: "design_settings", inputs_key: key! }, out as never, new Date(T)));
+      if (!(out.status === "waiting" && out.reason === "in_progress")) break;
+    }
+    return outs;
+  }
+  /** The step's rows as they were before the logo set: done, on the old key. */
+  const before = (over: Partial<StepRow> = {}) => rowsOf(row("design_refs", { result: { synthesized_at: T } }), row("design_settings", { inputs_key: `${INPUTS}${COLORS}`, result: { written: true, logo_path: LOGO }, ...over }));
+  const picture = (seen: { calls: Array<{ route: string }> }, route: string) => seen.calls.filter((x) => x.route === route);
+
   it("waits for learned references and a logo, and leaves a person's settings alone", async () => {
     expect(await STEPS.design_settings.inputs(dbWith({ design_brand_settings: [] }), c(), new Map())).toBeNull();
     expect(await STEPS.design_settings.inputs(dbWith({ design_brand_settings: [] }), client(), refs)).toBeNull();
-    const personRow = dbWith({ design_brand_settings: [{ client_id: "c1", source: "person" }] });
-    expect(await STEPS.design_settings.inputs(personRow, c(), refs)).toBe("person");
-    expect(await STEPS.design_settings.run(personRow, c(), ctx({ rows: refs }))).toEqual({ status: "done", result: { kept: "person" } });
+    // A row a person set has a key of its own, and the step makes its logo set and writes nothing else (16 Nov 2026; its own block is below).
+    const { db, row: settings } = world({ row: theirs() });
+    const untouched = structuredClone(settings());
+    expect(await STEPS.design_settings.inputs(db, c(), refs)).toBe(`person|logo:c1/their-logo.png|refs:${T}|at:left,0.3,0.05,0.05|site:|other:|tone:1`);
+    const outs = await drive(db, c(), rowsOf(row("design_refs", { result: { synthesized_at: T } })));
+    expect(outs.at(-1)).toMatchObject({ status: "done", result: { kept: "person", tone: { of: "c1/their-logo.png", settled: T } } });
+    const { logo_set, ...after } = settings();
+    const { logo_set: _none, ...beforeRow } = untouched;
+    expect(after).toEqual(beforeRow);
+    expect(logo_set).toMatchObject({ of: "c1/their-logo.png", canvas: { file: "stored", ground: "#0C1D2F", from: "settings" } });
   });
+
+  it("keys a lifecycle row on its posts, logo and colors, then the website's logo files, a person's second file and the tone rule", async () => {
+    const { db } = world();
+    expect(await STEPS.design_settings.inputs(db, c(), refs)).toBe(`${INPUTS}${COLORS}|site:|other:|tone:1`);
+    const withSite = rowsOf(row("design_refs", { result: { synthesized_at: T } }), row("brand_read", { result: { logo_files: ["https://brand.test/logo-white.svg"] } }));
+    expect(await STEPS.design_settings.inputs(db, c(), withSite)).toMatch(/\|site:[0-9a-z]+\|other:\|tone:1$/);
+    db.tables.design_brand_settings[0].logo_set = { person: { path: "c1/design-settings/logo-other-9.png", of: LOGO, at: T } };
+    expect(await STEPS.design_settings.inputs(db, c(), refs)).toBe(`${INPUTS}${COLORS}|site:|other:c1/design-settings/logo-other-9.png|tone:1`);
+  });
+
   it("derives the logo file, the placement from the client's posts and the background from the brand colors", async () => {
-    const db = dbWith({ design_brand_settings: [] }, { lifecycle_write_design_settings: () => true });
-    deps.anthropicKey = async () => "key";
-    deps.now = () => new Date(T);
-    deps.imaging = (async () => ({
-      logoPng: async () => ({ path: "c1/design-settings/logo-site-1.png", width: 600, height: 200, ink: [255, 255, 255] as [number, number, number], converted: "from_svg" as const }),
-      readLogoSpot: async () => ({ shown: true, at: "top-center" as const, width: 0.3 }),
-    })) as never;
+    const { db, seen } = world({ row: null });
     const out = await STEPS.design_settings.run(db, c(), ctx({ rows: refs }));
     expect(out).toMatchObject({ status: "done", result: { written: true, placement: { anchor: "center", width: 0.3, top: 0.04 }, placement_from: "client_posts", background: "#0C1D2F", background_from: "brand_color", references: 2 } });
-    expect(db.rpcCalls[0]).toMatchObject({ name: "lifecycle_write_design_settings", args: { p_client: "c1", p_logo_path: "c1/design-settings/logo-site-1.png", p_reference_paths: ["c1/social-a.jpg", "c1/social-b.jpg"], p_derived: { placement_from: "client_posts", logo_file: "from_svg" } } });
+    expect(db.rpcCalls[0]).toMatchObject({ name: "lifecycle_write_design_settings", args: { p_client: "c1", p_logo_path: LOGO, p_reference_paths: ["c1/social-0.jpg", "c1/social-1.jpg"], p_derived: { placement_from: "client_posts", logo_file: "from_svg", logo_read: SPOT, logo_read_for: INPUTS, at: T } } });
+    // A new client's posts are read by the model once.
+    expect(seen.spot).toBe(1);
+    expect(seen.key).toBe(1);
+  });
+
+  it("reuses the stored read of the logo's spot when its refs and logo parts are unchanged, and calls no model", async () => {
+    const { db, seen, row: settings } = world();
+    const outs = await drive(db, c(), before());
+    expect(outs.at(-1)).toMatchObject({ status: "done" });
+    expect(seen.spot).toBe(0);
+    expect(seen.key).toBe(0);
+    const write = db.rpcCalls.find((r) => r.name === "lifecycle_write_design_settings")!;
+    expect(write.args.p_derived).toMatchObject({ logo_read: SPOT, logo_read_for: INPUTS, placement_from: "client_posts" });
+    // The same logo, placement and background: the date the settings were derived on does not move.
+    expect(write.args.p_derived.at).toBe("2026-10-20T08:00:00.000Z");
+    expect(settings().derived.at).toBe("2026-10-20T08:00:00.000Z");
+    expect(settings()).toMatchObject({ logo_path: LOGO, placement: PLACEMENT, background: "#0C1D2F" });
+  });
+
+  it("reuses a stored read that found no spot", async () => {
+    const { db, seen } = world({ row: stored({ placement: { anchor: "center", width: 0.25, top: 0.04 }, derived: { placement_from: "default", logo_read: null, at: "2026-10-20T08:00:00.000Z" } }) });
+    const outs = await drive(db, c(), before());
+    expect(outs.at(-1)).toMatchObject({ status: "done", result: { placement_from: "default", placement: { anchor: "center", width: 0.25, top: 0.04 } } });
+    expect(seen.spot).toBe(0);
+    expect(seen.key).toBe(0);
+  });
+
+  it("asks the model again when the posts or the logo changed, and records what the read was made for", async () => {
+    // The posts were learned again since the step last finished.
+    const older = before({ inputs_key: `refs:2026-09-01T10:00:00.000Z|logo:${LOGO_URL}${COLORS}` });
+    const { db, seen } = world();
+    await drive(db, c(), older);
+    expect(seen.spot).toBe(1);
+    expect(seen.key).toBe(1);
+    const write = db.rpcCalls.find((r) => r.name === "lifecycle_write_design_settings")!;
+    expect(write.args.p_derived).toMatchObject({ logo_read: SPOT, logo_read_for: INPUTS, at: T });
+
+    // From then on the record on the settings row decides: another key change with the same posts and logo asks nothing.
+    const again = world({ row: stored({ derived: { ...stored().derived, logo_read_for: INPUTS } }) });
+    await drive(again.db, c({ brand_identity: { ...BRAND, secondary_color: "#0c1d2f", accent_color: "#000000" } }), before({ inputs_key: "refs:older|logo:x|colors:" }));
+    expect(again.seen.spot).toBe(0);
+    // A read made for another logo is not reused.
+    const moved = world({ row: stored({ derived: { ...stored().derived, logo_read_for: `refs:${T}|logo:https://brand.test/old.svg` } }) });
+    await drive(moved.db, c(), before());
+    expect(moved.seen.spot).toBe(1);
+  });
+
+  it("fails without a set when a read is needed and the AI connection is not configured", async () => {
+    const { db, seen } = world({ row: null });
+    deps.anthropicKey = async () => null;
+    expect(await STEPS.design_settings.run(db, c(), ctx({ rows: refs }))).toEqual({ status: "failed", error: "The AI connection is not configured." });
+    expect(seen.calls).toEqual([]);
+    expect(db.rpcCalls).toEqual([]);
+  });
+
+  it("reads four posts to a run and carries on where it stopped", async () => {
+    const nine = posts(9).map((p) => p.path);
+    const { db, seen, row: settings } = world({ row: stored({ reference_paths: nine }), shows: { "c1/social-1.jpg": found("other"), "c1/social-6.jpg": found("other", [15, 41, 76]), "c1/social-8.jpg": found("stored", [250, 250, 250]) } });
+    const outs = await drive(db, c({ harvested_design_references: posts(9) }), before());
+    expect(outs.map((o) => [o.status, o.reason ?? null, o.recheckMinutes ?? null])).toEqual([["waiting", "in_progress", 1], ["waiting", "in_progress", 1], ["done", null, null]]);
+    const asked = picture(seen, "post-logos").map((x) => (x as { body: { posts: string[] } }).body.posts.map((l) => l.replace("design-references/", "")));
+    expect(asked).toEqual([nine.slice(0, 4), nine.slice(4, 8), nine.slice(8)]);
+    // No post is asked for twice, and the settings are written once.
+    expect(new Set(asked.flat()).size).toBe(9);
+    expect(db.rpcCalls.filter((r) => r.name === "lifecycle_write_design_settings")).toHaveLength(1);
+    // The set: the copy two posts show, on the canvas, on the ground they have.
+    expect(settings().logo_set).toMatchObject({
+      of: LOGO, rule: 1, own: "light", other: { path: MADE.other, from: "made", size: [600, 200] }, white: null, made: MADE,
+      posts: { read: 9, found: 3, shown: { stored: 1, other: 2, white: 0 } }, canvas: { file: "other", from: "client_posts" }, at: T,
+    });
+    expect(outs.at(-1)!.result!.tone).toMatchObject({ of: LOGO, hash: HASH, settled: T });
+    // Every wait carries the settings, so a screen that reads the step sees what it saw before.
+    expect(outs[0].result).toMatchObject({ written: true, logo_path: LOGO, background: "#0C1D2F" });
+  });
+
+  it("leaves out a post that is gone from storage, reads the others and settles the set", async () => {
+    const six = posts(6).map((p) => p.path);
+    const { db, seen, row: settings } = world({ row: stored({ reference_paths: six }), gone: ["c1/social-2.jpg", "c1/social-4.jpg", "c1/social-5.jpg"], shows: { "c1/social-1.jpg": found("other") } });
+    const outs = await drive(db, c({ harvested_design_references: posts(6) }), before());
+    expect(outs.map((o) => o.status)).toEqual(["waiting", "done"]);
+    // The posts storage has are sent; the second batch holds none, so no call is made for it.
+    const asked = picture(seen, "post-logos").map((x) => (x as { body: { posts: string[] } }).body.posts.map((l) => l.replace("design-references/", "")));
+    expect(asked).toEqual([["c1/social-0.jpg", "c1/social-1.jpg", "c1/social-3.jpg"]]);
+    // Only the posts that were read are counted, and the set is settled from them.
+    expect(settings().logo_set).toMatchObject({ of: LOGO, other: { path: MADE.other, from: "made" }, posts: { read: 3, found: 1, shown: { stored: 0, other: 1, white: 0 } } });
+    expect(outs.at(-1)!.result!.tone).toMatchObject({ settled: T });
+  });
+
+  it("makes the files once and keeps what the service answered between runs", async () => {
+    const { db, seen } = world({ row: stored({ reference_paths: posts(9).map((p) => p.path) }) });
+    await drive(db, c({ harvested_design_references: posts(9) }), before());
+    expect(picture(seen, "logo-set")).toHaveLength(1);
+    expect(seen.hash).toEqual([LOGO]);
+    expect(seen.calls[0]).toEqual({ route: "logo-set", body: { job: "c1", step: "design_settings", logo: `generated-media/${LOGO}`, out: { other: `put:generated-media/${MADE.other}`, white: `put:generated-media/${MADE.white}` } } });
+    // The posts are searched with the stored file on its own ground, the copy on the other, and the white copy compared.
+    expect(picture(seen, "post-logos")[0]).toMatchObject({ body: {
+      placement: PLACEMENT, scales: [0.45, 1.35],
+      searches: [{ file: "stored", logo: `generated-media/${LOGO}`, ground: [255, 255, 255] }, { file: "other", logo: `generated-media/${MADE.other}`, ground: [11, 14, 26] }],
+      compare: [{ file: "white", logo: `generated-media/${MADE.white}` }],
+    } });
+  });
+
+  it("converts one website file to a run", async () => {
+    const files = ["https://brand.test/logo-white.svg", "https://brand.test/gone.png", "https://brand.test/icon.ico"];
+    const site = { [files[0]]: "c1/design-settings/logo-site-w.png", [files[2]]: null };
+    const { db, seen, row: settings } = world({ site, facts: { site: { index: 0, overlap: 0.97, size: { width: 900, height: 300 } }, inks: { ...FACTS.inks, other: [{ color: [250, 250, 250], share: 1 }] } } });
+    const rows = before();
+    rows.set("brand_read", row("brand_read", { result: { logo_files: files } }));
+    const outs = await drive(db, c(), rows);
+    expect(outs.map((o) => o.status)).toEqual(["waiting", "waiting", "done"]);
+    // The main logo once, then one website file a run, in the order the page has them.
+    expect(seen.logoPng).toEqual([LOGO_URL, ...files]);
+    // A file that could not be fetched or is no picture is left out; the one that passed the same-logo test is the second file.
+    expect(picture(seen, "logo-set")).toHaveLength(1);
+    expect((picture(seen, "logo-set")[0] as { body: { site: string[] } }).body.site).toEqual(["generated-media/c1/design-settings/logo-site-w.png"]);
+    expect(settings().logo_set).toMatchObject({ other: { path: "c1/design-settings/logo-site-w.png", from: "site", size: [900, 300] }, site: "c1/design-settings/logo-site-w.png", made: MADE });
+    // The posts were searched with the brand's own file on the other ground.
+    expect((picture(seen, "post-logos")[0] as { body: { searches: Array<{ logo: string }> } }).body.searches[1].logo).toBe("generated-media/c1/design-settings/logo-site-w.png");
+  });
+
+  it("writes today's settings and waits when the picture service cannot be reached", async () => {
+    const down = new PictureError("The picture service did not answer: 503.", "logo-set", "unavailable");
+    const { db, row: settings } = world({ row: null, picture: () => { throw down; } });
+    const out = await STEPS.design_settings.run(db, c(), ctx({ rows: refs })) as Out;
+    expect(out).toMatchObject({ status: "waiting", reason: "picture_service", recheckMinutes: 10, result: { written: true, logo_path: LOGO, background: "#0C1D2F" } });
+    // A new client can start designs with the one file, as today.
+    expect(settings()).toMatchObject({ logo_path: LOGO, placement: PLACEMENT, background: "#0C1D2F", source: "lifecycle", logo_set: null });
+    expect(db.rpcCalls.map((r) => r.name)).toEqual(["lifecycle_write_design_settings"]);
+  });
+
+  it("asks for half as many posts after a read the service did not answer in time, down to one, and still reads them all", async () => {
+    const nine = posts(9).map((p) => p.path);
+    // The service answers a read of posts only when it holds one post: a slow service, or a logo that is slow to search for.
+    let asked: number[] = [];
+    const slow = new PictureError("The picture service did not answer: timeout.", "post-logos", "unavailable");
+    const w = world({ row: stored({ reference_paths: nine }) });
+    const io = deps.picture;
+    deps.picture = ((db: unknown) => {
+      const real = (io as (db: unknown) => { call: (route: string, body: Record<string, unknown>) => Promise<unknown> })(db);
+      return { ...real, call: async (route: string, body: Record<string, unknown>) => {
+        if (route === "post-logos") { asked.push((body.posts as string[]).length); if ((body.posts as string[]).length > 1) throw slow; }
+        return real.call(route, body);
+      } };
+    }) as never;
+    const rows = before();
+    const cl = c({ harvested_design_references: posts(9) });
+    const outs: Out[] = [];
+    for (let i = 0; i < 14; i++) {
+      const got = await drive(w.db, cl, rows);
+      outs.push(got.at(-1)!);
+      if (got.at(-1)!.status === "done") break;
+    }
+    // Four posts, then two, then one: each a quiet wait for the service. From then on one post to a call until all nine are read.
+    expect(asked.slice(0, 3)).toEqual([4, 2, 1]);
+    expect(asked.slice(2)).toEqual(Array(9).fill(1));
+    expect(outs.slice(0, 2).map((o) => [o.status, o.reason, o.recheckMinutes])).toEqual([["waiting", "picture_service", 10], ["waiting", "picture_service", 10]]);
+    expect(outs.at(-1)).toMatchObject({ status: "done" });
+    expect(w.row().logo_set).toMatchObject({ of: LOGO, posts: { read: 9 } });
+  });
+
+  it("fails with the lifecycle's own backoff when the service refuses the call", async () => {
+    const refused = new PictureError("The picture service refused the call (400): The request is not well formed: site.", "logo-set", "refused");
+    const { db, row: settings } = world({ picture: () => { throw refused; } });
+    const outs = await drive(db, c(), before());
+    expect(outs).toEqual([{ status: "failed", error: refused.message }]);
+    expect(settings().logo_set).toBeNull();
+  });
+
+  it("stores no set and finishes when the service cannot use the logo", async () => {
+    const unusable = new PictureError("The logo file has no ink.", "logo-set", "unusable");
+    const { db, seen, row: settings } = world({ picture: (route) => { if (route === "logo-set") throw unusable; } });
+    const outs = await drive(db, c(), before());
+    expect(outs).toHaveLength(1);
+    expect(outs[0]).toMatchObject({ status: "done", result: { written: true, logo_path: LOGO, tone: { of: LOGO, unusable: "The logo file has no ink." } } });
+    expect(settings().logo_set).toBeNull();
+    expect(picture(seen, "post-logos")).toEqual([]);
+    expect(db.rpcCalls.map((r) => r.name)).toEqual(["lifecycle_write_design_settings"]);
+  });
+
+  it("does not settle a set when the logo or the person's file changed while it was being made", async () => {
+    // A person puts a second file there after the step read the row.
+    const person = { path: "c1/design-settings/logo-other-9.png", of: LOGO, at: T };
+    const w = world({ picture: (route) => { if (route === "post-logos") w.db.tables.design_brand_settings[0].logo_set = { person }; } });
+    const rows = before();
+    const key = await STEPS.design_settings.inputs(w.db, c(), rows);
+    const out = await STEPS.design_settings.run(w.db, c(), ctx({ rows })) as Out;
+    expect(out).toMatchObject({ status: "waiting", reason: "in_progress", recheckMinutes: 1 });
+    expect(w.row().logo_set).toEqual({ person });
+    // The next look has another key, and makes the set with the person's file.
+    expect(await STEPS.design_settings.inputs(w.db, c(), rows)).not.toBe(key);
+  });
+
+  it("keeps what each post gave when the key changes and the searches do not", async () => {
+    const { db, seen, row: settings } = world({ shows: { "c1/social-0.jpg": found("other") } });
+    const rows = before();
+    await drive(db, c(), rows);
+    expect(picture(seen, "post-logos")).toHaveLength(1);
+    const first = structuredClone(settings().logo_set);
+    // The brand colors change: the key changes, the settings are written again, and nothing about the files or the searches moved.
+    const recolored = c({ brand_identity: { ...BRAND, secondary_color: "#0c1d2f", accent_color: "#101010" } });
+    expect(await STEPS.design_settings.inputs(db, recolored, rows)).not.toBe(rows.get("design_settings")!.inputs_key);
+    const outs = await drive(db, recolored, rows);
+    expect(outs).toHaveLength(1);
+    expect(outs[0].status).toBe("done");
+    expect(picture(seen, "logo-set")).toHaveLength(1);
+    expect(picture(seen, "post-logos")).toHaveLength(1);
+    expect(seen.spot).toBe(0);
+    expect(settings().logo_set).toEqual(first);
+    expect(db.rpcCalls.filter((r) => r.name === "settle_design_logo_set")).toHaveLength(2);
+  });
+
+  it("settles the set with the logo it was made for and the person's file it read", async () => {
+    const person = { path: "c1/design-settings/logo-other-9.png", of: LOGO, at: T };
+    const { db, seen, row: settings } = world({ row: stored({ logo_set: { person } }), facts: { person: { size: { width: 500, height: 200 } }, inks: { ...FACTS.inks, other: [{ color: [250, 250, 250], share: 1 }] } } });
+    const outs = await drive(db, c(), before());
+    expect(outs.at(-1)!.status).toBe("done");
+    const settle = db.rpcCalls.find((r) => r.name === "settle_design_logo_set")!;
+    expect(settle.args).toMatchObject({ p_client: "c1", p_of: LOGO, p_person: person, p_set: { of: LOGO, other: { path: person.path, from: "person", size: [500, 200] } } });
+    expect("person" in (settle.args.p_set as object)).toBe(false);
+    // The service was sent the person's file, and the posts were searched with it marked as theirs.
+    expect((picture(seen, "logo-set")[0] as { body: { person: string } }).body.person).toBe(`generated-media/${person.path}`);
+    expect((picture(seen, "post-logos")[0] as { body: { searches: unknown[] } }).body.searches[1]).toEqual({ file: "other", logo: `generated-media/${person.path}`, ground: [11, 14, 26], fixed: true });
+    expect(settings().logo_set).toMatchObject({ person, other: { from: "person" } });
+    // A file put beside an older main logo is not used.
+    const stale = world({ row: stored({ logo_set: { person: { ...person, of: "c1/older.png" } } }) });
+    await drive(stale.db, c(), before());
+    expect(picture(stale.seen, "logo-set")[0].body).not.toHaveProperty("person");
+    expect(stale.row().logo_set.other).toBeNull();
+  });
+
+  describe("design_settings for a row a person set", () => {
+    it("gives a person's row its key before it looks for a website logo", async () => {
+      const { db } = world({ row: theirs() });
+      // No learned references yet, no website logo, no library: a lifecycle row would wait; a person's row has what it needs.
+      const bare = client({ logo_url: null, harvested_design_references: [], design_references: null });
+      expect(await STEPS.design_settings.inputs(db, bare, new Map())).toBe("person|logo:c1/their-logo.png|refs:|at:left,0.3,0.05,0.05|site:|other:|tone:1");
+      expect(await STEPS.design_settings.inputs(db, bare, refs)).toBe(`person|logo:c1/their-logo.png|refs:${T}|at:left,0.3,0.05,0.05|site:|other:|tone:1`);
+    });
+
+    it("makes the set for a person's row and leaves the logo, placement, background and date exactly as they are", async () => {
+      const { db, seen, row: settings } = world({ row: theirs(), shows: { "c1/new-0.jpg": found("other"), "c1/new-1.jpg": found("other"), "c1/new-2.jpg": found("white") } });
+      const untouched = structuredClone(settings());
+      const outs = await drive(db, c(), rowsOf(row("design_refs", { result: { synthesized_at: T } })));
+      expect(outs).toHaveLength(1);
+      expect(outs[0]).toMatchObject({ status: "done", result: { kept: "person" } });
+      // No settings are written, no model is asked, and their own logo is never fetched again or converted.
+      expect(db.rpcCalls.map((r) => r.name)).toEqual(["settle_design_logo_set"]);
+      expect(seen.key).toBe(0);
+      expect(seen.spot).toBe(0);
+      expect(seen.logoPng).toEqual([]);
+      // Their posts are searched with their logo, at their placement.
+      expect(picture(seen, "logo-set")[0].body).toMatchObject({ logo: "generated-media/c1/their-logo.png" });
+      expect(picture(seen, "post-logos")[0].body).toMatchObject({ posts: ["design-references/c1/new-0.jpg", "design-references/c1/new-1.jpg", "design-references/c1/new-2.jpg"], placement: theirs().placement });
+      // The canvas stays their file on their background, whatever their posts show; the files their posts show are in the set.
+      const settle = db.rpcCalls[0];
+      expect(settle.args).toMatchObject({ p_client: "c1", p_of: "c1/their-logo.png", p_person: null, p_set: { canvas: { file: "stored", ground: "#0C1D2F", from: "settings" }, other: { from: "made" }, white: { path: MADE.white } } });
+      const { logo_set, ...after } = settings();
+      const { logo_set: _none, ...beforeRow } = untouched;
+      expect(after).toEqual(beforeRow);
+      expect(logo_set.posts).toEqual({ read: 3, found: 3, shown: { stored: 0, other: 2, white: 1 } });
+    });
+
+    it("waits quietly for the picture service and changes nothing of theirs", async () => {
+      const down = new PictureError("The picture service did not answer: 503.", "logo-set", "unavailable");
+      const { db, row: settings } = world({ row: theirs(), picture: () => { throw down; } });
+      const untouched = structuredClone(settings());
+      const outs = await drive(db, c(), rowsOf(row("design_refs", { result: { synthesized_at: T } })));
+      expect(outs).toEqual([{ status: "waiting", reason: "picture_service", recheckMinutes: 10, result: { kept: "person", tone: expect.objectContaining({ of: "c1/their-logo.png" }) } }]);
+      expect(settings()).toEqual(untouched);
+      expect(db.rpcCalls).toEqual([]);
+    });
   });
 });
 

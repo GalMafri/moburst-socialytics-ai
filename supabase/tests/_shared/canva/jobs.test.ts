@@ -38,6 +38,7 @@ import { placementFor } from "../../../functions/_shared/lifecycle/designSetting
 import { type DesignRequest, type Settings, BUCKET, pngSize, settleRequest, startOption } from "../../../functions/_shared/canva/jobs";
 import { designPrompt, type GenerateInput } from "../../../functions/_shared/canva/brief";
 import { STORY_PAGE, storyLogoPlacement } from "../../../functions/_shared/design/story";
+import type { LogoSet } from "../../../functions/_shared/design/logoTone";
 
 // Starting a post's design: the job a request hands the design worker.
 
@@ -245,6 +246,123 @@ describe("startOption and the stored logo", () => {
     await startOption(db, request(), stored(db), "Pay The Pyper", 0, 0);
     expect(db.tables.canva_finish_jobs[0].input.logo_path).toBe("c1/logo.png");
     expect(db.tables.design_brand_settings[0].derived).toMatchObject({ logo_checked: "c1/logo.png" });
+  });
+});
+
+describe("startOption and the client's logo set", () => {
+  const OTHER = "c1/design-settings/logo-0123456789abcdef-other.png";
+  const WHITE = "c1/design-settings/logo-0123456789abcdef-white.png";
+  /** A set that belongs to the row's logo: the copy for dark pictures on the canvas, on a ground the client's posts have. */
+  const set = (over: Partial<LogoSet> = {}): LogoSet => ({
+    of: "c1/logo.png", rule: 1, own: "light", both: false,
+    other: { path: OTHER, from: "made", size: [701, 251] }, white: { path: WHITE }, made: { other: OTHER, white: WHITE }, site: null,
+    posts: { read: 8, found: 5, shown: { stored: 1, other: 3, white: 1 } },
+    canvas: { file: "other", ground: "#0F294C", from: "client_posts" }, at: "2026-11-16T09:00:00.000Z", ...over,
+  });
+  const LOGOS = { files: { stored: "c1/logo.png", other: OTHER, white: WHITE }, canvas: "other", second: { file: "stored", ground: "#FFFFFF" }, fixed: [] };
+  const world = (row: Settings, tables: Record<string, unknown[]> = {}) => {
+    const db = fakeDb({ canva_finish_jobs: [], ...tables });
+    db.uploads.set(`${BUCKET}/c1/logo.png`, pngHeader(701, 251));
+    // The copy has the stored file's size in life; another size here shows whose size the job carries.
+    db.uploads.set(`${BUCKET}/${OTHER}`, pngHeader(600, 300));
+    db.uploads.set(`${BUCKET}/${WHITE}`, pngHeader(701, 251));
+    return db;
+  };
+
+  it("carries the canvas file, its size, its ground and the set in a still job's input", async () => {
+    const row: Settings = { ...settings, logo_set: set() };
+    const db = world(row);
+    await startOption(db, request(), row, "Northwind Hockey", 0, 0);
+    const [job] = db.tables.canva_finish_jobs;
+    expect(job.input.logo_path).toBe(OTHER);
+    expect(job.input.logo_size).toEqual([600, 300]);
+    expect(job.input.generate.background).toBe("#0F294C");
+    expect(job.input.logos).toEqual(LOGOS);
+    expect(job.input.placement).toEqual(settings.placement);
+  });
+
+  it("leaves the settings it returns unchanged and gives a video job the stored file", async () => {
+    const row: Settings = { ...settings, logo_set: set() };
+    const before = structuredClone(row);
+    const db = world(row);
+    const used = await startOption(db, request(), row, "Northwind Hockey", 0, 0);
+    expect(used).toEqual(before);
+    expect(row).toEqual(before);
+    expect(used.logo_path).toBe("c1/logo.png");
+    expect(used.background).toBe("#0B0E1A");
+
+    const video = world(row, { clients: [{ id: "c1", video_style: null, video_references: [] }] });
+    await startOption(video, request({ kind: "video", format: "Reel", briefs: [{ headline: ["A"], picture: "p", footage: "f" }] }), row, "Northwind Hockey", 0, 0);
+    const [job] = video.tables.canva_finish_jobs;
+    expect(job.input.logo_path).toBe("c1/logo.png");
+    expect(job.input.logo_size).toEqual([701, 251]);
+    expect("logos" in job.input).toBe(false);
+  });
+
+  it("starts a job with the one file when there is no set or the set belongs to another logo", async () => {
+    for (const logo_set of [undefined, null, set({ of: "c1/older-logo.png" }), { ...set(), rule: 2 }]) {
+      const row = { ...settings, logo_set } as Settings;
+      const db = world(row);
+      await startOption(db, request(), row, "Northwind Hockey", 0, 0);
+      const [job] = db.tables.canva_finish_jobs;
+      expect(job.input.logo_path).toBe("c1/logo.png");
+      expect(job.input.logo_size).toEqual([701, 251]);
+      expect(job.input.generate.background).toBe("#0B0E1A");
+      expect("logos" in job.input).toBe(false);
+    }
+  });
+
+  it("works out a Story's placement from the canvas file's size", async () => {
+    // A logo at the bottom: how far up the safe band pushes it depends on the logo's height.
+    const low = { anchor: "center" as const, width: 0.323, top: 0.9 };
+    const row: Settings = { ...settings, placement: low, logo_set: set() };
+    const db = world(row);
+    await startOption(db, request({ format: "Story" }), row, "Northwind Hockey", 0, 0);
+    const [job] = db.tables.canva_finish_jobs;
+    expect(job.input.placement).toEqual(storyLogoPlacement(low, 600, 300));
+    expect(job.input.placement).not.toEqual(storyLogoPlacement(low, 701, 251));
+    expect(job.input.generate.background).toBe("#0F294C");
+    expect(job.input.logos).toEqual(LOGOS);
+  });
+
+  it("gives every slide of a carousel the same set", async () => {
+    const row: Settings = { ...settings, logo_set: set() };
+    const db = world(row);
+    const carousel = request({ kind: "carousel", briefs: [{ headline: ["A"], picture: "p", slides: [{ headline: ["A"], picture: "p1" }, { headline: ["B"], picture: "p2" }, { headline: ["C"], picture: "p3" }] }] });
+    await startOption(db, carousel, row, "Northwind Hockey", 0, 0);
+    expect(db.tables.canva_finish_jobs).toHaveLength(3);
+    for (const job of db.tables.canva_finish_jobs) {
+      expect(job.input.logo_path).toBe(OTHER);
+      expect(job.input.generate.background).toBe("#0F294C");
+      expect(job.input.logos).toEqual(LOGOS);
+    }
+  });
+
+  it("keeps the set through a design's start when the stored logo is already its ink alone", async () => {
+    // A lifecycle row whose file was not looked at yet: the fitting pass finds nothing to trim, and the path stays.
+    const row = { ...settings, source: "lifecycle", derived: { placement_from: "default" }, logo_set: set() } as Settings;
+    const db = world(row, { design_brand_settings: [{ ...row }] });
+    db.uploads.set(`${BUCKET}/c1/logo.png`, canvas(300, 100, { x: 0, y: 0, w: 300, h: 100 }));
+    await startOption(db, request(), db.tables.design_brand_settings[0] as unknown as Settings, "Northwind Hockey", 0, 0);
+    const [job] = db.tables.canva_finish_jobs;
+    expect(db.tables.design_brand_settings[0].logo_path).toBe("c1/logo.png");
+    expect(db.tables.design_brand_settings[0].derived).toMatchObject({ logo_checked: "c1/logo.png" });
+    expect(job.input.logo_path).toBe(OTHER);
+    expect(job.input.logos).toEqual(LOGOS);
+  });
+
+  it("starts with one file when the logo was trimmed at this design's start", async () => {
+    // A logo stored padded: the fitting pass moves logo_path, so the set made for the padded file is not this logo's.
+    const row = { ...settings, source: "lifecycle", derived: { placement_from: "default" }, logo_set: set() } as Settings;
+    const db = world(row, { design_brand_settings: [{ ...row }] });
+    db.uploads.set(`${BUCKET}/c1/logo.png`, canvas(400, 400, { x: 40, y: 134, w: 320, h: 128 }));
+    const used = await startOption(db, request(), db.tables.design_brand_settings[0] as unknown as Settings, "Northwind Hockey", 0, 0);
+    const [job] = db.tables.canva_finish_jobs;
+    expect(used.logo_path).toMatch(/^c1\/design-settings\/logo-site-[0-9a-f]{16}\.png$/);
+    expect(job.input.logo_path).toBe(used.logo_path);
+    expect(job.input.logo_size).toEqual([320, 128]);
+    expect(job.input.generate.background).toBe("#0B0E1A");
+    expect("logos" in job.input).toBe(false);
   });
 });
 

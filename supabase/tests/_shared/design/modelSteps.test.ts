@@ -5,7 +5,7 @@
 // model, never uses up a job's designs.
 import { describe, expect, it } from "vitest";
 import { DESIGN_LIMITS, type StepResult, advanceDesignJob } from "../../../functions/_shared/design/advance";
-import { type GenerateDeps, MAX_GENERATIONS, MAX_UNLOGO, type UnlogoDeps, runGenerate, runUnlogo } from "../../../functions/_shared/design/modelSteps";
+import { type GenerateDeps, MAX_GENERATIONS, MAX_UNLOGO, OF_THE_DESIGN, type UnlogoDeps, runGenerate, runUnlogo } from "../../../functions/_shared/design/modelSteps";
 import { heldWork } from "../../../functions/_shared/canva/hold";
 import { saveJobProgress } from "../../../functions/_shared/canva/jobs";
 import { ModelBusy } from "../../../functions/_shared/media/modelBusy";
@@ -111,6 +111,15 @@ describe("generate", () => {
     const up = generateFakes();
     await dies(r, (job, hold, save) => runGenerate({ ...up.deps, ...save }, job, hold));
     expect(r.row).toMatchObject({ step: "locate", state: { generations: 1, design_path: "c1/canva-finish/job-1/design-1.png" } });
+  });
+
+  it("clears the logo's file, names, scores and distances when a design is made again", async () => {
+    const tone = { logo_file: "c1/design-settings/logo-0123456789abcdef-other.png", logo_named: "other", logo_matched: "stored", logo_scores: [0.96, 0.31], logo_gaps: { stored: 281.5, other: 37.2 } };
+    const r = jobRow({ step: "generate", state: { generations: 1, logo_score: 0.96, logo_rect: { x: 1 }, logo_frame: [1088, 1360], ...tone } });
+    const up = generateFakes();
+    await advance(r, (job, hold, save) => runGenerate({ ...up.deps, ...save }, job, hold));
+    expect(r.row.state).toEqual({ generations: 2, design_path: "c1/canva-finish/job-1/design-2.png", picture_ms: { canvas: 240 } });
+    for (const key of ["logo_file", "logo_named", "logo_matched", "logo_scores", "logo_gaps"]) expect(OF_THE_DESIGN).toContain(key);
   });
 
   it("clears what the checks found on the design before", async () => {

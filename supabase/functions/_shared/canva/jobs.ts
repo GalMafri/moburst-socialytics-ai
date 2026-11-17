@@ -11,6 +11,7 @@ import { STORY_PAGE, STORY_SURFACE, isStoryPost, storyLogoPlacement } from "../d
 import { videoRouteFor } from "../video/kit.ts";
 import { pngSize } from "../picture/headers.ts";
 import { settleLogo } from "../design/logoFit.ts";
+import { jobLogos } from "../design/logoTone.ts";
 
 export const BUCKET = "generated-media";
 
@@ -25,6 +26,8 @@ export interface Settings {
   // deno-lint-ignore no-explicit-any
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   derived?: Record<string, any> | null;
+  /** The client's logo files for light and dark pictures, when the lifecycle has settled them (_shared/design/logoTone.ts). */
+  logo_set?: unknown;
 }
 
 export interface DesignRequest {
@@ -87,13 +90,25 @@ async function insertJobs(admin: any, requestId: string, optionIndex: number, ro
  * in Canva, or for a carousel one such job per slide (the slides after the
  * cover wait for it and follow its look). Answers the settings it used, so
  * the next option of the same request starts from them.
+ *
+ * A still starts from the client's logo set when the row has a current one
+ * (16 Nov 2026): the canvas carries the file most of the client's posts show,
+ * on the ground they show it on, and the job carries the set (input.logos)
+ * for locate. With no current set (none settled yet, or the logo changed
+ * since, as when it was trimmed at this very start) the job has the one file
+ * and the settings background, exactly as before, and nothing waits. The
+ * settings handed back are never changed by this, and a video keeps the
+ * stored file.
  */
 export async function startOption(admin: any, req: DesignRequest, given: Settings, brandName: string, briefIndex: number, optionIndex: number): Promise<Settings> {
   const brief = req.briefs[briefIndex % req.briefs.length];
   // The logo is its ink alone before a design is built on it (a logo stored padded is trimmed here, once).
   const settings = await settleLogo(admin, given, async () => (await import("../lifecycle/imaging.ts")).refitStoredLogo);
-  const [lw, lh] = await logoSize(admin, settings.logo_path);
-  if (req.kind === "video") { await startVideoOption(admin, req, settings, brandName, brief, optionIndex, [lw, lh]); return settings; }
+  if (req.kind === "video") { await startVideoOption(admin, req, settings, brandName, brief, optionIndex, await logoSize(admin, settings.logo_path)); return settings; }
+  const tone = jobLogos(settings);
+  const logoPath = tone?.logo_path ?? settings.logo_path;
+  // The size of the file the canvas carries, read from the file itself.
+  const [lw, lh] = await logoSize(admin, logoPath);
   const slides = req.kind === "carousel" && brief.slides?.length ? brief.slides : [brief];
   const carousel = req.kind === "carousel" && slides.length > 1;
   // A Story is drawn on its own 9:16 page, as a Story, with the client's logo spot moved into Meta's safe band.
@@ -107,8 +122,10 @@ export async function startOption(admin: any, req: DesignRequest, given: Setting
     slide_count: carousel ? slides.length : null,
     step: "generate",
     input: {
-      logo_path: settings.logo_path,
+      logo_path: logoPath,
       logo_size: [lw, lh],
+      // The files locate may recognize and finish may stamp; absent for a job with one file.
+      ...(tone ? { logos: tone.logos } : {}),
       copy: slide.headline,
       placement: story ? storyLogoPlacement(settings.placement, lw, lh) : settings.placement,
       title: `${brandName} ${req.platform ?? ""} option ${optionIndex + 1}${carousel ? ` slide ${i + 1}` : ""}`.replace(/\s+/g, " "),
@@ -116,7 +133,7 @@ export async function startOption(admin: any, req: DesignRequest, given: Setting
       // The posts this design builds on, as the planner chose them for this
       // post; a brief from before that choice existed uses the first three.
       generate: {
-        brand_name: brandName, platform: req.platform ?? "social", concept: slide.picture, background: settings.background, refs: brief.refs?.length ? brief.refs : settings.reference_paths.slice(0, 3),
+        brand_name: brandName, platform: req.platform ?? "social", concept: slide.picture, background: tone?.background ?? settings.background, refs: brief.refs?.length ? brief.refs : settings.reference_paths.slice(0, 3),
         ...(story ? { size: { ...STORY_PAGE }, surface: STORY_SURFACE } : {}),
         // The person's note, so the image model sees it and a retry of the job keeps it.
         ...(req.note?.trim() ? { note: req.note.trim() } : {}),

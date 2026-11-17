@@ -30,7 +30,8 @@ vi.mock("../../../functions/_shared/render/resvg.ts", () => ({ svgToPng: vi.fn()
 vi.mock("../../../functions/_shared/design-system/logoAsset.ts", () => ({ cutLogo: vi.fn() }));
 vi.mock("../../../functions/_shared/anthropic.ts", () => ({ anthropicMessages: vi.fn() }));
 
-import { logoPng, refitStoredLogo } from "../../../functions/_shared/lifecycle/imaging";
+import { createHash } from "node:crypto";
+import { fileHash, logoPng, refitStoredLogo } from "../../../functions/_shared/lifecycle/imaging";
 
 /** A PNG as these tests carry it: the real signature and header size, then the RGBA canvas. */
 function png(w: number, h: number, rgba: ArrayLike<number>): Uint8Array {
@@ -98,5 +99,18 @@ describe("refitStoredLogo", () => {
     expect(await refitStoredLogo(put(withInk(300, 100, 0, 0, 300, 100)), "c1", "c1/logo.png")).toBeNull();
     expect(await refitStoredLogo(put(new Uint8Array(40)), "c1", "c1/logo.png")).toBeNull();
     await expect(refitStoredLogo(fakeDb(), "c1", "c1/missing.png")).rejects.toThrow("could not be read");
+  });
+});
+
+describe("fileHash", () => {
+  it("names a stored logo by the first 16 characters of its hash, and throws for a file storage cannot give", async () => {
+    const db = fakeDb();
+    const file = withInk(40, 16, 0, 0, 40, 16);
+    db.uploads.set("generated-media/c1/design-settings/logo-site-a.png", file);
+    const hash = await fileHash(db, "c1/design-settings/logo-site-a.png");
+    expect(hash).toBe(createHash("sha256").update(file).digest("hex").slice(0, 16));
+    // The same bytes give the same name, so a set made again writes its copies over the same files.
+    expect(await fileHash(db, "c1/design-settings/logo-site-a.png")).toBe(hash);
+    await expect(fileHash(db, "c1/missing.png")).rejects.toThrow("The logo file could not be read");
   });
 });
