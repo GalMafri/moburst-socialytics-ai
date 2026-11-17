@@ -13,6 +13,7 @@ import { pngSize } from "../picture/headers.ts";
 import { settleLogo } from "../design/logoFit.ts";
 import { jobLogos, restGround, stampList, type JobLogos, type LogoSet, type StampEntry } from "../design/logoTone.ts";
 import { jobShape, pagePlacement } from "../design/platformSize.ts";
+import { type CoverJob, forSameCover } from "../design/coverDesign.ts";
 
 export const BUCKET = "generated-media";
 
@@ -452,12 +453,14 @@ export type Claim = "claimed" | "lost" | "failed";
  * service: one call may take two timeouts and the retry pause between them,
  * which outlasts a pass's own lease. Used by the design worker's picture
  * steps and the video worker's title check. A job stopped meanwhile is left
- * as it is.
+ * as it is, and so is a carousel's slide whose row is another cover
+ * design's by now (design/coverDesign.ts): a run that lost its row never
+ * holds it.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function renewJobLease(admin: any, jobId: string, now: Date, ms: number): Promise<void> {
-  await admin.from("canva_finish_jobs").update({ lease_until: new Date(now.getTime() + ms).toISOString(), updated_at: now.toISOString() })
-    .eq("id", jobId).in("status", ["queued", "running"]);
+export async function renewJobLease(admin: any, job: CoverJob, now: Date, ms: number): Promise<void> {
+  await forSameCover(admin.from("canva_finish_jobs").update({ lease_until: new Date(now.getTime() + ms).toISOString(), updated_at: now.toISOString() })
+    .eq("id", job.id).in("status", ["queued", "running"]), job);
 }
 
 /**
@@ -468,12 +471,14 @@ export async function renewJobLease(admin: any, jobId: string, now: Date, ms: nu
  * in a picture service call that hangs, leaves the picture on the row, so
  * the next pass goes on from it instead of paying for another. Throws when
  * the row could not be written, so nothing is used as if it were saved. A
- * job stopped meanwhile is left as it is.
+ * job stopped meanwhile is left as it is, and so is a carousel's slide
+ * whose row is another cover design's by now (design/coverDesign.ts): the
+ * picture of a run that lost its row is saved to no row.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function saveJobProgress(admin: any, job: { id: string; step: string; state: unknown }): Promise<void> {
-  const { error } = await admin.from("canva_finish_jobs").update({ step: job.step, state: job.state, updated_at: new Date().toISOString() })
-    .eq("id", job.id).in("status", ["queued", "running"]);
+export async function saveJobProgress(admin: any, job: { id: string; step: string; state: unknown; slide_index?: number | null }): Promise<void> {
+  const { error } = await forSameCover(admin.from("canva_finish_jobs").update({ step: job.step, state: job.state, updated_at: new Date().toISOString() })
+    .eq("id", job.id).in("status", ["queued", "running"]), job);
   if (error) throw new Error(`Could not save the job's progress: ${error.message}`);
 }
 

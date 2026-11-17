@@ -200,7 +200,7 @@ describe("renewJobLease", () => {
   it("holds an active job until now plus the given time, before a picture call that may outlast the pass's lease", async () => {
     const db = fakeDb({ canva_finish_jobs: [job({ lease_until: ago(-2) })] });
     const [row] = db.tables.canva_finish_jobs;
-    await renewJobLease(db, "job-1", NOW, 420_000);
+    await renewJobLease(db, { id: "job-1" }, NOW, 420_000);
     expect(new Date(row.lease_until).getTime()).toBe(NOW.getTime() + 420_000);
     expect(row.updated_at).toBe(NOW.toISOString());
     expect(row.attempts).toBe(0);
@@ -209,7 +209,7 @@ describe("renewJobLease", () => {
   it("leaves a job stopped meanwhile as it is", async () => {
     const db = fakeDb({ canva_finish_jobs: [job({ status: "canceled", lease_until: null })] });
     const [row] = db.tables.canva_finish_jobs;
-    await renewJobLease(db, "job-1", NOW, 420_000);
+    await renewJobLease(db, { id: "job-1" }, NOW, 420_000);
     expect(row.lease_until).toBeNull();
   });
 });

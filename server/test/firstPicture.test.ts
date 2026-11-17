@@ -90,7 +90,7 @@ describe("POST /api/picture/slot-file with the first picture", () => {
     const { status, json } = await call({ ...base, ...ask });
     expect(status).toBe(200);
 
-    const expected = composeFirst(firstPicture(), cleanedPicture(), rect);
+    const expected = composeFirst(firstPicture(), cleanedPicture(), rect, true);
     expect(expected.facts.made).toBe(true);
     const got = result(json);
     expect(got.composed).toEqual(expected.facts);
@@ -141,7 +141,7 @@ describe("POST /api/picture/slot-file with the first picture", () => {
     const { call } = await store({ first: firstPicture(), cleaned: left });
     const got = result((await call({ ...base, ...ask })).json);
     expect(got.composed?.made).toBe(true);
-    expect(got.drawn).toEqual(slotFile(composeFirst(firstPicture(), copyOf(left), rect).picture!, rect, [W, H], "stored", stamps, drawn).drawn);
+    expect(got.drawn).toEqual(slotFile(composeFirst(firstPicture(), copyOf(left), rect, true).picture!, rect, [W, H], "stored", stamps, drawn).drawn);
     expect(got.drawn?.found).toBe(true);
   });
 
@@ -153,7 +153,7 @@ describe("POST /api/picture/slot-file with the first picture", () => {
     };
     const { puts, call } = await store({ first: twice(firstPicture()), cleaned: twice(cleanedPicture()) });
     const got = result((await call({ ...base, ...ask })).json);
-    const expected = composeFirst(twice(firstPicture()), twice(cleanedPicture()), { x: rect.x * 2, y: rect.y * 2, width: rect.width * 2, height: rect.height * 2 });
+    const expected = composeFirst(twice(firstPicture()), twice(cleanedPicture()), { x: rect.x * 2, y: rect.y * 2, width: rect.width * 2, height: rect.height * 2 }, true);
     expect(got.composed).toEqual(expected.facts);
     expect(Buffer.from((await decodeRaster(new Uint8Array(puts["composed.png"]))).data).equals(Buffer.from(expected.picture!.data))).toBe(true);
     expect(got.ground).toEqual(GROUND);
@@ -191,7 +191,7 @@ describe("POST /api/picture/slot-file with the first picture", () => {
 
   it("answers as not composed when the composed picture cannot be stored, and the call succeeds", async () => {
     const cleanedAnswer = slotFile(cleanedPicture(), rect, [W, H], "stored", stamps, drawn);
-    const made = composeFirst(firstPicture(), cleanedPicture(), rect).facts;
+    const made = composeFirst(firstPicture(), cleanedPicture(), rect, true).facts;
     for (const out of [`${PUT}refused`, `${PUT}busy`]) {
       const { puts, lines, call } = await store({ first: firstPicture(), cleaned: cleanedPicture() });
       const { status, json } = await call({ ...base, ...ask, out });
@@ -221,20 +221,34 @@ describe("POST /api/picture/slot-file with the first picture", () => {
     expect((await call({ ...base, ...ask, out: "https://elsewhere.test/out.png" })).json.reason).toBe("The request is not well formed: out");
   });
 
-  it("refuses to compose for a slot that is not a found drawing", async () => {
-    // A slot at the canvas rectangle carries no `drawn`: the removed logo's place is not known, so nothing may be composed.
-    const { puts, call } = await store({ first: firstPicture(), cleaned: cleanedPicture() });
-    const got = await call({ ...base, first: ask.first, out: ask.out });
-    expect(got.status).toBe(400);
-    expect(got.json.reason).toBe("The request is not well formed: drawn");
-    expect(Object.keys(puts)).toEqual([]);
+  it("composes for a slot that is not a found drawing only when the two pictures show the removal inside it", async () => {
+    // A slot at the canvas rectangle carries no `drawn`: the service measures the removal itself.
+    const shown = await store({ first: firstPicture(), cleaned: cleanedPicture() });
+    const got = await shown.call({ ...base, first: ask.first, out: ask.out });
+    expect(got.status).toBe(200);
+    const expected = composeFirst(firstPicture(), cleanedPicture(), rect, false);
+    expect(expected.facts.made).toBe(true);
+    expect(expected.facts.removed).toBeGreaterThanOrEqual(0.2);
+    expect(result(got.json)).toEqual({ ...slotFile(expected.picture!, rect, [W, H], "stored", stamps), composed: expected.facts });
+    expect(result(got.json)).not.toHaveProperty("drawn");
+    expect(Buffer.from((await decodeRaster(new Uint8Array(shown.puts["composed.png"]))).data).equals(Buffer.from(expected.picture!.data))).toBe(true);
+
+    // The model drew its logo somewhere else: the rectangle shows no removal, nothing is composed, the cleaned picture is read.
+    const elsewhere = flat(W, H, GROUND);
+    box(elsewhere, 220, 100, W, 200, [20, 24, 30]);
+    drawLogo(elsewhere, shape, { ...rect, y: rect.y + 120 }, [255, 255, 255]);
+    const none = await store({ first: elsewhere, cleaned: cleanedPicture() });
+    const refused = await none.call({ ...base, first: ask.first, out: ask.out });
+    expect(refused.status).toBe(200);
+    expect(result(refused.json)).toEqual({ ...slotFile(cleanedPicture(), rect, [W, H], "stored", stamps), composed: { made: false, why: "removal", share: 0, join: 0, removed: 0 } });
+    expect(Object.keys(none.puts)).toEqual([]);
   });
 });
 
 describe("composeForSlot", () => {
   it("gives the cleaned picture back with the reason when there is no first picture", () => {
     const cleaned = cleanedPicture();
-    const made = composeForSlot(null, cleaned, rect, [W, H]);
+    const made = composeForSlot(null, cleaned, rect, [W, H], true);
     expect(made.picture).toBe(cleaned);
     expect(made.facts).toEqual({ made: false, why: "first", share: 0, join: 0 });
   });

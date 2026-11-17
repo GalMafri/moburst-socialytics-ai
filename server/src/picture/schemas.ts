@@ -113,8 +113,6 @@ export function pictureSchemas(storage: string) {
     .superRefine((body, ctx) => {
       if (body.first !== undefined && body.out === undefined) ctx.addIssue({ code: "custom", path: ["out"], message: "A first picture needs a place for the composed one." });
       if (body.out !== undefined && body.first === undefined) ctx.addIssue({ code: "custom", path: ["first"], message: "A composed picture needs the first one." });
-      // Composed only where the drawing was found: its place is then a fact, and it is looked for again on the composed picture.
-      if (body.first !== undefined && body.out !== undefined && !body.drawn) ctx.addIssue({ code: "custom", path: ["drawn"], message: "A composed picture needs the found drawing." });
       body.files.forEach((f, i) => {
         if (body.files.findIndex((o) => o.file === f.file) !== i) ctx.addIssue({ code: "custom", path: ["files", i, "file"], message: "A file is listed once." });
       });

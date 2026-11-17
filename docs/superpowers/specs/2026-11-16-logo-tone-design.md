@@ -1093,17 +1093,33 @@ A removal sends the whole first picture through the image model (`design-worker`
 
 ### The rule
 
-The delivered picture is the model's first picture of that design, pixel for pixel. The cleaned picture is used in exactly one place: the slot's rectangle, and only when the slot is the drawing the search found (`logo_slot.from` "drawn"), because the removed logo's place is then an exact fact. Nothing else is ever taken from the cleaned picture, so the words and the photo outside that rectangle are the first picture's pixels by construction.
+The delivered picture is the model's first picture of that design, pixel for pixel. The cleaned picture is used in exactly one place: the rectangle where the logo was removed, and that has to be a measured fact. Nothing else is ever taken from the cleaned picture, so the words and the photo outside that rectangle are the first picture's pixels by construction.
 
-When the slot is the canvas rectangle (`from` "canvas": the drawing was not found, so its place is unknown), nothing is composed and the cleaned picture is the base, as today.
+Where the logo was removed is decided once, in one place (`firstPicture.ts`, `removedAt`), for every slot:
+
+- A found drawing (`logo_slot.from` "drawn"): the found rectangle. The search is the fact, and the service looks for the drawing again on the composed picture.
+- A slot at the canvas rectangle (`from` "canvas": the search did not recognize the drawing): the canvas rectangle, only when the two pictures show the removal inside it, carried out on each side to where that removal ends. When they do not show it (the model drew its logo somewhere else, or drew none), nothing is composed and the cleaned picture is the base, as today, with `why` "removal".
+
+The worker asks the same way for every design and keeps the reason the service gives. There is no case of its own for a canvas slot.
 
 The code: `supabase/functions/_shared/design/firstPicture.ts` (the arithmetic, `composeFirst`, numbers in `FIRST_PICTURE_RULE`), `server/src/picture/compose.ts` (the service's side), `supabase/functions/_shared/design/firstPictureJob.ts` (the worker's side).
 
 ### 1. Where the patch is
 
-One patch, at the slot (`state.logo_slot.rect`). The read for marks answers words and the code has no rectangle for anything the removal took out elsewhere, so nothing is taken from the cleaned picture there. A logo or a mark the removal took out away from the slot is still on the composed picture. The existing read for marks judges the composed picture, names it, and the design goes on from its cleaned picture (point 3).
+One patch, at the rectangle the logo was removed from. The read for marks answers words and the code has no rectangle for anything the removal took out elsewhere, so nothing is taken from the cleaned picture there. A logo or a mark the removal took out away from that rectangle is still on the composed picture. The existing read for marks judges the composed picture, names it, and the design goes on from its cleaned picture (point 3).
 
-The patch: the slot's 4x4-pixel cells, with 2 cells (8 pixels) added around them, take the cleaned pixels whole. Around that is a ring of 4 cells (16 pixels) across which the patch fades into the first picture. No pixel farther than 32 pixels from the slot's rectangle is written (`patchReach`: 8 of margin, 16 of ring, under 8 for the cell grid). A test runs 60 pairs of unrelated random pictures with slots inside, across an edge, in a corner and off the picture, and counts 0 changed pixels beyond that reach; another moves a thin line of text 3 pixels in the cleaned picture and counts 0 changed pixels on it. On the two designs the patch covers 1.2% and 1.4% of the picture.
+The measure for a canvas slot. Both pictures are read as 4x4-pixel cells. A cell is far apart when the two pictures differ on it by more than 48 levels (the level the ring's guard already uses). The removal is shown when at least one fifth of the canvas rectangle's cells are far apart. Measured on four removals of three live designs, with the same rectangle then laid on some 60,000 to 72,000 other places of each picture:
+
+| Pair | Cells far apart where the logo was removed | The most anywhere else |
+|---|---|---|
+| A, removal 1 (found drawing) | 28.3% | 1.6% |
+| A, removal 2 (found drawing) | 27.8% | 2.4% |
+| B, removal 1 (found drawing) | 43.9% | 8.4% (a croissant's crust) |
+| C, removal 1 (canvas slot, a list design of 17 Nov, 18:18) | 35.0% | 15.3% (a block of list text the removal softened) |
+
+The carrying out. On design C the canvas rectangle is 544x143 at (816, 109) and the model drew its logo in another color, 607x157 at (781, 146): larger, and 37 pixels lower. With the canvas rectangle alone the ring crosses the logo's lower line, the join reads 44 and nothing is composed, so this client would never get the first picture. So the rectangle is carried out on each side, one line of cells at a time, while the line just past that side still has a cell far apart, and by the rectangle's shorter side at most. On design C it goes 35 pixels left, 27 right and 50 down, and the ring is then clean (join 1.09). The join's two tests stay the judge: a side that stops at the limit with the removal still running, or a rectangle that ran into something else the removal changed, leaves cells far apart on the ring, and nothing is composed. A found drawing's rectangle is never carried out.
+
+The patch: the rectangle's cells, with 2 cells (8 pixels) added around them, take the cleaned pixels whole. Around that is a ring of 4 cells (16 pixels) across which the patch fades into the first picture. For a found drawing no pixel farther than 32 pixels from the slot's rectangle is written (`patchReach`); for a canvas slot none outside the patch's bounds (`composed.box`), which lie within the slot carried out by its shorter side plus those 32. Tests run pairs of unrelated random pictures for both kinds and count 0 changed pixels beyond; another moves a thin line of text 3 pixels in the cleaned picture and counts 0 changed pixels on it. On the three designs the patch covers 1.2%, 1.4% and 2.7% of the picture.
 
 ### 2. The join
 
@@ -1128,33 +1144,60 @@ The service composes inside the cleaned-slot call, stores the composed picture, 
 
 | Step | What it reads |
 |---|---|
-| The drawn logo is gone (`stillDrawn`) | the composed picture, in the same call. The service composes only for a request that carries `drawn`, so this check is always made |
+| The drawn logo is gone (`stillDrawn`) | the composed picture, in the same call, for a found drawing (the request carries `drawn`). A canvas slot has no drawing to look for: the removal measured inside it is its fact, and the read for marks is the guard against a logo drawn elsewhere |
 | The ground under the slot, and the logo file chosen for it | the composed picture, in the same call |
 | The read for marks | the composed picture |
 | The stamping of the logo file and the resize (finish) | the composed picture |
 | The read of the words and of the area around the stamped logo (verify) | the finished file, made from the composed picture |
 
-A composed picture has to pass every check a cleaned picture has to pass. If it fails one (the drawing is still found, no file shows on the ground, or the read names a mark), it is dropped, `state.composed.path` becomes null with the check as the reason, and the marks step runs again on the cleaned picture, exactly as before the rule. This happens once for each cleaned picture: after it, that cleaned picture is never composed again. The job keeps `state.composed.of` (the cleaned picture the composed one belongs to), so a later removal never reads an earlier one's.
+A composed picture has to pass every check a cleaned picture has to pass. What a failed check means is in point 6: while the option may still make another design, the design is made again or its slot is cleaned once more, and the cleaned picture is never the base. On the last design the option may make, the composed picture is dropped (`state.composed.path` becomes null with the check as the reason) and the marks step runs again on the cleaned picture, exactly as before the rule, once for each cleaned picture. The job keeps `state.composed.of` (the cleaned picture the composed one belongs to), so a later removal never reads an earlier one's.
 
 ### 4. Where the composing runs
 
-Inside the existing cleaned-slot call (`slot-file`), with no new call. A request that carries `drawn` may also carry `first` (the design as first drawn) and `out` (where the composed picture goes), both or neither. The answer then has `composed`: whether a picture was made, why not, the share of the picture, the join number and the patch's bounds.
+Inside the existing cleaned-slot call (`slot-file`), with no new call. A request may carry `first` (the design as first drawn) and `out` (where the composed picture goes), both or neither. The service composes only at a rectangle it can justify: a found drawing's (`drawn` is in the request), or one inside which it measures the removal itself. The answer then has `composed`: whether a picture was made, why not, the share of the picture, the join number and the patch's bounds.
 
 On a Mac, for one design: composing about 20 ms, writing the PNG 250 to 600 ms; one more file read (7 MB) and one more written (about 10.5 MB). Not measured on the service.
 
 Deploy order, service first:
 
+- A worker from before the canvas case, new service: it sends the two fields only with `drawn`, and is answered as before.
+- New worker, a service from before the canvas case: that service refuses the two fields without `drawn` with a 400, the worker asks again without them, and the design goes on with its cleaned picture (`why` "service"), as today.
 - Old worker, new service: the old worker never sends the two fields, and a request without them is answered exactly as before (the route's existing tests are unchanged and pass).
 - New worker, old service: the old service refuses a field it does not know with a 400 before it reads anything. The worker reads that as a service from before the rule and asks again without the two fields in the same step (`askCleanedSlot`). The design goes on with its cleaned picture, with `state.composed.why` "service". No try is spent and no design fails.
 - A job in flight keeps its step. At `finish` with no `state.composed` it finishes from its cleaned picture as it would have.
 
-### 5. Cost
+### 5. Cost of composing
 
-No image-model call is added, on any path. A design whose composed picture passes makes the same calls as today. A design whose composed picture fails a check makes one more cleaned-slot call and one more read for marks (the reading model, never the image model) before it goes the way it would have gone today. One more file is stored for each removal that is composed.
+Composing itself adds no image-model call. A design whose composed picture passes makes the same calls as before. One more file is stored for each removal that is composed. What a design that does not pass costs is counted in point 6.
+
+### 6. A picture is never delivered re-rendered when a fresh one can be made
+
+The live case, 17 Nov: the logo was found, the picture composed, and the read for marks named "a large, faint dark-blue monogram watermark in the background" that the model had drawn. The worker dropped the composed picture, read the cleaned one, cleaned it again and delivered it: the photo and the words had been through the image model twice more (99.2% of the delivered base's pixels differ from the first picture's).
+
+The rule. While the option may still make another design (`lastDesign`: fewer than `MAX_GENERATIONS` made), a design that cannot be delivered as its first picture is made again, through the worker's one existing path for that (`designAgain`), and nothing is cleaned further:
+
+| What happened | Before the last design | On the last design |
+|---|---|---|
+| The read for marks names a mark on the composed picture (the model drew it) | made again, reason "marks: drawn in the picture, away from the logo's place: ..." (`afterMark`) | the composed picture is dropped and the cleaned one is judged and cleaned, as before |
+| The logo was removed at the slot and composing was refused because the join is not clean (`composeRedesign`) | made again, reason "logo's place: the first picture could not take the cleaned logo's place (join, ...)" | goes on from the cleaned picture, which is judged as before |
+| The drawing is still found at the slot of the composed picture (`afterSlot`) | one more removal, at once. A deliberate change: before, the composed picture was dropped and the cleaned one judged first, with the removal following when the drawing was found there too. The slot's pixels are the same in both, so the removal follows as it did. It edits the first picture again and only the slot is taken from it, so the delivered picture is not redrawn | the composed picture is dropped and the cleaned one judged, as before |
+| No logo file shows on the ground under the slot of the composed picture (`afterSlot`) | made again, at once. A deliberate change: before, the composed picture was dropped and the cleaned one judged, and a design whose cleaned picture passed was delivered from it, redrawn. Now a new design is made instead, which costs one drawing and one removal more in that case | the composed picture is dropped and the cleaned one judged, as before |
+
+"Judged as before" on the last design means what it meant before the rule, and no more: the cleaned picture is delivered when it passes. When it fails a check there too (no logo file shows on its ground, the words read wrong, something touches the logo, or a mark is still there after the 3 removals a design has), no design can follow the last one and the option is over, as on main. The fall back keeps the rule from costing an option its last design; it does not promise a design.
+
+A slot that is no place the logo was removed from is not in this table: a canvas rectangle with no drawing found there and no removal shown inside it (`why` "removal"). There is nothing to compose, so the design goes on from its cleaned picture on any design, exactly as before the rule: no design is made again and no call is added (corrected after the review of 17 Nov: the build first made such a design again).
+
+Composing that failed for a reason no new drawing would change (a service from before the rule, a picture that could not be read, sized or stored) goes on from the cleaned picture on any design, as before.
+
+The next drawing is told nothing new: the path for making a design again keeps its reason on the job (`state.redesigns`) for review and passes nothing to the image model, and no prompt is changed here.
+
+Paid image-model calls for one option, at the worst. Before: 3 designs (`MAX_GENERATIONS`), each with its first removal and one after each of 2 mark cleans, 12 calls. After: the same caps hold, so 12 at the very worst (a drawing still found at the slot keeps its removals). Along the live case's path, a mark the model keeps drawing: before 12, now 8 (two designs end after one removal each, the last has its three). What does grow is the usual case of such a design: before, 1 design and 2 removals, delivered redrawn; now 2 designs and 2 removals, delivered as its first picture, when the second drawing has no such mark.
 
 ### Limits, said plainly
 
-- A design keeps the first picture's photo only when its slot is the found drawing and the read for marks finds nothing on the composed picture. A design whose removal took a mark out away from the slot is delivered from its cleaned picture, as today, after one extra slot call and one extra read. Design A is such a design: the lettering on the glasses' temple is back on its composed picture, so its read for marks is expected to name it. Design B composes with nothing else to find.
+- The last design an option may make still goes on from its cleaned picture when it cannot be composed or the reader names a mark on it, and is delivered from it when that picture passes its checks: a client for whom the model draws such a mark on all three designs gets a redrawn picture, as before, after three designs. A last design whose cleaned picture fails a check ends its option, as before.
+- A design keeps the first picture's photo only when the logo's removal is a fact at its slot (a found drawing, or a canvas rectangle that shows it) and the read for marks finds nothing on the composed picture. A canvas slot's logo under 48 levels of contrast with its ground, or one covering under a fifth of the rectangle's cells, is not shown to be removed, and the design is delivered from its cleaned picture.
+- A canvas rectangle is carried out along whatever is far apart next to it. Text right against the slot (no clean line of cells between) that the removal changed would be taken in whole from the cleaned picture, by the slot's shorter side at most. It is never blended: the ring's guard refuses that. A design whose removal took a mark out away from the slot is delivered from its cleaned picture, as today, after one extra slot call and one extra read. Design A is such a design: the lettering on the glasses' temple is back on its composed picture, so its read for marks is expected to name it. Design B composes with nothing else to find.
 - Text or a photo edge within 24 pixels of the slot's rectangle lies in the margin or the ring. If the redraw moved it and more than 4 ring cells differ by over 48 levels, nothing is composed. Text of low contrast (under 48 levels a cell), or one that crosses 4 cells or fewer, is still composed, with its part inside the margin from the cleaned picture and its part in the ring a blend. From 28 pixels away nothing is touched.
 - The join number is a mean. Soft, low-contrast content moved far gives a low number.
 - The numbers (20 levels, 48 levels on 4 cells, 8 and 16 pixels) come from two designs and three removals. Each job keeps what composing found (`state.composed`).

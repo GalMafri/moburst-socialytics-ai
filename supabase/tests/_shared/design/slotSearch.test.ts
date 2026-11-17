@@ -214,7 +214,7 @@ describe("the cleaned slot with the first picture, when the service did not fini
     }) as unknown as typeof fetch;
     let n = 0;
     const admin = { rpc: async () => ({ data: `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`, error: null }) };
-    const ask = () => askCleanedSlot<SlotFileResult>(state, BASE, true, (compose) =>
+    const ask = () => askCleanedSlot<SlotFileResult>(state, BASE, (compose) =>
       slotSearch(admin, state, "slot-file", state.nologo_path as string, { ...fileBody, ...(compose ? { first: "https://storage.test/read/design.png?token=d", out: "https://storage.test/upload/composed.png?token=w" } : {}) }, { fetchImpl, sleep: async () => {} }));
     return { calls, ask };
   }

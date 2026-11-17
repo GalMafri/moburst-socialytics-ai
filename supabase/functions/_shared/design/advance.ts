@@ -6,7 +6,14 @@
 // is kept by the shared rule (canva/stepError.ts). Free of Deno and network
 // imports, so a job can be run through an outage in a test; the worker gives
 // it the steps.
+//
+// Every write here to a carousel's slide after the cover lands only while
+// the row is for the cover design the run read (coverDesign.ts). When the
+// cover was made again meanwhile, the run stops at the first write that did
+// not land: it finishes nothing, releases no lease, and the row runs on
+// from where it was started again.
 
+import { landed } from "./coverDesign.ts";
 import { ACTIVE_JOB, recordStepError, type StepJob, type StepLimits } from "../canva/stepError.ts";
 
 /** next: run the following step now; wait: a later pass; held: work continues in the background under its lease; done. */
@@ -36,17 +43,19 @@ export async function advanceDesignJob(
     while (result === "next" && timeLeft()) {
       result = await runStep();
       if (result !== "held") {
-        await jobs().update({ step: job.step, state: job.state, error: null, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE_JOB);
+        const saved = await landed(jobs().update({ step: job.step, state: job.state, error: null, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE_JOB), job);
+        // The row is another cover design's by now, or was stopped: this run's work is dropped here.
+        if (!saved) return;
       }
     }
     if (result === "done") {
-      await jobs().update({ status: "done", step: "finished", output_path: job.state.final_path, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE_JOB);
+      await landed(jobs().update({ status: "done", step: "finished", output_path: job.state.final_path, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE_JOB), job);
     } else if (result !== "held") {
-      await jobs().update({ lease_until: null }).eq("id", job.id).in("status", ACTIVE_JOB);
+      await landed(jobs().update({ lease_until: null }).eq("id", job.id).in("status", ACTIVE_JOB), job);
     }
   } catch (e) {
     if (e instanceof Stopped) {
-      await jobs().update({ status: "canceled", error: null, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE_JOB);
+      await landed(jobs().update({ status: "canceled", error: null, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE_JOB), job);
     } else {
       await recordStepError(admin, job, e, DESIGN_LIMITS);
     }

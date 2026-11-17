@@ -6,7 +6,7 @@
 // logo goes (17 Nov 2026): locate finds that slot, the model's drawing is
 // cleaned out, and the client's logo file that shows on the ground under the
 // slot is placed there (_shared/design/logoSlot.ts). The delivered picture is
-// the model's first picture with the cleaned picture's slot where the drawn
+// the model's first picture with the cleaned picture's slot where the
 // logo was found and removed (_shared/design/firstPicture.ts). Each design is a row in canva_finish_jobs (the table
 // keeps its old name); a video's footage and join stay with video-worker.
 //
@@ -54,7 +54,8 @@ import { POSTS_PER_CALL, type Reading, askLogoSet, liveIo, readNextPosts } from 
 import { personOther } from "../_shared/lifecycle/designSettings.ts";
 import { logoAreaRect } from "../_shared/picture/geometry.ts";
 import { drawOrFallBack, dropStaleDesign } from "../_shared/design/sizeFallback.ts";
-import { askCleanedSlot, basePicture, composedPath, dropComposed } from "../_shared/design/firstPictureJob.ts";
+import { afterMark, afterSlot, askCleanedSlot, basePicture, composeRedesign, composedPath } from "../_shared/design/firstPictureJob.ts";
+import { jobFolder, startAgain } from "../_shared/design/coverDesign.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
@@ -249,14 +250,15 @@ function hold(admin: any, job: Job, work: () => Promise<void>): StepResult {
  * wall limit stays the bound; a run that dies spends a try as before.
  */
 async function renewLease(admin: any, job: Job): Promise<void> {
-  await renewJobLease(admin, job.id, new Date(), MODEL_LEASE_MS);
+  await renewJobLease(admin, job, new Date(), MODEL_LEASE_MS);
 }
 
 // ── The steps ───────────────────────────────────────────────────────────────
 
 async function runStep(admin: any, job: Job): Promise<StepResult> {
   const s = job.state ?? (job.state = {});
-  const base = `${job.client_id}/canva-finish/${job.id}`;
+  // The folder of the job's files: its own for each cover design a carousel's slide is drawn from (_shared/design/coverDesign.ts).
+  const base = jobFolder(job);
   // A job left at a step of the Canva method (before 13 Oct) goes on from the design it has.
   if (!STEPS.has(job.step)) job.step = s.design_path ? "unlogo" : "generate";
   // A design drawn for another page than the job now has (its option fell back to the 4:5 page while it was
@@ -317,10 +319,10 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       // the ground under the slot is read from the picture's own pixels, and the first of the client's logo
       // files whose whole parts all show on it is the file finish stamps.
       const stamp = stampPlan({ logo_path: job.input.logo_path, generate: g, logos: job.input.logos, stamp: job.input.stamp }, s);
-      // The first picture is the base (_shared/design/firstPictureJob.ts): where the slot is the found drawing, the service composes
-      // it in this same call with the cleaned picture's slot and reads the slot on the result, the search for the drawing included.
+      // The first picture is the base (_shared/design/firstPictureJob.ts): in this same call the service composes it with the cleaned
+      // picture's slot, where the logo was removed there, and reads the slot on the result, the search for a found drawing included.
       // `picture` is what every later step reads and finish stamps.
-      const { result: slot, ms: slotMs } = await askCleanedSlot(s, base, !!stamp.drawn, async (compose) => {
+      const { result: slot, ms: slotMs } = await askCleanedSlot(s, base, async (compose) => {
         const request = await slotFileRequest(admin, stamp, { job: job.id, step: "marks", picturePath: s.nologo_path });
         if (compose) Object.assign(request, { first: await signedRead(admin, BUCKET, s.design_path), out: await signedWrite(admin, BUCKET, composedPath(base, s)) });
         // The look for the drawing at the slot is a search: worked to the service's time budget and carried on from what the job kept
@@ -331,10 +333,22 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       // The service's time was used before the search ended: nothing is decided about the slot or the composed picture yet, no try
       // is spent, and the step asks again from where the service got. The service stores a composed picture only with the call that ends the search.
       if (!slot) return "next";
+      // A picture is never delivered re-rendered when a fresh one can be made (_shared/design/firstPictureJob.ts): the logo was removed
+      // at the slot, the first picture could not take the cleaned pixels there (no clean join), and the option may still make another
+      // design. A slot that shows no removal has nothing to compose and goes on from its cleaned picture, as before the rule.
+      const refused = composeRedesign(s);
+      if (refused) {
+        console.warn(`[design-worker] job ${job.id}: ${refused}; designing again.`);
+        await designAgain(admin, job, refused);
+        return "next";
+      }
       const picture = basePicture(s);
       const outcome = stampOutcome(stamp, slot, g.brand_name);
-      // A composed picture that fails a check is dropped, and this step runs again on the cleaned picture, as before the rule.
-      if (outcome.next !== "stamp" && dropComposed(s, outcome.reason)) return "next";
+      // A check of the slot that fails (_shared/design/firstPictureJob.ts, afterSlot). On the last design the option may make, a
+      // composed picture is dropped and this step runs again on the cleaned picture, which is judged as before the rule. In every
+      // other case the check's own consequence follows, within the bounds a design always had: one more removal, or a new design
+      // (after the last design there is none, and the option is over, as before).
+      if (outcome.next !== "stamp" && afterSlot(s, outcome.reason) === "cleaned") return "next";
       if (outcome.next === "clean") {
         // The model's logo is still on the picture: taken out the way any other mark is, within the same bounds.
         console.warn(`[design-worker] job ${job.id}: ${outcome.reason}.`);
@@ -366,10 +380,17 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
         return "next";
       }
       const where = seen.where || "every logo and brand mark, also on clothing, shoes, balls and equipment";
-      // Seen on the composed picture, which is the first picture outside the slot: the cleaned picture is judged, as before the rule.
-      if (dropComposed(s, REASONS.marks(where))) return "next";
+      // A mark on the composed picture is the model's own drawing: the design is made again, never cleaned further. On the last
+      // design, and for a mark on a cleaned picture, it goes the way it always did (_shared/design/firstPictureJob.ts, afterMark).
+      const marked = afterMark(s, where);
+      if (marked.next === "cleaned") return "next";
+      if (marked.next === "again") {
+        console.warn(`[design-worker] job ${job.id}: the model drew a mark (${where}); designing again.`);
+        await designAgain(admin, job, marked.reason);
+        return "next";
+      }
       console.warn(`[design-worker] job ${job.id}: marks left on the picture (${where}).`);
-      return cleanAgain(admin, job, where, REASONS.marks(where));
+      return cleanAgain(admin, job, where, marked.reason);
     }
     case "finish": {
       // A design from before the locate step is located first.
@@ -494,9 +515,11 @@ async function designAgain(admin: any, job: Job, reason: string): Promise<void> 
     const { data: slides } = await admin.from("canva_finish_jobs").select("id, state")
       .eq("design_request_id", job.design_request_id).eq("option_index", job.option_index).gt("slide_index", 0)
       .in("status", ["queued", "running", "done"]);
+    // Each other slide's row is started again for the cover's next design (_shared/design/coverDesign.ts). A run that still holds
+    // one of them, its image call in flight, read the row before this: none of its writes lands from here on, so its design in
+    // the old cover's look is saved to no row, and the row runs on from here.
     for (const slide of slides ?? []) {
-      const keep = slide.state?.replaces ? { replaces: slide.state.replaces } : {};
-      await admin.from("canva_finish_jobs").update({ step: "generate", status: "running", state: keep, output_path: null, attempts: 0, error: null, lease_until: null, updated_at: new Date().toISOString() }).eq("id", slide.id);
+      await admin.from("canva_finish_jobs").update(startAgain(slide.state, new Date().toISOString())).eq("id", slide.id);
     }
   }
 }

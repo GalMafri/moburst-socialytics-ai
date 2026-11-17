@@ -6,25 +6,32 @@
 // whole picture comes back redrawn: the photo parts are grittier and a few
 // pixels off. So the cleaned picture is never the base. The base is the
 // first picture, pixel for pixel, and the cleaned picture is used in exactly
-// one place: the slot's rectangle, where the drawing was found and removed.
+// one place: the rectangle where the logo was removed.
 //
-//   where          the slot, a known rectangle, with a margin around it.
-//                  Nothing else is ever taken from the cleaned picture, so
-//                  the words and the photo outside it are the first
-//                  picture's own pixels by construction;
+//   where          the slot's rectangle, with a margin around it, when it is
+//                  a fact that the logo was removed there. Either the search
+//                  found the drawing at that rectangle, or (a slot at the
+//                  canvas rectangle, where the search did not recognize the
+//                  drawing) the two pictures themselves show the removal
+//                  inside it; the rectangle is then carried out, side by
+//                  side, as far as that removal runs past it, because a
+//                  drawing the search did not recognize is often larger or
+//                  lower than the canvas had it. Nothing else is ever taken
+//                  from the cleaned picture, so the words and the photo outside it are the
+//                  first picture's own pixels by construction;
 //   the join       the patch is brought to the first picture's color by
 //                  what the two pictures differ by on the ring around it,
 //                  and fades into the first picture across that ring;
 //   when it fails  the ring is where both pictures should show the same
 //                  thing. When they do not (on average, or on more than a
 //                  few cells, as with text the redraw moved), no clean join
-//                  exists, and no picture is composed: the design keeps the cleaned
-//                  picture as its base, as before this rule.
+//                  exists, and no picture is composed. What the design
+//                  does then is the worker's rule (firstPictureJob.ts).
 //
 // Nothing here looks for what else the removal took out. A mark it removed
-// somewhere else is still on the composed picture, the existing read for
-// marks finds it there, and the design then goes on from its cleaned
-// picture (firstPictureJob.ts).
+// somewhere else is still on the composed picture, and the existing read
+// for marks finds it there. What the design does then is the worker's rule
+// too (firstPictureJob.ts).
 //
 // Every number is a count of pixels or a difference of color levels (0 to
 // 255), measured on real designs (the spec has the measurements).
@@ -49,6 +56,8 @@ export type FirstPictureRule = {
   apartLevel: number;
   /** The join is clean only when at most this many ring cells are apart. */
   apartCells: number;
+  /** A rectangle the search did not find the drawing at is where the logo was removed only when at least this share of its cells are apart. */
+  removedShare: number;
 };
 
 /**
@@ -59,8 +68,23 @@ export type FirstPictureRule = {
  * are 32.4, 21.3 and 6.9). Measured with a thin line of text 12 pixels
  * under the slot of a real pair, moved 3 pixels: 12 to 200 cells over 48,
  * with means of 4.4 to 17 that pass `joinMax`.
+ *
+ * `removedShare` is the same measure read the other way: inside the
+ * rectangle a removed logo leaves many cells apart, a redraw alone leaves
+ * few. Measured on four removals of three live designs (cells over 48
+ * levels, before the correction): where the logo was removed, 28.3%, 27.8%,
+ * 43.9% and 35.0% of the rectangle's cells (the last is a slot at the
+ * canvas rectangle, a logo the model drew in another color). The same
+ * rectangle laid everywhere else on those pictures, some 60,000 to 72,000
+ * places each: at most 1.6%, 2.4%, 8.4% (a croissant's crust) and 15.3% (a
+ * block of list text the removal softened). The line is one fifth.
+ * On that fourth design the canvas rectangle is 544x143 at (816, 109) and
+ * the model drew its logo 607x157 at (781, 146): with the canvas rectangle
+ * alone the ring crosses the lower line of the logo and the join reads 44.
+ * Carried out to where the removal ends (35 pixels left, 27 right, 50 down)
+ * the ring is clean.
  */
-export const FIRST_PICTURE_RULE: FirstPictureRule = { cell: 4, grow: 2, feather: 4, joinMax: 20, apartLevel: 48, apartCells: 4 };
+export const FIRST_PICTURE_RULE: FirstPictureRule = { cell: 4, grow: 2, feather: 4, joinMax: 20, apartLevel: 48, apartCells: 4, removedShare: 0.2 };
 
 /**
  * How far from the slot's rectangle, in pixels, a pixel can be changed: the
@@ -97,32 +121,95 @@ function middle(values: number[]): number {
   return values[(values.length - 1) >> 1];
 }
 
+type Cells = { x0: number; y0: number; x1: number; y1: number };
+
 /**
- * The first picture with the cleaned picture's slot, or no picture. `slot`
- * is the logo's slot in the pictures' own pixels. When a picture is
- * composed it is `first` itself, changed in place inside `facts.box` only
- * (two full pictures are in memory already; a third is not needed): no
- * pixel farther than `patchReach` from the slot is written. When none is
- * composed, `first` is not changed and `facts.why` says why.
+ * Where the logo was removed, in cells: the one decision every composed
+ * picture starts from. `slot` is the slot's cells and `far` says whether
+ * the two pictures are far apart on a cell.
+ *
+ * A found drawing's rectangle is that place as it is: the search is the
+ * fact. A rectangle the search did not find the drawing at is that place
+ * only when at least `removedShare` of its cells are far apart, and it is
+ * then carried out on each side, a line of cells at a time, while the line
+ * just past that side still has a cell far apart, by the rectangle's
+ * shorter side at most. A side that stops at the limit with the removal
+ * still running leaves cells far apart on the ring, and the join refuses.
+ *
+ * `removed` is the share of the slot's own cells that are far apart, for
+ * both kinds. `cells` is null when the rectangle is not such a place.
  */
-export function composeFirst(first: Raster, cleaned: Raster, slot: Rect, rule: FirstPictureRule = FIRST_PICTURE_RULE): { picture: Raster | null; facts: ComposeFacts } {
-  const none = (why: NotComposed, join = 0) => ({ picture: null, facts: { made: false, why, share: 0, join } });
+function removedAt(slot: Cells, found: boolean, far: (cx: number, cy: number) => boolean, cw: number, ch: number, rule: FirstPictureRule): { cells: Cells | null; removed: number } {
+  let apart = 0;
+  for (let cy = slot.y0; cy <= slot.y1; cy++) for (let cx = slot.x0; cx <= slot.x1; cx++) if (far(cx, cy)) apart++;
+  const removed = places(apart / ((slot.x1 - slot.x0 + 1) * (slot.y1 - slot.y0 + 1)), 4);
+  if (found) return { cells: slot, removed };
+  if (removed < rule.removedShare) return { cells: null, removed };
+  const most = Math.min(slot.x1 - slot.x0 + 1, slot.y1 - slot.y0 + 1);
+  const c = { ...slot };
+  const across = (cy: number) => { for (let cx = c.x0; cx <= c.x1; cx++) if (far(cx, cy)) return true; return false; };
+  const down = (cx: number) => { for (let cy = c.y0; cy <= c.y1; cy++) if (far(cx, cy)) return true; return false; };
+  for (let moved = true; moved;) {
+    moved = false;
+    if (c.y0 > 0 && slot.y0 - c.y0 < most && across(c.y0 - 1)) { c.y0--; moved = true; }
+    if (c.y1 < ch - 1 && c.y1 - slot.y1 < most && across(c.y1 + 1)) { c.y1++; moved = true; }
+    if (c.x0 > 0 && slot.x0 - c.x0 < most && down(c.x0 - 1)) { c.x0--; moved = true; }
+    if (c.x1 < cw - 1 && c.x1 - slot.x1 < most && down(c.x1 + 1)) { c.x1++; moved = true; }
+  }
+  return { cells: c, removed };
+}
+
+/**
+ * The first picture with the cleaned picture's pixels where the logo was
+ * removed, or no picture. `slot` is the logo's slot in the pictures' own
+ * pixels, and `found` says the search found the drawing there. Where the
+ * logo was removed is decided once (`removedAt`); when the slot is no such
+ * place nothing is composed, with `why` "removal". When a picture is
+ * composed it is `first` itself, changed in place inside `facts.box` only
+ * (two full pictures are in memory already; a third is not needed). For a
+ * found drawing no pixel farther than `patchReach` from the slot is
+ * written. When none is composed, `first` is not changed and `facts.why`
+ * says why.
+ */
+export function composeFirst(first: Raster, cleaned: Raster, slot: Rect, found: boolean, rule: FirstPictureRule = FIRST_PICTURE_RULE): { picture: Raster | null; facts: ComposeFacts } {
+  const none = (why: NotComposed, measured: { join?: number; removed?: number } = {}) => ({ picture: null, facts: { made: false, why, share: 0, join: measured.join ?? 0, ...(measured.removed === undefined ? {} : { removed: measured.removed }) } });
   if (first.width !== cleaned.width || first.height !== cleaned.height || !first.width || !first.height) return none("size");
   const W = first.width, H = first.height, S = rule.cell;
   const cw = Math.ceil(W / S), ch = Math.ceil(H / S);
 
   // The slot: every cell it touches on the picture.
-  const sx0 = Math.max(0, Math.floor(slot.x / S)), sy0 = Math.max(0, Math.floor(slot.y / S));
-  const sx1 = Math.min(cw - 1, Math.floor((slot.x + slot.width - 1) / S)), sy1 = Math.min(ch - 1, Math.floor((slot.y + slot.height - 1) / S));
-  if (sx0 > sx1 || sy0 > sy1) return none("slot");
+  const cells: Cells = {
+    x0: Math.max(0, Math.floor(slot.x / S)), y0: Math.max(0, Math.floor(slot.y / S)),
+    x1: Math.min(cw - 1, Math.floor((slot.x + slot.width - 1) / S)), y1: Math.min(ch - 1, Math.floor((slot.y + slot.height - 1) / S)),
+  };
+  if (cells.x0 > cells.x1 || cells.y0 > cells.y1) return none("slot");
 
-  // How much of the cleaned picture a cell takes: all of it in the slot and `grow` cells around it, then less with each cell of the ring, nothing beyond.
+  // What the first picture has more than the cleaned one on a cell, read once for each cell that is asked about.
+  const read = new Map<number, [number, number, number]>();
+  const apartOn = (cx: number, cy: number): [number, number, number] => {
+    const key = cy * cw + cx;
+    let d = read.get(key);
+    if (!d) {
+      const a = cellMean(first, S, cx, cy), b = cellMean(cleaned, S, cx, cy);
+      read.set(key, d = [a[0] - b[0], a[1] - b[1], a[2] - b[2]]);
+    }
+    return d;
+  };
+  const by = (d: [number, number, number], offset: number[]) => Math.max(Math.abs(d[0] - offset[0]), Math.abs(d[1] - offset[1]), Math.abs(d[2] - offset[2]));
+
+  // Where the logo was removed.
+  const place = removedAt(cells, found, (cx, cy) => by(apartOn(cx, cy), [0, 0, 0]) > rule.apartLevel, cw, ch, rule);
+  const removed = place.removed;
+  if (!place.cells) return none("removal", { removed });
+  const { x0: sx0, y0: sy0, x1: sx1, y1: sy1 } = place.cells;
+
+  // How much of the cleaned picture a cell takes: all of it in that rectangle and `grow` cells around it, then less with each cell of the ring, nothing beyond.
   const take = (cx: number, cy: number): number => {
     const x = Math.min(cw - 1, Math.max(0, cx)), y = Math.min(ch - 1, Math.max(0, cy));
     const away = Math.max(sx0 - x, x - sx1, sy0 - y, y - sy1) - rule.grow;
     return away <= 0 ? 1 : away > rule.feather ? 0 : 1 - away / (rule.feather + 1);
   };
-  // The patch's cells: the slot, its margin, the ring, and one cell beyond in which the fade ends.
+  // The patch's cells: the rectangle, its margin, the ring, and one cell beyond in which the fade ends.
   const out = rule.grow + rule.feather + 1;
   const bx0 = Math.max(0, sx0 - out), by0 = Math.max(0, sy0 - out), bx1 = Math.min(cw - 1, sx1 + out), by1 = Math.min(ch - 1, sy1 + out);
 
@@ -131,9 +218,7 @@ export function composeFirst(first: Raster, cleaned: Raster, slot: Rect, rule: F
   for (let cy = by0; cy <= by1; cy++) {
     for (let cx = bx0; cx <= bx1; cx++) {
       const t = take(cx, cy);
-      if (t <= 0 || t >= 1) continue;
-      const a = cellMean(first, S, cx, cy), b = cellMean(cleaned, S, cx, cy);
-      ring.push([a[0] - b[0], a[1] - b[1], a[2] - b[2]]);
+      if (t > 0 && t < 1) ring.push(apartOn(cx, cy));
     }
   }
   // A slot with no ring on the picture has nothing of the first picture around it to join.
@@ -143,13 +228,13 @@ export function composeFirst(first: Raster, cleaned: Raster, slot: Rect, rule: F
   // The join: what is left between the two pictures on the ring after the correction, on the worst channel of each cell.
   let left = 0, apart = 0;
   for (const d of ring) {
-    const by = Math.max(Math.abs(d[0] - offset[0]), Math.abs(d[1] - offset[1]), Math.abs(d[2] - offset[2]));
-    left += by;
-    if (by > rule.apartLevel) apart++;
+    const rest = by(d, offset);
+    left += rest;
+    if (rest > rule.apartLevel) apart++;
   }
   const join = places(left / ring.length, 2);
   // Refused on the mean, or on cells that are far apart: strokes or an edge the redraw moved inside the ring would be delivered doubled.
-  if (join > rule.joinMax || apart > rule.apartCells) return none("join", join);
+  if (join > rule.joinMax || apart > rule.apartCells) return none("join", { join, removed });
 
   // The composed picture: inside the patch, the cleaned pixel with the correction, taken by the share its place has between the cells' centers.
   const box: Rect = { x: bx0 * S, y: by0 * S, width: Math.min(W, (bx1 + 1) * S) - bx0 * S, height: Math.min(H, (by1 + 1) * S) - by0 * S };
@@ -167,7 +252,7 @@ export function composeFirst(first: Raster, cleaned: Raster, slot: Rect, rule: F
       }
     }
   }
-  let cells = 0;
-  for (let cy = by0; cy <= by1; cy++) for (let cx = bx0; cx <= bx1; cx++) if (take(cx, cy) > 0) cells++;
-  return { picture: first, facts: { made: true, share: places(cells / (cw * ch), 4), join, box } };
+  let taken = 0;
+  for (let cy = by0; cy <= by1; cy++) for (let cx = bx0; cx <= bx1; cx++) if (take(cx, cy) > 0) taken++;
+  return { picture: first, facts: { made: true, share: places(taken / (cw * ch), 4), join, removed, box } };
 }

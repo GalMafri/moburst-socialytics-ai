@@ -408,7 +408,7 @@ export function pictureRoutes(deps: PictureRouteDeps): Hono {
     let picture = cleaned;
     let composed: FirstPictureFacts | undefined;
     if (body.first && body.out) {
-      const made = composeForSlot(await io.maybe("first", body.first), cleaned, body.rect, body.frame);
+      const made = composeForSlot(await io.maybe("first", body.first), cleaned, body.rect, body.frame, !!body.drawn);
       composed = made.facts;
       picture = made.picture;
     }

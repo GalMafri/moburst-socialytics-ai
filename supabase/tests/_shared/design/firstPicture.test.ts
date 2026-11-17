@@ -86,7 +86,7 @@ function differing(a: Raster, b: Raster, rect: Rect | null, by = 0): { near: num
 
 describe("the rule's numbers", () => {
   it("are the ones the spec states", () => {
-    expect(FIRST_PICTURE_RULE).toEqual({ cell: 4, grow: 2, feather: 4, joinMax: 20, apartLevel: 48, apartCells: 4 });
+    expect(FIRST_PICTURE_RULE).toEqual({ cell: 4, grow: 2, feather: 4, joinMax: 20, apartLevel: 48, apartCells: 4, removedShare: 0.2 });
     // 8 pixels of margin, 16 of ring, and under 8 for the cell grid.
     expect(patchReach()).toBe(32);
   });
@@ -98,7 +98,7 @@ describe("composeFirst", () => {
     const kept = copyOf(first);
     // The redraw: the logo gone, new grain everywhere.
     const cleaned = grain(scene(), 6, 2);
-    const { picture, facts } = composeFirst(first, cleaned, SLOT);
+    const { picture, facts } = composeFirst(first, cleaned, SLOT, true);
 
     expect(facts.made).toBe(true);
     expect(facts.why).toBeUndefined();
@@ -145,7 +145,7 @@ describe("composeFirst", () => {
         : kind === 4 ? { x: 30 + next(Math.max(1, w - 90)), y: 30 + next(Math.max(1, h - 70)), width: 8 + next(50), height: 4 + next(30) }
         : { x: w + next(50), y: next(h), width: 40, height: 20 };
       // Composed whatever the ring shows, so the pixels are written in every run that has a slot on the picture.
-      const made = composeFirst(first, cleaned, slot, { ...FIRST_PICTURE_RULE, joinMax: 1000, apartCells: 1e9 });
+      const made = composeFirst(first, cleaned, slot, true, { ...FIRST_PICTURE_RULE, joinMax: 1000, apartCells: 1e9 });
       if (made.picture) composed++;
       expect(differing(first, kept, slot, reach).beyond).toBe(0);
       if (made.facts.box) {
@@ -155,7 +155,7 @@ describe("composeFirst", () => {
       }
       // With the rule's own join test the same holds, and a refusal writes nothing at all.
       const again = copyOf(kept);
-      const ruled = composeFirst(again, cleaned, slot);
+      const ruled = composeFirst(again, cleaned, slot, true);
       if (!ruled.picture) expect(differing(again, kept, null).beyond).toBe(0);
       else expect(differing(again, kept, slot, reach).beyond).toBe(0);
     }
@@ -173,7 +173,7 @@ describe("composeFirst", () => {
         const first = grain(draw(0, 0, true), 3, 11);
         const kept = copyOf(first);
         const cleaned = cast(grain(draw(dx, dy, false), 7, 12), [2, -3, 2]);
-        const { picture, facts } = composeFirst(first, cleaned, SLOT);
+        const { picture, facts } = composeFirst(first, cleaned, SLOT, true);
         expect(facts.made).toBe(true);
         // Every pixel of the text's area is the first picture's own byte.
         const words: Rect = { x: 90, y: 170, width: 240, height: 80 };
@@ -186,7 +186,7 @@ describe("composeFirst", () => {
   it("leaves a mark the removal took out somewhere else on the picture: only the slot is taken from the cleaned picture", () => {
     const first = withLogo(scene());
     box(first, 330, 180, 370, 196, [215, 215, 205]);
-    const { picture, facts } = composeFirst(first, scene(), SLOT);
+    const { picture, facts } = composeFirst(first, scene(), SLOT, true);
     expect(facts.made).toBe(true);
     // Still there: the read for marks judges this picture and finds it.
     expect(pixel(picture!, 336, 188)).toEqual([215, 215, 205]);
@@ -196,7 +196,7 @@ describe("composeFirst", () => {
     const first = withLogo(scene());
     // The cleaned picture came back with a cast of its own.
     const cleaned = cast(scene(), [4, -6, 5]);
-    const { picture, facts } = composeFirst(first, cleaned, SLOT);
+    const { picture, facts } = composeFirst(first, cleaned, SLOT, true);
     expect(facts.made).toBe(true);
     expect(facts.join).toBe(0);
     // In the slot the cleaned pixel is used with the cast taken off: the first picture's own ground, exactly.
@@ -214,7 +214,7 @@ describe("composeFirst", () => {
     const first = scene();
     const cleaned = scene();
     box(cleaned, SLOT.x - 8, SLOT.y - 8, SLOT.x + SLOT.width + 8, SLOT.y + SLOT.height + 8, [120, 150, 210]);
-    const { picture, facts } = composeFirst(first, cleaned, SLOT);
+    const { picture, facts } = composeFirst(first, cleaned, SLOT, true);
     expect(facts.made).toBe(true);
     const y = SLOT.y + 20;
     // Whole in the slot and its margin, the first picture past the ring, in between on the way.
@@ -235,7 +235,7 @@ describe("composeFirst", () => {
     };
     const one = withLogo(striped(0));
     const kept = copyOf(one);
-    const made = composeFirst(one, striped(12), SLOT);
+    const made = composeFirst(one, striped(12), SLOT, true);
     expect(made.picture).toBeNull();
     expect(made.facts.made).toBe(false);
     expect(made.facts.why).toBe("join");
@@ -244,7 +244,7 @@ describe("composeFirst", () => {
     // The first picture was not touched.
     expect(differing(one, kept, null).beyond).toBe(0);
     // The same stripes where they belong join cleanly.
-    expect(composeFirst(withLogo(striped(0)), striped(0), SLOT).facts.made).toBe(true);
+    expect(composeFirst(withLogo(striped(0)), striped(0), SLOT, true).facts.made).toBe(true);
   });
 
   it("composes nothing when text the redraw moved lies inside the ring, although the ring's mean is low", () => {
@@ -258,7 +258,7 @@ describe("composeFirst", () => {
         };
         const first = grain(draw(0, 0, true), 3, 21);
         const kept = copyOf(first);
-        const made = composeFirst(first, grain(draw(dx, dy, false), 6, 22), SLOT);
+        const made = composeFirst(first, grain(draw(dx, dy, false), 6, 22), SLOT, true);
         expect(made.picture).toBeNull();
         expect(made.facts.made).toBe(false);
         expect(made.facts.why).toBe("join");
@@ -266,7 +266,7 @@ describe("composeFirst", () => {
         if (Math.abs(dx) === 3) expect(made.facts.join).toBeLessThan(FIRST_PICTURE_RULE.joinMax);
         expect(differing(first, kept, null).beyond).toBe(0);
         // The same line where it belongs is no reason to refuse.
-        expect(composeFirst(grain(draw(0, 0, true), 3, 21), grain(draw(0, 0, false), 6, 22), SLOT).facts.made).toBe(true);
+        expect(composeFirst(grain(draw(0, 0, true), 3, 21), grain(draw(0, 0, false), 6, 22), SLOT, true).facts.made).toBe(true);
       }
     }
   });
@@ -276,7 +276,7 @@ describe("composeFirst", () => {
     const cellsApart = (count: number) => {
       const cleaned = scene();
       for (let k = 0; k < count; k++) box(cleaned, 30 * 4, (11 + k) * 4, 31 * 4, (12 + k) * 4, [GROUND[0] + 60, GROUND[1], GROUND[2]]);
-      return composeFirst(withLogo(scene()), cleaned, SLOT);
+      return composeFirst(withLogo(scene()), cleaned, SLOT, true);
     };
     expect(cellsApart(4).facts.made).toBe(true);
     expect(cellsApart(5).facts).toMatchObject({ made: false, why: "join" });
@@ -284,15 +284,143 @@ describe("composeFirst", () => {
     // At the level itself a cell is not apart: only over it.
     const at = scene();
     for (let k = 0; k < 8; k++) box(at, 30 * 4, (11 + k) * 4, 31 * 4, (12 + k) * 4, [GROUND[0] + 48, GROUND[1], GROUND[2]]);
-    expect(composeFirst(withLogo(scene()), at, SLOT).facts.made).toBe(true);
+    expect(composeFirst(withLogo(scene()), at, SLOT, true).facts.made).toBe(true);
+  });
+
+  describe("a slot the search did not find the drawing at (the canvas rectangle)", () => {
+    it("is composed when the two pictures show the logo was removed inside it", () => {
+      const first = grain(withLogo(scene()), 3, 31);
+      const kept = copyOf(first);
+      const { picture, facts } = composeFirst(first, cast(grain(scene(), 6, 32), [2, -3, 2]), SLOT, false);
+      expect(facts.made).toBe(true);
+      expect(facts.removed).toBeGreaterThanOrEqual(FIRST_PICTURE_RULE.removedShare);
+      expect(differing(picture!, kept, facts.box!).beyond).toBe(0);
+      for (const [c, v] of pixel(picture!, 160, 60).entries()) expect(Math.abs(v - GROUND[c])).toBeLessThanOrEqual(8);
+    });
+
+    it("is not composed when nothing was removed inside it: the model drew no logo, or drew it somewhere else", () => {
+      // No logo at all: the two pictures differ only as a redraw does (grain, a cast, an edge 6 pixels off).
+      const none = grain(scene(300), 3, 33);
+      const keptNone = copyOf(none);
+      const redraw = () => cast(grain(scene(294), 8, 34), [3, 3, -4]);
+      const made = composeFirst(none, redraw(), SLOT, false);
+      expect(made.picture).toBeNull();
+      expect(made.facts).toMatchObject({ made: false, why: "removal", share: 0 });
+      expect(made.facts.removed).toBeLessThan(0.05);
+      expect(differing(none, keptNone, null).beyond).toBe(0);
+      // The logo drawn below the rectangle and removed there: the rectangle itself shows no removal.
+      const elsewhere = scene();
+      box(elsewhere, 150, 130, 180, 158, [255, 255, 255]);
+      box(elsewhere, 190, 130, 250, 158, [255, 255, 255]);
+      expect(composeFirst(elsewhere, scene(), SLOT, false).facts).toMatchObject({ made: false, why: "removal", removed: 0 });
+      // A found drawing's rectangle needs no such measure: the search is the fact.
+      expect(composeFirst(grain(scene(300), 3, 33), redraw(), SLOT, true).facts.made).toBe(true);
+    });
+
+    it("needs one fifth of its cells far apart: 60 of 300 composes, 59 does not", () => {
+      // Whole cells of the slot (30 by 10 cells) lighter by 60 levels in the first picture, as ink that was removed.
+      const inked = (count: number) => {
+        const first = scene();
+        for (let k = 0; k < count; k++) {
+          const cx = 35 + (k % 10) * 2, cy = 10 + Math.floor(k / 10);
+          box(first, cx * 4, cy * 4, cx * 4 + 4, cy * 4 + 4, [GROUND[0] + 60, GROUND[1] + 60, GROUND[2] + 60]);
+        }
+        return composeFirst(first, scene(), SLOT, false).facts;
+      };
+      expect(inked(60)).toMatchObject({ made: true, removed: 0.2 });
+      expect(inked(59)).toMatchObject({ made: false, why: "removal", removed: 0.1967 });
+    });
+
+    it("does not take a faint logo for a removal, while a found one is composed", () => {
+      // A logo 30 levels from its ground: under the level a cell is apart at.
+      const faint = () => {
+        const r = scene();
+        box(r, 150, 46, 250, 74, [GROUND[0] + 30, GROUND[1] + 30, GROUND[2] + 30]);
+        return r;
+      };
+      expect(composeFirst(faint(), scene(), SLOT, false).facts).toMatchObject({ made: false, why: "removal", removed: 0 });
+      expect(composeFirst(faint(), scene(), SLOT, true).facts).toMatchObject({ made: true, removed: 0 });
+    });
+
+    it("is carried out to where the removal ends when the model drew the logo larger or lower than the canvas had it", () => {
+      // The drawing runs 20 pixels past the slot on the left and 32 below it, in two lines with a gap, as a wordmark has.
+      const larger = () => {
+        const r = scene();
+        box(r, 120, 46, 250, 66, [255, 255, 255]);
+        box(r, 120, 72, 250, 112, [255, 255, 255]);
+        return r;
+      };
+      const first = grain(larger(), 3, 35);
+      const kept = copyOf(first);
+      const { picture, facts } = composeFirst(first, grain(scene(), 6, 36), SLOT, false);
+      expect(facts.made).toBe(true);
+      // The whole drawing is gone, also the part outside the slot, and nothing outside the patch changed.
+      for (const [x, y] of [[124, 50], [124, 108], [246, 110], [200, 60]]) {
+        for (const [c, v] of pixel(picture!, x, y).entries()) expect(Math.abs(v - GROUND[c])).toBeLessThanOrEqual(8);
+      }
+      expect(facts.box!.x).toBeLessThanOrEqual(120 - 8);
+      expect(facts.box!.y + facts.box!.height).toBeGreaterThanOrEqual(112 + 8);
+      expect(differing(picture!, kept, facts.box!).beyond).toBe(0);
+      // The same pictures with a found slot: the rectangle is the search's, so the ring crosses the drawing and nothing is composed.
+      expect(composeFirst(grain(larger(), 3, 35), grain(scene(), 6, 36), SLOT, true).facts).toMatchObject({ made: false, why: "join" });
+    });
+
+    it("is carried out by its shorter side at most: a removal that runs on past that is not composed", () => {
+      // The slot is 10 cells high. Ink runs down from it for 100 pixels: the rectangle stops after 40, the ring still shows ink.
+      const first = withLogo(scene());
+      box(first, 150, 74, 250, 180, [255, 255, 255]);
+      const kept = copyOf(first);
+      const made = composeFirst(first, scene(), SLOT, false);
+      expect(made.facts).toMatchObject({ made: false, why: "join" });
+      expect(differing(first, kept, null).beyond).toBe(0);
+    });
+
+    it("changes no pixel outside the patch it answers, whatever the two pictures show", () => {
+      const next = seeded(20261118);
+      let composed = 0;
+      for (let run = 0; run < 40; run++) {
+        const w = 120 + next(160), h = 120 + next(160);
+        const random = () => {
+          const r = flat(w, h, [next(256), next(256), next(256)]);
+          for (let k = 0; k < 10; k++) {
+            const x = next(w), y = next(h);
+            box(r, x, y, x + 1 + next(w), y + 1 + next(h), [next(256), next(256), next(256)]);
+          }
+          return grain(r, 1 + next(8), 1 + next(1000));
+        };
+        const first = random(), kept = copyOf(first);
+        const slot: Rect = { x: next(w - 40), y: next(h - 30), width: 16 + next(60), height: 8 + next(30) };
+        const made = composeFirst(first, random(), slot, false, { ...FIRST_PICTURE_RULE, joinMax: 1000, apartCells: 1e9 });
+        if (!made.picture) expect(differing(first, kept, null).beyond).toBe(0);
+        else {
+          composed++;
+          expect(differing(first, kept, made.facts.box!).beyond).toBe(0);
+          // The patch is the slot carried out by its shorter side at most, plus the margin and the ring.
+          const most = (Math.min(Math.ceil(slot.width / 4), Math.ceil(slot.height / 4)) + 1) * 4 + patchReach();
+          expect(near(slot, most, made.facts.box!.x, made.facts.box!.y)).toBe(true);
+          expect(near(slot, most, made.facts.box!.x + made.facts.box!.width - 1, made.facts.box!.y + made.facts.box!.height - 1)).toBe(true);
+        }
+      }
+      expect(composed).toBeGreaterThan(10);
+    });
+
+    it("is held to the same join as a found one", () => {
+      const striped = (shift: number) => {
+        const r = scene();
+        for (let x = 100 + shift; x < 300; x += 24) box(r, x, 0, x + 12, 34, [230, 232, 236]);
+        return r;
+      };
+      expect(composeFirst(withLogo(striped(0)), striped(12), SLOT, false).facts).toMatchObject({ made: false, why: "join" });
+      expect(composeFirst(withLogo(striped(0)), striped(0), SLOT, false).facts.made).toBe(true);
+    });
   });
 
   it("composes nothing when the pictures are not one size, or the slot has no place or no ring on the picture", () => {
     const first = withLogo(scene());
     const kept = copyOf(first);
-    expect(composeFirst(first, flat(W, H - 4, GROUND), SLOT).facts).toEqual({ made: false, why: "size", share: 0, join: 0 });
-    expect(composeFirst(first, scene(), { x: -500, y: -500, width: 100, height: 40 }).facts).toEqual({ made: false, why: "slot", share: 0, join: 0 });
-    expect(composeFirst(first, scene(), { x: 0, y: 0, width: W, height: H }).facts).toEqual({ made: false, why: "slot", share: 0, join: 0 });
+    expect(composeFirst(first, flat(W, H - 4, GROUND), SLOT, true).facts).toEqual({ made: false, why: "size", share: 0, join: 0 });
+    expect(composeFirst(first, scene(), { x: -500, y: -500, width: 100, height: 40 }, true).facts).toEqual({ made: false, why: "slot", share: 0, join: 0 });
+    expect(composeFirst(first, scene(), { x: 0, y: 0, width: W, height: H }, true).facts).toEqual({ made: false, why: "slot", share: 0, join: 0 });
     expect(differing(first, kept, null).beyond).toBe(0);
   });
 
@@ -303,7 +431,7 @@ describe("composeFirst", () => {
       return r;
     };
     const first = odd(true);
-    const { picture, facts } = composeFirst(first, odd(false), { x: 146, y: 16, width: 57, height: 28 });
+    const { picture, facts } = composeFirst(first, odd(false), { x: 146, y: 16, width: 57, height: 28 }, true);
     expect(facts.made).toBe(true);
     expect(pixel(picture!, 202, 30)).toEqual(GROUND);
     expect(pixel(picture!, 170, 30)).toEqual(GROUND);

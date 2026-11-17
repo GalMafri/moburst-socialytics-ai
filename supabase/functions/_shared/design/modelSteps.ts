@@ -17,6 +17,7 @@
 // leaves it on the row and no later pass pays for another.
 
 import { notePicture } from "../picture/client.ts";
+import { jobFolder } from "./coverDesign.ts";
 
 /** Designs made for one option before it fails (a design with wrong words, a ground no logo file shows on, a mark that cannot be cleaned out or something across the logo is made again). */
 export const MAX_GENERATIONS = 3;
@@ -33,11 +34,12 @@ export const OF_THE_DESIGN = [
 ];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type ModelJob = { id: string; client_id: string; step: string; state: any };
+type ModelJob = { id: string; client_id: string; step: string; state: any; slide_index?: number | null };
 /** How the worker runs work that outlasts its request (canva/hold.ts). */
 type Hold<R> = (work: () => Promise<void>) => R;
 
-const baseOf = (job: ModelJob) => `${job.client_id}/canva-finish/${job.id}`;
+/** The folder of the job's files: its own for each cover design a carousel's slide is drawn from (coverDesign.ts). */
+const baseOf = (job: ModelJob) => jobFolder(job);
 
 export interface GenerateDeps {
   /** The picture service draws the canvas and its mask at these paths; its time. */

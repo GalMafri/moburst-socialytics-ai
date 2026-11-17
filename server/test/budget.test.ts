@@ -581,7 +581,7 @@ const composeBody = { ...plainBody, first: `${GET}first.png`, out: `${PUT}compos
 
 describe("the cleaned slot with the first picture, in a search that takes several calls", () => {
   it("composes a picture from these two: the test is of a real composed picture", () => {
-    expect(composeForSlot(firstPicture(), cleanedPicture(), slotRect, [FW, FH]).facts.made).toBe(true);
+    expect(composeForSlot(firstPicture(), cleanedPicture(), slotRect, [FW, FH], true).facts.made).toBe(true);
   });
 
   it("stores the composed picture once, with the call that ends the search, and answers what one call answers", async () => {

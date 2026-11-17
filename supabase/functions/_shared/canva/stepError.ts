@@ -22,6 +22,7 @@
 // title was drawn and paid for went back to the title step when the title's
 // check could not reach the picture service, and paid for another.)
 
+import { landed } from "../design/coverDesign.ts";
 import { ModelBusy } from "../media/modelBusy.ts";
 import { PictureError } from "../picture/client.ts";
 import { REQUEST_MAX_MINUTES } from "../design/requestRules.ts";
@@ -34,7 +35,7 @@ export function waitsOut(e: unknown): boolean {
   return e instanceof ModelBusy || (e instanceof PictureError && e.transient);
 }
 
-export type StepJob = { id: string; step: string; attempts?: number; state: unknown; design_request_id?: string | null; created_at?: string | null };
+export type StepJob = { id: string; step: string; attempts?: number; state: unknown; design_request_id?: string | null; created_at?: string | null; slide_index?: number | null };
 
 /** True when a job's wait has outlasted its limit: only a job with no request has one of its own, REQUEST_MAX_MINUTES from its start. */
 export function waitOver(job: Pick<StepJob, "design_request_id" | "created_at">, now: number): boolean {
@@ -46,7 +47,13 @@ export function waitOver(job: Pick<StepJob, "design_request_id" | "created_at">,
 /** A worker's limits for its jobs: tries of one job before it fails, and the worker's name for its log lines. */
 export type StepLimits = { maxAttempts: number; worker: string };
 
-/** The step's error kept on its job: a wait, a try spent with the job still running, or the job failed. */
+/**
+ * The step's error kept on its job: a wait, a try spent with the job still
+ * running, or the job failed. For a carousel's slide after the cover it is
+ * kept only while the row is for the cover design the run read
+ * (design/coverDesign.ts): an error of work for another cover design is not
+ * the row's, so it spends no try of it, fails nothing and releases no lease.
+ */
 export async function recordStepError(
   // The Supabase admin client, typed loosely as every worker passes it.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -62,7 +69,7 @@ export async function recordStepError(
   const waits = waitsOut(e);
   if (waits && !waitOver(job, now)) {
     console.warn(`[${opts.worker}] job ${job.id} step ${job.step} waits:`, msg);
-    await jobs().update({ step: job.step, state: job.state, error: msg, lease_until: null, updated_at }).eq("id", job.id).in("status", ACTIVE_JOB);
+    await landed(jobs().update({ step: job.step, state: job.state, error: msg, lease_until: null, updated_at }).eq("id", job.id).in("status", ACTIVE_JOB), job);
     return "wait";
   }
   // A wait that outlasted its limit ends the job with the reason, and is still no spent try.
@@ -70,6 +77,6 @@ export async function recordStepError(
   const failed = waits || attempts >= opts.maxAttempts || msg.startsWith("FINAL:");
   const error = waits ? `Still waiting after ${REQUEST_MAX_MINUTES} minutes: ${msg}` : msg.replace(/^FINAL:\s*/, "");
   console.error(`[${opts.worker}] job ${job.id} step ${job.step}:`, error);
-  await jobs().update({ attempts, step: job.step, state: job.state, error, status: failed ? "failed" : "running", lease_until: null, updated_at }).eq("id", job.id).in("status", ACTIVE_JOB);
+  await landed(jobs().update({ attempts, step: job.step, state: job.state, error, status: failed ? "failed" : "running", lease_until: null, updated_at }).eq("id", job.id).in("status", ACTIVE_JOB), job);
   return failed ? "failed" : "retry";
 }

@@ -227,6 +227,8 @@ export const REASONS = {
   band: (read: string[]) => `words: outside the Story's band, which reads ${JSON.stringify(read)}`,
   ground: (ground: Rgb | null) => `ground: no logo file shows on the picture under the logo (${ground ? hexOf(ground) : "no ground read"})`,
   marks: (where: string) => `marks: could not be cleaned out: ${where}`,
+  drawn: (where: string) => `marks: drawn in the picture, away from the logo's place: ${where}`,
+  composed: (why: string, join: number) => `logo's place: the first picture could not take the cleaned logo's place (${why}, join ${places(join, 2)})`,
   stillDrawn: (score: number) => `marks: the logo drawn at its place is still there after cleaning (match ${places(score, 3)})`,
   touched: (by: string) => `logo's place: touched by ${by}`,
 };

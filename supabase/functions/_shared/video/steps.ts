@@ -191,7 +191,7 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
           out: await signedWrite(admin, BUCKET, jpegPath),
         })).ms,
         save: () => saveJobProgress(admin, job),
-        renewLease: () => renewJobLease(admin, job.id, new Date(), MODEL_LEASE_MS),
+        renewLease: () => renewJobLease(admin, job, new Date(), MODEL_LEASE_MS),
       }, job, (work) => hold(admin, job, work));
     }
     case "frame_check": {
@@ -392,7 +392,7 @@ function titleDeps(admin: any, job: VideoJob): TitleDeps {
       const { error } = await admin.storage.from(BUCKET).upload(path, png, { contentType: "image/png", upsert: true });
       if (error) throw new Error(`Could not store the title: ${error.message}`);
     },
-    renewLease: () => renewJobLease(admin, job.id, new Date(), MODEL_LEASE_MS),
+    renewLease: () => renewJobLease(admin, job, new Date(), MODEL_LEASE_MS),
     save: () => saveJobProgress(admin, job),
     locate: async (layerPath, readPath) => callPicture(admin, "title-read", {
       job: job.id,
