@@ -192,7 +192,9 @@ export type SlotFileResult = {
  * was removed from: the found drawing's (the request carries `drawn`, and
  * the drawing is looked for again on the composed picture), or one inside
  * which the two pictures show the removal, which the service measures
- * itself. When no picture is composed nothing is kept and the slot is read
+ * itself, or, when the slot holds no removal, the one place away from it
+ * that the cleaning took the drawing out of (`measured.elsewhere`; the slot
+ * is still what the answer is about). When no picture is composed nothing is kept and the slot is read
  * on the cleaned picture, as without the two fields. A request without them
  * is answered exactly as before.
  */
@@ -230,11 +232,25 @@ export type FirstPictureFacts = { made: boolean; why?: "first" | "size" | "slot"
  * none has a place). The join is clean when the ring holds no larger share
  * of cells far apart than `rings`. `join`: the ring's mean difference for a
  * slot only `floor` made a place, when its join failed: such a slot is
- * answered "removal" with a `join` of 0, as before.
+ * answered "removal" with a `join` of 0, as before. `elsewhere`: read when
+ * the slot holds no removal, and something the cleaning took out was found
+ * away from it: the rectangle around it in the picture's pixels, the cells
+ * far apart in it as a share of the slot's cells (the rule asks one fifth),
+ * and, when it was read, the most any block of its size holds elsewhere, in
+ * the same measure. It is the place the patch is laid when `apart` is one
+ * fifth or more and above `floor`, and it is no larger than a slot's own
+ * place ever is; `box` then lies around it and not around the slot.
+ * `detail` is the detail of the two pictures on the ring around that place,
+ * read once the place passed, at each scale: how much pixels `apart` from
+ * each other differ, in levels (the root of the mean square). The place is
+ * patched only when at every scale the cleaned picture keeps at least half
+ * of the first picture's (of its square), or the first holds under one
+ * level there.
  */
 export type FirstPictureMeasure = {
   floor?: number;
   join?: number;
+  elsewhere?: { place: Rect; apart: number; floor?: number; detail?: Array<{ apart: number; first: number; cleaned: number }> };
   ring?: { cells: number; apart: number; touching: number };
   rings?: { cells: number; apart: number; rings: number };
 };

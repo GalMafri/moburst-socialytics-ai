@@ -344,7 +344,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       }
       // A picture is never delivered re-rendered when a fresh one can be made (_shared/design/firstPictureJob.ts): the logo was removed
       // at the slot, the first picture could not take the cleaned pixels there (no clean join), and the option may still make another
-      // design. A slot that shows no removal has nothing to compose and goes on from its cleaned picture, as before the rule.
+      // design. A design the service answers "removal" for has nothing to compose and goes on from its cleaned picture, as before the rule.
       const refused = composeRedesign(s);
       if (refused) {
         console.warn(`[design-worker] job ${job.id}: ${refused}; designing again.`);

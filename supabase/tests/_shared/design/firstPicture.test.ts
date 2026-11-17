@@ -144,7 +144,7 @@ function differing(a: Raster, b: Raster, rect: Rect | null, by = 0): { near: num
 
 describe("the rule's numbers", () => {
   it("are the ones the spec states", () => {
-    expect(FIRST_PICTURE_RULE).toEqual({ cell: 4, grow: 2, feather: 4, joinMax: 20, apartLevel: 48, apartCells: 4, removedShare: 0.2 });
+    expect(FIRST_PICTURE_RULE).toEqual({ cell: 4, grow: 2, feather: 4, joinMax: 20, apartLevel: 48, apartCells: 4, removedShare: 0.2, detailShare: 0.5 });
     // 8 pixels of margin, 16 of ring, and under 8 for the cell grid.
     expect(patchReach()).toBe(32);
   });
@@ -356,7 +356,7 @@ describe("composeFirst", () => {
       for (const [c, v] of pixel(picture!, 160, 60).entries()) expect(Math.abs(v - GROUND[c])).toBeLessThanOrEqual(8);
     });
 
-    it("is not composed when nothing was removed inside it: the model drew no logo, or drew it somewhere else", () => {
+    it("is not composed when nothing was removed inside it: the model drew no logo", () => {
       // No logo at all: the two pictures differ only as a redraw does (grain, a cast, an edge 6 pixels off).
       const none = grain(scene(300), 3, 33);
       const keptNone = copyOf(none);
@@ -366,11 +366,6 @@ describe("composeFirst", () => {
       expect(made.facts).toMatchObject({ made: false, why: "removal", share: 0 });
       expect(made.facts.removed).toBeLessThan(0.05);
       expect(differing(none, keptNone, null).beyond).toBe(0);
-      // The logo drawn below the rectangle and removed there: the rectangle itself shows no removal.
-      const elsewhere = scene();
-      box(elsewhere, 150, 130, 180, 158, [255, 255, 255]);
-      box(elsewhere, 190, 130, 250, 158, [255, 255, 255]);
-      expect(composeFirst(elsewhere, scene(), SLOT, false).facts).toMatchObject({ made: false, why: "removal", removed: 0 });
       // A found drawing's rectangle needs no such measure: the search is the fact.
       expect(composeFirst(grain(scene(300), 3, 33), redraw(), SLOT, true).facts.made).toBe(true);
     });
@@ -398,11 +393,18 @@ describe("composeFirst", () => {
         return composeFirst(first, scene(), SLOT, false).facts;
       };
       // 59 of 300, and as many or more in a place elsewhere: no removal, answered exactly as before this reading.
-      expect(inked(59, 59)).toEqual({ made: false, why: "removal", share: 0, join: 0, removed: 0.1967, measured: { floor: 0.1967 } });
-      expect(inked(59, 100)).toEqual({ made: false, why: "removal", share: 0, join: 0, removed: 0.1967, measured: { floor: 0.3333 } });
+      // (Both places together are too large to be one place the cleaning took something out of, so nothing is found away from the slot either.)
+      const refused = (below: number, floor: number) => {
+        const { measured, ...rest } = inked(59, below);
+        expect(rest).toEqual({ made: false, why: "removal", share: 0, join: 0, removed: 0.1967 });
+        expect(measured!.floor).toBe(floor);
+        expect(measured!.elsewhere!.floor).toBeUndefined();
+      };
+      refused(59, 0.1967);
+      refused(100, 0.3333);
       // More than the most elsewhere by no more than the few cells the rule lets through anywhere: still no removal.
-      expect(inked(59, 58)).toEqual({ made: false, why: "removal", share: 0, join: 0, removed: 0.1967, measured: { floor: 0.1933 } });
-      expect(inked(59, 55)).toEqual({ made: false, why: "removal", share: 0, join: 0, removed: 0.1967, measured: { floor: 0.1833 } });
+      refused(58, 0.1933);
+      refused(55, 0.1833);
       // Five cells more than the most elsewhere: the logo was removed here.
       expect(inked(59, 54)).toMatchObject({ made: true, removed: 0.1967, measured: { floor: 0.18 } });
       expect(inked(59, 0)).toMatchObject({ made: true, removed: 0.1967, measured: { floor: 0 } });
@@ -833,11 +835,362 @@ describe("read against the pair of pictures itself", () => {
     });
   });
 
+  // The model drew its logo away from the canvas rectangle, and the slot (where the brand's file is stamped) holds no removal
+  // (18 Nov 2026). The cleaning took the drawing out all the same, and the whole cleaned picture used to be delivered for it.
+  describe("a removal away from the slot", () => {
+    /** The first picture: the scene and a drawing of three bars from pixel (x, y), 100 wide and 28 high. The slot is 30 cells by 10. */
+    const drawnAt = (r: Raster, x: number, y: number): Raster => {
+      box(r, x, y, x + 30, y + 28, [255, 255, 255]);
+      box(r, x + 40, y, x + 65, y + 28, [255, 255, 255]);
+      box(r, x + 75, y + 6, x + 100, y + 28, [255, 255, 255]);
+      return r;
+    };
+    const AWAY: [number, number] = [40, 160];
+    const asBefore = (first: Raster, cleaned: Raster, removed = 0) => {
+      const made = composeFirst(copyOf(first), cleaned, SLOT, false);
+      const { measured, ...rest } = made.facts;
+      expect(rest).toEqual({ made: false, why: "removal", share: 0, join: 0, removed });
+      expect(rest).toEqual(before(first, cleaned, SLOT, false));
+      expect(made.picture).toBeNull();
+      return measured!;
+    };
+
+    it("is composed where the cleaning took the drawing out, and the slot is left alone", () => {
+      const first = grain(drawnAt(scene(), ...AWAY), 3, 71);
+      const kept = copyOf(first);
+      const cleaned = cast(grain(scene(), 6, 72), [2, -3, 2]);
+      expect(before(first, cleaned, SLOT, false)).toEqual({ made: false, why: "removal", share: 0, join: 0, removed: 0 });
+      const made = composeFirst(first, cleaned, SLOT, false);
+      // The place is the drawing's own cells (10 to 34 across, 40 to 46 down). It holds 134 cells far apart, where the rule asks
+      // 60 of the slot (one fifth of its 300), and nothing else on the pair is far apart.
+      expect(made.facts).toMatchObject({ made: true, removed: 0, measured: { floor: 0.4467, elsewhere: { place: { x: 40, y: 160, width: 100, height: 28 }, apart: 0.4467, floor: 0 } } });
+      // The patch lies around the drawing, not around the slot.
+      expect(made.facts.box).toEqual({ x: (10 - 7) * 4, y: (40 - 7) * 4, width: (25 + 14) * 4, height: (7 + 14) * 4 });
+      expect(differing(made.picture!, kept, made.facts.box!).beyond).toBe(0);
+      expect(differing(made.picture!, kept, SLOT).near).toBe(0);
+      // The drawing is gone.
+      for (const [x, y] of [[50, 170], [90, 180], [130, 184]]) for (const [c, v] of pixel(made.picture!, x, y).entries()) expect(Math.abs(v - GROUND[c])).toBeLessThanOrEqual(8);
+      expect(pixel(kept, 50, 170)[0]).toBeGreaterThan(245);
+    });
+
+    it("does not count what the redraw only moved: where the cleaned picture still shows the thing, nothing was taken out", () => {
+      // A thin line of words far from the drawing, 3 pixels off in the cleaned picture, and the scene's edge 6 pixels off.
+      const first = textLine(drawnAt(scene(300), ...AWAY), 180, 210, [250, 250, 250]);
+      const cleaned = textLine(scene(294), 183, 210, [250, 250, 250]);
+      const made = facts(first, cleaned, SLOT, false);
+      expect(made).toMatchObject({ made: true, measured: { elsewhere: { place: { x: 40, y: 160, width: 100, height: 28 } } } });
+      // Without the drawing the same pair has nothing taken out anywhere.
+      const none = asBefore(textLine(scene(300), 180, 210, [250, 250, 250]), cleaned);
+      expect(none.elsewhere).toBeUndefined();
+    });
+
+    it("is not composed when a second thing was taken out far from the first: nothing may be left outside the patch", () => {
+      // A second mark, an icon 12 pixels square and a dot 8 pixels square, each far from the drawing: the place around all that was
+      // taken out is larger than a slot's place ever is (50 cells by 30).
+      for (const [x, y, w, h] of [[300, 240, 60, 20], [330, 60, 12, 12], [40, 20, 8, 8]]) {
+        const first = box(drawnAt(scene(), ...AWAY), x, y, x + w, y + h, [255, 255, 255]);
+        const read = asBefore(first, scene());
+        expect(read.elsewhere!.floor).toBeUndefined();
+        expect(Math.max(read.elsewhere!.place.width / 4 - 50, read.elsewhere!.place.height / 4 - 30)).toBeGreaterThan(0);
+      }
+      // The same dot beside the drawing is inside the place, and is taken from the cleaned picture with it.
+      const beside = box(drawnAt(scene(), ...AWAY), 150, 200, 158, 208, [255, 255, 255]);
+      const made = composeFirst(beside, scene(), SLOT, false);
+      expect(made.facts).toMatchObject({ made: true, measured: { elsewhere: { place: { x: 40, y: 160, width: 120, height: 48 } } } });
+      expect(pixel(made.picture!, 154, 204)).toEqual(GROUND);
+    });
+
+    it("is no larger than a slot's own place ever is: the slot carried out by its shorter side", () => {
+      // The slot is 30 cells by 10, so its place is 50 by 30 at most. Two bars taken out, 30 cells from the top of one to the
+      // bottom of the other, and 31; and two side by side, 50 cells from end to end, and 51.
+      const bars = (across: number, down: number) => {
+        const r = scene();
+        box(r, 20, 20, 20 + Math.min(across, 20) * 4, 28, [255, 255, 255]);
+        box(r, 20 + (across - 20) * 4, 20 + (down - 2) * 4, 20 + across * 4, 20 + down * 4, [255, 255, 255]);
+        return r;
+      };
+      expect(facts(bars(20, 30), scene(), SLOT, false)).toMatchObject({ made: true, measured: { elsewhere: { place: { x: 20, y: 20, width: 80, height: 120 }, apart: 0.2667, floor: 0 } } });
+      expect(asBefore(bars(20, 31), scene()).elsewhere).toEqual({ place: { x: 20, y: 20, width: 80, height: 124 }, apart: 0.2667 });
+      expect(facts(bars(50, 4), scene(), SLOT, false)).toMatchObject({ made: true, measured: { elsewhere: { place: { x: 20, y: 20, width: 200, height: 16 } } } });
+      expect(asBefore(bars(51, 4), scene()).elsewhere).toMatchObject({ place: { x: 20, y: 20, width: 204, height: 16 } });
+      expect(asBefore(bars(51, 4), scene()).elsewhere!.floor).toBeUndefined();
+    });
+
+    it("holds as many cells far apart as the rule asks of the slot: one fifth of the slot's cells", () => {
+      // 60 cells of 300 are composed, 59 are not: a crumb is no logo, however plainly it was taken out.
+      const inked = (count: number) => cellsInked(scene(), block(10, 40, 20, 3).slice(0, count));
+      expect(facts(inked(60), scene(), SLOT, false)).toMatchObject({ made: true, measured: { elsewhere: { apart: 0.2, floor: 0 } } });
+      expect(asBefore(inked(59), scene()).elsewhere).toEqual({ place: { x: 40, y: 160, width: 80, height: 12 }, apart: 0.1967 });
+      expect(asBefore(inked(4), scene()).elsewhere).toEqual({ place: { x: 40, y: 160, width: 16, height: 4 }, apart: 0.0133 });
+      // One cell alone is a point: nothing that touches another was taken out, and nothing is looked at.
+      expect(asBefore(inked(1), scene()).elsewhere).toBeUndefined();
+    });
+
+    it("stands clearly above everything else on the pair: more cells far apart than any block of its size elsewhere, by more than the rule's few", () => {
+      // A drawing of five stems: 70 cells far apart in a place 22 cells by 7. Elsewhere, cells the cleaned picture has and the
+      // first has not, in rows a cell high (the redraw put them there; nothing was taken out, so they make no place, and they
+      // are the pair's level): `count` of them inside one block of the place's size.
+      const stems = (r: Raster) => { for (let k = 0; k < 5; k++) box(r, 40 + k * 20, 160, 48 + k * 20, 188, [255, 255, 255]); return r; };
+      const added = (count: number) => {
+        const cells: Array<[number, number]> = [];
+        for (let k = 0; k < count; k++) cells.push([60 + (k % 22), 20 + Math.floor(k / 22) * 2]);
+        return cellsInked(scene(), cells);
+      };
+      const place = { x: 40, y: 160, width: 88, height: 28 };
+      // 65 elsewhere: 70 is more by five, and the place is composed. 66: more by four, the few cells the rule lets through anywhere.
+      expect(facts(stems(scene()), added(0), SLOT, false)).toMatchObject({ made: true, measured: { elsewhere: { place, apart: 0.2333, floor: 0 } } });
+      expect(facts(stems(scene()), added(65), SLOT, false)).toMatchObject({ made: true, measured: { elsewhere: { place, apart: 0.2333, floor: 0.2167 } } });
+      expect(asBefore(stems(scene()), added(66)).elsewhere).toEqual({ place, apart: 0.2333, floor: 0.22 });
+      expect(asBefore(stems(scene()), added(70)).elsewhere).toEqual({ place, apart: 0.2333, floor: 0.2333 });
+      expect(asBefore(stems(scene()), added(88)).elsewhere).toEqual({ place, apart: 0.2333, floor: 0.2933 });
+      // The level is read right up to the patch: the same 66 cells just beside it count as they do far from it.
+      const beside = cellsInked(scene(), [...block(44, 40, 22, 1), ...block(44, 42, 22, 1), ...block(44, 44, 22, 1)]);
+      expect(asBefore(stems(scene()), beside).elsewhere).toEqual({ place, apart: 0.2333, floor: 0.22 });
+      // Lines the redraw moved 2 pixels down read the same way: redrawn, not taken out.
+      const lines = (r: Raster, every: number, off: number) => { for (let cy = 20; cy < 36; cy += every) box(r, 220, cy * 4 + off, 380, cy * 4 + 4 + off, [255, 255, 255]); return r; };
+      expect(facts(stems(lines(scene(), 8, 0)), lines(scene(), 8, 2), SLOT, false)).toMatchObject({ made: true, measured: { elsewhere: { place, floor: 0.1467 } } });
+      expect(asBefore(stems(lines(scene(), 4, 0)), lines(scene(), 4, 2)).elsewhere).toEqual({ place, apart: 0.2333, floor: 0.2933 });
+    });
+
+    it("is held to the same join, and a join that fails is no reason to make a design again", () => {
+      // A line of words runs under the drawing, 3 pixels off in the cleaned picture: through the ring.
+      const words = (r: Raster, off: number) => textLine(r, 20 + off, 160 + 28 + 14, [250, 250, 250]);
+      const first = words(drawnAt(scene(), ...AWAY), 0), cleaned = words(scene(), 3);
+      const read = asBefore(first, cleaned);
+      expect(read.elsewhere).toMatchObject({ place: { x: 40, y: 160, width: 100, height: 28 }, apart: 0.4867 });
+      expect(read.ring!.touching).toBeGreaterThan(FIRST_PICTURE_RULE.apartCells);
+      expect(read.join).toBeLessThanOrEqual(FIRST_PICTURE_RULE.joinMax);
+    });
+
+    it("counts as one thing the cells taken out that touch at a corner, and as taken out only a cell with the cleaned picture plain on every side and corner", () => {
+      // Two cells taken out far from the drawing that meet at a corner are a thing, and the place is too large for it.
+      const corner = asBefore(cellsInked(drawnAt(scene(), ...AWAY), [[80, 20], [81, 21]]), scene());
+      expect(corner.elsewhere!.place).toEqual({ x: 40, y: 80, width: 288, height: 108 });
+      // Two with a cell between them are two points, and the drawing is composed.
+      expect(facts(cellsInked(drawnAt(scene(), ...AWAY), [[80, 20], [82, 20]]), scene(), SLOT, false)).toMatchObject({ made: true, measured: { elsewhere: { place: { x: 40, y: 160, width: 100, height: 28 } } } });
+      // The same two cells at a corner, with something the cleaned picture shows at the corner of each: redrawn, and no thing.
+      const shown = cellsInked(scene(), [[79, 19], [82, 22]], 120);
+      expect(facts(cellsInked(drawnAt(scene(), ...AWAY), [[80, 20], [81, 21]]), shown, SLOT, false)).toMatchObject({ made: true, measured: { elsewhere: { place: { x: 40, y: 160, width: 100, height: 28 } } } });
+    });
+
+    it("answers as before on a picture with no block of the place's size outside its patch, and reads its ring against rings outside its own surroundings", () => {
+      // 42 cells by 30. The slot's surroundings are all of it, so the slot is held against nothing. A drawing 18 cells by 12 in a
+      // corner: its patch (25 cells by 19) leaves no room for a block of its size.
+      const small = (cells: Array<[number, number]>) => cellsInked(flat(168, 120, GROUND), cells);
+      const slot: Rect = { x: 60, y: 40, width: 108, height: 40 };
+      const none = facts(small(block(0, 0, 18, 12)), small([]), slot, false);
+      expect(none).toMatchObject({ made: false, why: "removal", share: 0, join: 0, measured: { elsewhere: { place: { x: 0, y: 0, width: 72, height: 48 }, apart: 0.8 } } });
+      // One cell wider, and a block of its size has a place beside the patch: composed.
+      expect(facts(cellsInked(flat(172, 120, GROUND), block(0, 0, 18, 12)), flat(172, 120, GROUND), slot, false)).toMatchObject({ made: true, measured: { elsewhere: { floor: 0 } } });
+      expect(none.measured!.elsewhere!.floor).toBeUndefined();
+      // 50 cells by 30, points one cell in every four on each picture (the redraw has its own, between the first picture's), and a
+      // drawing 8 cells square in the corner. Rings of its patch's size have places outside the drawing's surroundings (none
+      // outside the slot's), and its ring of points is read against them.
+      const points: Array<[number, number]> = [], redrawn: Array<[number, number]> = [];
+      for (let cy = 2; cy < 30; cy += 4) for (let cx = 2; cx < 50; cx += 4) if (cx > 9 || cy > 9) { points.push([cx, cy]); redrawn.push([cx - 2, cy]); }
+      const first = cellsInked(cellsInked(flat(200, 120, GROUND), block(0, 0, 8, 8), 150), points);
+      const made = facts(first, cellsInked(flat(200, 120, GROUND), redrawn), slot, false);
+      expect(made).toMatchObject({ made: true, measured: { elsewhere: { place: { x: 0, y: 0, width: 32, height: 32 }, apart: 0.237 }, ring: { cells: 96, apart: 11, touching: 0 }, rings: { cells: 256, apart: 32 } } });
+      expect(made.measured!.floor).toBeUndefined();
+    });
+
+    // Nothing is stamped over a patch away from the slot, and the join reads color only (cell means): a cleaned picture that came
+    // back smoother than the first would pass it and show as a smooth rectangle on a grainy ground.
+    describe("is patched only when the cleaned picture keeps the first picture's detail around it, at every scale", () => {
+      /** Each pixel the mean of its `2 * reach + 1` square: a smoothed picture, with every cell's mean nearly kept. */
+      const smoothed = (r: Raster, reach: number): Raster => {
+        const o = copyOf(r);
+        for (let y = 0; y < r.height; y++) for (let x = 0; x < r.width; x++) {
+          const sum = [0, 0, 0];
+          let n = 0;
+          for (let dy = -reach; dy <= reach; dy++) for (let dx = -reach; dx <= reach; dx++) {
+            const p = (Math.min(r.height - 1, Math.max(0, y + dy)) * r.width + Math.min(r.width - 1, Math.max(0, x + dx))) * 4;
+            sum[0] += r.data[p]; sum[1] += r.data[p + 1]; sum[2] += r.data[p + 2]; n++;
+          }
+          o.data.set(sum.map((v) => v / n), (y * r.width + x) * 4);
+        }
+        return o;
+      };
+      const grained = (by: number, seed: number) => grain(flat(W, H, GROUND), by, seed);
+      /** A ground of squares `size` pixels a side, each lighter or darker by up to `by` levels, the same on every run. */
+      const blotched = (size: number, by: number, seed: number) => {
+        const next = seeded(seed);
+        const r = flat(W, H, GROUND);
+        for (let y = 0; y < H; y += size) for (let x = 0; x < W; x += size) { const v = next(2 * by + 1) - by; box(r, x, y, x + size, y + size, [GROUND[0] + v, GROUND[1] + v, GROUND[2] + v]); }
+        return r;
+      };
+      /** `share` of one picture and the rest of another, pixel by pixel. */
+      const mixed = (a: Raster, b: Raster, share: number) => { const o = copyOf(a); for (let i = 0; i < o.data.length; i++) o.data[i] = a.data[i] * (1 - share) + b.data[i] * share; return o; };
+      /** A pattern laid on the flat ground: `levels` more on the pixels `lit` says. */
+      const laid = (levels: number, lit: (x: number, y: number) => boolean, channels = [0, 1, 2]) => {
+        const r = flat(W, H, GROUND);
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (lit(x, y)) for (const c of channels) r.data[(y * W + x) * 4 + c] += levels;
+        return r;
+      };
+      const checks = (levels: number, side = 1) => laid(levels, (x, y) => (Math.floor(x / side) + Math.floor(y / side)) % 2 === 1);
+      /** The detail a call recorded, as "first/cleaned" at 1, 4 and 8 pixels apart. */
+      const read = (m: { elsewhere?: { detail?: Array<{ apart: number; first: number; cleaned: number }> } }) => {
+        expect(m.elsewhere!.detail!.map((d) => d.apart)).toEqual([1, 4, 8]);
+        return m.elsewhere!.detail!.map((d) => `${d.first}/${d.cleaned}`);
+      };
+      const kept = (m: { elsewhere?: { detail?: Array<{ first: number; cleaned: number }> } }) => m.elsewhere!.detail!.map((d) => +(d.cleaned / d.first).toFixed(2));
+      /** The detail of a pair that is composed (and it is). */
+      const composed = (first: Raster, cleaned: Raster, rule = FIRST_PICTURE_RULE) => {
+        const made = composeFirst(copyOf(first), cleaned, SLOT, false, rule).facts;
+        expect(made.made).toBe(true);
+        return read(made.measured!);
+      };
+
+      it("refuses a grainy ground that came back smoothed, although its join passes", () => {
+        // Grain of 35 and of 70 levels either way, smoothed over three pixels by three, and over five by five.
+        for (const [by, reach] of [[35, 1], [35, 2], [70, 1]]) {
+          const ground = grained(by, 81);
+          const first = drawnAt(copyOf(ground), ...AWAY), cleaned = smoothed(ground, reach);
+          const m = asBefore(first, cleaned);
+          // The place is the drawing, it holds what the rule asks and stands out, and the detail on its ring is what refuses it.
+          expect(m.elsewhere).toMatchObject({ place: { x: 40, y: 160, width: 100, height: 28 }, floor: 0 });
+          for (const share of kept(m)) expect(share).toBeLessThan(0.4);
+          // The join was not what refused: its ring is never read.
+          expect(m.ring).toBeUndefined();
+          expect(m.join).toBeUndefined();
+          // With the join let through as it would be, the same pair is still not composed.
+          const loose = composeFirst(copyOf(first), cleaned, SLOT, false, { ...FIRST_PICTURE_RULE, joinMax: 1000, apartCells: 1e9 });
+          expect(loose.facts).toMatchObject({ made: false, why: "removal" });
+          // And without the guard it would have been: the join alone passes it.
+          expect(composeFirst(copyOf(first), cleaned, SLOT, false, { ...FIRST_PICTURE_RULE, detailShare: 0 }).facts).toMatchObject({ made: true });
+        }
+      });
+
+      it("refuses a coarse texture the redraw smoothed away and covered with fresh fine noise, which pixels side by side do not show", () => {
+        // Squares of 6 and of 12 pixels, 30 levels either way, smoothed over seven pixels by seven and nine by nine, with new
+        // grain of 4, 2 and 3 levels on top: the cases an independent review drew (18 Nov 2026).
+        for (const [size, reach, by, seed] of [[6, 3, 4, 91], [6, 3, 2, 92], [12, 4, 3, 93]]) {
+          const ground = blotched(size, 30, 90);
+          const first = drawnAt(copyOf(ground), ...AWAY), cleaned = grain(smoothed(ground, reach), by, seed);
+          const m = asBefore(first, cleaned);
+          // Under half of the detail's energy is left at some scale (under 0.71 of the differences), and that refuses it.
+          expect(Math.min(...kept(m))).toBeLessThan(0.71);
+          expect(m.ring).toBeUndefined();
+          expect(composeFirst(copyOf(first), cleaned, SLOT, false, { ...FIRST_PICTURE_RULE, detailShare: 0 }).facts).toMatchObject({ made: true });
+        }
+        // Grain with 0.45 of a smoothing mixed in keeps 0.55 of its differences at every scale: under half of the energy.
+        const ground = grained(35, 81);
+        const part = asBefore(drawnAt(copyOf(ground), ...AWAY), mixed(ground, smoothed(ground, 2), 0.45));
+        for (const share of kept(part)) { expect(share).toBeGreaterThan(0.5); expect(share).toBeLessThan(0.6); }
+        // With a fifth mixed in it keeps four fifths, and is composed.
+        const little = facts(drawnAt(copyOf(ground), ...AWAY), mixed(ground, smoothed(ground, 2), 0.2), SLOT, false);
+        expect(little.made).toBe(true);
+        for (const share of kept(little.measured!)) expect(share).toBeGreaterThan(0.75);
+      });
+
+      it("is read at three scales, and one scale at which too little is kept is enough", () => {
+        // Checks of one pixel: detail side by side only (pixels 4 and 8 apart are alike). Squares of 4 pixels: 4 apart and less.
+        // Squares of 8: at every scale. (Side by side, a square's edge is crossed by one pair in four or in eight, less the
+        // pairs that would leave the ring.)
+        expect(composed(drawnAt(checks(40), ...AWAY), checks(40))).toEqual(["40/40", "0/0", "0/0"]);
+        expect(composed(drawnAt(checks(40, 4), ...AWAY), checks(40, 4))).toEqual(["19.01/19.01", "40/40", "0/0"]);
+        expect(composed(drawnAt(checks(40, 8), ...AWAY), checks(40, 8))).toEqual(["13.44/13.44", "28.28/28.28", "40/40"]);
+        // Squares of 4 pixels smoothed away under checks of one pixel: more side by side than before, nothing 4 apart.
+        expect(read(asBefore(drawnAt(checks(40, 4), ...AWAY), checks(30)))).toEqual(["19.01/30", "40/0", "0/0"]);
+        // Squares of 8 kept as squares of 4: side by side and 4 apart the cleaned picture holds more, 8 apart nothing.
+        expect(read(asBefore(drawnAt(checks(40, 8), ...AWAY), checks(40, 4)))).toEqual(["13.44/19.01", "28.28/40", "40/0"]);
+        // And the finest scale alone: checks of one pixel gone, squares of 8 added.
+        expect(read(asBefore(drawnAt(checks(40), ...AWAY), checks(40, 8)))).toEqual(["40/13.44", "0/28.28", "0/40"]);
+      });
+
+      it("is a share of the detail's energy: one half is kept, less is not", () => {
+        const first = drawnAt(checks(40), ...AWAY);
+        // 29 levels of 40 is 0.53 of the energy, 28 is 0.49.
+        expect(composed(first, checks(29))).toEqual(["40/29", "0/0", "0/0"]);
+        expect(read(asBefore(first, checks(28)))).toEqual(["40/28", "0/0", "0/0"]);
+        expect(read(asBefore(first, checks(0)))).toEqual(["40/0", "0/0", "0/0"]);
+        // Exactly the share is kept: with a quarter asked, 20 levels of 40 are a quarter of the energy, and 19 are not.
+        const quarter = { ...FIRST_PICTURE_RULE, detailShare: 0.25 };
+        expect(composed(first, checks(20), quarter)).toEqual(["40/20", "0/0", "0/0"]);
+        expect(composeFirst(copyOf(first), checks(19), SLOT, false, quarter).facts).toMatchObject({ made: false, why: "removal" });
+        // The same line at a coarser scale.
+        expect(composed(drawnAt(checks(40, 8), ...AWAY), checks(29, 8))[2]).toBe("40/29");
+        expect(read(asBefore(drawnAt(checks(40, 8), ...AWAY), checks(28, 8)))[2]).toBe("40/28");
+        // The worst channel is what is read: the same checks in blue alone are the same detail, and a cleaned picture without them is refused.
+        expect(read(asBefore(drawnAt(laid(40, (x, y) => (x + y) % 2 === 1, [2]), ...AWAY), flat(W, H, GROUND)))).toEqual(["40/0", "0/0", "0/0"]);
+        // One-sided: a cleaned picture with more detail than the first is not refused by this, at any scale.
+        expect(composed(first, checks(46))).toEqual(["40/46", "0/0", "0/0"]);
+        expect(composed(drawnAt(flat(W, H, GROUND), ...AWAY), checks(8, 4))).toEqual(["0/3.8", "0/8", "0/0"]);
+      });
+
+      it("lets a scale with no detail to lose through: under one level, whatever the cleaned picture holds", () => {
+        // One level on every other pixel across: 0.71 of a level side by side, none on the cleaned picture.
+        const lines = (levels: number) => laid(levels, (x) => x % 2 === 0);
+        expect(composed(drawnAt(lines(1), ...AWAY), flat(W, H, GROUND))).toEqual(["0.71/0", "0/0", "0/0"]);
+        // Checks of one level are one level exactly, and a cleaned picture with none of it is refused.
+        expect(read(asBefore(drawnAt(checks(1), ...AWAY), flat(W, H, GROUND)))).toEqual(["1/0", "0/0", "0/0"]);
+        // A plain ground on both pictures, as every case above these: nothing to read, and nothing refused.
+        expect(composed(drawnAt(scene(), ...AWAY), scene())).toEqual(["0/0", "0/0", "0/0"]);
+      });
+
+      it("reads pairs of pixels on the ring only: what lies beside the ring is not its detail", () => {
+        // A frame of strong checks just outside the ring, on the first picture alone, and a plain ring: nothing to lose on it.
+        const framed = drawnAt(flat(W, H, GROUND), ...AWAY);
+        const out = { x: 12 - 8, y: 132 - 8, width: 156 + 16, height: 84 + 16 };
+        for (let y = out.y; y < out.y + out.height; y++) for (let x = out.x; x < out.x + out.width; x++) {
+          const inside = x >= 16 && x < 164 && y >= 136 && y < 212;
+          if (!inside && (x + y) % 2) framed.data.set([GROUND[0] + 40, GROUND[1] + 40, GROUND[2] + 40], (y * W + x) * 4);
+        }
+        const made = facts(framed, flat(W, H, GROUND), SLOT, false);
+        expect(made.made).toBe(true);
+        expect(read(made.measured!)).toEqual(["0/0", "0/0", "0/0"]);
+      });
+
+      it("is read for a place away from the slot only: a slot or a found drawing on the same smoothed ground is composed as it was", () => {
+        const ground = grained(35, 81);
+        const first = withLogo(copyOf(ground)), cleaned = smoothed(ground, 1);
+        for (const found of [false, true]) {
+          const made = facts(first, cleaned, SLOT, found);
+          expect(made.made).toBe(true);
+          expect(made).toEqual(before(first, cleaned, SLOT, found));
+        }
+      });
+    });
+
+    it("is not looked for on a pair that differs all over, or when the slot or a found drawing is the place", () => {
+      // The lower half of the picture came back as another picture: what was "taken out" is everywhere.
+      const other = scene();
+      for (let y = 160; y < H; y++) for (let x = 0; x < W; x++) other.data.set([200 - (x % 7) * 3, 40, 90], (y * W + x) * 4);
+      const half = asBefore(drawnAt(scene(), ...AWAY), other);
+      expect(half.elsewhere!.place.height).toBeGreaterThan(120);
+      expect(half.elsewhere!.floor).toBeUndefined();
+      // A slot that holds the removal, and a found drawing, are composed where they are, with nothing looked for elsewhere.
+      const both = drawnAt(withLogo(scene()), ...AWAY);
+      for (const found of [false, true]) {
+        const made = facts(both, scene(), SLOT, found);
+        expect(made.made).toBe(true);
+        expect(made.measured).toBeUndefined();
+        expect(made).toEqual(before(both, scene(), SLOT, found));
+      }
+    });
+
+    it("composes on a field of points when the drawing is the one thing taken out, and its ring passes as any ring does", () => {
+      const SW = 800, SH = 640;
+      const sky = (seed: number) => grain(stars(flat(SW, SH, GROUND), 260, seed), 3, seed + 1);
+      const slot: Rect = { x: 500, y: 480, width: 240, height: 100 };
+      const first = box(sky(45), 120, 80, 280, 120, [255, 255, 255]), cleaned = sky(47);
+      expect(before(first, cleaned, slot, false)).toMatchObject({ made: false, why: "removal" });
+      const made = facts(first, cleaned, slot, false);
+      // Points are single cells: none of them touches another, so they are no thing that was taken out, and the place is the drawing.
+      // (One point beside the drawing touches it, and is taken with it: the place is a row of cells higher.)
+      expect(made).toMatchObject({ made: true, measured: { elsewhere: { place: { x: 120, y: 76, width: 160, height: 44 } } } });
+      expect(made.measured!.ring!.apart).toBeGreaterThan(FIRST_PICTURE_RULE.apartCells);
+      expect(made.measured!.ring!.touching).toBeLessThanOrEqual(FIRST_PICTURE_RULE.apartCells);
+    });
+  });
+
   it("answers as before where the picture has no place of the slot's size, or no ring of the patch's, outside the slot's surroundings", () => {
     // 100 cells by 30: the surroundings of a slot 30 by 10 are the page's whole height, and the bands beside them are 25 cells wide.
     const wide = (cells: Array<[number, number]>) => cellsInked(flat(400, 120, GROUND), cells);
     const thin = block(40, 12, 12, 2);
-    expect(facts(wide(thin), wide([]), SLOT, false)).toEqual({ made: false, why: "removal", share: 0, join: 0, removed: 0.08 });
+    const { measured: read, ...answered } = facts(wide(thin), wide([]), SLOT, false);
+    expect(answered).toEqual({ made: false, why: "removal", share: 0, join: 0, removed: 0.08 });
+    expect(read!.floor).toBeUndefined();
     // A found drawing there with five single cells far apart on its ring: refused, as five always were.
     const ringed = facts(wide([...block(36, 11, 28, 8), [30, 10], [30, 12], [30, 14], [30, 16], [30, 18]]), wide([]), SLOT, true);
     expect(ringed).toMatchObject({ made: false, why: "join", measured: { ring: { apart: 5, touching: 0 } } });
@@ -862,10 +1215,11 @@ describe("read against the pair of pictures itself", () => {
         return grain(stars(r, points, seed), 1 + next(4), seed + 1);
       };
       const first = draw(3000 + run, 0), cleaned = draw(5000 + run, 3);
-      // On the first picture, a drawing of some size at the slot, near it, or nowhere; and sometimes small marks beside it.
+      // On the first picture, a drawing of some size at the slot, near it, far from it, or nowhere; and sometimes small marks beside it.
       const kind = run % 7;
-      if (kind < 5) {
-        const x = slot.x + (kind === 3 ? -24 : 4) + next(12), y = slot.y + (kind === 4 ? 14 : 2) + next(6);
+      if (kind < 6) {
+        const far = slot.y > h / 2 ? 16 + next(30) : slot.y + slot.height + 50 + next(30);
+        const x = slot.x + (kind === 3 ? -24 : 4) + next(12), y = kind === 5 ? far : slot.y + (kind === 4 ? 14 : 2) + next(6);
         const dw = kind === 1 ? 10 + next(20) : Math.floor(slot.width * (0.4 + next(60) / 100)), dh = kind === 1 ? 4 + next(6) : Math.floor(slot.height * (0.3 + next(60) / 100));
         for (let sx = x; sx < x + dw; sx += 8) box(first, sx, y, sx + 3 + next(5), y + dh, ink);
         if (run % 4 === 1) for (let k = 0; k < 5; k++) box(first, x + k * 14, y + dh + 14, x + k * 14 + 6, y + dh + 20, ink);
@@ -892,7 +1246,22 @@ describe("read against the pair of pictures itself", () => {
           if (was.facts.why === "removal") {
             expect(found).toBe(false);
             expect(now.facts.removed).toBeLessThan(0.2);
-            expect(now.facts.removed).toBeGreaterThan(measured!.floor!);
+            const away = measured!.elsewhere;
+            if (!away) expect(now.facts.removed).toBeGreaterThan(measured!.floor!);
+            else {
+              // The slot holds no removal, and the place is what the cleaning took out elsewhere: as much as the rule asks of the
+              // slot, more than any block of its size elsewhere, no larger than a slot's own place, and the box lies around it.
+              expect(measured!.floor === undefined || now.facts.removed! <= measured!.floor).toBe(true);
+              expect(away.apart).toBeGreaterThanOrEqual(0.2);
+              expect(away.apart).toBeGreaterThan(away.floor!);
+              expect(away.detail!.map((d) => d.apart)).toEqual([1, 4, 8]);
+              for (const d of away.detail!) expect(d.first < 1 || d.cleaned * d.cleaned >= 0.5 * d.first * d.first).toBe(true);
+              const most = Math.min(Math.ceil(slot.width / 4), Math.ceil(slot.height / 4)) + 1;
+              expect(away.place.width).toBeLessThanOrEqual(slot.width + 8 + 8 * most);
+              expect(away.place.height).toBeLessThanOrEqual(slot.height + 8 + 8 * most);
+              expect(near(away.place, patchReach(), now.facts.box!.x, now.facts.box!.y)).toBe(true);
+              tally.elsewhere = (tally.elsewhere ?? 0) + 1;
+            }
           }
           const ring = measured?.ring, rings = measured?.rings;
           if (was.facts.why === "join") expect(ring).toBeDefined();
@@ -912,6 +1281,9 @@ describe("read against the pair of pictures itself", () => {
     for (const key of ["canvas: composed then, composed now", "canvas: removal then, removal now", "canvas: removal then, composed now", "found: composed then, composed now", "found: join then, join now", "found: join then, composed now"]) {
       expect(tally[key] ?? 0, `${key} in ${JSON.stringify(tally)}`).toBeGreaterThan(0);
     }
+    // A removal away from the slot was among them.
+    expect(tally.elsewhere).toBeGreaterThan(0);
+    delete tally.elsewhere;
     // Nothing that was composed is now refused, and nothing is refused for another reason than before.
     for (const key of Object.keys(tally)) expect(key).toMatch(/: (composed then, composed now|(\w+) then, \2 now|(removal|join) then, composed now)$/);
   }, 300_000);

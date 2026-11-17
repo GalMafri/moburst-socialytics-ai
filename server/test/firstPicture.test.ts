@@ -221,7 +221,7 @@ describe("POST /api/picture/slot-file with the first picture", () => {
     expect((await call({ ...base, ...ask, out: "https://elsewhere.test/out.png" })).json.reason).toBe("The request is not well formed: out");
   });
 
-  it("composes for a slot that is not a found drawing only when the two pictures show the removal inside it", async () => {
+  it("composes for a slot that is not a found drawing only where the two pictures show the removal: inside it, or at the one place away from it", async () => {
     // A slot at the canvas rectangle carries no `drawn`: the service measures the removal itself.
     const shown = await store({ first: firstPicture(), cleaned: cleanedPicture() });
     const got = await shown.call({ ...base, first: ask.first, out: ask.out });
@@ -234,17 +234,33 @@ describe("POST /api/picture/slot-file with the first picture", () => {
     expect(result(got.json)).not.toHaveProperty("drawn");
     expect(Buffer.from((await decodeRaster(new Uint8Array(shown.puts["composed.png"]))).data).equals(Buffer.from(expected.picture!.data))).toBe(true);
 
-    // The model drew its logo somewhere else: the rectangle shows no removal, nothing is composed, the cleaned picture is read.
-    const elsewhere = flat(W, H, GROUND);
-    box(elsewhere, 220, 100, W, 200, [20, 24, 30]);
-    drawLogo(elsewhere, shape, { ...rect, y: rect.y + 120 }, [255, 255, 255]);
-    const none = await store({ first: elsewhere, cleaned: cleanedPicture() });
+    // The model drew its logo somewhere else, and the slot holds no removal. The cleaning took the drawing out there: that place is
+    // composed, the slot is read on the composed picture (its ground is the first picture's own), and the answer says where.
+    const elsewhere = () => {
+      const r = flat(W, H, GROUND);
+      box(r, 220, 100, W, 200, [20, 24, 30]);
+      return drawLogo(r, shape, { ...rect, y: rect.y + 120 }, [255, 255, 255]);
+    };
+    const away = await store({ first: elsewhere(), cleaned: cleanedPicture() });
+    const moved = await away.call({ ...base, first: ask.first, out: ask.out });
+    expect(moved.status).toBe(200);
+    const there = composeFirst(elsewhere(), cleanedPicture(), rect, false);
+    expect(there.facts).toMatchObject({ made: true, removed: 0, measured: { elsewhere: { place: { x: 64, y: 152, width: 68, height: 28 } } } });
+    expect(there.facts.box!.y).toBeGreaterThan(rect.y + rect.height);
+    expect(result(moved.json)).toEqual({ ...slotFile(there.picture!, rect, [W, H], "stored", stamps), composed: there.facts });
+    expect(result(moved.json).ground).toEqual(GROUND);
+    expect(Buffer.from((await decodeRaster(new Uint8Array(away.puts["composed.png"]))).data).equals(Buffer.from(there.picture!.data))).toBe(true);
+
+    // Two drawings far from each other and from the slot: no one place holds what the cleaning took out, nothing is composed,
+    // nothing is written, and the cleaned picture is read, as before.
+    const twice = drawLogo(elsewhere(), shape, { ...rect, x: 230, y: 20 }, [255, 255, 255]);
+    const none = await store({ first: twice, cleaned: cleanedPicture() });
     const refused = await none.call({ ...base, first: ask.first, out: ask.out });
     expect(refused.status).toBe(200);
-    // Read against the pair too: the place the two pictures differ most is where that drawing was, and the slot holds nothing.
-    const floor = result(refused.json).composed!.measured!.floor!;
-    expect(floor).toBeGreaterThan(0.2);
-    expect(result(refused.json)).toEqual({ ...slotFile(cleanedPicture(), rect, [W, H], "stored", stamps), composed: { made: false, why: "removal", share: 0, join: 0, removed: 0, measured: { floor } } });
+    const read = result(refused.json).composed!.measured!;
+    expect(read.elsewhere!.place.width).toBeGreaterThan(200);
+    expect(read.elsewhere!.floor).toBeUndefined();
+    expect(result(refused.json)).toEqual({ ...slotFile(cleanedPicture(), rect, [W, H], "stored", stamps), composed: { made: false, why: "removal", share: 0, join: 0, removed: 0, measured: read } });
     expect(Object.keys(none.puts)).toEqual([]);
 
     // A thin logo at the slot, under one fifth of its cells, and nothing else the two pictures differ in: composed, which a fixed

@@ -109,6 +109,14 @@ describe("askCleanedSlot", () => {
         expect(composeRedesign(t)).toBeNull();
       }
     }
+    // A removal the service found away from the slot is composed like any other: the composed picture is the base, and the
+    // slot it was read at is where the logo file is stamped, as always.
+    const elsewhere = { floor: 0.0448, elsewhere: { place: { x: 780, y: 204, width: 632, height: 124 }, apart: 0.4011, floor: 0.0496 } };
+    const e = state({ logo_slot: { from: "canvas" } });
+    await askCleanedSlot(e, BASE, async () => ({ result: answer({ made: true, share: 0.0198, join: 1.95, removed: 0.0045, measured: elsewhere, box: { x: 752, y: 176, width: 688, height: 180 } }), ms: 4 }));
+    expect(e.composed).toEqual({ of: `${BASE}/nologo-1-2.png`, path: `${BASE}/composed-1-2.png`, share: 0.0198, join: 1.95, removed: 0.0045, measured: elsewhere, box: { x: 752, y: 176, width: 688, height: 180 } });
+    expect(basePicture(e)).toBe(`${BASE}/composed-1-2.png`);
+    expect(composeRedesign(e)).toBeNull();
     // A refused join where the rule's own numbers made the place still makes the design again, with or without those numbers.
     const j = state({ generations: 1 });
     await askCleanedSlot(j, BASE, async () => ({ result: answer({ made: false, why: "join", share: 0, join: 4.39, removed: 0.7433, measured: { ring: { cells: 768, apart: 20, touching: 20 } } }), ms: 4 }));

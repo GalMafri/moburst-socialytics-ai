@@ -8,7 +8,9 @@
 // fact that the logo was removed there. Whether it is, is decided in one
 // place, the rule itself (firstPicture.ts, composeFirst), for every slot:
 // the found drawing's rectangle, or the canvas rectangle when the two
-// pictures show the removal inside it. So the worker asks the same way for
+// pictures show the removal inside it, or, when the slot holds none, the
+// one place away from it that the cleaning took the drawing out of (the
+// slot stays where the logo file is stamped). So the worker asks the same way for
 // every design and keeps the reason the service gives.
 //
 // The worker asks for the composed picture in the call it already makes for
