@@ -1,19 +1,22 @@
 // @vitest-environment node
 // A carousel's slides agree on one logo file (17 Nov 2026, carouselLogo.ts):
 // the first in the client's order that shows on every slide's ground. When
-// none does, each slide keeps the file its own ground took. Nothing is made
-// again, stopped or failed for the rule, and no wait in it can outlast what
-// it waits for. The rows here are plain objects, in an invented brand's
+// none does, each slide keeps the file its own ground took. The logo also
+// sits in one place at one size, the client's placement rectangle, on every
+// slide where that is possible. Nothing is made again,
+// stopped or failed for the rule, and no wait in it can outlast what it
+// waits for. The rows here are plain objects, in an invented brand's
 // colors.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { type AgreeDeps, type CarouselLogo, type CoverRow, type SiblingRow, OF_THE_MEASUREMENT, agreeOnLogo, coverDecision, decideCarousel, followCarousel, inCarousel, measuredAgain, siblingStands, slotFacts } from "../../../functions/_shared/design/carouselLogo";
+import { canvasLogoRect } from "../../../functions/_shared/canva/brief";
+import { type AgreeDeps, type CarouselLogo, type CoverRow, type SiblingRow, OF_THE_MEASUREMENT, agreeOnLogo, carouselSlot, coverDecision, decideCarousel, followCarousel, inCarousel, measuredAgain, settlePlace, siblingStands, slotFacts } from "../../../functions/_shared/design/carouselLogo";
 import { stampOutcome } from "../../../functions/_shared/design/logoChoice";
 import { pickStamp } from "../../../functions/_shared/design/logoSlot";
 import type { StampEntry } from "../../../functions/_shared/design/logoTone";
 import { OF_THE_DESIGN } from "../../../functions/_shared/design/modelSteps";
-import type { LogoFileName, Rect, Rgb, SlotFileResult } from "../../../functions/_shared/picture/contract";
+import type { LogoFileName, Placement, Rect, Rgb, SlotFileResult } from "../../../functions/_shared/picture/contract";
 import { functionsDir } from "../../paths";
 
 // A two-color logo (a dark word and a bright sign) and its white copy, which the client's posts never show.
@@ -26,7 +29,15 @@ const DEEP: Rgb = [38, 44, 52];
 // A light and a dark ground: no one file of a dark one-color logo and its white copy shows on both.
 const LIGHT: Rgb = [244, 244, 244], DARK: Rgb = [16, 16, 16];
 const ONE_COLOR: Partial<Record<LogoFileName, Rgb[]>> = { stored: [NAVY], white: [WHITE] };
-const SLOT: Rect = { x: 130, y: 136, width: 652, height: 218 };
+// The client's placement, the size of the file the canvas carried, and the frame every slide of the option is drawn in.
+const PLACEMENT: Placement = { anchor: "left", left: 0.06, width: 0.3, top: 0.05 };
+const INPUT = { placement: PLACEMENT, logo_size: [600, 200] };
+const FRAME: [number, number] = [2176, 2720];
+/** The rectangle the canvas carried the logo at: the carousel's rectangle. */
+const SLOT: Rect = canvasLogoRect(PLACEMENT, 600, 200, FRAME[0], FRAME[1]);
+/** Where the model drew the logo on a slide whose drawing was found: smaller, and a little off the canvas place. */
+const DRAWN: Rect = { x: 190, y: 152, width: 420, height: 140 };
+const DRAWN_FITS: Partial<Record<LogoFileName, Rect>> = { stored: DRAWN, white: DRAWN };
 const FITS: Partial<Record<LogoFileName, Rect>> = { stored: SLOT, white: SLOT };
 const COVER = "c1/canva-finish/cover-job/design-1.png";
 const NEXT_COVER = "c1/canva-finish/cover-job/design-2.png";
@@ -48,7 +59,7 @@ function measured(ground: Rgb | null, extra: Record<string, unknown> = {}, files
   const answer = answerOn(ground, files, inks, fits);
   const outcome = stampOutcome({ files }, answer, "Brand");
   if (outcome.next !== "stamp") throw new Error(`This ground takes no file alone: ${outcome.next}`);
-  return { logo_frame: [2176, 2720], ...outcome.state, ...slotFacts(answer), ...extra };
+  return { logo_frame: FRAME, logo_slot: { rect: fits.stored, from: fits.stored === SLOT ? "canvas" : "drawn", of: "stored" }, ...outcome.state, ...slotFacts(answer), ...extra };
 }
 
 /** The same once the slide is stamped with its own file and its checks have passed: where a single design would be done. */
@@ -59,8 +70,11 @@ function checked(ground: Rgb | null, extra: Record<string, unknown> = {}, files:
   return { ...s, final_path: own, checks_passed: own, ...extra };
 }
 
-const cover = (ground: Rgb | null, extra: Record<string, unknown> = {}, inks = INKS) => checked(ground, { design_path: COVER, generations: 1, ...extra }, FILES, inks);
-const sibling = (ground: Rgb | null, extra: Record<string, unknown> = {}, inks = INKS): SiblingRow => ({ status: "running", step: "verify", state: checked(ground, { cover_path: COVER, ...extra }, FILES, inks) });
+/** What a slide in the carousel's rectangle already keeps about its place. */
+const IN_PLACE = { logo_place: { at: SLOT, kept: "same" } };
+/** The cover and a sibling once their checks have passed and their place is settled: what the cover's decision reads. */
+const cover = (ground: Rgb | null, extra: Record<string, unknown> = {}, inks = INKS) => checked(ground, { design_path: COVER, generations: 1, ...IN_PLACE, ...extra }, FILES, inks);
+const sibling = (ground: Rgb | null, extra: Record<string, unknown> = {}, inks = INKS): SiblingRow => ({ status: "running", step: "verify", state: checked(ground, { cover_path: COVER, ...IN_PLACE, ...extra }, FILES, inks) });
 /** A slide still on its way: drawn from the cover, measured, its checks not passed yet. */
 const onItsWay = (ground: Rgb, step = "finish"): SiblingRow => ({ status: "running", step, state: measured(ground, { cover_path: COVER }) });
 
@@ -98,14 +112,14 @@ describe("what a carousel's slide keeps from the cleaned slot's answer", () => {
 
   it("goes with the design, like everything else that was measured on it or decided from it", () => {
     for (const key of Object.keys(slotFacts(answerOn(DEEP))!)) expect(OF_THE_DESIGN).toContain(key);
-    for (const key of ["carousel_logo", "checks_passed", "logo_follows"]) expect(OF_THE_DESIGN).toContain(key);
+    for (const key of ["carousel_logo", "checks_passed", "logo_place", "logo_follows"]) expect(OF_THE_DESIGN).toContain(key);
     for (const key of OF_THE_MEASUREMENT) expect(OF_THE_DESIGN).toContain(key);
   });
 
   it("leaves nothing of an earlier measurement when the slide is measured again: no older ground is left for the decision to read", () => {
     // Measured on a ground, with a look for the drawing; then again, where the slot has no ground and no drawing was looked for.
     const first = { ...answerOn(DEEP), drawn: { score: 0.2, found: false } };
-    const s: Record<string, unknown> = { logo_frame: [2176, 2720], cover_path: COVER, nologo_path: "n.png", ...(stampOutcome({ files: FILES }, first, "Brand") as { state: Record<string, unknown> }).state, ...slotFacts(first) };
+    const s: Record<string, unknown> = { logo_frame: FRAME, cover_path: COVER, nologo_path: "n.png", ...(stampOutcome({ files: FILES }, first, "Brand") as { state: Record<string, unknown> }).state, ...slotFacts(first) };
     expect(s).toMatchObject({ logo_ground: DEEP, logo_clean: 0.2, logo_named: "white" });
     const again = answerOn(null);
     const outcome = stampOutcome({ files: FILES }, again, "Brand") as { state: Record<string, unknown> };
@@ -119,7 +133,7 @@ describe("what a carousel's slide keeps from the cleaned slot's answer", () => {
     expect(s.logo_clean).toBeUndefined();
     expect(s).toMatchObject({ logo_named: "stored", logo_alone: "stored", logo_flat: 0, logo_inks: INKS });
     // So the cover's decision takes no ground from this slide.
-    const row: SiblingRow = { status: "running", step: "verify", state: { ...s, checks_passed: "f.png" } };
+    const row: SiblingRow = { status: "running", step: "verify", state: { ...s, checks_passed: "f.png", ...IN_PLACE } };
     expect(decideCarousel(cover(SLATE[0]), [row], 1, FILES)).toMatchObject({ next: "decided", logo: { by: "every", file: "stored", grounds: 1 } });
   });
 });
@@ -145,8 +159,14 @@ describe("where a sibling stands for the cover's decision", () => {
     }
   });
 
-  it("is ready once its checks have passed for this cover design, with or without the files' facts", () => {
+  it("is ready once its checks have passed and its place is settled for this cover design", () => {
     expect(siblingStands(sibling(SLATE[0]), COVER)).toBe("ready");
+    // Its checks have passed and its place is not settled yet: its ground may still become another rectangle's.
+    const { logo_place: _place, ...unplaced } = sibling(SLATE[0]).state!;
+    expect(siblingStands({ status: "running", step: "verify", state: unplaced }, COVER)).toBe("waits");
+    // Whatever came of settling it counts: a slide that kept its own place is as ready as one that was moved.
+    for (const logo_place of [{ at: SLOT, from: DRAWN }, { at: SLOT, kept: "touched" }, { kept: "unknown" }]) expect(siblingStands({ status: "running", step: "verify", state: { ...unplaced, logo_place } }, COVER)).toBe("ready");
+    // A slide measured without the files' facts has no place to settle and is done at its next run.
     expect(siblingStands({ status: "running", step: "verify", state: { cover_path: COVER, checks_passed: "f.png" } }, COVER)).toBe("ready");
   });
 
@@ -336,38 +356,196 @@ describe("what one slide does with the cover's decision", () => {
   });
 });
 
+describe("the carousel's rectangle", () => {
+  it("is the client's placement rectangle on the slide's own frame: the rectangle the canvas carried", () => {
+    expect(carouselSlot({ input: INPUT }, { logo_frame: FRAME })).toEqual(SLOT);
+    expect(SLOT).toEqual({ x: 131, y: 136, width: 653, height: 218 });
+    // Every slide of an option has the same placement and the same page, so the same rectangle; on another frame it is the same shares of that frame.
+    expect(carouselSlot({ input: INPUT }, { logo_frame: [1088, 1360] })).toEqual(canvasLogoRect(PLACEMENT, 600, 200, 1088, 1360));
+    expect(carouselSlot({ input: { ...INPUT, placement: { anchor: "center", width: 0.25, top: 0.04 } } }, { logo_frame: FRAME })).toEqual(canvasLogoRect({ anchor: "center", width: 0.25, top: 0.04 }, 600, 200, 2176, 2720));
+  });
+
+  it("is not told for a job that does not say enough", () => {
+    expect(carouselSlot({ input: INPUT }, {})).toBeNull();
+    expect(carouselSlot({ input: { placement: PLACEMENT } }, { logo_frame: FRAME })).toBeNull();
+    expect(carouselSlot({ input: { logo_size: [600, 200] } }, { logo_frame: FRAME })).toBeNull();
+    expect(carouselSlot({ input: { ...INPUT, logo_size: [600, 0] } }, { logo_frame: FRAME })).toBeNull();
+    expect(carouselSlot({}, { logo_frame: FRAME })).toBeNull();
+    expect(carouselSlot({ input: null }, { logo_frame: FRAME })).toBeNull();
+  });
+});
+
+describe("a slide's place in its carousel", () => {
+  type PlaceCalls = { measured: Rect[]; stamped: Array<{ path: string; rect: Rect }>; looked: Array<{ path: string; rect: Rect }> };
+  /** The three picture calls, answering for the ground `there` under the carousel's rectangle. */
+  function service(there: Rgb | null, over: Partial<Pick<AgreeDeps, "measure" | "stamp" | "clearAt">> = {}) {
+    const made: PlaceCalls = { measured: [], stamped: [], looked: [] };
+    const deps: Pick<AgreeDeps, "measure" | "stamp" | "clearAt"> = {
+      measure: async (slot) => { made.measured.push(slot); return answerOn(there); },
+      stamp: async (path, rect) => { made.stamped.push({ path, rect }); return "c1/canva-finish/job/final-placed.png"; },
+      clearAt: async (path, rect) => { made.looked.push({ path, rect }); return true; },
+      ...over,
+    };
+    return { made, deps };
+  }
+  /** A slide whose drawing was found: its slot is where the model drew the logo, and it is stamped and checked there. */
+  const drawn = (own: Rgb) => ({ input: INPUT, state: checked(own, { cover_path: COVER, logo_slot: { rect: DRAWN, from: "drawn", of: "stored", template: { file: "stored", ground: [255, 255, 255] } } }, FILES, INKS, DRAWN_FITS) });
+  const none = { made: { measured: [], stamped: [], looked: [] } };
+
+  it("stays where it is, with no call, when its slot is the rectangle the canvas carried", async () => {
+    const job = { input: INPUT, state: checked(SLATE[0], { cover_path: COVER }) };
+    const before = structuredClone(job.state);
+    const s = service(DEEP);
+    expect(await settlePlace(job, FILES, s.deps)).toEqual({ at: SLOT, kept: "same" });
+    expect(s.made).toEqual(none.made);
+    expect(job.state).toEqual(before);
+    // A slot the canvas carried is the carousel's rectangle as the service itself computed it: it is taken as it is, and nothing is
+    // computed again for it, whatever the job says or leaves out.
+    const carried = { ...SLOT, x: SLOT.x + 1 };
+    for (const input of [INPUT, { placement: PLACEMENT }, undefined]) {
+      expect(await settlePlace({ input, state: { ...before, logo_slot: { rect: carried, from: "canvas", of: "stored" } } }, FILES, s.deps)).toEqual({ at: carried, kept: "same" });
+    }
+    expect(s.made).toEqual(none.made);
+    // A drawing found exactly there is in place too.
+    const exact = { input: INPUT, state: { ...before, logo_slot: { rect: { ...SLOT }, from: "drawn", of: "stored" } } };
+    expect(await settlePlace(exact, FILES, s.deps)).toEqual({ at: SLOT, kept: "same" });
+    expect(s.made).toEqual(none.made);
+  });
+
+  it("moves a slide whose drawing was found to the carousel's rectangle: measured there, stamped there on the picture without a logo, and looked at there", async () => {
+    const job = drawn(SLATE[0]);
+    expect(job.state).toMatchObject({ logo_rect: DRAWN, logo_named: "stored", logo_ground: SLATE[0] });
+    const s = service(SLATE[2]);
+    expect(await settlePlace(job, FILES, s.deps)).toEqual({ at: SLOT, from: DRAWN });
+    // One read of the ground, one stamp, one look, each at the carousel's rectangle.
+    expect(s.made.measured).toEqual([SLOT]);
+    expect(s.made.stamped).toEqual([{ path: FILES[0].path, rect: SLOT }]);
+    expect(s.made.looked).toEqual([{ path: "c1/canva-finish/job/final-placed.png", rect: SLOT }]);
+    // From here on everything the slide measured is of the place it is stamped at, and the finished picture is the new one.
+    expect(job.state).toMatchObject({ logo_rect: SLOT, logo_ground: SLATE[2], logo_named: "stored", logo_alone: "stored", logo_fits: FITS, logo_inks: INKS, final_path: "c1/canva-finish/job/final-placed.png" });
+    expect(job.state.logo_shows).toEqual(answerOn(SLATE[2]).shows);
+    // What the slide's own checks passed, and where the model drew the logo, stay for review.
+    expect(job.state.checks_passed).toBe("c1/canva-finish/job/final-own-stored.png");
+    expect(job.state.logo_slot).toMatchObject({ rect: DRAWN, from: "drawn" });
+  });
+
+  it("takes the file the ground under the carousel's rectangle takes, which can be another than the slide had where the model drew the logo", async () => {
+    const job = drawn(SLATE[0]);
+    const s = service(DEEP);
+    expect(await settlePlace(job, FILES, s.deps)).toEqual({ at: SLOT, from: DRAWN });
+    expect(s.made.stamped).toEqual([{ path: FILES[1].path, rect: SLOT }]);
+    expect(job.state).toMatchObject({ logo_named: "white", logo_alone: "white", logo_file: FILES[1].path, logo_ground: DEEP });
+    // A ground with no pixel under the rectangle has nothing to test: the first file, as for every slot, and no older ground is kept.
+    const blind = drawn(SLATE[0]);
+    expect(await settlePlace(blind, FILES, service(null).deps)).toEqual({ at: SLOT, from: DRAWN });
+    expect(blind.state.logo_named).toBe("stored");
+    expect(blind.state).not.toHaveProperty("logo_ground");
+  });
+
+  it("keeps its own place, exactly as it passed its checks, in every case in which it cannot be moved", async () => {
+    const refusals: Array<[string, Partial<Pick<AgreeDeps, "measure" | "stamp" | "clearAt">>, Partial<PlaceCalls>]> = [
+      // The ground under the carousel's rectangle could not be read, or the service answers no facts of the files.
+      ["unmeasured", { measure: async () => { throw new Error("The picture service did not answer: timeout."); } }, {}],
+      ["unmeasured", { measure: async () => { const { inks: _inks, fits: _fits, ...before } = answerOn(SLATE[2]); return before as SlotFileResult; } }, {}],
+      // The service's answer is no result object at all: nothing was read, and nothing is thrown.
+      ["unmeasured", { measure: async () => undefined as unknown as SlotFileResult }, {}],
+      ["unmeasured", { measure: async () => null as unknown as SlotFileResult }, {}],
+      ["unmeasured", { measure: async () => "ok" as unknown as SlotFileResult }, {}],
+      // A result whose fields are not what the worker reads them as: reading it fails inside the read.
+      ["unmeasured", { measure: async () => ({ ...answerOn(SLATE[2]), get drawn(): never { throw new TypeError("not a result"); } }) as unknown as SlotFileResult }, {}],
+      // No logo file shows on the ground there.
+      ["hidden", { measure: async () => ({ ...answerOn(SLATE[2]), file: null }) }, {}],
+      // The stamp failed.
+      ["unstamped", { stamp: async () => { throw new Error("The picture service refused the call (400)."); } }, {}],
+      // Something would touch the logo there, or the look failed.
+      ["touched", { clearAt: async () => false }, { stamped: [{ path: FILES[0].path, rect: SLOT }] }],
+      ["unstamped", { clearAt: async () => { throw new Error("The area around the logo could not be read"); } }, { stamped: [{ path: FILES[0].path, rect: SLOT }] }],
+    ];
+    for (const [why, over, made] of refusals) {
+      const job = drawn(SLATE[0]);
+      const before = structuredClone(job.state);
+      const s = service(SLATE[2], over);
+      expect(await settlePlace(job, FILES, s.deps), why).toEqual({ at: SLOT, kept: why });
+      expect(job.state, why).toEqual(before);
+      expect(s.made.stamped, why).toEqual(made.stamped ?? []);
+    }
+  });
+
+  it("spends no try on an answer that is no result: the whole agreement goes on and the slide is delivered as it was", async () => {
+    for (const answer of [undefined, null, 7, "ok"]) {
+      const rows = carousel(SLATE.slice(0, 2));
+      rows[1] = drawnSlide(1, SLATE[1], SLATE[1]);
+      const own = structuredClone(rows[1].state!);
+      const c = calls();
+      // Nothing is thrown out of the agreement (a throw would reach the worker's error rule and spend a try of the job).
+      await expect(runToEnd(rows, c, [1, 0], { measure: async () => answer as unknown as SlotFileResult })).resolves.toBe(2);
+      expect(rows.every((r) => r.status === "done")).toBe(true);
+      expect(rows[1].state).toEqual({ ...own, logo_place: { at: SLOT, kept: "unmeasured" }, logo_follows: { of: COVER, kept: "same" } });
+      expect(c.stamps).toEqual([]);
+    }
+  });
+
+  it("keeps its own place when the carousel's rectangle cannot be told for it", async () => {
+    const s = service(SLATE[2]);
+    // A job from before the slot was kept, and a job that does not carry its placement or the file's size.
+    const { logo_slot: _slot, ...old } = drawn(SLATE[0]).state;
+    expect(await settlePlace({ input: INPUT, state: old }, FILES, s.deps)).toEqual({ kept: "unknown" });
+    expect(await settlePlace({ input: { placement: PLACEMENT }, state: drawn(SLATE[0]).state }, FILES, s.deps)).toEqual({ kept: "unknown" });
+    expect(await settlePlace({ state: drawn(SLATE[0]).state }, FILES, s.deps)).toEqual({ kept: "unknown" });
+    expect(s.made).toEqual(none.made);
+  });
+
+  it("has no outcome that throws or makes a design again", async () => {
+    const boom = async () => { throw new Error("down"); };
+    for (const over of [{ measure: boom }, { stamp: boom }, { clearAt: boom }, { measure: boom, stamp: boom, clearAt: boom }]) {
+      const placed = await settlePlace(drawn(SLATE[0]), FILES, service(SLATE[2], over).deps);
+      expect(Object.keys(placed).sort()).toEqual(["at", "kept"]);
+    }
+  });
+});
+
 // ── The agreement, run over rows ────────────────────────────────────────────
 
-type Row = { slide_index: number; status: string; step: string; state: Record<string, unknown> | null };
-type Calls = { stamps: string[]; looks: string[]; saves: number };
+type Row = { slide_index: number; status: string; step: string; state: Record<string, unknown> | null; /** The ground under the carousel's rectangle on this slide's picture, for a slide whose own slot is another rectangle. */ there?: Rgb | null };
+type Calls = { measures: string[]; stamps: string[]; looks: string[]; saves: number };
 
 /**
  * One run of one row's job at its agreement, as the worker runs it: the job is the run's own copy of the row, the reads are of
- * the rows as they are, and what the run answers is kept as the worker's job loop keeps it (state saved; "done" ends the job).
+ * the rows as they are, and what the run answers is kept as the worker's job loop keeps it (the state saved after every step,
+ * "next" runs the step again in the same request, "done" ends the job).
  */
 async function runAgreement(rows: Row[], index: number, calls: Calls, over: Partial<AgreeDeps> = {}, files: StampEntry[] = FILES): Promise<"done" | "wait"> {
   const row = rows[index];
-  const job = { slide_index: row.slide_index, slide_count: rows.length, state: structuredClone(row.state ?? {}) };
+  const job = { input: INPUT, slide_index: row.slide_index, slide_count: rows.length, state: structuredClone(row.state ?? {}) };
   const deps: AgreeDeps = {
+    measure: async (slot) => { calls.measures.push(`${row.slide_index}:${JSON.stringify(slot)}`); return answerOn(row.there ?? null, files, files === OWN_SECOND ? SECOND_INKS : INKS, files === OWN_SECOND ? SECOND_FITS : FITS); },
     siblings: async () => rows.filter((r) => r.slide_index > 0).map((r) => structuredClone({ status: r.status, step: r.step, state: r.state })) as SiblingRow[],
     cover: async () => { const c = rows.find((r) => r.slide_index === 0); return c ? structuredClone({ status: c.status, state: c.state }) as CoverRow : null; },
     save: async () => { calls.saves++; row.state = structuredClone(job.state); },
-    stamp: async (logoPath) => { calls.stamps.push(`${row.slide_index}:${logoPath}`); return `c1/canva-finish/job/final-${row.slide_index}-carousel.png`; },
+    stamp: async (logoPath, rect) => { calls.stamps.push(`${row.slide_index}:${logoPath}@${rect.x},${rect.y},${rect.width}x${rect.height}`); return `c1/canva-finish/job/final-${row.slide_index}-${calls.stamps.length}.png`; },
     clearAt: async (finalPath) => { calls.looks.push(finalPath); return true; },
     ...over,
   };
-  const result = await agreeOnLogo(job, () => files, deps);
-  row.state = structuredClone(job.state);
-  if (result === "done") Object.assign(row, { status: "done", step: "finished" });
-  return result;
+  for (let step = 0; step < 4; step++) {
+    const result = await agreeOnLogo(job, () => files, deps);
+    row.state = structuredClone(job.state);
+    if (result === "done") Object.assign(row, { status: "done", step: "finished" });
+    if (result !== "next") return result;
+  }
+  throw new Error("The agreement asked to run again without end.");
 }
 
-const calls = (): Calls => ({ stamps: [], looks: [], saves: 0 });
-/** A carousel whose every slide has passed its own checks: the cover first. */
-const carousel = (grounds: Array<Rgb | null>, inks = INKS): Row[] => grounds.map((g, i) => ({ slide_index: i, status: "running", step: "verify", state: i === 0 ? cover(g, {}, inks) : sibling(g, {}, inks).state }));
+const calls = (): Calls => ({ measures: [], stamps: [], looks: [], saves: 0 });
+const at = (rect: Rect) => `${rect.x},${rect.y},${rect.width}x${rect.height}`;
+/** A slide whose checks have passed and whose place is not settled yet: where the agreement starts. */
+const unplaced = (state: Record<string, unknown>) => { const { logo_place: _place, ...rest } = state; return rest; };
+/** A carousel whose every slide has passed its own checks, each in the rectangle the canvas carried: the cover first. */
+const carousel = (grounds: Array<Rgb | null>, inks = INKS): Row[] => grounds.map((g, i) => ({ slide_index: i, status: "running", step: "verify", state: unplaced(i === 0 ? cover(g, {}, inks) : sibling(g, {}, inks).state!) }));
 /** The same for a client whose second file is its own, in another shape. */
 const secondCarousel = (grounds: Rgb[]): Row[] => grounds.map((g, i) => ({ slide_index: i, status: "running", step: "verify", state: checked(g, i === 0 ? { design_path: COVER } : { cover_path: COVER }, OWN_SECOND, SECOND_INKS, SECOND_FITS) }));
-/** The most passes any carousel here may take: a pass in which the cover decides, one in which the slides follow, and a spare for a slide that had to end first. */
+/** A slide whose drawing was found: stamped where the model drew the logo, on the ground `own`; `there` is the ground under the carousel's rectangle. */
+const drawnSlide = (index: number, own: Rgb, there: Rgb | null): Row => ({ slide_index: index, status: "running", step: "verify", there, state: checked(own, index === 0 ? { design_path: COVER } : { cover_path: COVER }, FILES, INKS, DRAWN_FITS) });
+/** The most passes any carousel here may take: one in which the slides settle their place, one in which the cover decides, one in which the slides follow, and a spare for a slide that had to end first. */
 const PASSES = 4;
 /** Passes over every row whose job is waiting at its agreement, in the order given, until every such job has ended. Answers the passes it took; more than PASSES is a wait that did not end. */
 async function runToEnd(rows: Row[], c: Calls, order: number[] = rows.map((_, i) => i), over: Partial<AgreeDeps> = {}, files: StampEntry[] = FILES): Promise<number> {
@@ -392,11 +570,13 @@ describe("the agreement over a whole carousel", () => {
     expect(rows.map((r) => r.state!.logo_file)).toEqual(Array(5).fill(FILES[1].path));
     expect(rows[0].state!.carousel_logo).toEqual({ of: COVER, by: "every", file: "white", shows: { stored: 1.37, white: 7.33 }, grounds: 5 });
     // Four slides are stamped again, the fifth already had the file; the rectangle is the same, so nothing is looked at again.
-    expect([...c.stamps].sort()).toEqual([0, 1, 2, 3].map((i) => `${i}:${FILES[1].path}`));
+    expect([...c.stamps].sort()).toEqual([0, 1, 2, 3].map((i) => `${i}:${FILES[1].path}@${at(SLOT)}`));
     expect(c.looks).toEqual([]);
+    expect(c.measures).toEqual([]);
     expect(c.saves).toBe(1);
     // The delivered picture is the one stamped with the carousel's file; what each slide measured alone stays for review.
-    expect(rows.slice(0, 4).map((r) => r.state!.final_path)).toEqual([0, 1, 2, 3].map((i) => `c1/canva-finish/job/final-${i}-carousel.png`));
+    for (const r of rows.slice(0, 4)) expect(r.state!.final_path).toMatch(new RegExp(`^c1/canva-finish/job/final-${r.slide_index}-\\d+\\.png$`));
+    expect(rows.map((r) => r.state!.logo_place)).toEqual(Array(5).fill({ at: SLOT, kept: "same" }));
     expect(rows[4].state!.final_path).toBe(rows[4].state!.checks_passed);
     expect(rows.map((r) => r.state!.logo_follows)).toEqual([...Array(4).fill({ of: COVER, file: "white" }), { of: COVER, kept: "same" }]);
     expect(rows.map((r) => r.state!.logo_alone)).toEqual(["stored", "stored", "stored", "stored", "white"]);
@@ -406,10 +586,11 @@ describe("the agreement over a whole carousel", () => {
     const rows = carousel(SLATE);
     const before = rows.map((r) => r.state!.final_path);
     const c = calls();
-    expect(await runToEnd(rows, c)).toBe(1);
+    // The cover is handed out first: it waits for the slides to settle their place, and decides on the next pass.
+    expect(await runToEnd(rows, c)).toBe(2);
     expect(rows.every((r) => r.status === "done" && r.state!.logo_named === "stored")).toBe(true);
     expect(rows.map((r) => r.state!.final_path)).toEqual(before);
-    expect(c.stamps).toEqual([]);
+    expect(c).toEqual({ ...calls(), saves: 1 });
     expect(rows.map((r) => r.state!.logo_follows)).toEqual(Array(4).fill({ of: COVER, kept: "same" }));
   });
 
@@ -427,10 +608,106 @@ describe("the agreement over a whole carousel", () => {
     expect(c.stamps).toEqual([]);
   });
 
+  it("puts the logo in one place at one size: four slides in the canvas rectangle and one where the model drew it end in the same rectangle", async () => {
+    // The carousel that showed it: the second slide's drawing was found, smaller than the client's placement.
+    const rows = carousel([...SLATE, [52, 60, 70]]);
+    rows[1] = drawnSlide(1, SLATE[1], SLATE[1]);
+    expect(rows.map((r) => r.state!.logo_rect)).toEqual([SLOT, DRAWN, SLOT, SLOT, SLOT]);
+    const c = calls();
+    expect(await runToEnd(rows, c, [4, 3, 2, 1, 0])).toBe(2);
+    expect(rows.every((r) => r.status === "done")).toBe(true);
+    expect(rows.map((r) => r.state!.logo_rect)).toEqual(Array(5).fill(SLOT));
+    expect(rows.map((r) => r.state!.logo_named)).toEqual(Array(5).fill("stored"));
+    expect(rows.map((r) => r.state!.logo_place)).toEqual([{ at: SLOT, kept: "same" }, { at: SLOT, from: DRAWN }, ...Array(3).fill({ at: SLOT, kept: "same" })]);
+    // All it cost: one read of the ground, one stamp and one look, for the one slide that moved. The four others made no call.
+    expect(c.measures).toEqual([`1:${JSON.stringify(SLOT)}`]);
+    expect(c.stamps).toEqual([`1:${FILES[0].path}@${at(SLOT)}`]);
+    expect(c.looks).toHaveLength(1);
+    // The slide that moved delivers the picture stamped at the carousel's rectangle; the others the picture their checks passed.
+    expect(rows[1].state!.final_path).toBe(c.looks[0]);
+    expect(rows[1].state!.final_path).not.toBe(rows[1].state!.checks_passed);
+    for (const i of [0, 2, 3, 4]) expect(rows[i].state!.final_path).toBe(rows[i].state!.checks_passed);
+    expect(rows[0].state!.carousel_logo).toMatchObject({ by: "every", file: "stored", grounds: 5 });
+  });
+
+  it("decides the file on the ground under the rectangle each slide is stamped at, never on the ground it measured before it moved", async () => {
+    // Where the model drew the logo the ground hides the stored file; under the carousel's rectangle it does not.
+    const lighter = carousel(SLATE);
+    lighter[2] = drawnSlide(2, DEEP, SLATE[2]);
+    expect(lighter[2].state).toMatchObject({ logo_named: "white", logo_ground: DEEP });
+    const a = calls();
+    await runToEnd(lighter, a, [3, 2, 1, 0]);
+    expect(lighter[0].state!.carousel_logo).toEqual({ of: COVER, by: "every", file: "stored", shows: { stored: 2.21, white: 7.33 }, grounds: 4 });
+    expect(lighter.map((r) => r.state!.logo_named)).toEqual(Array(4).fill("stored"));
+    expect(lighter.map((r) => r.state!.logo_rect)).toEqual(Array(4).fill(SLOT));
+    // The slide was stamped once at the carousel's rectangle, with the file that ground takes; nobody is stamped again for the file.
+    expect(a.stamps).toEqual([`2:${FILES[0].path}@${at(SLOT)}`]);
+    // The other way round: fine where the model drew it, hidden under the carousel's rectangle. That ground is the slide's now, and it decides for all four.
+    const darker = carousel(SLATE);
+    darker[2] = drawnSlide(2, SLATE[2], DEEP);
+    const b = calls();
+    await runToEnd(darker, b, [3, 2, 1, 0]);
+    expect(darker[0].state!.carousel_logo).toMatchObject({ by: "every", file: "white", grounds: 4 });
+    expect(darker.map((r) => r.state!.logo_named)).toEqual(Array(4).fill("white"));
+    expect(darker.map((r) => r.state!.logo_rect)).toEqual(Array(4).fill(SLOT));
+    expect([...b.stamps].sort()).toEqual([`0:${FILES[1].path}@${at(SLOT)}`, `1:${FILES[1].path}@${at(SLOT)}`, `2:${FILES[1].path}@${at(SLOT)}`, `3:${FILES[1].path}@${at(SLOT)}`]);
+  });
+
+  it("leaves a slide where it was when the logo would be touched in the carousel's rectangle, and that slide still takes the carousel's file where it is", async () => {
+    const rows = carousel([SLATE[0], SLATE[1], DEEP]);
+    rows[1] = drawnSlide(1, SLATE[1], SLATE[1]);
+    const own = structuredClone(rows[1].state!);
+    const c = calls();
+    // Only the look at the carousel's rectangle finds something; the slide's own rectangle has the file's shape, so nothing is looked at for the file.
+    await runToEnd(rows, c, [2, 1, 0], { clearAt: async () => false });
+    expect(rows.every((r) => r.status === "done")).toBe(true);
+    expect(rows[1].state!.logo_place).toEqual({ at: SLOT, kept: "touched" });
+    // Its ground is still the one where the model drew the logo, and the decision read that one.
+    expect(rows[0].state!.carousel_logo).toMatchObject({ by: "every", file: "white", grounds: 3 });
+    expect(rows[1].state).toMatchObject({ logo_ground: own.logo_ground, logo_alone: "stored", logo_named: "white", logo_rect: DRAWN, logo_follows: { of: COVER, file: "white" } });
+    expect(rows.map((r) => r.state!.logo_rect)).toEqual([SLOT, DRAWN, SLOT]);
+    expect(c.stamps).toEqual([`1:${FILES[0].path}@${at(SLOT)}`, `0:${FILES[1].path}@${at(SLOT)}`, `1:${FILES[1].path}@${at(DRAWN)}`]);
+  });
+
+  it("settles the place in a step of its own: the state is saved before any row is read", async () => {
+    const reads = { siblings: async () => { throw new Error("no row is read in this step"); }, cover: async () => { throw new Error("no row is read in this step"); } };
+    for (const row of [drawnSlide(0, SLATE[0], SLATE[1]), drawnSlide(1, SLATE[0], SLATE[1]), carousel(SLATE)[0], carousel(SLATE)[1]]) {
+      const job = { input: INPUT, slide_index: row.slide_index, slide_count: 4, state: structuredClone(row.state!) };
+      const made = calls();
+      const deps: AgreeDeps = { ...reads, save: async () => { made.saves++; }, measure: async () => answerOn(row.there ?? null), stamp: async (path) => { made.stamps.push(path); return "c1/canva-finish/job/final-placed.png"; }, clearAt: async () => true };
+      // The worker's job loop saves the state after a step that answers "next", then runs the step again.
+      expect(await agreeOnLogo(job, () => FILES, deps)).toBe("next");
+      expect(job.state.logo_place).toEqual(row.there === undefined ? { at: SLOT, kept: "same" } : { at: SLOT, from: DRAWN });
+      expect(job.state).not.toHaveProperty("logo_follows");
+      expect(made.saves).toBe(0);
+    }
+  });
+
+  it("settles a slide's place once, before the cover reads its ground, and never again", async () => {
+    const rows = carousel(SLATE.slice(0, 2));
+    rows[1] = drawnSlide(1, DEEP, SLATE[1]);
+    const c = calls();
+    // The cover is handed out first: the slide's checks have passed, but its place is not settled, so the cover waits.
+    expect(await runAgreement(rows, 0, c)).toBe("wait");
+    expect(rows[0].state).not.toHaveProperty("carousel_logo");
+    expect(rows[0].state!.logo_place).toEqual({ at: SLOT, kept: "same" });
+    // The slide settles its place and waits for the cover; a run of it that comes back measures nothing again.
+    expect(await runAgreement(rows, 1, c)).toBe("wait");
+    expect(await runAgreement(rows, 1, c)).toBe("wait");
+    expect(c.measures).toHaveLength(1);
+    expect(c.stamps).toHaveLength(1);
+    expect(await runAgreement(rows, 0, c)).toBe("done");
+    expect(rows[0].state!.carousel_logo).toMatchObject({ by: "every", file: "stored", grounds: 2 });
+    expect(await runAgreement(rows, 1, c)).toBe("done");
+    expect(c.measures).toHaveLength(1);
+    expect(c.stamps).toHaveLength(1);
+  });
+
   it("decides once: a cover that comes back uses the decision its row holds, and a slide that comes back does nothing more", async () => {
     const rows = carousel([...SLATE, DEEP]);
     // The cover decided and saved, and its run stopped before it was stamped again: the row holds the decision and the cover's own file.
-    const decided = decideCarousel(rows[0].state!, rows.slice(1) as SiblingRow[], 4, FILES) as { logo: CarouselLogo };
+    const decided = decideCarousel(cover(SLATE[0]), [SLATE[1], SLATE[2], SLATE[3], DEEP].map((g) => sibling(g)), 4, FILES) as { logo: CarouselLogo };
+    expect(decided.logo).toMatchObject({ of: COVER, file: "white" });
     rows[0].state!.carousel_logo = decided.logo;
     // Meanwhile a slide's row is no longer what it was when the cover decided: the decision is not taken again.
     rows[4].state = sibling(SLATE[0]).state;
@@ -458,9 +735,10 @@ describe("the agreement over a whole carousel", () => {
     const touched = secondCarousel(grounds), t = calls();
     const own = structuredClone(touched[1].state);
     await runToEnd(touched, t, [0, 1, 2], { clearAt: async (path) => !path.includes("final-1-") }, OWN_SECOND);
+    expect(t.measures).toEqual([]);
     expect(touched.every((r) => r.status === "done")).toBe(true);
     expect(touched.map((r) => r.state!.logo_named)).toEqual(["other", "stored", "other"]);
-    expect(touched[1].state).toEqual({ ...own, logo_follows: { of: COVER, kept: "touched" } });
+    expect(touched[1].state).toEqual({ ...own, logo_place: { at: SLOT, kept: "same" }, logo_follows: { of: COVER, kept: "touched" } });
   });
 
   it("never costs a slide its finished picture: a second stamp or look that fails leaves the slide done as it was", async () => {
@@ -471,9 +749,9 @@ describe("the agreement over a whole carousel", () => {
     for (const failing of failures) {
       const rows = secondCarousel([[128, 128, 128], DEEP]);
       const before = structuredClone(rows[0].state!);
-      expect(await runToEnd(rows, calls(), [0, 1], failing, OWN_SECOND)).toBe(1);
+      expect(await runToEnd(rows, calls(), [0, 1], failing, OWN_SECOND)).toBe(2);
       expect(rows.every((r) => r.status === "done")).toBe(true);
-      expect(rows[0].state).toEqual({ ...before, carousel_logo: { of: COVER, by: "every", file: "other", shows: { stored: 1.37, other: 3.95 }, grounds: 2 }, logo_follows: { of: COVER, kept: "unstamped" } });
+      expect(rows[0].state).toEqual({ ...before, logo_place: { at: SLOT, kept: "same" }, carousel_logo: { of: COVER, by: "every", file: "other", shows: { stored: 1.37, other: 3.95 }, grounds: 2 }, logo_follows: { of: COVER, kept: "unstamped" } });
       expect(rows[0].state!.final_path).toBe(before.checks_passed);
     }
   });
@@ -481,6 +759,8 @@ describe("the agreement over a whole carousel", () => {
   it("holds no decision the cover's row does not hold: a save that fails is no decision, and the cover decides again", async () => {
     const rows = carousel([...SLATE, DEEP]);
     const c = calls();
+    // The slides have settled their place; the cover's save of its decision fails.
+    for (const i of [1, 2, 3, 4]) await runAgreement(rows, i, c);
     expect(await runAgreement(rows, 0, c, { save: async () => { throw new Error("Could not save the job's progress: timeout"); } })).toBe("wait");
     expect(rows[0].state).not.toHaveProperty("carousel_logo");
     expect(rows[0]).toMatchObject({ status: "running", state: { logo_named: "stored" } });
@@ -496,6 +776,9 @@ describe("the agreement over a whole carousel", () => {
     expect(await runAgreement(rows, 2, c, { cover: async () => "unread" })).toBe("wait");
     expect(rows.every((r) => r.status === "running")).toBe(true);
     expect(c).toEqual(calls());
+    // The place is settled all the same: it waits for nothing.
+    expect(rows[0].state!.logo_place).toEqual({ at: SLOT, kept: "same" });
+    expect(rows[2].state!.logo_place).toEqual({ at: SLOT, kept: "same" });
   });
 });
 
@@ -548,12 +831,13 @@ describe("no wait outlasts what it waits for", () => {
 
   it("a cover measured without the files' facts is done as it is, and its slides after it", async () => {
     // A cover a worker or a service from before the rule measured: its checks pass under the new worker, and it has nothing to decide from.
-    const { logo_inks: _inks, logo_fits: _fits, logo_alone: _alone, ...before } = cover(SLATE[0]);
+    const { logo_inks: _inks, logo_fits: _fits, logo_alone: _alone, ...before } = unplaced(cover(SLATE[0]));
     const rows: Row[] = [{ slide_index: 0, status: "running", step: "verify", state: before }, { slide_index: 1, status: "running", step: "verify", state: sibling(DEEP).state }];
     const c = calls();
     expect(await runToEnd(rows, c, [1, 0])).toBe(2);
     expect(rows.every((r) => r.status === "done")).toBe(true);
     expect(rows.map((r) => r.state!.logo_named)).toEqual(["stored", "white"]);
+    expect(rows[0].state).not.toHaveProperty("logo_place");
     expect(rows[0].state).not.toHaveProperty("carousel_logo");
     expect(c).toEqual(calls());
   });
@@ -576,7 +860,7 @@ describe("no wait outlasts what it waits for", () => {
     const rows = carousel([SLATE[0], SLATE[1], DEEP, SLATE[2]]);
     rows[1] = { slide_index: 1, status: "done", step: "finished", state: { cover_path: COVER, logo_ground: DEEP, logo_named: "white", final_path: "old.png" } };
     rows[3] = { slide_index: 3, status: "done", step: "finished", state: { ...rows[3].state, cover_path: NEXT_COVER } };
-    expect(await runToEnd(rows, calls())).toBe(1);
+    expect(await runToEnd(rows, calls())).toBe(2);
     expect(rows.every((r) => r.status === "done")).toBe(true);
     // The decision is made from the two slides that were measured for this design, and the done slides stay as they are.
     expect(rows[0].state!.carousel_logo).toMatchObject({ by: "every", file: "white", grounds: 2 });
@@ -590,6 +874,10 @@ describe("no wait outlasts what it waits for", () => {
       () => ({ status: "running", step: "verify", state: sibling(SLATE[1]).state }),
       () => ({ status: "running", step: "verify", state: sibling(DEEP).state }),
       () => ({ status: "running", step: "verify", state: sibling(null).state }),
+      // Checks passed and the place not settled: a slide the worker from before the place rule left waiting.
+      () => ({ status: "running", step: "verify", state: unplaced(sibling(SLATE[3]).state!) }),
+      // The model's drawing was found: stamped where it was drawn, to be moved to the carousel's rectangle.
+      () => ({ ...drawnSlide(1, SLATE[1], DEEP), state: unplaced(drawnSlide(1, SLATE[1], DEEP).state!) }),
       // Checks passed under the new worker, measured before the rule.
       () => ({ status: "running", step: "verify", state: { cover_path: COVER, logo_named: "stored", logo_ground: DEEP, final_path: "f.png", checks_passed: "f.png" } }),
       // Checks passed for a cover design the row was never started again for.
@@ -601,6 +889,8 @@ describe("no wait outlasts what it waits for", () => {
     ];
     const covers: Array<() => Omit<Row, "slide_index">> = [
       () => ({ status: "running", step: "verify", state: cover(SLATE[0]) }),
+      () => ({ status: "running", step: "verify", state: unplaced(cover(SLATE[0])) }),
+      () => ({ ...drawnSlide(0, SLATE[0], DEEP), state: unplaced(drawnSlide(0, SLATE[0], DEEP).state!) }),
       () => ({ status: "running", step: "verify", state: cover(LIGHT, {}, ONE_COLOR) }),
       () => ({ status: "running", step: "verify", state: { design_path: COVER, logo_named: "stored", final_path: "f.png", checks_passed: "f.png" } }),
       () => ({ status: "running", step: "verify", state: cover(SLATE[0], { carousel_logo: WHITE_DECISION }) }),
@@ -612,7 +902,7 @@ describe("no wait outlasts what it waits for", () => {
     let ran = 0;
     for (const [ci, makeCover] of covers.entries()) for (let a = 0; a < slides.length; a++) for (let b = a; b < slides.length; b++) {
       for (const order of [[0, 1, 2], [2, 1, 0], [1, 0, 2]]) {
-        const rows: Row[] = [{ slide_index: 0, ...makeCover() }, { slide_index: 1, ...slides[a]() }, { slide_index: 2, ...slides[b]() }];
+        const rows: Row[] = [{ ...makeCover(), slide_index: 0 }, { ...slides[a](), slide_index: 1 }, { ...slides[b](), slide_index: 2 }];
         const before = structuredClone(rows);
         const label = `cover ${ci}, slides ${a} and ${b}, order ${order.join("")}`;
         // No job is left waiting, and none is stopped or failed by the agreement: every job that was active is done, with a finished picture.
@@ -681,9 +971,23 @@ describe("the worker's steps that run the rule", () => {
     expect(agree).toContain("save: () => saveJobProgress(admin, job),");
   });
 
+  it("reads the ground under the carousel's rectangle on the picture without a logo, in one call with nothing looked for and nothing composed", () => {
+    const measure = agree.slice(agree.indexOf("measure: (slot) =>"), agree.indexOf("siblings: async () =>"));
+    // The request is the cleaned slot's own, built by the same two functions, for a slot the canvas carried: no drawing is looked for there.
+    expect(measure).toContain('logo_slot: { rect: slot, from: "canvas", of: slotPlan(input).templates[0].file }');
+    expect(measure).toContain('await callPicture(admin, "slot-file", await slotFileRequest(admin, plan, { job: job.id, step: "verify", picturePath: basePicture(job.state) }));');
+    expect(code(measure)).not.toMatch(/first:|out:|slotSearch|composedPath|design_path|nologo_path/);
+    // The stamp that follows starts from the same picture, and the look is the verify step's own.
+    const stamp = worker.slice(worker.indexOf("async function stampLogo("), worker.indexOf("function agreeOnLogo("));
+    expect(stamp).toContain("picture: await signedRead(admin, BUCKET, basePicture(s)),");
+    expect(agree).toContain("clearAt: (finalPath, rect) => logoClearAt(admin, job, base, finalPath, rect)");
+    // A call that fails is logged and handed back, and the shared code leaves the slide where it was.
+    expect(code(agree).match(/\.catch\(\(e\) => \{ throw keepsOwn\(job, e\); \}\)/g)).toHaveLength(3);
+  });
+
   it("runs nothing of it for a job that is no carousel: every line that names it is behind the carousel test", () => {
     const outside = code(worker.replace(marks, "").replace(verify, "").replace(agree, ""));
-    for (const name of ["slotFacts(", "measuredAgain(", "agreeOnLogo(", "agreeOnCarouselLogo(", "carousel_logo", "logo_inks", "checks_passed", "logo_follows", "inCarousel("]) expect(outside, name).not.toContain(name);
+    for (const name of ["slotFacts(", "measuredAgain(", "agreeOnLogo(", "agreeOnCarouselLogo(", "carousel_logo", "logo_inks", "checks_passed", "logo_follows", "logo_place", "inCarousel("]) expect(outside, name).not.toContain(name);
     // The second look at the logo's area is declared outside and called from the agreement alone.
     expect(outside.split("logoClearAt(")).toHaveLength(2);
   });

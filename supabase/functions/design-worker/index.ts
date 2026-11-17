@@ -508,12 +508,23 @@ async function stampLogo(admin: any, job: Job, base: string, logoPath: string, r
 }
 
 /**
- * A carousel's slide after its own checks have passed: the one thing left is which logo file the carousel is stamped with
+ * A carousel's slide after its own checks have passed: what is left is where the carousel's logo sits and which file it is
  * (_shared/design/carouselLogo.ts, agreeOnLogo, which decides everything). The worker gives it the two reads of the option's
- * rows, the save, and the two picture calls. Nothing here makes a design again, stops a job or spends a try.
+ * rows, the save, and the three picture calls. Nothing here makes a design again, stops a job or spends a try.
  */
 function agreeOnLogo(admin: any, job: Job, base: string): Promise<StepResult> {
-  return agreeOnCarouselLogo(job, () => stampPlan({ logo_path: job.input.logo_path, generate: job.input.generate, logos: job.input.logos, stamp: job.input.stamp }, job.state).files, {
+  const input = { logo_path: job.input.logo_path, generate: job.input.generate, logos: job.input.logos, stamp: job.input.stamp };
+  return agreeOnCarouselLogo(job, () => stampPlan(input, job.state).files, {
+    // The cleaned slot read at another rectangle, on the picture every later step reads and finish stamps (the picture without a
+    // logo). The rectangle is one the canvas carried, in the canvas file's shape, so no drawing is looked for there and nothing is
+    // composed: the call has no search and ends in one go.
+    measure: (slot) => (async () => {
+      await renewLease(admin, job);
+      const plan = stampPlan(input, { ...job.state, logo_matched: undefined, logo_slot: { rect: slot, from: "canvas", of: slotPlan(input).templates[0].file } });
+      const { result, ms } = await callPicture(admin, "slot-file", await slotFileRequest(admin, plan, { job: job.id, step: "verify", picturePath: basePicture(job.state) }));
+      notePicture(job.state, "slot-file", ms);
+      return result;
+    })().catch((e) => { throw keepsOwn(job, e); }),
     siblings: async () => {
       const { data } = await admin.from("canva_finish_jobs").select("status, step, state")
         .eq("design_request_id", job.design_request_id).eq("option_index", job.option_index).gt("slide_index", 0);
@@ -525,7 +536,7 @@ function agreeOnLogo(admin: any, job: Job, base: string): Promise<StepResult> {
       return error ? "unread" : data ?? null;
     },
     save: () => saveJobProgress(admin, job),
-    // A second stamp or look that fails leaves the slide with the finished picture it has (agreeOnLogo); the reason is logged here.
+    // A second stamp or look that fails leaves the slide with the finished picture it has (agreeOnLogo, settlePlace); the reason is logged here.
     stamp: (logoPath, rect) => (async () => {
       await renewLease(admin, job);
       return stampLogo(admin, job, base, logoPath, rect);
@@ -534,15 +545,16 @@ function agreeOnLogo(admin: any, job: Job, base: string): Promise<StepResult> {
   });
 }
 
-/** Logs why a carousel's slide could not take the carousel's logo file, and hands the error back. */
+/** Logs why a carousel's slide could not take the carousel's logo file or place, and hands the error back. */
 function keepsOwn(job: Job, e: unknown): unknown {
-  console.warn(`[design-worker] job ${job.id}: the carousel's logo file could not be stamped (${e instanceof Error ? e.message : e}); this slide keeps its own file.`);
+  console.warn(`[design-worker] job ${job.id}: the carousel's logo could not be placed (${e instanceof Error ? e.message : e}); this slide keeps its own.`);
   return e;
 }
 
 /**
  * Whether nothing touches or crosses the logo on a finished file, seen at full size around `rect`: the verify step's own look
- * at the logo's area, for a slide stamped again at another rectangle than the one its checks saw.
+ * at the logo's area, for a slide stamped again at another rectangle than the one its checks saw (the carousel's rectangle, or
+ * the rectangle of a file of another shape).
  */
 async function logoClearAt(admin: any, job: Job, base: string, finalPath: string, rect: Rect): Promise<boolean> {
   const s = job.state;
@@ -560,7 +572,7 @@ async function logoClearAt(admin: any, job: Job, base: string, finalPath: string
   notePicture(s, "read", ms);
   const crop = base64Encode((await download(admin, `${stem}-area.png`)) as unknown as ArrayBuffer);
   const seen = await readCheck(() => askAbout("image/png", crop, logoCheckPrompt(g.brand_name)), parseLogoCheck, "The area around the logo");
-  if (!seen.clear) console.warn(`[design-worker] job ${job.id}: the carousel's logo file would be touched by ${seen.touching}; this slide keeps its own file.`);
+  if (!seen.clear) console.warn(`[design-worker] job ${job.id}: the carousel's logo would be touched by ${seen.touching}; this slide keeps its own.`);
   return seen.clear;
 }
 

@@ -131,10 +131,10 @@ describe("generate", () => {
   });
 
   it("clears a carousel slide's facts of the files, that its checks passed, what it did with the carousel's file and the cover's decision when a design is made again", async () => {
-    for (const key of ["logo_inks", "logo_fits", "logo_alone", "checks_passed", "logo_follows", "carousel_logo"]) expect(OF_THE_DESIGN).toContain(key);
+    for (const key of ["logo_inks", "logo_fits", "logo_alone", "checks_passed", "logo_place", "logo_follows", "carousel_logo"]) expect(OF_THE_DESIGN).toContain(key);
     const facts = { logo_inks: { stored: [[11, 14, 26]], white: [[255, 255, 255]] }, logo_fits: { stored: { x: 1 }, white: { x: 1 } }, logo_alone: "stored" };
     const design = "c1/canva-finish/job-1/design-1.png";
-    const choice = { checks_passed: "c1/canva-finish/job-1/final-a.png", logo_follows: { of: design, file: "white" }, carousel_logo: { of: design, file: "white", by: "every", shows: { stored: 1.37, white: 7.33 }, grounds: 5 } };
+    const choice = { checks_passed: "c1/canva-finish/job-1/final-a.png", logo_place: { at: { x: 1 }, from: { x: 2 } }, logo_follows: { of: design, file: "white" }, carousel_logo: { of: design, file: "white", by: "every", shows: { stored: 1.37, white: 7.33 }, grounds: 5 } };
     const r = jobRow({ step: "generate", slide_index: 0, state: { generations: 1, logo_rect: { x: 1 }, logo_frame: [2176, 2720], logo_file: "c1/w.png", logo_named: "white", final_path: "c1/canva-finish/job-1/final-b.png", ...facts, ...choice } });
     const up = generateFakes();
     await advance(r, (job, hold, save) => runGenerate({ ...up.deps, ...save }, job, hold));

@@ -12,6 +12,7 @@ import { canvasLogoRect } from "../../supabase/functions/_shared/canva/brief.ts"
 import { PUBLIC_DEFAULTS } from "../../public-env.ts";
 import { PICTURE_CALL_HEADER, READ_JPEG_QUALITY, type LocateResult, type LogoSetResult, type Placement, type PostLogo, type Rgb, type SlotFileResult, type SlotResult } from "../../supabase/functions/_shared/picture/contract.ts";
 import { partsOf, wholeExposedInks, wholeInksOf } from "../../supabase/functions/_shared/design/logoTone.ts";
+import { carouselSlot } from "../../supabase/functions/_shared/design/carouselLogo.ts";
 import { blank, box, drawLogo, flat, inked, mark } from "../../supabase/tests/_shared/design/draw.ts";
 import { createApp } from "../src/app.ts";
 import { generationCanvas } from "../src/picture/canvas.ts";
@@ -766,6 +767,9 @@ describe("POST /api/picture/slot", () => {
     expect(first.json).toEqual({ ok: true, result: findSlot(same, [{ file: "stored", raster: shape, ground: LIGHT }], placement, scales), ms: 5 });
     const got = result(first.json);
     expect(got.from).toBe("drawn");
+    // A found drawing is another rectangle than the canvas carried, and the worker computes that canvas rectangle itself for a carousel's slide.
+    expect(got.slot).not.toEqual(got.canvas);
+    expect(carouselSlot({ input: { placement, logo_size: [shape.width, shape.height] } }, { logo_frame: got.frame })).toEqual(got.canvas);
     expect(got.of).toBe("stored");
     expect(got.slot).toEqual(got.drawn);
     expect(got.canvas).toEqual(usual);
@@ -803,6 +807,9 @@ describe("POST /api/picture/slot", () => {
     const none = result((await empty.call("slot", { ...base, templates: [templates[0]] })).json);
     expect(none.from).toBe("canvas");
     expect(none.slot).toEqual(usual);
+    // The rectangle the worker computes for a carousel's slide (carouselLogo.ts, carouselSlot) from the job's own placement, the
+    // canvas file's size and the frame the slot was found in is this route's canvas rectangle, pixel for pixel, on every answer.
+    for (const answer of [got, none]) expect(carouselSlot({ input: { placement, logo_size: [shape.width, shape.height] } }, { logo_frame: answer.frame })).toEqual(answer.canvas);
   });
 
   it("refuses a body with no template, three templates, or a field it does not know", async () => {

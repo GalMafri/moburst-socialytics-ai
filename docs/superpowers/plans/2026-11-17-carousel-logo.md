@@ -2,6 +2,8 @@
 
 This is the final plan. It replaces the first version of this file (commit f44d1237), whose rule made a slide again when its ground hid the cover's file and whose cover waited at `finish` before its own checks. Section 11 says what changed and why.
 
+Section 12 adds the follow-up built on the branch `qafix/carousel-rect`: the logo also sits in one place at one size on every slide. Where sections 3 to 10 say what a slide waits for, what it costs and what its row shows, section 12 adds to them.
+
 File references are to the branch `qafix/carousel-logo`. Lines of unchanged code are those of `origin/main` at 7d41f07e.
 
 ## 0. Constraints
@@ -163,3 +165,64 @@ Nothing depends on this order for safety. A worker deployed before the service f
 - **Stale ground.** A slide measured again with no ground kept the older `logo_ground`. A carousel's slide now clears its measurement when it is measured again.
 - **No wait for the service.** The first version made a carousel slide wait at `marks` for a service that did not answer the files' facts. It now goes on with its own file.
 - Kept from the first version: `pickStampOn`, the service's two fields, a read of the cover's row that fails is a wait and never a stop, and a row at a step of an older method counts as still on its way.
+
+## 12. One place and one size (follow-up, `qafix/carousel-rect`)
+
+**The finding.** On the first real carousel after the deploy the file was the same on all five slides, and its size and place were not. Four slides had a slot `from: "canvas"` (the rectangle the canvas carried, which is the client's placement). One had a slot `from: "drawn"`: the search found the model's own drawing, and the slot is where and as large as the model drew it (`logoSlot.ts`, `slotOf`), anywhere within 15% of the picture from the usual spot and between 0.48 and 1.32 of the usual width (`logoMatch.ts`, `logoFound`). On that slide the logo was visibly smaller.
+
+**The rule.** Within a carousel the logo sits in the carousel's rectangle on every slide where that is possible: the client's placement rectangle on the slide's own frame. A slide whose slot is another rectangle is measured there, stamped there and looked at there, and keeps its own place when that cannot be done. Nothing is made again, stopped or failed, and no try is spent.
+
+### 12.1 Which rectangle
+
+The carousel's rectangle is the rectangle the canvas carried: `canvasLogoRect(input.placement, input.logo_size, logo_frame)` (`carouselLogo.ts`, `carouselSlot`). The placement is in shares of the page, and every slide of an option has the same placement, the same canvas file and the same page, so the rectangle is the same on every slide by itself. A test on the service's `slot` route holds the worker's computation to the route's own `canvas` rectangle, pixel for pixel.
+
+The cover's own rectangle was the other candidate. It was not chosen, for four reasons:
+
+1. When the cover is the one slide whose drawing was found, at a size of the model's choosing, the cover's rectangle would move the four slides that are at the client's size to the one that is off. The finding itself is that the smaller logo is the wrong one.
+2. The client's placement is the size and place of the client's own posts, and it is what every slide was stamped at before the slot existed.
+3. Every slide was drawn over a canvas that carried the logo there, so most slides are in it already and make no call. With the cover's rectangle every slide that is not the cover depends on the cover's state for its place too.
+4. It needs no second decision and no second wait. Each slide settles its place for itself, before the one decision there is (the file).
+
+When the cover's slot is `from: "canvas"`, which is the common case, both candidates are the same rectangle.
+
+### 12.2 Order: the place first, then the file
+
+The file decision has to read each slide's ground under the rectangle it is stamped at. So the place is settled first, by each slide for itself, at the start of the agreement (`carouselLogo.ts`, `settlePlace`, called from `agreeOnLogo`):
+
+1. A slot `from: "canvas"`, or one that equals the carousel's rectangle, is in place: no call, `logo_place = { at, kept: "same" }`.
+2. Otherwise the worker asks the service's `slot-file` route for the carousel's rectangle on the slide's picture without a logo (`basePicture`), with the job's stamp list, no drawing to look for and nothing to compose. The answer is the ground there, the file that ground takes by the rule every slot has, and every file's inks and rectangle there.
+3. The slide is stamped there with that file by the `finish` route, starting from `basePicture`, so nothing of the first stamp is under it.
+4. The area around the logo is read at the new rectangle with the existing `logoClearAt`.
+5. Only then is the state written: the new measurement in place of the slide's own (`measuredAgain`, then `stampOutcome`'s state and `slotFacts`), the new `final_path`, and `logo_place = { at, from }`.
+
+`agreeOnLogo` then answers `"next"`, so the worker's job loop saves the state before anything reads the slide's ground. A sibling is ready for the cover's decision only once its `logo_place` is on its row (`siblingStands`). From there the file agreement runs exactly as built, on grounds that are each under the rectangle the slide is stamped at. A slide that could not be moved still takes the carousel's file where it is.
+
+### 12.3 The place a moved logo leaves
+
+A slot `from: "drawn"` is where the model drew the logo. The composed picture holds the cleaned picture's pixels there: `composeFirst` writes the cleaned pixels into the slot, a margin and a fading ring, and for a found drawing nothing farther than `patchReach` from the slot (`firstPicture.ts`). Two checks have passed on that picture before any file is stamped: the `slot-file` route looked for the drawing again at the slot and did not find it (`stillDrawn`, else the picture goes back to the removal), and the `marks` step read the whole picture as carrying no logo and no brand mark anywhere. So the place is left bare as it is. The carousel's rectangle is near it by the search's own bounds, and the look at the new rectangle takes in 0.6 of the logo's height around it (`logoAreaRect`).
+
+### 12.4 Every state in which a slide keeps its own rectangle
+
+| `logo_place` | When |
+|---|---|
+| `{ at, kept: "same" }` | its slot is the carousel's rectangle already (no call) |
+| `{ kept: "unknown" }` | the job has no `logo_slot` (a job from before the slot), or no placement, canvas file size or frame to compute the rectangle from |
+| `{ at, kept: "unmeasured" }` | the read of the ground there failed, or the service answered no facts of the files |
+| `{ at, kept: "hidden" }` | no logo file shows on the ground there |
+| `{ at, kept: "touched" }` | a line, text or object would touch the logo there |
+| `{ at, kept: "unstamped" }` | the stamp or the look failed |
+| none | the slide was measured without the files' facts, or the agreement never ran for it (cover done, failed or gone before): it is done as it is |
+
+In every one of them the slide's state and finished picture are what passed its own checks.
+
+### 12.5 Cost
+
+No image model call. A slide whose slot is the carousel's rectangle costs nothing. A slide that is moved costs three picture-service calls (`slot-file`, `finish`, `read`) and one reading-model call. The carousel of the finding: one slide, so three calls and one read. A slide moved and then given another file by the decision costs one more `finish` call, as before.
+
+### 12.6 Waits, deploy, rows
+
+- Settling the place waits for nothing. The cover's wait now also covers siblings whose place is not settled yet; each settles it at its next run, so the wait ends as before.
+- Deploy: `design-worker` only. The service already answers what is needed. A carousel in flight under the worker from before this change has slides waiting with `checks_passed` and no `logo_place`: each settles its place at its next run under the new worker. Rolling back is safe: the earlier worker ignores `logo_place`, and a moved slide's state is whole.
+- A real carousel's rows: every slide that has `logo_inks` has `state->'logo_place'`; `logo_place.at` is the same on every slide; a moved slide has `logo_place.from` equal to its `logo_slot.rect`, a `logo_rect` equal to `logo_fits[logo_named]` (which is `at` for a file of the canvas file's shape), a `final_path` other than its `checks_passed`, and `logo_ground` read under `at`; on a carousel where no slide kept its own place every slide has the same `logo_rect` for the same file.
+- `OF_THE_DESIGN` gains `logo_place`.
+

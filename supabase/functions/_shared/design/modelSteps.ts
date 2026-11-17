@@ -24,11 +24,11 @@ export const MAX_GENERATIONS = 3;
 /** Removals of the model's logo drawing for one design before the job fails. */
 export const MAX_UNLOGO = 4;
 
-/** What a later step found on a design: all of it goes when a new design is made. The keys after logo_score are what the job keeps about its slot, the ground under it and the file chosen for it (logoChoice.ts); logo_gaps is from before 17 Nov 2026; slot_so_far and slot_file_so_far are how far a search of the design got in a call that used its time (logoChoice.ts, SEARCH_KEPT). The last six are a carousel's (carouselLogo.ts): a slide's facts of the files on its ground, that its checks have passed, what it did with the carousel's file, and on the cover the file chosen for the whole carousel, which belongs to the cover's design. */
+/** What a later step found on a design: all of it goes when a new design is made. The keys after logo_score are what the job keeps about its slot, the ground under it and the file chosen for it (logoChoice.ts); logo_gaps is from before 17 Nov 2026; slot_so_far and slot_file_so_far are how far a search of the design got in a call that used its time (logoChoice.ts, SEARCH_KEPT). The last seven are a carousel's (carouselLogo.ts): a slide's facts of the files on its ground, that its checks have passed, its place in the carousel, what it did with the carousel's file, and on the cover the file chosen for the whole carousel, which belongs to the cover's design. */
 export const OF_THE_DESIGN = [
   "logo_rect", "logo_frame", "logo_score", "logo_file", "logo_named", "logo_matched", "logo_scores", "logo_gaps", "logo_ground",
   "logo_slot", "logo_flat", "logo_shows", "logo_clean", "slot_so_far", "slot_file_so_far",
-  "logo_inks", "logo_fits", "logo_alone", "checks_passed", "logo_follows", "carousel_logo",
+  "logo_inks", "logo_fits", "logo_alone", "checks_passed", "logo_place", "logo_follows", "carousel_logo",
   "nologo_path", "unlogos", "final_path", "read", "band_read", "marks_check", "marks_where", "mark_cleans",
   // The composed picture of the design's cleaned picture (firstPictureJob.ts).
   "composed",
