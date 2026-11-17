@@ -7,7 +7,8 @@
 // cleaned out, and the client's logo file that shows on the ground under the
 // slot is placed there (_shared/design/logoSlot.ts). The delivered picture is
 // the model's first picture with the cleaned picture's slot where the
-// logo was found and removed (_shared/design/firstPicture.ts). Each design is a row in canva_finish_jobs (the table
+// logo was found and removed (_shared/design/firstPicture.ts). A carousel's slides agree on one file once each has passed
+// its own checks, when one shows on every slide's ground (_shared/design/carouselLogo.ts). Each design is a row in canva_finish_jobs (the table
 // keeps its old name); a video's footage and join stay with video-worker.
 //
 //   POST {action:"tick"}              one pass over the due jobs, then the next posts
@@ -44,7 +45,7 @@ import { copyMatches, logoCheckPrompt, marksPrompt, parseLogoCheck, parseMarks, 
 import { LOGO_SCALES } from "../_shared/design/logoMatch.ts";
 import { STORY_SURFACE, storyTextBand } from "../_shared/design/story.ts";
 import { NotEnded, callPicture, notePicture, pictureCheckCount, searchToEnd, signedRead, signedWrite } from "../_shared/picture/client.ts";
-import { PICTURE_WORK_BUDGET_MS, type LogoTemplate, type Placement, type SlotFileRequest, type SlotRequest } from "../_shared/picture/contract.ts";
+import { PICTURE_WORK_BUDGET_MS, type LogoTemplate, type Placement, type Rect, type SlotFileRequest, type SlotRequest } from "../_shared/picture/contract.ts";
 import { heldWork } from "../_shared/canva/hold.ts";
 import { DESIGN_LIMITS, MAX_DESIGN_ATTEMPTS, type StepResult, Stopped, advanceDesignJob } from "../_shared/design/advance.ts";
 import { type GenerateDeps, OF_THE_DESIGN, runGenerate, runUnlogo } from "../_shared/design/modelSteps.ts";
@@ -56,6 +57,7 @@ import { logoAreaRect } from "../_shared/picture/geometry.ts";
 import { drawOrFallBack, dropStaleDesign } from "../_shared/design/sizeFallback.ts";
 import { afterMark, afterSlot, askCleanedSlot, basePicture, composeRedesign, composedPath } from "../_shared/design/firstPictureJob.ts";
 import { jobFolder, startAgain } from "../_shared/design/coverDesign.ts";
+import { agreeOnLogo as agreeOnCarouselLogo, inCarousel, measuredAgain, slotFacts } from "../_shared/design/carouselLogo.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
@@ -333,6 +335,13 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       // The service's time was used before the search ended: nothing is decided about the slot or the composed picture yet, no try
       // is spent, and the step asks again from where the service got. The service stores a composed picture only with the call that ends the search.
       if (!slot) return "next";
+      // A carousel's slide also keeps the facts of every listed file on this slot, and nothing of a measurement taken before this
+      // one (_shared/design/carouselLogo.ts). A service from before it answered them leaves the slide with its own file, as always.
+      const facts = inCarousel(job) ? slotFacts(slot) : null;
+      if (inCarousel(job)) {
+        measuredAgain(s);
+        if (!facts) console.warn(`[design-worker] job ${job.id}: the picture service answered no facts of the logo files; this slide keeps its own file.`);
+      }
       // A picture is never delivered re-rendered when a fresh one can be made (_shared/design/firstPictureJob.ts): the logo was removed
       // at the slot, the first picture could not take the cleaned pixels there (no clean join), and the option may still make another
       // design. A slot that shows no removal has nothing to compose and goes on from its cleaned picture, as before the rule.
@@ -360,6 +369,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
         return "next";
       }
       Object.assign(s, outcome.state);
+      if (facts) Object.assign(s, facts);
       // Then no logo left anywhere, the client's own or another brand's: read on the logo-free picture, at the page size.
       const page = pageOf(job);
       const marksPath = `${base}/marks-${s.generations}-${s.unlogos}${picture === s.nologo_path ? "" : "-first"}.jpg`;
@@ -399,27 +409,14 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       // The logo file in the slot, in the room the design left for it, then
       // the picture at its delivered size. The model's own drawing is gone
       // (unlogo), and the file is the one that shows on the ground there (marks).
-      const [ow, oh] = deliveredOf(job);
-      // Each finished file has a name of its own, so a design made again is never shown from a cached copy.
-      const path = `${base}/final-${Date.now().toString(36)}.png`;
-      const { ms } = await callPicture(admin, "finish", {
-        job: job.id,
-        step: "finish",
-        // The picture the marks step judged: the first picture with the cleaned slot, or the cleaned picture.
-        picture: await signedRead(admin, BUCKET, basePicture(s)),
-        // The file chosen for the ground under the slot, or the job's own logo for a job moved on before that choice existed.
-        logo: await signedRead(admin, BUCKET, stampFile(job.input, s)),
-        rect: s.logo_rect,
-        frame: s.logo_frame,
-        output: { width: ow, height: oh },
-        out: await signedWrite(admin, BUCKET, path),
-      });
-      notePicture(s, "finish", ms);
-      s.final_path = path;
+      // The file chosen for the ground under the slot, or the job's own logo for a job moved on before that choice existed.
+      s.final_path = await stampLogo(admin, job, base, stampFile(job.input, s), s.logo_rect);
       job.step = "verify";
       return "next";
     }
     case "verify": {
+      // A carousel's slide whose checks have passed has only the carousel's logo file left to agree on (_shared/design/carouselLogo.ts).
+      if (inCarousel(job) && s.checks_passed) return agreeOnLogo(admin, job, base);
       await renewLease(admin, job);
       // Read at the page size as a JPEG: well under the model's image limit, and every letter legible.
       // The Story's band (a crop of that page) and the area around the logo (at full size) come from the same call.
@@ -473,10 +470,98 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
           return "next";
         }
       }
+      // A carousel's slide is not done yet: its checks have passed with its own file, which is saved, and the step runs once more for the agreement.
+      if (inCarousel(job)) {
+        s.checks_passed = s.final_path;
+        return "next";
+      }
       return "done";
     }
   }
   throw new Error(`FINAL: Unknown step '${job.step}'`);
+}
+
+/**
+ * The logo file stamped on the job's picture at a rectangle, and the picture
+ * stored at its delivered size: the finish step's one call to the picture
+ * service, with no model. Answers where the finished file is; the job's
+ * state is the caller's to change.
+ */
+async function stampLogo(admin: any, job: Job, base: string, logoPath: string, rect: Rect): Promise<string> {
+  const s = job.state;
+  const [ow, oh] = deliveredOf(job);
+  // Each finished file has a name of its own, so a design made again is never shown from a cached copy.
+  const path = `${base}/final-${Date.now().toString(36)}.png`;
+  const { ms } = await callPicture(admin, "finish", {
+    job: job.id,
+    step: "finish",
+    // The picture the marks step judged: the first picture with the cleaned slot, or the cleaned picture.
+    picture: await signedRead(admin, BUCKET, basePicture(s)),
+    logo: await signedRead(admin, BUCKET, logoPath),
+    rect,
+    frame: s.logo_frame,
+    output: { width: ow, height: oh },
+    out: await signedWrite(admin, BUCKET, path),
+  });
+  notePicture(s, "finish", ms);
+  return path;
+}
+
+/**
+ * A carousel's slide after its own checks have passed: the one thing left is which logo file the carousel is stamped with
+ * (_shared/design/carouselLogo.ts, agreeOnLogo, which decides everything). The worker gives it the two reads of the option's
+ * rows, the save, and the two picture calls. Nothing here makes a design again, stops a job or spends a try.
+ */
+function agreeOnLogo(admin: any, job: Job, base: string): Promise<StepResult> {
+  return agreeOnCarouselLogo(job, () => stampPlan({ logo_path: job.input.logo_path, generate: job.input.generate, logos: job.input.logos, stamp: job.input.stamp }, job.state).files, {
+    siblings: async () => {
+      const { data } = await admin.from("canva_finish_jobs").select("status, step, state")
+        .eq("design_request_id", job.design_request_id).eq("option_index", job.option_index).gt("slide_index", 0);
+      return data ?? null;
+    },
+    cover: async () => {
+      const { data, error } = await admin.from("canva_finish_jobs").select("status, state")
+        .eq("design_request_id", job.design_request_id).eq("option_index", job.option_index).eq("slide_index", 0).maybeSingle();
+      return error ? "unread" : data ?? null;
+    },
+    save: () => saveJobProgress(admin, job),
+    // A second stamp or look that fails leaves the slide with the finished picture it has (agreeOnLogo); the reason is logged here.
+    stamp: (logoPath, rect) => (async () => {
+      await renewLease(admin, job);
+      return stampLogo(admin, job, base, logoPath, rect);
+    })().catch((e) => { throw keepsOwn(job, e); }),
+    clearAt: (finalPath, rect) => logoClearAt(admin, job, base, finalPath, rect).catch((e) => { throw keepsOwn(job, e); }),
+  });
+}
+
+/** Logs why a carousel's slide could not take the carousel's logo file, and hands the error back. */
+function keepsOwn(job: Job, e: unknown): unknown {
+  console.warn(`[design-worker] job ${job.id}: the carousel's logo file could not be stamped (${e instanceof Error ? e.message : e}); this slide keeps its own file.`);
+  return e;
+}
+
+/**
+ * Whether nothing touches or crosses the logo on a finished file, seen at full size around `rect`: the verify step's own look
+ * at the logo's area, for a slide stamped again at another rectangle than the one its checks saw.
+ */
+async function logoClearAt(admin: any, job: Job, base: string, finalPath: string, rect: Rect): Promise<boolean> {
+  const s = job.state;
+  const g: GenerateInput = job.input.generate;
+  const [ow, oh] = deliveredOf(job);
+  const stem = `${base}/verify-${Date.now().toString(36)}`;
+  const { ms } = await callPicture(admin, "read", {
+    job: job.id,
+    step: "verify",
+    picture: await signedRead(admin, BUCKET, finalPath),
+    page: pageOf(job),
+    area: logoAreaRect(rect, s.logo_frame, { width: ow, height: oh }),
+    out: { page: await signedWrite(admin, BUCKET, `${stem}.jpg`), area: await signedWrite(admin, BUCKET, `${stem}-area.png`) },
+  });
+  notePicture(s, "read", ms);
+  const crop = base64Encode((await download(admin, `${stem}-area.png`)) as unknown as ArrayBuffer);
+  const seen = await readCheck(() => askAbout("image/png", crop, logoCheckPrompt(g.brand_name)), parseLogoCheck, "The area around the logo");
+  if (!seen.clear) console.warn(`[design-worker] job ${job.id}: the carousel's logo file would be touched by ${seen.touching}; this slide keeps its own file.`);
+  return seen.clear;
 }
 
 /**

@@ -93,19 +93,42 @@ export type StampInks = { file: LogoFileName; inks: Rgb[]; last?: boolean };
  * shows anywhere.
  */
 export function pickStamp(files: StampInks[], ground: Rgb): { file: LogoFileName | null; shows: Partial<Record<LogoFileName, number>> } {
+  return pickStampOn(files, [ground]);
+}
+
+/**
+ * The file stamped on several grounds at once (a carousel's slides, 17 Nov
+ * 2026): pickStamp's order and its two lines, each held on every ground, so
+ * the weakest ground decides. `shows` is each file's weakest whole part on
+ * its weakest ground, to two places. With one ground it is pickStamp, field
+ * for field.
+ */
+export function pickStampOn(files: StampInks[], grounds: Rgb[]): { file: LogoFileName | null; shows: Partial<Record<LogoFileName, number>> } {
   const shows: Partial<Record<LogoFileName, number>> = {};
   for (const f of files) {
-    const weakest = weakestContrast(f.inks, ground);
+    let weakest = Infinity;
+    for (const g of grounds) weakest = Math.min(weakest, weakestContrast(f.inks, g));
     if (Number.isFinite(weakest)) shows[f.file] = Math.round(weakest * 100) / 100;
   }
   const first = files.filter((f) => !f.last), after = files.filter((f) => f.last);
   for (const group of [first, after]) {
-    const whole = group.find((f) => showsWhole(f.inks, ground));
+    const whole = group.find((f) => grounds.every((g) => showsWhole(f.inks, g)));
     if (whole) return { file: whole.file, shows };
-    const weak = group.find((f) => !hidesPart(f.inks, ground));
+    const weak = group.find((f) => grounds.every((g) => !hidesPart(f.inks, g)));
     if (weak) return { file: weak.file, shows };
   }
   return { file: null, shows };
+}
+
+/**
+ * A carousel's file: the pick on every slide's ground (`by` "every"). When
+ * no file shows on every ground the grounds really differ (light slides
+ * and dark slides), and there is no one file: each slide keeps the file its
+ * own ground took (`by` "own", no file named).
+ */
+export function carouselStamp(files: StampInks[], grounds: Rgb[]): { file: LogoFileName; by: "every"; shows: Partial<Record<LogoFileName, number>> } | { file: null; by: "own"; shows: Partial<Record<LogoFileName, number>> } {
+  const picked = pickStampOn(files, grounds);
+  return picked.file ? { file: picked.file, by: "every", shows: picked.shows } : { file: null, by: "own", shows: picked.shows };
 }
 
 /** How far around the slot, as a share of the picture, the drawing is looked for again after cleaning. */

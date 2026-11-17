@@ -303,6 +303,28 @@ describe("no cover is made again", () => {
     expect(r.statements.map((s) => s.landed)).toEqual([true, true]);
   });
 
+  it("lets a slide wait for the carousel's logo file only while its row is for the cover design it read", async () => {
+    // The slide's own checks have passed and it waits for the cover's decision (carouselLogo.ts): its step and state are saved and its lease released, with no try spent.
+    const waiting = { [FOR_COVER]: 2, cover_path: NEW_COVER, logo_rect: { x: 1 }, logo_inks: { stored: [[11, 14, 26]] }, logo_named: "stored", final_path: `${FOLDER}/cover-2/final-abc.png`, checks_passed: `${FOLDER}/cover-2/final-abc.png` };
+    const r = slide({ step: "verify", state: waiting, lease_until: "2026-11-17T10:02:00.000Z" });
+    const wait = async (job: Job) => advanceDesignJob(r.admin, job, async () => "wait", () => true);
+    await wait(r.read());
+    expect(r.row).toMatchObject({ status: "running", step: "verify", state: waiting, attempts: 0, error: null, lease_until: null });
+    expect(r.statements.map((s) => s.landed)).toEqual([true, true]);
+    expect(r.statements.every((s) => comparedOn(s).length === 1 && comparedOn(s)[0][0] === "eq" && comparedOn(s)[0][2] === "2")).toBe(true);
+
+    // A run reads the row, the cover is made again, and a new pass takes the row for the cover's next design.
+    const old = r.read();
+    await coverMadeAgain(r);
+    expect(await claim(r)).toBe("claimed");
+    const held = r.row.lease_until;
+    const before = r.statements.length;
+    // The old run's wait is the same write as above, and it does not land: the row keeps the new start, and the new pass's lease.
+    await wait(old);
+    expect(r.statements.slice(before).map((s) => s.landed)).toEqual([false]);
+    expect(r.row).toMatchObject({ status: "running", step: "generate", state: { [FOR_COVER]: 3 }, lease_until: held });
+  });
+
   it("goes through a slide's whole job to done, and stops with the cover's option, as always", async () => {
     const r = slide({ step: "verify", state: { [FOR_COVER]: 2, final_path: `${FOLDER}/cover-2/final-abc.png` }, lease_until: "2026-11-17T10:02:00.000Z" });
     await advanceDesignJob(r.admin, r.read(), async () => "done", () => true);

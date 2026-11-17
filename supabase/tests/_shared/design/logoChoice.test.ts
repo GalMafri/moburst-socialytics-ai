@@ -222,6 +222,16 @@ describe("the slot: what the worker asks and keeps", () => {
     expect(stampOutcome(plan, { ground: [98, 2, 73], flat: 0.99, file: "white", rect: { x: 816, y: 109, width: 544, height: 143 }, shows: { stored: 1.62, white: 12.93 } }, "Brand")).toMatchObject({ next: "stamp", state: { logo_file: WHITE, logo_named: "white" } });
   });
 
+  it("keeps the same state for a single design now that the service also answers every file's facts", () => {
+    const rect = { x: 785, y: 154, width: 594, height: 113 };
+    const before = { ground: [212, 240, 245] as [number, number, number], flat: 0.97342, file: "stored" as const, rect, shows: { stored: 1.83, other: 16.1, white: 1.19 }, drawn: { score: 0.1182, found: false } };
+    const now = { ...before, inks: { stored: [[0, 193, 213]], other: [[11, 14, 26]], white: [[255, 255, 255]] } as Record<string, Array<[number, number, number]>>, fits: { stored: rect, other: rect, white: rect } };
+    const kept = stampOutcome({ files: STAMP }, now, "Brand");
+    // @ts-expect-error an answer from before the two fields: the type has them now, a service from before does not send them.
+    expect(kept).toEqual(stampOutcome({ files: STAMP }, before, "Brand"));
+    expect(Object.keys((kept as { state: Record<string, unknown> }).state)).toEqual(["logo_file", "logo_named", "logo_rect", "logo_ground", "logo_flat", "logo_shows", "logo_clean"]);
+  });
+
   it("sends the picture to be cleaned again when the drawing is still there, and says why if cleaning is used up", () => {
     const got = stampOutcome({ files: STAMP }, { ground: [20, 20, 20], flat: 0.5, file: "white", rect: { x: 1, y: 1, width: 10, height: 4 }, shows: {}, drawn: { score: 0.9123, found: true } }, "Brand");
     expect(got).toEqual({ next: "clean", where: "the Brand logo, which is still in the picture", reason: "marks: the logo drawn at its place is still there after cleaning (match 0.912)" });

@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { canvasLogoRect } from "../../supabase/functions/_shared/canva/brief.ts";
 import { PUBLIC_DEFAULTS } from "../../public-env.ts";
 import { PICTURE_CALL_HEADER, READ_JPEG_QUALITY, type LocateResult, type LogoSetResult, type Placement, type PostLogo, type Rgb, type SlotFileResult, type SlotResult } from "../../supabase/functions/_shared/picture/contract.ts";
-import { partsOf, wholeExposedInks } from "../../supabase/functions/_shared/design/logoTone.ts";
+import { partsOf, wholeExposedInks, wholeInksOf } from "../../supabase/functions/_shared/design/logoTone.ts";
 import { blank, box, drawLogo, flat, inked, mark } from "../../supabase/tests/_shared/design/draw.ts";
 import { createApp } from "../src/app.ts";
 import { generationCanvas } from "../src/picture/canvas.ts";
@@ -883,6 +883,42 @@ describe("POST /api/picture/slot-file", () => {
     expect(got.file).toBe("other");
     const height = Math.round((rect.width * 34) / 80);
     expect(got.rect).toEqual({ x: rect.x, y: Math.round(rect.y + rect.height / 2 - height / 2), width: rect.width, height });
+  });
+
+  it("answers every listed file's whole ink colors and its own rectangle in the slot, whichever file is named", async () => {
+    // A two-color file, its white copy of the same shape, and a second file of another shape.
+    const two = box(mark(40, 16, [11, 14, 26]), 24, 0, 40, 7, [0, 193, 213]);
+    const taller = mark(80, 34, [250, 250, 250]);
+    const logos = { stored: two, other: taller, white };
+    const all = [...files, { file: "white", logo: `${GET}white.png`, last: true }];
+    const height = Math.round((rect.width * 34) / 80);
+    const fitted = { x: rect.x, y: Math.round(rect.y + rect.height / 2 - height / 2), width: rect.width, height };
+    const facts = { inks: { stored: wholeInksOf(two), other: wholeInksOf(taller), white: wholeInksOf(white) }, fits: { stored: rect, other: fitted, white: rect } };
+    expect(facts.inks).toEqual({ stored: [[11, 14, 26], [0, 193, 213]], other: [[250, 250, 250]], white: [[255, 255, 255]] });
+    // On a dark ground the taller file is named, on a light one the stored file: the facts are the same on both.
+    for (const [ground, named] of [[[38, 44, 52], "other"], [[244, 244, 244], "stored"]] as Array<[Rgb, string]>) {
+      const { call } = await store(flat(W, H, ground), logos);
+      const { json } = await call("slot-file", { ...base, files: all });
+      const got = result(json);
+      expect(got.file).toBe(named);
+      expect(got.inks).toEqual(facts.inks);
+      expect(got.fits).toEqual(facts.fits);
+      expect(got.rect).toEqual(facts.fits[named as "stored" | "other"]);
+      // The answer is the operation's own, as for every route.
+      expect(json.result).toEqual(slotFile(flat(W, H, ground), rect, [W, H], "stored", [{ file: "stored", raster: two }, { file: "other", raster: taller }, { file: "white", raster: white, last: true }]));
+    }
+    // No file shows on the ground: none is named, and the facts are still answered.
+    const { call } = await store(flat(W, H, [250, 250, 250]), { white });
+    const none = result((await call("slot-file", { ...base, of: "white", files: [{ file: "white", logo: `${GET}white.png` }] })).json);
+    expect(none.file).toBeNull();
+    expect(none.inks).toEqual({ white: [[255, 255, 255]] });
+    expect(none.fits).toEqual({ white: rect });
+    // The same for a call whose slot has no pixel on the picture.
+    const off = await store(flat(W, H, [38, 44, 52]), logos);
+    const outside = result((await off.call("slot-file", { ...base, rect: { ...rect, x: W + 40 }, files: all })).json);
+    expect(outside.ground).toBeNull();
+    expect(outside.inks).toEqual(facts.inks);
+    expect(Object.keys(outside.fits)).toEqual(["stored", "other", "white"]);
   });
 
   it("refuses a file named twice, no file, a drawing or a shape of a file that is not listed, and a field it does not know", async () => {

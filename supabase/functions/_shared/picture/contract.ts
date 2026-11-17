@@ -158,7 +158,12 @@ export type StampFile = { file: LogoFileName; logo: string; last?: boolean };
  * the slot has no pixel on the picture) and `flat` how much of the slot is
  * near it; `file` is the first file whose whole parts all show there, null
  * when none does; `rect` is where it is stamped, in `frame` pixels; `shows`
- * is each file's weakest whole part against the ground.
+ * is each file's weakest whole part against the ground. `inks` and `fits`
+ * are the facts of every listed file, whichever was named (17 Nov 2026): a
+ * carousel's slides are stamped with one file, chosen over all their
+ * grounds by the worker (_shared/design/carouselLogo.ts), which needs each
+ * file's exact colors and its own rectangle in this slot for that. A
+ * service from before that day answers neither.
  */
 export type SlotFileRequest = PictureMeta & {
   picture: string; rect: Rect; frame: [number, number]; of: LogoFileName;
@@ -169,6 +174,10 @@ export type SlotFileResult = {
   ground: Rgb | null; flat: number;
   file: LogoFileName | null; rect: Rect;
   shows: Partial<Record<LogoFileName, number>>;
+  /** Each listed file's whole exposed ink colors (wholeInksOf): what a ground is tested against. */
+  inks: Partial<Record<LogoFileName, Rgb[]>>;
+  /** Where each listed file would be stamped in this slot, in `frame` pixels (fitRect). */
+  fits: Partial<Record<LogoFileName, Rect>>;
   drawn?: { score: number; found: boolean };
   composed?: FirstPictureFacts;
 };

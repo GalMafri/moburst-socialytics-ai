@@ -56,7 +56,9 @@ export function findSlot(design: Raster, templates: TemplateIn[], placement: Pla
  * file of the slot's own shape, else the same width and center with the
  * file's own proportions. With `drawn`, that file is looked for again at
  * the slot over that color. A slot with no pixel on the picture has no
- * ground to test: the first file is named.
+ * ground to test: the first file is named. Beside the named file, every
+ * listed file's whole ink colors and its own rectangle in the slot are
+ * answered (`inks`, `fits`).
  *
  * The look for the drawing is the one search of this route: after each step
  * of it the route hears how far it got, and `from` carries on from such a
@@ -84,6 +86,9 @@ export function* slotFileSteps(picture: Raster, rect: Rect, frame: [number, numb
     ground: under?.ground ?? null, flat: under?.flat ?? 0,
     file: picked.file, rect: named ? fitRect(rect, rasterOf(of), named) : rect,
     shows: picked.shows,
+    // Every listed file's own colors and its own rectangle in this slot, whichever file was named: a carousel's file is chosen over all its slides (carouselLogo.ts).
+    inks: Object.fromEntries(files.map((f) => [f.file, wholeInksOf(f.raster)])),
+    fits: Object.fromEntries(files.map((f) => [f.file, fitRect(rect, rasterOf(of), f.raster)])),
     ...(still ? { drawn: still } : {}),
   };
 }
