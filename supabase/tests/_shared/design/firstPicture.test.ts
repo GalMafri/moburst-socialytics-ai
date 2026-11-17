@@ -2,12 +2,18 @@
 // Pictures are drawn here, in made-up neutral colors: a first picture with a
 // drawn logo in its slot, and "cleaned" pictures that differ from it the way
 // a redraw does (grain, a color cast, edges and thin strokes a few pixels off).
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { Rect, Rgb } from "../../../functions/_shared/picture/contract";
 import type { Raster } from "../../../functions/_shared/design/logoTone";
 import { FIRST_PICTURE_RULE, composeFirst, patchReach } from "../../../functions/_shared/design/firstPicture";
 import { composeFirst as composeBefore } from "./firstPictureBefore";
 import { box, copyOf, flat } from "./draw";
+
+// These tests are long sums with nothing to wait for. Between them, and between the generated pairs of the last one, the
+// test's worker is handed back to its event loop for one turn, so on a slow machine the runner's own messages to and from
+// this worker are still answered in time and a run in which every test passes is not failed for an unanswered message.
+const turn = () => new Promise<void>((done) => setImmediate(done));
+afterEach(turn);
 
 const W = 400, H = 320;
 const GROUND: Rgb = [60, 90, 150];
@@ -838,10 +844,11 @@ describe("read against the pair of pictures itself", () => {
     expect(ringed.measured!.rings).toBeUndefined();
   });
 
-  it("is, on every generated pair, either the answer the rule gave before or a composed picture whose join passed", () => {
+  it("is, on every generated pair, either the answer the rule gave before or a composed picture whose join passed", async () => {
     const next = seeded(20261119);
     const tally: Record<string, number> = {};
     for (let run = 0; run < 140; run++) {
+      await turn();
       const w = 320 + next(240), h = 320 + next(240);
       const paper: Rgb = [40 + next(160), 40 + next(160), 40 + next(160)];
       const ink: Rgb = [paper[0] > 128 ? 10 : 245, paper[1] > 128 ? 10 : 245, paper[2] > 128 ? 10 : 245];
@@ -907,5 +914,5 @@ describe("read against the pair of pictures itself", () => {
     }
     // Nothing that was composed is now refused, and nothing is refused for another reason than before.
     for (const key of Object.keys(tally)) expect(key).toMatch(/: (composed then, composed now|(\w+) then, \2 now|(removal|join) then, composed now)$/);
-  }, 120_000);
+  }, 300_000);
 });
