@@ -291,7 +291,7 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
   const carousel = request.kind === "carousel";
   const video = request.kind === "video";
-  const common = { brand, platform: request.platform ?? "social", copy: request.post_copy, voice, count: BRIEFS_PLANNED, postCount: library.length, recent, guidance, otherPlatforms, note: request.note ?? null };
+  const common = { brand, platform: request.platform ?? "social", copy: request.post_copy, voice, count: BRIEFS_PLANNED, postCount: library.length, recent, guidance, otherPlatforms, note: request.note ?? null, visual: (request as any).visual_direction ?? null };
   const filmed = video && request.footage_path ? (request.on_camera || "the speaker") : null;
   const instruction = video ? videoPlannerPrompt({ ...common, visual: (request as any).visual_direction ?? null, filmed, style: videoStyle?.profile ?? null, videos: videoStyle?.videos, framesPer: videoStyle?.frames_per_video }) : carousel ? carouselPlannerPrompt({ ...common, slides: CAROUSEL_SLIDES }) : plannerPrompt({ ...common, story: isStoryPost(request) });
   let briefs = [] as ReturnType<typeof parseBriefs>;

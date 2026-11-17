@@ -212,3 +212,56 @@ describe("a note on Regenerate", () => {
     }
   });
 });
+
+import { plannedVisualLine } from "../../../functions/_shared/canva/options";
+
+describe("the visual the calendar planned for the post", () => {
+  const base = { brand: "Northwind", platform: "Instagram", copy: "Four signs you picked the right shop.", voice: null, count: 3, postCount: 6, recent: "" };
+  const visual = "Clean graphic with the line 'Four signs. One shop.' beside white stars on a soft green background.";
+
+  it("is given to the planner of a single image, a Story and a carousel, right after the copy", () => {
+    const prompts = [plannerPrompt({ ...base, visual }), plannerPrompt({ ...base, story: true, visual }), carouselPlannerPrompt({ ...base, slides: 5, visual })];
+    for (const p of prompts) {
+      const lines = p.split("\n");
+      const at = lines.findIndex((l) => l.includes(visual));
+      expect(at).toBeGreaterThan(0);
+      expect(lines[at - 1]).toBe(`"""${base.copy}"""`);
+      expect(lines[at]).toContain("expects the design to be it");
+      expect(lines[at]).toContain("the headline is those words exactly");
+      expect(lines[at]).toContain("The posts you choose give the layout and the style; the planned visual gives what is shown.");
+    }
+  });
+
+  it("makes the picture the plan's subject, and no longer asks for a subject of the chosen posts' kind", () => {
+    for (const p of [plannerPrompt({ ...base, visual }), carouselPlannerPrompt({ ...base, slides: 5, visual })]) {
+      expect(p).toContain("picture: one sentence describing the picture behind the words: the planned visual's subject and setting, in the materials, light and composition of the posts you chose.");
+      expect(p).not.toContain("using the kinds of subjects");
+      expect(p).toContain("It holds no lettering");
+    }
+  });
+
+  it("lets a carousel follow the plan's slides, and the options keep the plan's words", () => {
+    expect(carouselPlannerPrompt({ ...base, slides: 5, visual })).toContain("Where the planned visual says what each slide shows or says, the slides follow it in that order.");
+    expect(plannerPrompt({ ...base, visual })).toContain("and in headline where the planned visual does not give the words.");
+  });
+
+  it("changes nothing for a post with no planned visual", () => {
+    for (const v of [undefined, null, "", "   "]) {
+      const single = plannerPrompt({ ...base, visual: v });
+      const carousel = carouselPlannerPrompt({ ...base, slides: 5, visual: v });
+      expect(single).toBe(plannerPrompt(base));
+      expect(carousel).toBe(carouselPlannerPrompt({ ...base, slides: 5 }));
+      expect(single).not.toContain("planned");
+      expect(carousel).not.toContain("planned");
+      expect(single).toContain("using the kinds of subjects, materials, light and composition of the posts you chose, with a subject the recent designs did not show.");
+      expect(single).toContain("The options differ from each other in layout or picture, and in headline. Put the strongest first");
+    }
+    expect(plannedVisualLine("Northwind", null)).toBe("");
+  });
+
+  it("is written on one line whatever spacing the calendar holds", () => {
+    const line = plannedVisualLine("Northwind", "  A bowl\n\n on a   table.  ");
+    expect(line).toContain('"""A bowl on a table."""');
+    expect(line.includes("\n")).toBe(false);
+  });
+});

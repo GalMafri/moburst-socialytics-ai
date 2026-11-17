@@ -283,12 +283,32 @@ export function noteLine(note: string | null | undefined): string {
   return n ? `A note from the person who asked for this design: "${n}". Every option follows it.` : "";
 }
 
+/**
+ * The visual the calendar planned for this post. The team reads it there and
+ * expects the design to be it, so the planner builds every option on it: what
+ * is shown comes from the plan, the look comes from the client's posts. A
+ * design holds a headline and no other lettering, so a plan that asks for
+ * more (a list, labels, a screen with writing) gives its main line.
+ */
+export function plannedVisualLine(brand: string, visual: string | null | undefined): string {
+  const v = String(visual ?? "").replace(/\s+/g, " ").trim();
+  if (!v) return "";
+  return `The team planned this visual for the post and expects the design to be it: """${v}""". Every option shows it. The picture is its subject, setting and colors, in the look of ${brand}'s posts. Where it gives words for the design in quotation marks, the headline is those words exactly, as far as the headline's length allows, never a rewrite of them. Where it asks for more lettering than a headline holds (a list, labels, a screen with writing), the headline carries its main line and the picture shows its subject without lettering. The posts you choose give the layout and the style; the planned visual gives what is shown.`;
+}
+
+/** How the picture line opens: the plan's subject when the post has a planned visual, else a subject in the kind the chosen posts show. */
+function pictureLead(visual: string | null | undefined): string {
+  return String(visual ?? "").trim()
+    ? "one sentence describing the picture behind the words: the planned visual's subject and setting, in the materials, light and composition of the posts you chose."
+    : "one sentence describing the picture behind the words, using the kinds of subjects, materials, light and composition of the posts you chose, with a subject the recent designs did not show.";
+}
+
 const CHOOSE_POSTS = (brand: string) =>
   `- posts: the numbers of one or two of ${brand}'s posts whose layout suits what this post says (a quote suits a quote layout, a comparison or list a comparison or list layout, a product or feature a product layout, a statement a statement layout). When the recent designs were built on a post and another suits the content as well, choose the other.\n` +
   `- layout: a few words naming the layout of the posts you chose.`;
 
 /** The planner's instruction for carousels: every option is a set of slides read in order. */
-export function carouselPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; slides: number; postCount: number; recent: string; guidance?: string; otherPlatforms?: boolean; note?: string | null }): string {
+export function carouselPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; slides: number; postCount: number; recent: string; guidance?: string; otherPlatforms?: boolean; note?: string | null; visual?: string | null }): string {
   return [
     `The images are ${args.brand}'s own published posts, numbered Post 1 to Post ${args.postCount}.`,
     otherPlatformsLine(args),
@@ -296,14 +316,15 @@ export function carouselPlannerPrompt(args: { brand: string; platform: string; c
     args.guidance ?? "",
     `Plan ${args.count} different carousel options for a new ${args.platform} carousel post with this copy:`,
     `"""${args.copy}"""`,
+    plannedVisualLine(args.brand, args.visual),
     args.voice ? `${args.brand}'s voice: ${args.voice}` : "",
     noteLine(args.note),
-    `Each option has exactly ${args.slides} slides, read in order. Slide 1 carries the hook. The middle slides each carry one point from the copy, in the copy's order. The last slide closes with the copy's call to action or takeaway.`,
+    `Each option has exactly ${args.slides} slides, read in order. Slide 1 carries the hook. The middle slides each carry one point from the copy, in the copy's order. The last slide closes with the copy's call to action or takeaway.${String(args.visual ?? "").trim() ? " Where the planned visual says what each slide shows or says, the slides follow it in that order." : ""}`,
     "For each option give:",
     CHOOSE_POSTS(args.brand),
     "- slides, and for each slide:",
     `  - headline: the words set on that slide, written in ${args.brand}'s voice from the copy, in the copy's language. One line of at most 8 words, optionally a second, shorter line. Words only: an emoji stays in the post's copy.`,
-    "  - picture: one sentence describing the picture behind the words, using the kinds of subjects, materials, light and composition of the posts you chose, with a subject the recent designs did not show. Describe what is in the picture, all of it in sharp focus. It holds no lettering, numbers, signs, screens with writing, logos or brand marks, and names no brand. It shows no real or identifiable person and no portrait standing in for one: where a chosen post has a person, use an object, a scene or hands instead. The slides of one option share one setting and look, so they read as a series, and each slide shows a different subject or moment, so no two slides repeat a picture.",
+    `  - picture: ${pictureLead(args.visual)} Describe what is in the picture, all of it in sharp focus. It holds no lettering, numbers, signs, screens with writing, logos or brand marks, and names no brand. It shows no real or identifiable person and no portrait standing in for one: where a chosen post has a person, use an object, a scene or hands instead. The slides of one option share one setting and look, so they read as a series, and each slide shows a different subject or moment, so no two slides repeat a picture.`,
     "The options differ from each other in layout or setting, and in wording. Put the strongest first: it is the one that will be made, so it should be the one you would publish.",
     `Reply with JSON only: {"options":[{"posts":[2],"layout":"...","slides":[{"headline":["line one","optional line two"],"picture":"..."}]}]}`,
   ].filter(Boolean).join("\n");
@@ -606,7 +627,7 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
  * they are. A Story (story: true) gets one line more; its headline limits are
  * a feed post's.
  */
-export function plannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; postCount: number; recent: string; guidance?: string; story?: boolean; otherPlatforms?: boolean; note?: string | null }): string {
+export function plannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; postCount: number; recent: string; guidance?: string; story?: boolean; otherPlatforms?: boolean; note?: string | null; visual?: string | null }): string {
   return [
     `The images are ${args.brand}'s own published posts, numbered Post 1 to Post ${args.postCount}.`,
     otherPlatformsLine(args),
@@ -614,14 +635,15 @@ export function plannerPrompt(args: { brand: string; platform: string; copy: str
     args.guidance ?? "",
     `Plan ${args.count} different design options for a new ${args.platform} post with this copy:`,
     `"""${args.copy}"""`,
+    plannedVisualLine(args.brand, args.visual),
     args.voice ? `${args.brand}'s voice: ${args.voice}` : "",
     args.story ? "This post is a Story: its frame is seen full screen for a few seconds, so the headline carries the message, and a second line may carry the call to action." : "",
     noteLine(args.note),
     "For each option give:",
     CHOOSE_POSTS(args.brand),
     `- headline: the words that will be set on the design, written in ${args.brand}'s voice from the post's message, in the copy's language. One line of at most 8 words, optionally a second, shorter line. Words only: an emoji stays in the post's copy.`,
-    "- picture: one sentence describing the picture behind the words, using the kinds of subjects, materials, light and composition of the posts you chose, with a subject the recent designs did not show. Describe what is in the picture, all of it in sharp focus. It holds no lettering, numbers, signs, screens with writing, logos or brand marks, and names no brand. It shows no real or identifiable person and no portrait standing in for one: where a chosen post has a person, use an object, a scene or hands instead.",
-    "The options differ from each other in layout or picture, and in headline. Put the strongest first: it is the one that will be made, so it should be the one you would publish.",
+    `- picture: ${pictureLead(args.visual)} Describe what is in the picture, all of it in sharp focus. It holds no lettering, numbers, signs, screens with writing, logos or brand marks, and names no brand. It shows no real or identifiable person and no portrait standing in for one: where a chosen post has a person, use an object, a scene or hands instead.`,
+    `The options differ from each other in layout or picture, and in headline${String(args.visual ?? "").trim() ? " where the planned visual does not give the words" : ""}. Put the strongest first: it is the one that will be made, so it should be the one you would publish.`,
     'Reply with JSON only: {"options":[{"posts":[2],"layout":"...","headline":["line one","optional line two"],"picture":"..."}]}',
   ].filter(Boolean).join("\n");
 }
