@@ -19,11 +19,12 @@
 
 import { Hono } from "hono";
 import type { z } from "zod";
-import { READ_JPEG_QUALITY, type PictureRoute, type PictureResults, type Size } from "../../../supabase/functions/_shared/picture/contract.ts";
+import { READ_JPEG_QUALITY, type FirstPictureFacts, type PictureRoute, type PictureResults, type Size } from "../../../supabase/functions/_shared/picture/contract.ts";
 import type { CompareIn, TemplateIn } from "../../../supabase/functions/_shared/design/logoTone.ts";
 import type { Log } from "../log.ts";
 import { fetchBytes, putBytes, StorageError, type Fetcher } from "../storage.ts";
 import { generationCanvas } from "./canvas.ts";
+import { composeForSlot } from "./compose.ts";
 import { finishPicture } from "./finish.ts";
 import { locateLogo } from "./locate.ts";
 import { locateTemplates, logoSet, postLogo, UnusableLogo } from "./tone.ts";
@@ -239,10 +240,28 @@ export function pictureRoutes(deps: PictureRouteDeps): Hono {
 
   // The cleaned slot: the ground under it, the file that shows there, and whether the drawing is gone.
   route("slot-file", slotFileBody, async (body, io) => {
-    const picture = await io.input("picture", body.picture);
+    const cleaned = await io.input("picture", body.picture);
+    // With the first picture: the slot is read on the composed picture, which is stored (compose.ts). No picture composed: the cleaned one, as before.
+    let picture = cleaned;
+    let composed: FirstPictureFacts | undefined;
+    if (body.first && body.out) {
+      const made = composeForSlot(await io.maybe("first", body.first), cleaned, body.rect, body.frame);
+      composed = made.facts;
+      picture = made.picture;
+      if (composed.made) {
+        try {
+          await io.output("out", body.out, picture, PNG);
+        } catch (err) {
+          // A composed picture that cannot be stored is no composed picture: the cleaned one is read and stays the design's base.
+          if (!(err instanceof StorageError)) throw err;
+          composed = { made: false, why: "store", share: composed.share, join: composed.join };
+          picture = cleaned;
+        }
+      }
+    }
     const files: StampIn[] = [];
     for (const f of body.files) files.push({ file: f.file, raster: await io.input(`file.${f.file}`, f.logo), last: f.last });
-    return slotFile(picture, body.rect, body.frame, body.of, files, body.drawn);
+    return { ...slotFile(picture, body.rect, body.frame, body.of, files, body.drawn), ...(composed ? { composed } : {}) };
   });
 
   return app;

@@ -103,8 +103,14 @@ export function pictureSchemas(storage: string) {
       ...meta, picture: stored, rect, frame, of: fileName,
       files: z.array(z.strictObject({ file: fileName, logo: stored, last: z.boolean().optional() })).min(1).max(3),
       drawn: z.strictObject({ file: fileName, ground: rgb }).optional(),
+      // The first picture as the base (17 Nov 2026): the design as first drawn and where the composed picture goes, both or neither.
+      first: stored.optional(), out: stored.optional(),
     })
     .superRefine((body, ctx) => {
+      if (body.first !== undefined && body.out === undefined) ctx.addIssue({ code: "custom", path: ["out"], message: "A first picture needs a place for the composed one." });
+      if (body.out !== undefined && body.first === undefined) ctx.addIssue({ code: "custom", path: ["first"], message: "A composed picture needs the first one." });
+      // Composed only where the drawing was found: its place is then a fact, and it is looked for again on the composed picture.
+      if (body.first !== undefined && body.out !== undefined && !body.drawn) ctx.addIssue({ code: "custom", path: ["drawn"], message: "A composed picture needs the found drawing." });
       body.files.forEach((f, i) => {
         if (body.files.findIndex((o) => o.file === f.file) !== i) ctx.addIssue({ code: "custom", path: ["files", i, "file"], message: "A file is listed once." });
       });

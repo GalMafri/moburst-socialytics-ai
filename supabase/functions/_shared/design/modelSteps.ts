@@ -28,6 +28,8 @@ export const OF_THE_DESIGN = [
   "logo_rect", "logo_frame", "logo_score", "logo_file", "logo_named", "logo_matched", "logo_scores", "logo_gaps", "logo_ground",
   "logo_slot", "logo_flat", "logo_shows", "logo_clean",
   "nologo_path", "unlogos", "final_path", "read", "band_read", "marks_check", "marks_where", "mark_cleans",
+  // The composed picture of the design's cleaned picture (firstPictureJob.ts).
+  "composed",
 ];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

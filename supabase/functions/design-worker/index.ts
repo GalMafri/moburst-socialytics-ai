@@ -5,7 +5,9 @@
 // locate, unlogo, marks, finish, verify. The image model only marks where the
 // logo goes (17 Nov 2026): locate finds that slot, the model's drawing is
 // cleaned out, and the client's logo file that shows on the ground under the
-// slot is placed there (_shared/design/logoSlot.ts). Each design is a row in canva_finish_jobs (the table
+// slot is placed there (_shared/design/logoSlot.ts). The delivered picture is
+// the model's first picture with the cleaned picture's slot where the drawn
+// logo was found and removed (_shared/design/firstPicture.ts). Each design is a row in canva_finish_jobs (the table
 // keeps its old name); a video's footage and join stay with video-worker.
 //
 //   POST {action:"tick"}              one pass over the due jobs, then the next posts
@@ -48,6 +50,7 @@ import { jobLogos, postSearchPlan } from "../_shared/design/logoTone.ts";
 import { POSTS_PER_CALL, askLogoSet, askPostLogos, liveIo } from "../_shared/design/logoSetWork.ts";
 import { personOther } from "../_shared/lifecycle/designSettings.ts";
 import { logoAreaRect } from "../_shared/picture/geometry.ts";
+import { askCleanedSlot, basePicture, composedPath, dropComposed } from "../_shared/design/firstPictureJob.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
@@ -303,9 +306,19 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       // the ground under the slot is read from the picture's own pixels, and the first of the client's logo
       // files whose whole parts all show on it is the file finish stamps.
       const stamp = stampPlan({ logo_path: job.input.logo_path, generate: g, logos: job.input.logos, stamp: job.input.stamp }, s);
-      const { result: slot, ms: slotMs } = await slotCall(admin, "slot-file", await slotFileRequest(admin, stamp, { job: job.id, step: "marks", picturePath: s.nologo_path }));
+      // The first picture is the base (_shared/design/firstPictureJob.ts): where the slot is the found drawing, the service composes
+      // it in this same call with the cleaned picture's slot and reads the slot on the result, the search for the drawing included.
+      // `picture` is what every later step reads and finish stamps.
+      const { result: slot, ms: slotMs } = await askCleanedSlot(s, base, !!stamp.drawn, async (compose) => {
+        const request = await slotFileRequest(admin, stamp, { job: job.id, step: "marks", picturePath: s.nologo_path });
+        if (compose) Object.assign(request, { first: await signedRead(admin, BUCKET, s.design_path), out: await signedWrite(admin, BUCKET, composedPath(base, s)) });
+        return slotCall(admin, "slot-file", request);
+      });
       notePicture(s, "slot-file", slotMs);
+      const picture = basePicture(s);
       const outcome = stampOutcome(stamp, slot, g.brand_name);
+      // A composed picture that fails a check is dropped, and this step runs again on the cleaned picture, as before the rule.
+      if (outcome.next !== "stamp" && dropComposed(s, outcome.reason)) return "next";
       if (outcome.next === "clean") {
         // The model's logo is still on the picture: taken out the way any other mark is, within the same bounds.
         console.warn(`[design-worker] job ${job.id}: ${outcome.reason}.`);
@@ -319,11 +332,11 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       Object.assign(s, outcome.state);
       // Then no logo left anywhere, the client's own or another brand's: read on the logo-free picture, at the page size.
       const page = pageOf(job);
-      const marksPath = `${base}/marks-${s.generations}-${s.unlogos}.jpg`;
+      const marksPath = `${base}/marks-${s.generations}-${s.unlogos}${picture === s.nologo_path ? "" : "-first"}.jpg`;
       const { ms } = await callPicture(admin, "read", {
         job: job.id,
         step: "marks",
-        picture: await signedRead(admin, BUCKET, s.nologo_path),
+        picture: await signedRead(admin, BUCKET, picture),
         page,
         out: { page: await signedWrite(admin, BUCKET, marksPath) },
       });
@@ -337,6 +350,8 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
         return "next";
       }
       const where = seen.where || "every logo and brand mark, also on clothing, shoes, balls and equipment";
+      // Seen on the composed picture, which is the first picture outside the slot: the cleaned picture is judged, as before the rule.
+      if (dropComposed(s, REASONS.marks(where))) return "next";
       console.warn(`[design-worker] job ${job.id}: marks left on the picture (${where}).`);
       return cleanAgain(admin, job, where, REASONS.marks(where));
     }
@@ -354,7 +369,8 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       const { ms } = await callPicture(admin, "finish", {
         job: job.id,
         step: "finish",
-        picture: await signedRead(admin, BUCKET, s.nologo_path),
+        // The picture the marks step judged: the first picture with the cleaned slot, or the cleaned picture.
+        picture: await signedRead(admin, BUCKET, basePicture(s)),
         // The file chosen for the ground under the slot, or the job's own logo for a job moved on before that choice existed.
         logo: await signedRead(admin, BUCKET, stampFile(job.input, s)),
         rect: s.logo_rect,
@@ -545,7 +561,7 @@ async function pictureCheck(admin: any, count: number): Promise<{ elapsed_ms: nu
       const { ms } = await callPicture(admin, "finish", {
         job: r.id,
         step: "picture_check",
-        picture: await signedRead(admin, BUCKET, r.state.nologo_path),
+        picture: await signedRead(admin, BUCKET, basePicture(r.state)),
         logo: await signedRead(admin, BUCKET, stampFile(r.input, r.state)),
         rect: r.state.logo_rect,
         frame: r.state.logo_frame,

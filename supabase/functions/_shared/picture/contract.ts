@@ -124,13 +124,40 @@ export type SlotFileRequest = PictureMeta & {
   picture: string; rect: Rect; frame: [number, number]; of: LogoFileName;
   files: StampFile[];
   drawn?: { file: LogoFileName; ground: Rgb };
-};
+} & FirstPictureAsk;
 export type SlotFileResult = {
   ground: Rgb | null; flat: number;
   file: LogoFileName | null; rect: Rect;
   shows: Partial<Record<LogoFileName, number>>;
   drawn?: { score: number; found: boolean };
+  composed?: FirstPictureFacts;
 };
+/**
+ * The first picture as the base (17 Nov 2026, _shared/design/firstPicture.ts).
+ * A cleaned-slot request whose slot is the found drawing (it carries
+ * `drawn`) may also carry `first`, the design as the model first drew it (a
+ * GET link), and `out`, where the composed picture goes (an upload link):
+ * both or neither, and never without `drawn`. The service then composes the
+ * first picture with the cleaned picture's slot, stores it at `out`, and
+ * reads the slot on that composed picture, the search for the drawing
+ * included, so everything the answer says is about the picture that is
+ * delivered. When no picture is composed nothing is kept and the slot is
+ * read on the cleaned picture, as without the two fields. A request without
+ * them is answered exactly as before.
+ */
+export type FirstPictureAsk = { first?: string; out?: string };
+/**
+ * What composing came to. `made` false: there is no composed picture, and
+ * `why` says so: the first picture could not be read ("first"), the two
+ * pictures are not one size ("size"), the slot has no place or no ring on
+ * the picture ("slot"), the ring around the slot does not show the same
+ * thing in both pictures ("join"), or the composed picture could not be
+ * stored ("store"). `share` is the part of the picture the patch covers,
+ * `join` the ring's mean difference in color levels after the correction,
+ * and `box` the patch's bounds in the picture's pixels: outside it the
+ * composed picture is the first picture exactly.
+ */
+export type FirstPictureFacts = { made: boolean; why?: "first" | "size" | "slot" | "join" | "store"; share: number; join: number; box?: Rect };
 export type ReadRequest = PictureMeta & { picture: string; page: Size; band?: Rect; area?: Rect; out: { page: string; band?: string; area?: string } };
 export type ReadResult = { picture: Size; page: Size; band?: Size; area?: Size };
 export type FinishRequest = PictureMeta & { picture: string; logo: string; rect: Rect; frame: [number, number]; output: Size; out: string };

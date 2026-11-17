@@ -1012,3 +1012,91 @@ No new paid call and no new retry. One option before: at most 3 designs (`MAX_GE
 - The settings card shows a tile only for a copy the client's posts show. A design can now carry a copy with no tile.
 - When a set has the brand's own second file, the made copy for that ground is not also tried.
 - For a logo of one color the two templates are the same search once the sign is not read, so the second one costs time and finds nothing new. It is kept, because a logo of several colors needs it.
+
+## 14. The delivered picture is the model's first picture (17 Nov 2026)
+
+Built on branch `qafix/first-picture`. Nothing here is deployed. A first version also patched every place it worked out the removal had changed; the review showed it took text a redraw had only moved for something removed and delivered doubled letter edges. That part was taken out. What follows is the rule as built.
+
+### What the owner saw, and what was measured
+
+The picture part of every design looked lower in quality than its text and its logo. The owner's guess was repeated whole-image edits. Measured on two live designs (three removals), all files at 2176x2720:
+
+| Design | Cleaned picture | Pixels that differ from the first picture | Mean difference (largest channel, levels) |
+|---|---|---|---|
+| A | after removal 1 | 98.2% | 6.74 |
+| A | after removal 2 | 98.2% | 6.69 |
+| B | after removal 1 | 99.5% | 10.77 |
+
+A removal sends the whole first picture through the image model (`design-worker`, step `unlogo`, always from `design_path`), and the whole picture comes back redrawn: skin and surfaces get harsh grain, edges move by 1 to 4 pixels, colors shift by up to 6 levels a channel. The cleaned picture was then the base of everything delivered.
+
+### The rule
+
+The delivered picture is the model's first picture of that design, pixel for pixel. The cleaned picture is used in exactly one place: the slot's rectangle, and only when the slot is the drawing the search found (`logo_slot.from` "drawn"), because the removed logo's place is then an exact fact. Nothing else is ever taken from the cleaned picture, so the words and the photo outside that rectangle are the first picture's pixels by construction.
+
+When the slot is the canvas rectangle (`from` "canvas": the drawing was not found, so its place is unknown), nothing is composed and the cleaned picture is the base, as today.
+
+The code: `supabase/functions/_shared/design/firstPicture.ts` (the arithmetic, `composeFirst`, numbers in `FIRST_PICTURE_RULE`), `server/src/picture/compose.ts` (the service's side), `supabase/functions/_shared/design/firstPictureJob.ts` (the worker's side).
+
+### 1. Where the patch is
+
+One patch, at the slot (`state.logo_slot.rect`). The read for marks answers words and the code has no rectangle for anything the removal took out elsewhere, so nothing is taken from the cleaned picture there. A logo or a mark the removal took out away from the slot is still on the composed picture. The existing read for marks judges the composed picture, names it, and the design goes on from its cleaned picture (point 3).
+
+The patch: the slot's 4x4-pixel cells, with 2 cells (8 pixels) added around them, take the cleaned pixels whole. Around that is a ring of 4 cells (16 pixels) across which the patch fades into the first picture. No pixel farther than 32 pixels from the slot's rectangle is written (`patchReach`: 8 of margin, 16 of ring, under 8 for the cell grid). A test runs 60 pairs of unrelated random pictures with slots inside, across an edge, in a corner and off the picture, and counts 0 changed pixels beyond that reach; another moves a thin line of text 3 pixels in the cleaned picture and counts 0 changed pixels on it. On the two designs the patch covers 1.2% and 1.4% of the picture.
+
+### 2. The join
+
+- The correction. On the ring the two pictures should show the same thing. For each channel the middle value of (first minus cleaned) over the ring's cells is added to every cleaned pixel of the patch. Measured, in levels for red, green and blue: (0.2, -0.1, 0.3) and (-0.4, -0.5, -0.1) for design A's slot after its two removals, (0.6, -5.5, 4.0) for design B's.
+- The fade. Each cell has a share (1 in the slot and its margin, then 0.8, 0.6, 0.4, 0.2 across the ring, 0 beyond), and a pixel takes the share its place has between the centers of the four cells around it. A pixel whose share is 0 is not written.
+
+When the join cannot be made cleanly. The test is on the ring, after the correction: the mean over the ring's cells of the largest channel's difference between the two pictures. Over 20 levels, no picture is composed and the design keeps the cleaned picture as its base, which is today's behavior for that design. Measured:
+
+| Ring | Mean difference | Seen at 200% |
+|---|---|---|
+| The three real slots | 2.32, 3.13, 2.68 | no seam |
+| A patch forced onto twelve photo areas of the two designs | 1.7 to 16.5 | the two highest (croissant 16.5, cup of ice 15.1) were looked at: no seam |
+| The same forced patches with the cleaned picture moved 8 pixels sideways: headline letters, the bag's edge | 26.6, 23.8 | doubled edges |
+
+A second test on the same ring, added after the re-check. The mean lets through a few strokes of text or a hard edge that the redraw moved inside the ring: a thin dark line of text 12 pixels under the slot of a real pair, moved 3 pixels, has a mean of 13.5 and was delivered with doubled letters. So a ring cell is "apart" when, after the correction, the two pictures differ on it by more than 48 levels, and with more than 4 cells apart no picture is composed (`why` "join", like the mean). Measured by the reviewer: the rings of the three real removals have 0 cells over 48 (their largest cell differences are 32.4, 21.3 and 6.9); every moved-text case has 12 to 200, with means of 4.4 to 17. A refusal only falls back to the cleaned picture, as today.
+
+Three more reasons compose nothing: the two pictures are not one size, the slot has no place or no ring on the picture, and the composed picture could not be stored (the call still succeeds and reads the cleaned picture).
+
+### 3. Every later step reads the picture that is delivered
+
+The service composes inside the cleaned-slot call, stores the composed picture, and reads the slot on it. From there one path is used for everything (`basePicture(state)`):
+
+| Step | What it reads |
+|---|---|
+| The drawn logo is gone (`stillDrawn`) | the composed picture, in the same call. The service composes only for a request that carries `drawn`, so this check is always made |
+| The ground under the slot, and the logo file chosen for it | the composed picture, in the same call |
+| The read for marks | the composed picture |
+| The stamping of the logo file and the resize (finish) | the composed picture |
+| The read of the words and of the area around the stamped logo (verify) | the finished file, made from the composed picture |
+
+A composed picture has to pass every check a cleaned picture has to pass. If it fails one (the drawing is still found, no file shows on the ground, or the read names a mark), it is dropped, `state.composed.path` becomes null with the check as the reason, and the marks step runs again on the cleaned picture, exactly as before the rule. This happens once for each cleaned picture: after it, that cleaned picture is never composed again. The job keeps `state.composed.of` (the cleaned picture the composed one belongs to), so a later removal never reads an earlier one's.
+
+### 4. Where the composing runs
+
+Inside the existing cleaned-slot call (`slot-file`), with no new call. A request that carries `drawn` may also carry `first` (the design as first drawn) and `out` (where the composed picture goes), both or neither. The answer then has `composed`: whether a picture was made, why not, the share of the picture, the join number and the patch's bounds.
+
+On a Mac, for one design: composing about 20 ms, writing the PNG 250 to 600 ms; one more file read (7 MB) and one more written (about 10.5 MB). Not measured on the service.
+
+Deploy order, service first:
+
+- Old worker, new service: the old worker never sends the two fields, and a request without them is answered exactly as before (the route's existing tests are unchanged and pass).
+- New worker, old service: the old service refuses a field it does not know with a 400 before it reads anything. The worker reads that as a service from before the rule and asks again without the two fields in the same step (`askCleanedSlot`). The design goes on with its cleaned picture, with `state.composed.why` "service". No try is spent and no design fails.
+- A job in flight keeps its step. At `finish` with no `state.composed` it finishes from its cleaned picture as it would have.
+
+### 5. Cost
+
+No image-model call is added, on any path. A design whose composed picture passes makes the same calls as today. A design whose composed picture fails a check makes one more cleaned-slot call and one more read for marks (the reading model, never the image model) before it goes the way it would have gone today. One more file is stored for each removal that is composed.
+
+### Limits, said plainly
+
+- A design keeps the first picture's photo only when its slot is the found drawing and the read for marks finds nothing on the composed picture. A design whose removal took a mark out away from the slot is delivered from its cleaned picture, as today, after one extra slot call and one extra read. Design A is such a design: the lettering on the glasses' temple is back on its composed picture, so its read for marks is expected to name it. Design B composes with nothing else to find.
+- Text or a photo edge within 24 pixels of the slot's rectangle lies in the margin or the ring. If the redraw moved it and more than 4 ring cells differ by over 48 levels, nothing is composed. Text of low contrast (under 48 levels a cell), or one that crosses 4 cells or fewer, is still composed, with its part inside the margin from the cleaned picture and its part in the ring a blend. From 28 pixels away nothing is touched.
+- The join number is a mean. Soft, low-contrast content moved far gives a low number.
+- The numbers (20 levels, 48 levels on 4 cells, 8 and 16 pixels) come from two designs and three removals. Each job keeps what composing found (`state.composed`).
+- The paid steps were not run here: no removal, and no read for marks on a composed picture.
+- Inside the patch the pixels are the cleaned picture's, with its grain and with whatever the removal redrew there (in design A it continued a tile line through the logo's place). That is as today.
+- `tone_check` with `designs` and the replay script still read the cleaned picture. They report and deliver nothing.
+- The composed file is a PNG of about 10.5 MB where the model's own is 7 MB.
