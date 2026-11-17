@@ -53,6 +53,8 @@ interface Sources {
   refuse: Partial<Record<TrendPlatform, string>>;
   /** Platforms whose run answers with no rows. */
   empty: TrendPlatform[];
+  /** One search of a source refused (a source that takes one search a run): the message the source gives for that run's input, if any. */
+  refuseSearch?: (platform: TrendPlatform, input: Any) => string | undefined;
   /** Every actor start, in order. */
   calls: TrendPlatform[];
 }
@@ -60,10 +62,10 @@ function apify(s: Sources): TrendsDeps["apify"] {
   const byActor = Object.fromEntries(TREND_PLATFORMS.map((p) => [TREND_SOURCES[p].actor.id, p])) as Record<string, TrendPlatform>;
   const runs: Record<string, TrendPlatform> = {};
   const client: ApifyClient = {
-    async startRun(actorId) {
+    async startRun(actorId, input) {
       const platform = byActor[actorId];
       s.calls.push(platform);
-      const refused = s.refuse[platform];
+      const refused = s.refuse[platform] ?? s.refuseSearch?.(platform, input);
       if (refused) throw new ApifyError(refused, Number(refused.match(/answered (\d{3})/)?.[1]) || null);
       const id = `r${s.calls.length}`;
       runs[id] = platform;
@@ -371,7 +373,7 @@ describe("a week with one failed source", () => {
     const { outcomes } = await w.sweepAndRun();
     const tryOne = String(outcomes[0].result!.run_id);
     await w.drive(tryOne);
-    expect(w.run(tryOne)).toMatchObject({ status: "stopped", outcome: "The answers instagram gave when the week was saved are no longer kept, so the week is not written again." });
+    expect(w.run(tryOne)).toMatchObject({ status: "stopped", step: "start", outcome: "The earlier run kept no answer for instagram search 1 of 1, so the week is not written again." });
     // Nothing was paid for, nothing was judged, and Instagram's posts are still the week's.
     expect(w.sources.calls).toEqual([]);
     expect(w.requests).toEqual([]);
@@ -391,7 +393,7 @@ describe("a week with one failed source", () => {
     const replay = await startTrendWeek(w.db, "c1", w.clock.now(), { replayFrom: first, suffix: "replay-1" });
     if (!("runId" in replay)) throw new Error(replay.skipped);
     await w.drive(replay.runId);
-    expect(w.run(replay.runId)).toMatchObject({ status: "stopped", outcome: "The answer linkedin gave (run 1 of 1) is no longer kept, so the week is not written again." });
+    expect(w.run(replay.runId)).toMatchObject({ status: "stopped", step: "start", outcome: "The earlier run kept no answer for linkedin search 1 of 1, so the week is not written again." });
     expect(w.requests).toEqual([]);
     expect(untouched(w.posts(), before.posts)).toBe(true);
     expect(untouched(w.themes(), before.themes)).toBe(true);
@@ -410,6 +412,199 @@ describe("a week with one failed source", () => {
     expect(driven.outcome.status).toBe("failed");
     expect(w.run(run_id).status).toBe("stopped");
     expect(w.sources.calls).toEqual([]);
+  });
+});
+
+describe("what a rebuild reads from the run the week was saved from", () => {
+  const SERVER_ERROR = "Apify POST /acts/nfyn3ecod9uCDaoVH/runs answered 500: internal error";
+  /** A week saved without TikTok, in which one of YouTube's two searches failed and the other answered (so YouTube counts as answered). */
+  async function weekWithAFailedSearch() {
+    const w = world();
+    w.sources.refuse.tiktok = REFUSED_INPUT;
+    w.sources.refuseSearch = (platform, input) => (platform === "youtube" && input?.query === "marketing tips" ? SERVER_ERROR : undefined);
+    const first = await w.collectWeek();
+    expect(w.week()).toMatchObject({ status: "partial" });
+    expect(w.week().platforms.youtube).toMatchObject({ status: "ok", searched: 2 });
+    expect(w.week().platforms.tiktok.status).toBe("failed");
+    return { w, first, youtube: w.posts().filter((p) => p.platform === "youtube").map((p) => p.url).sort() };
+  }
+  /** The next try: the sweep, its job, and the run driven to its end. */
+  async function nextTry(w: ReturnType<typeof world>) {
+    const last = Math.max(Date.parse(w.week().finished_at), ...w.db.tables.report_pipeline_runs.map((r) => Date.parse(r.finished_at ?? "") || 0));
+    const tries = w.db.tables.report_pipeline_runs.filter((r) => r.input?.recollect).length;
+    w.clock.set(new Date(last + [10 * MIN, HOUR, 6 * HOUR][tries]));
+    const { outcomes } = await w.sweepAndRun();
+    const runId = String(outcomes[0].result!.run_id);
+    const driven = await w.drive(runId);
+    return { runId, driven };
+  }
+  const keysOf = (w: ReturnType<typeof world>, runId: string) => w.db.tables.pipeline_payloads.filter((r) => r.run_id === runId).map((r) => String(r.key));
+  /** Storage that fails to hand over one kept answer, a given number of times. */
+  function failingRead(w: ReturnType<typeof world>, path: string, times: number) {
+    const storage = w.db.storage;
+    const left = { n: times, failed: 0 };
+    w.db.storage = {
+      from: (bucket: string) => {
+        const real = storage.from(bucket);
+        return { ...real, download: async (at: string) => (at.endsWith(path) && left.n-- > 0 ? (left.failed++, { data: null, error: { message: "upstream request timeout" } }) : real.download(at)) };
+      },
+    };
+    return left;
+  }
+
+  it("heals a week whose collection had one failed search of an answered source, when the failed source answers", async () => {
+    const { w, first, youtube } = await weekWithAFailedSearch();
+    // The original run recorded the failed search as a fact, beside the answer of the search that worked.
+    expect(keysOf(w, first)).toEqual(expect.arrayContaining(["source.youtube.0", "source.youtube.1.failed"]));
+    expect(keysOf(w, first)).not.toContain("source.youtube.1");
+    w.sources.refuse = {};
+    w.sources.refuseSearch = undefined;
+    w.sources.calls.length = 0;
+    const { runId } = await nextTry(w);
+    expect(w.run(runId).status).toBe("done");
+    // Only TikTok was asked. YouTube's failed search was read as what it was: a search that brought nothing.
+    expect(w.sources.calls).toEqual(["tiktok"]);
+    expect(w.week()).toMatchObject({ status: "done" });
+    expect(w.week().platforms.tiktok.status).toBe("ok");
+    expect(w.week().platforms.youtube).toMatchObject({ status: "ok", searched: 2 });
+    expect(w.posts().filter((p) => p.platform === "youtube").map((p) => p.url).sort()).toEqual(youtube);
+    expect(w.posts().some((p) => p.platform === "tiktok" && p.kept)).toBe(true);
+    const plan = await makePayloadStore(w.db, runId).get<Any>("plan");
+    expect(plan.kept["youtube.0"]).toEqual({ state: "answered" });
+    expect(plan.kept["youtube.1"]).toEqual({ state: "failed", message: "" });
+    // The fact is carried on, so the next rebuild of the week reads it the same way.
+    expect(keysOf(w, runId)).toContain("source.youtube.1.failed");
+    expect((await makePayloadStore(w.db, runId).get<Any>("source.youtube.1.failed")).message).toContain("answered 500");
+  });
+
+  it("heals it too when the failed search left no kept mark, from the run's own step log", async () => {
+    const { w, first, youtube } = await weekWithAFailedSearch();
+    // The mark was never stored (its write is not waited on); the run's step log still says the search failed.
+    w.db.tables.pipeline_payloads = w.db.tables.pipeline_payloads.filter((r) => !(r.run_id === first && r.key === "source.youtube.1.failed"));
+    const logged = w.db.tables.report_pipeline_steps.filter((x) => x.run_id === first && x.step === "scrape_youtube" && typeof x.detail?.failed === "string");
+    expect(logged.map((x) => x.detail.run)).toEqual([2]);
+    w.sources.refuse = {};
+    w.sources.refuseSearch = undefined;
+    w.sources.calls.length = 0;
+    const { runId } = await nextTry(w);
+    expect(w.run(runId).status).toBe("done");
+    expect(w.sources.calls).toEqual(["tiktok"]);
+    expect(w.week()).toMatchObject({ status: "done" });
+    expect(w.posts().filter((p) => p.platform === "youtube").map((p) => p.url).sort()).toEqual(youtube);
+    const plan = await makePayloadStore(w.db, runId).get<Any>("plan");
+    expect(plan.kept["youtube.1"]).toEqual({ state: "failed", message: expect.stringContaining("answered 500") });
+    // A replay of this run finds the mark again, and its step log says so as well.
+    expect(keysOf(w, runId)).toContain("source.youtube.1.failed");
+    expect(w.db.tables.report_pipeline_steps.some((x) => x.run_id === runId && x.step === "scrape_youtube" && x.detail?.run === 2 && typeof x.detail?.failed === "string")).toBe(true);
+  });
+
+  it("stops at start, before any paid call, when a search has nothing kept and no record of failing", async () => {
+    const { w, first } = await weekWithAFailedSearch();
+    const before = { posts: w.posts(), themes: w.themes(), week: { ...w.week() } };
+    // YouTube's answered search has lost its answer, and nothing says that search failed.
+    w.db.tables.pipeline_payloads = w.db.tables.pipeline_payloads.filter((r) => !(r.run_id === first && r.key === "source.youtube.0"));
+    w.sources.refuse = {};
+    w.sources.refuseSearch = undefined;
+    w.sources.calls.length = 0;
+    w.requests.length = 0;
+    const { runId, driven } = await nextTry(w);
+    expect(driven.calls.map((c) => c.step)).toEqual(["start"]);
+    expect(w.run(runId)).toMatchObject({ status: "stopped", outcome: "The earlier run kept no answer for youtube search 1 of 2, so the week is not written again." });
+    expect(w.sources.calls).toEqual([]);
+    expect(w.requests).toEqual([]);
+    expect(untouched(w.posts(), before.posts)).toBe(true);
+    expect(untouched(w.themes(), before.themes)).toBe(true);
+    expect(w.week()).toEqual(before.week);
+  });
+
+  it("reads every kept answer before it asks the named source, and reads each search exactly as start decided", async () => {
+    const { w, first } = await weekWithAFailedSearch();
+    w.sources.refuse = {};
+    w.sources.refuseSearch = undefined;
+    const { runId, driven } = await nextTry(w);
+    // The named source's steps come last.
+    const steps = driven.calls.map((c) => c.step).filter((x) => x.startsWith("scrape_"));
+    const order = [...new Set(steps)];
+    expect(order).toEqual(["scrape_instagram", "scrape_linkedin", "scrape_youtube", "scrape_pinterest", "scrape_facebook", "scrape_tiktok"]);
+    // start's list has one entry for every search the run read, and the run read each as the list says.
+    const plan = await makePayloadStore(w.db, runId).get<Any>("plan");
+    const searches = TREND_PLATFORMS.filter((p) => p !== "tiktok").flatMap((p) =>
+      TREND_SOURCES[p].inputs(plan.searches[p] ?? [], { region: plan.client.region, language: plan.client.language, windowStart: plan.window.start.slice(0, 10), windowEnd: plan.window.end.slice(0, 10) }).map((_, i) => `${p}.${i}`));
+    expect(Object.keys(plan.kept).sort()).toEqual([...searches].sort());
+    expect(searches.length).toBeGreaterThan(6);
+    const read = keysOf(w, runId);
+    const original = keysOf(w, first);
+    for (const [search, held] of Object.entries(plan.kept as Record<string, { state: string }>)) {
+      const key = `source.${search}`;
+      // What start decided is what the earlier run holds, and what the scrape step then read and kept.
+      expect(original.includes(held.state === "failed" ? `${key}.failed` : key), search).toBe(true);
+      expect(read.includes(`${key}.failed`), search).toBe(held.state === "failed");
+      expect(read.includes(key), search).toBe(held.state === "answered");
+    }
+    // The named source is in no list: it was asked.
+    expect(Object.keys(plan.kept).some((k) => k.startsWith("tiktok."))).toBe(false);
+  });
+
+  it("tries again a kept answer that could not be read just now: not missing, not empty, and nothing is paid before it is read", async () => {
+    const { w, first } = await weekWithAFailedSearch();
+    const facebookBefore = w.posts().filter((p) => p.platform === "facebook").length;
+    expect(facebookBefore).toBeGreaterThan(0);
+    const reads = failingRead(w, `runs/${first}/source.facebook.1.json`, 2);
+    w.sources.refuse = {};
+    w.sources.refuseSearch = undefined;
+    w.sources.calls.length = 0;
+    const { runId, driven } = await nextTry(w);
+    expect(reads.failed).toBe(2);
+    // The step was tried again, twice, and no source had been asked by then.
+    const retried = driven.calls.filter((c) => c.step === "scrape_facebook" && String(c.outcome.reason ?? "").includes("could not be read just now"));
+    expect(retried.map((c) => c.attempt)).toEqual([1, 2]);
+    const firstPaid = driven.calls.findIndex((c) => c.step === "scrape_tiktok");
+    expect(driven.calls.findIndex((c) => c === retried[1])).toBeLessThan(firstPaid);
+    // Then it was read: the week healed, with every Facebook post it had, and TikTok asked once.
+    expect(w.run(runId).status).toBe("done");
+    expect(w.sources.calls).toEqual(["tiktok"]);
+    expect(w.week()).toMatchObject({ status: "done" });
+    expect(w.week().platforms.facebook.status).toBe("ok");
+    expect(w.posts().filter((p) => p.platform === "facebook")).toHaveLength(facebookBefore);
+  });
+
+  it("stops without having paid for anything when a kept answer cannot be read at all, and the next try starts clean", async () => {
+    const { w, first } = await weekWithAFailedSearch();
+    const before = { posts: w.posts(), themes: w.themes(), status: w.week().status };
+    const reads = failingRead(w, `runs/${first}/source.facebook.1.json`, 5);
+    w.sources.refuse = {};
+    w.sources.refuseSearch = undefined;
+    w.sources.calls.length = 0;
+    w.requests.length = 0;
+    const one = await nextTry(w);
+    expect(reads.failed).toBe(5);
+    expect(w.run(one.runId)).toMatchObject({ status: "stopped", outcome: expect.stringMatching(/scrape_facebook did not finish in 5 tries: The answer the earlier run kept for facebook search 2 of 2 could not be read just now/) });
+    expect(w.sources.calls).toEqual([]);
+    expect(w.requests).toEqual([]);
+    expect(untouched(w.posts(), before.posts)).toBe(true);
+    expect(untouched(w.themes(), before.themes)).toBe(true);
+    expect(w.week().status).toBe(before.status);
+    // Storage answers again: the second try heals the week.
+    const two = await nextTry(w);
+    expect(w.run(two.runId).status).toBe("done");
+    expect(w.week()).toMatchObject({ status: "done" });
+    expect(w.sources.calls).toEqual(["tiktok"]);
+  });
+
+  it("gives a plain replay the same reading list, and stops it at start when a search has nothing kept", async () => {
+    const { w, first } = await weekWithAFailedSearch();
+    w.sources.calls.length = 0;
+    const replay = await startTrendWeek(w.db, "c1", w.clock.now(), { replayFrom: first, suffix: "replay-1" });
+    if (!("runId" in replay)) throw new Error(replay.skipped);
+    await w.drive(replay.runId);
+    expect(w.run(replay.runId).status).toBe("done");
+    expect(w.sources.calls).toEqual([]);
+    const plan = await makePayloadStore(w.db, replay.runId).get<Any>("plan");
+    // Every source is read from kept answers, TikTok's failed search among them.
+    expect(plan.kept["tiktok.0"]).toMatchObject({ state: "failed" });
+    expect(plan.kept["youtube.1"]).toMatchObject({ state: "failed" });
+    expect(w.week().platforms.tiktok.status).toBe("failed");
+    expect(w.week().platforms.youtube.status).toBe("ok");
   });
 });
 

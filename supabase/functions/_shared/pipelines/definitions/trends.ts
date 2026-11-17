@@ -34,12 +34,11 @@
 // (input.recollect.platforms), and differs from any other run in four steps:
 //   start     the earlier run's plan, with the window's end moved to now so
 //             the late source's newest posts count, and the exclusions as
-//             they are now, so a theme a person dismissed since stays out.
-//             Every other source's kept answer must still be there: a missing
-//             answer is not an empty one, so the run stops before it pays for
-//             anything and the week stays as it was saved
+//             they are now, so a theme a person dismissed since stays out
 //   scrape_*  a named source: the real source (paid). Any other: the answer
-//             the earlier run kept, so nothing that answered is paid for twice
+//             the earlier run kept, so nothing that answered is paid for twice.
+//             The sources read from kept answers go first and the named ones
+//             last, so nothing is paid for before every kept answer was read
 //   rules     no named source brought posts: the run ends here, before any
 //             model call, and the week's posts and themes stay. A source that
 //             answered with nothing is recorded as answered (output "sources")
@@ -51,6 +50,16 @@
 // records for each source that failed again the kind of fault and how many
 // tries in a row it has been (platforms.<p>.fault): a request or an account
 // the source refuses twice running is not asked again that week.
+//
+// What a replay may read is decided once, at start, search by search (the
+// plan's `kept`): each search of each source the run does not ask either
+// answered in the earlier run (its answer is kept), or failed there (a
+// recorded fact about that run: the search brought nothing, and it is read as
+// that, so the source's other searches and the week's other posts are kept),
+// or has nothing kept at all, and then the run stops at start, before any
+// paid call. The scrape steps read by that decision and never make their own.
+// A kept answer that could not be read just now (a download that failed) is
+// neither missing nor empty: the step is tried again, and nothing was paid.
 //
 // A theme a person dismissed is a recorded decision. Whenever a week is
 // written again (a replay, a source collected again), the themes step is told
@@ -126,6 +135,23 @@ interface Plan {
   short?: Partial<Record<TrendPlatform, Shortfall>>;
   /** The searches the coverage rewrite gave each platform this week, in place of the profile's own terms. */
   rewritten?: Partial<Record<TrendPlatform, string[]>>;
+  /** A replay's reading list, decided at start: what the earlier run holds for each search it reads from kept answers, by `<platform>.<search>` from 0. */
+  kept?: Record<string, KeptSearch>;
+}
+
+/** What an earlier run holds for one search of one source: its answer, or the fact that the search failed there (with what it said). */
+export type KeptSearch = { state: "answered" } | { state: "failed"; message: string };
+
+/**
+ * A kept answer that is there and could not be read just now (the download
+ * failed). It is not a missing answer and not an empty one: the step is tried
+ * again by the runner, and never marks the source failed.
+ */
+export class KeptAnswerUnread extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "KeptAnswerUnread";
+  }
 }
 
 interface TrendState {
@@ -276,6 +302,62 @@ function sourceRuns(plan: Plan, platform: TrendPlatform) {
   });
 }
 
+/** The sources a run visits, in order: a run that collects failed sources again reads every kept answer first and asks the named sources last. */
+function scrapeOrder(run: Pick<PipelineRun, "input">): TrendPlatform[] {
+  const asked = recollectOf(run)?.platforms ?? [];
+  return [...TREND_PLATFORMS.filter((p) => !asked.includes(p)), ...asked];
+}
+const scrapeStepOf = (platform: TrendPlatform) => `scrape_${platform}`;
+/** The step after a source's last search: the next source's, or the rules. */
+function afterScrape(run: Pick<PipelineRun, "input">, platform: TrendPlatform): string {
+  const order = scrapeOrder(run);
+  const next = order[order.indexOf(platform) + 1];
+  return next ? scrapeStepOf(next) : "rules";
+}
+
+/**
+ * A replay's reading list: for every search of every source the run does not
+ * ask, what the earlier run holds. Read from that run's own records, in this
+ * order:
+ *   1. its kept payloads (pipeline_payloads): `source.<p>.<i>.failed` says the
+ *      search failed, `source.<p>.<i>` is its answer;
+ *   2. for a search with neither (the failed mark is written after the
+ *      failure and its write is not waited on), that run's step log
+ *      (report_pipeline_steps): a scrape step of that source whose detail has
+ *      `failed` and that search's number (`run`, from 1) says it failed.
+ * A search with no record at all has nothing kept: the run stops, before any
+ * paid call, and the week stays as it was saved.
+ */
+async function keptSearches(ctx: StepContext, fromRun: string, plan: Plan, asked: TrendPlatform[]): Promise<Record<string, KeptSearch>> {
+  const { data: keys, error } = await ctx.db.from("pipeline_payloads").select("key").eq("run_id", fromRun);
+  if (error) throw new Error(`Could not read what the earlier run kept: ${error.message}`);
+  const keptKeys = new Set(((keys ?? []) as Array<{ key: unknown }>).map((k) => String(k.key)));
+  const out: Record<string, KeptSearch> = {};
+  const unknown: Array<{ platform: TrendPlatform; i: number; of: number }> = [];
+  for (const platform of TREND_PLATFORMS) {
+    if (asked.includes(platform)) continue;
+    const runs = sourceRuns(plan, platform);
+    runs.forEach((_, i) => {
+      const key = `source.${platform}.${i}`;
+      if (keptKeys.has(`${key}.failed`)) out[`${platform}.${i}`] = { state: "failed", message: "" };
+      else if (keptKeys.has(key)) out[`${platform}.${i}`] = { state: "answered" };
+      else unknown.push({ platform, i, of: runs.length });
+    });
+  }
+  if (!unknown.length) return out;
+  const { data: steps, error: stepsError } = await ctx.db.from("report_pipeline_steps").select("step, detail").eq("run_id", fromRun);
+  if (stepsError) throw new Error(`Could not read the earlier run's steps: ${stepsError.message}`);
+  const missing: string[] = [];
+  for (const u of unknown) {
+    const logged = ((steps ?? []) as Array<{ step: unknown; detail: Record<string, unknown> | null }>).find((row) =>
+      row.step === scrapeStepOf(u.platform) && typeof row.detail?.failed === "string" && Number(row.detail?.run) === u.i + 1);
+    if (logged) out[`${u.platform}.${u.i}`] = { state: "failed", message: String(logged.detail!.failed) };
+    else missing.push(`${u.platform} search ${u.i + 1} of ${u.of}`);
+  }
+  if (missing.length) throw new StepStop(`The earlier run kept no answer for ${missing.join(", ")}, so the week is not written again.`);
+  return out;
+}
+
 /**
  * The week's status once the given sources no longer count as failed, its
  * posts and themes unchanged: done when no source is left failed and nothing
@@ -300,7 +382,8 @@ async function statusWithout(ctx: StepContext, answered: TrendPlatform[]): Promi
 const trendRunHorizon = (run: Pick<PipelineRun, "input">): Date | null => trendWeekEnd(String((run.input as { week_start?: unknown } | null)?.week_start ?? ""));
 
 export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
-  const scrapeStep = (platform: TrendPlatform, next: string) => async (ctx: StepContext): Promise<StepResult> => {
+  const scrapeStep = (platform: TrendPlatform) => async (ctx: StepContext): Promise<StepResult> => {
+    const next = afterScrape(ctx.run, platform);
     const plan = await need<Plan>(ctx, "plan");
     const st = stateOf(ctx);
     const runs = sourceRuns(plan, platform);
@@ -309,6 +392,8 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
       return { type: "next", step: next, state: { ...st, platforms: { ...(st.platforms ?? {}), [platform]: { status, searched: 0, rows: 0 } } }, detail: { platform, status } };
     }
     const prog = { ...(st.scrape?.[platform] ?? { i: 0, rows: 0, ok: 0, failed: 0 }) };
+    // A source whose searches are all done is not gone through again (a run under way when the order of sources changed comes back to one).
+    if (prog.i >= runs.length) return { type: "next", step: next, state: st, detail: { platform, already: true } };
     const run = runs[prog.i];
     const key = `source.${platform}.${prog.i}`;
     let usd = 0;
@@ -320,20 +405,27 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
       let rows: unknown[] | null = null;
       // A replay reads every answer the earlier run kept. A run that collects failed sources again
       // reads them too, except for the sources it names: those are asked for real.
-      if (replayOf(ctx) && !recollectOf(ctx.run)?.platforms.includes(platform)) {
-        const failed = await keptAnswer<{ message?: unknown }>(ctx, `${key}.failed`);
-        if (failed) {
-          await ctx.payloads.put(`${key}.failed`, failed, KEEP);
-          fault = sourceFaultKind(String(failed.message ?? ""));
+      const replay = replayOf(ctx);
+      if (replay && !recollectOf(ctx.run)?.platforms.includes(platform)) {
+        // What to read was decided at start (plan.kept). A run started before that list was kept decides now, the same way.
+        const list = plan.kept ?? await keptSearches(ctx, replay.from_run, plan, recollectOf(ctx.run)?.platforms ?? []);
+        const held = list[`${platform}.${prog.i}`];
+        if (!held) throw new StepStop(`The run has no record of what the earlier run kept for ${platform} search ${prog.i + 1} of ${runs.length}, so the week is not written again.`);
+        if (held.state === "failed") {
+          // The search failed in the earlier run: it is read as what it was, a search that brought nothing.
+          const marker = await keptAnswer<{ message?: unknown }>(ctx, `${key}.failed`).catch(() => null);
+          const message = (typeof marker?.message === "string" && marker.message ? marker.message : held.message).slice(0, 300);
+          await ctx.payloads.put(`${key}.failed`, { message }, KEEP);
+          fault = sourceFaultKind(message);
+          detail = { ...detail, replayed: true, failed: message };
         } else {
-          // A missing answer is not an empty one: read as empty it would mark the source answered and
-          // write the week again without that source's posts. The run stops and the week stays as saved.
+          // The answer is kept. One that does not come back was not read just now: neither missing nor empty.
           const kept = await keptAnswer<unknown[]>(ctx, key);
-          if (!Array.isArray(kept)) throw new StepStop(`The answer ${platform} gave (run ${prog.i + 1} of ${runs.length}) is no longer kept, so the week is not written again.`);
+          if (!Array.isArray(kept)) throw new KeptAnswerUnread(`The answer the earlier run kept for ${platform} search ${prog.i + 1} of ${runs.length} could not be read just now.`);
           rows = kept;
           await ctx.payloads.put(key, rows, KEEP);
+          detail = { ...detail, replayed: true };
         }
-        detail = { ...detail, replayed: true };
       } else {
         const actor = await runActorStep(ctx, { actor: TREND_SOURCES[platform].actor, input: run.input, datasetKey: key, keepDays: SOURCE_KEEP_DAYS, apify: deps.apify });
         if (actor.type === "wait") return actor.result;
@@ -355,8 +447,10 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
         prog.failed += 1;
       }
     } catch (e) {
-      if (e instanceof StepStop || ctx.attempt < SCRAPE_TRIES) throw e;
+      // A stop, and a kept answer that was not read, are not this source failing: the first ends the run, the second is tried again.
+      if (e instanceof StepStop || e instanceof KeptAnswerUnread || ctx.attempt < SCRAPE_TRIES) throw e;
       const message = (e instanceof Error ? e.message : String(e)).slice(0, 300);
+      // The failed search is a fact a replay reads: here, and in this step's log (detail.failed with the search's number), which keptSearches falls back on.
       await ctx.payloads.put(`${key}.failed`, { message }, KEEP).catch(() => undefined);
       prog.failed += 1;
       fault = sourceFaultKind(message);
@@ -481,7 +575,7 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
       saveAs: rewriteKey(platform, again), keepDays: KEEP.keepDays, next: "read_rewrite", fetchImpl: deps.claudeFetch,
     }), rewriteGiveUp)(ctx);
   };
-  const scrapeSteps = Object.fromEntries(TREND_PLATFORMS.map((p, i) => [`scrape_${p}`, scrapeStep(p, order[i + 1] ?? "rules")]));
+  const scrapeSteps = Object.fromEntries(TREND_PLATFORMS.map((p) => [scrapeStepOf(p), scrapeStep(p)]));
 
   return {
     name: TRENDS_PIPELINE,
@@ -501,24 +595,19 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
         if (replayOf(ctx)) {
           const kept = await keptAnswer<Plan>(ctx, "plan");
           if (!kept) throw new Error("The replayed run kept no plan.");
+          // What the run may read from the earlier one is decided here, once, search by search, before any paid call:
+          // a search with nothing kept stops the run now, and the week stays as it was saved.
+          const list = await keptSearches(ctx, replayOf(ctx)!.from_run, kept, recollect?.platforms ?? []);
           if (!recollect) {
-            await ctx.payloads.put("plan", kept, KEEP);
+            await ctx.payloads.put("plan", { ...kept, kept: list }, KEEP);
             return { type: "next", step: order[0], state: {}, detail: { replayed: true, platforms: kept.platforms } };
           }
-          // Every source the run does not ask must still have its kept answer: a missing answer is not an
-          // empty one, so the run stops here, before any source is paid for, and the week stays as saved.
-          const replay = replayOf(ctx)!;
-          const { data: keys, error: keysError } = await ctx.db.from("pipeline_payloads").select("key").eq("run_id", replay.from_run);
-          if (keysError) throw new Error(`Could not read what the earlier run kept: ${keysError.message}`);
-          const keptKeys = new Set(((keys ?? []) as Array<{ key: unknown }>).map((k) => String(k.key)));
-          const missing = TREND_PLATFORMS.filter((p) => !recollect.platforms.includes(p)
-            && sourceRuns(kept, p).some((_, i) => !keptKeys.has(`source.${p}.${i}`) && !keptKeys.has(`source.${p}.${i}.failed`)));
-          if (missing.length) throw new StepStop(`The answers ${missing.join(", ")} gave when the week was saved are no longer kept, so the week is not written again.`);
           // A failed source collected again: the window ends now, so its newest posts count, and what
           // people excluded since the week was saved (a dismissed theme becomes an exclusion) is read again.
           const { exclusions } = await activeTerms(ctx.db, ctx.run.client_id);
-          await ctx.payloads.put("plan", { ...kept, exclusions, window: { ...kept.window, end: ctx.now().toISOString() } }, KEEP);
-          return { type: "next", step: order[0], state: {}, detail: { recollect: recollect.platforms, try: recollect.try, platforms: kept.platforms } };
+          await ctx.payloads.put("plan", { ...kept, kept: list, exclusions, window: { ...kept.window, end: ctx.now().toISOString() } }, KEEP);
+          // Kept answers are read first, the named sources asked last.
+          return { type: "next", step: scrapeStepOf(scrapeOrder(ctx.run)[0]), state: {}, detail: { recollect: recollect.platforms, try: recollect.try, platforms: kept.platforms } };
         }
         const clientId = ctx.run.client_id;
         const { data: client, error } = await ctx.db.from("clients").select("id, name, geo, language").eq("id", clientId).maybeSingle();
