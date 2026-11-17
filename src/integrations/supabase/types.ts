@@ -2111,6 +2111,7 @@ export type Database = {
           started_at: string
           status: string
           updated_at: string
+          upload_size: Json | null
           video_route: string | null
           visual_direction: string | null
         }
@@ -2143,6 +2144,7 @@ export type Database = {
           started_at?: string
           status?: string
           updated_at?: string
+          upload_size?: Json | null
           video_route?: string | null
           visual_direction?: string | null
         }
@@ -2175,6 +2177,7 @@ export type Database = {
           started_at?: string
           status?: string
           updated_at?: string
+          upload_size?: Json | null
           video_route?: string | null
           visual_direction?: string | null
         }
@@ -2761,6 +2764,120 @@ export type Database = {
           key?: string
           run_id?: string
           storage_path?: string
+        }
+        Relationships: []
+      }
+      platform_size_outcomes: {
+        Row: {
+          drawn_at: string | null
+          format: string
+          height: number
+          platform: string
+          refusal_confirmed_at: string | null
+          refused_at: string | null
+          refused_reason: string | null
+          width: number
+        }
+        Insert: {
+          drawn_at?: string | null
+          format: string
+          height: number
+          platform: string
+          refusal_confirmed_at?: string | null
+          refused_at?: string | null
+          refused_reason?: string | null
+          width: number
+        }
+        Update: {
+          drawn_at?: string | null
+          format?: string
+          height?: number
+          platform?: string
+          refusal_confirmed_at?: string | null
+          refused_at?: string | null
+          refused_reason?: string | null
+          width?: number
+        }
+        Relationships: []
+      }
+      platform_size_reads: {
+        Row: {
+          error: string | null
+          id: string
+          ok: boolean
+          read_at: string
+          rows: Json
+          source: string | null
+          source_updated: string | null
+        }
+        Insert: {
+          error?: string | null
+          id?: string
+          ok: boolean
+          read_at?: string
+          rows?: Json
+          source?: string | null
+          source_updated?: string | null
+        }
+        Update: {
+          error?: string | null
+          id?: string
+          ok?: boolean
+          read_at?: string
+          rows?: Json
+          source?: string | null
+          source_updated?: string | null
+        }
+        Relationships: []
+      }
+      platform_sizes: {
+        Row: {
+          changed_at: string
+          checked_at: string | null
+          format: string
+          height: number
+          pending_at: string | null
+          pending_height: number | null
+          pending_misses: number
+          pending_width: number | null
+          platform: string
+          previous_height: number | null
+          previous_width: number | null
+          source: string
+          usable: boolean
+          width: number
+        }
+        Insert: {
+          changed_at?: string
+          checked_at?: string | null
+          format: string
+          height: number
+          pending_at?: string | null
+          pending_height?: number | null
+          pending_misses?: number
+          pending_width?: number | null
+          platform: string
+          previous_height?: number | null
+          previous_width?: number | null
+          source?: string
+          usable?: boolean
+          width: number
+        }
+        Update: {
+          changed_at?: string
+          checked_at?: string | null
+          format?: string
+          height?: number
+          pending_at?: string | null
+          pending_height?: number | null
+          pending_misses?: number
+          pending_width?: number | null
+          platform?: string
+          previous_height?: number | null
+          previous_width?: number | null
+          source?: string
+          usable?: boolean
+          width?: number
         }
         Relationships: []
       }
@@ -4549,6 +4666,14 @@ export type Database = {
         Args: { p_choice: string; p_client: string; p_path: string }
         Returns: Json
       }
+      design_size_refused: {
+        Args: { p_job: string; p_reason?: string }
+        Returns: number
+      }
+      enqueue_platform_sizes_job: {
+        Args: { p_dry_run?: boolean; p_now?: string }
+        Returns: Json
+      }
       enqueue_scheduled_report_jobs: {
         Args: { p_dry_run?: boolean; p_now?: string }
         Returns: Json
@@ -4720,6 +4845,17 @@ export type Database = {
         Returns: boolean
       }
       mcp_rate_touch: { Args: { p_user: string }; Returns: number }
+      note_platform_size_outcome: {
+        Args: {
+          p_format: string
+          p_height: number
+          p_outcome: string
+          p_platform: string
+          p_reason?: string
+          p_width: number
+        }
+        Returns: undefined
+      }
       open_competitor_topics: {
         Args: { p_client_id: string }
         Returns: {
@@ -4755,6 +4891,7 @@ export type Database = {
           status: string
         }[]
       }
+      record_platform_size_read: { Args: { p_read: Json }; Returns: Json }
       release_ready_dispatches: { Args: never; Returns: number }
       release_rivaliq_request: {
         Args: { cooldown_seconds?: number; request_token: string }
