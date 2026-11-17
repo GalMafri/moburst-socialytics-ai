@@ -7,10 +7,13 @@
 //   - a canvas: the client's background colour with the client's logo file
 //     already placed at the client's habitual spot, locked by a mask shaped
 //     like the logo's letters;
-//   - three of the client's own posts as its visual language;
-//   - the picture as a positive description in the client's own visual
-//     vocabulary (naming what to avoid invites it);
-//   - the post's copy, to be spelled exactly.
+//   - the client's own posts the planner chose, for their look alone: colors,
+//     type treatment and layout style (17 Nov 2026; until then they were its
+//     "visual language", and each design came back a close remake of one of
+//     them: the same people, objects and composition);
+//   - the picture as a positive description of a new scene;
+//   - the post's copy, to be spelled exactly: its headline, and the labels
+//     its planned visual calls for, when it has any.
 // Its drawn logo and lettering are replaced afterwards with exact layers in
 // Canva (canva-finish), so nothing here has to be relied on for exactness.
 
@@ -43,12 +46,18 @@ export interface SlideContext {
   withCover: boolean;
 }
 
-export function designPrompt(g: Pick<GenerateInput, "brand_name" | "platform" | "concept" | "video_card" | "surface" | "note">, copy: string[], refCount: number, slide?: SlideContext): string {
-  const lines = [`Headline, spelled exactly: "${copy[0]}"`, ...copy.slice(1).map((t) => `Second line, spelled exactly: "${t}"`)].join(" ");
+export function designPrompt(g: Pick<GenerateInput, "brand_name" | "platform" | "concept" | "video_card" | "surface" | "note">, copy: string[], refCount: number, slide?: SlideContext, labels?: string[] | null, placing?: string | null): string {
+  // The labels the planned visual calls for beyond the headline (canva/options.ts): each set once, where `placing` says. None for most designs, and then no placing either.
+  const has = Array.isArray(labels) && labels.length > 0;
+  const place = has ? String(placing ?? "").trim() : "";
+  const labeled = has ? ` Labels, each set once and spelled exactly: ${labels!.map((l) => `"${l}"`).join("; ")}.${place ? ` Where the labels sit: ${place}.` : ""}` : "";
+  const lines = [`Headline, spelled exactly: "${copy[0]}"`, ...copy.slice(1).map((t) => `Second line, spelled exactly: "${t}"`)].join(" ") + labeled;
   // The person's note, after the picture; the logo stays the brand's own file in its spot.
   const note = String(g.note ?? "").trim();
   const noted = note ? `Follow this note from the person who asked for the design, keeping the logo exactly as it is: "${note}". ` : "";
   const refsWord = refCount === 1 ? "the other image, which is" : `the other ${numberWord(refCount)} images, which are`;
+  // The client's posts give the look alone; the picture is the planned one, drawn new.
+  const look = lookOnly(refCount, g.brand_name);
   if (g.video_card) {
     // The cards open and close a vertical video; the end card follows the cover's look.
     const which = g.video_card === "cover" ? "the opening card" : "the closing card";
@@ -58,19 +67,19 @@ export function designPrompt(g: Pick<GenerateInput, "brand_name" | "platform" | 
       : refsWord;
     return `The first image is the canvas for ${which} of a new ${g.brand_name} ${g.platform} vertical video (9:16). Its logo is final: keep it exactly as it is, where it is. ` +
       cover +
-      `Design the card around the logo in the visual language of ${refs} ${g.brand_name}'s own posts, filling the tall frame. The picture shows ${g.concept}. ${noted}` +
+      `Design the card around the logo in the look of ${refs} ${g.brand_name}'s own posts, filling the tall frame. ${look} The picture shows ${g.concept}. ${noted}` +
       `${lines} Add no other text and no other logo. ${SHARP}`;
   }
   if (g.surface === STORY_SURFACE) {
     // Seen full screen for a few seconds: the picture fills the tall frame, the words stay in Meta's band.
     const pct = (n: number) => `${Math.round(n * 100)}%`;
     return `The first image is the canvas for a new ${g.brand_name} ${g.platform} Story (9:16), seen full screen on a phone. Its logo is final: keep it exactly as it is, where it is. ` +
-      `Design the whole Story around it in the visual language of ${refsWord} ${g.brand_name}'s own posts, the picture filling the tall frame from edge to edge. The picture shows ${g.concept}. ${noted}` +
+      `Design the whole Story around it in the look of ${refsWord} ${g.brand_name}'s own posts, the picture filling the tall frame from edge to edge. ${look} The picture shows ${g.concept}. ${noted}` +
       `${lines} Every word sits inside the band that leaves out the top ${pct(STORY_SAFE.top)}, the bottom ${pct(STORY_SAFE.bottom)} and ${pct(STORY_SAFE.left)} at each side of the frame. Add no other text and no other logo. ${SHARP}`;
   }
   if (!slide) {
     return `The first image is the canvas for a new ${g.brand_name} ${g.platform} post (4:5). Its logo is final: keep it exactly as it is, where it is. ` +
-      `Design the whole post around it in the visual language of ${refsWord} ${g.brand_name}'s own posts. The picture shows ${g.concept}. ${noted}` +
+      `Design the whole post around it in the look of ${refsWord} ${g.brand_name}'s own posts. ${look} The picture shows ${g.concept}. ${noted}` +
       `${lines} Add no other text and no other logo. ${SHARP}`;
   }
   const which = slide.index === 0 ? `the cover, slide 1 of ${slide.count}` : `slide ${slide.index + 1} of ${slide.count}`;
@@ -82,8 +91,20 @@ export function designPrompt(g: Pick<GenerateInput, "brand_name" | "platform" | 
     : refsWord;
   return `The first image is the canvas for ${which} of a new ${g.brand_name} ${g.platform} carousel (4:5). Its logo is final: keep it exactly as it is, where it is. ` +
     cover +
-    `Design the slide around the logo in the visual language of ${refs} ${g.brand_name}'s own posts. The picture shows ${g.concept}. ${noted}` +
-    `${lines} Add no other text, no slide numbers and no other logo. ${SHARP}`;
+    `Design the slide around the logo in the look of ${refs} ${g.brand_name}'s own posts. ${look} The picture shows ${g.concept}. ${noted}` +
+    `${lines} Add no other text, no slide numbers${has ? " other than the labels given" : ""} and no other logo. ${SHARP}`;
+}
+
+/**
+ * What the image model takes from the client's posts it is shown: their look
+ * and nothing else. What must be new is the scene: a person, a place, props
+ * and the composition of a past post are never reproduced; the client's own
+ * product, packaging or app may appear as its posts show it.
+ */
+function lookOnly(refCount: number, brand: string): string {
+  const [those, their, show] = refCount === 1 ? ["that post's", "its", "that post shows"] : ["those posts'", "their", "those posts show"];
+  return `Take ${those} look and nothing else: ${their} colors, ${their} type treatment and ${their} layout style, which is how type and picture are arranged (where the headline sits, panels, margins), never the picture's own scene. ` +
+    `The scene is a new one, drawn for this design: do not reproduce a person, a place, the props or the composition ${show}. ${brand}'s own product, packaging or app may appear as ${show} it, when the picture calls for it.`;
 }
 
 /**

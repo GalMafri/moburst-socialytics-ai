@@ -141,15 +141,21 @@ describe("leastRecentPosts", () => {
     expect(leastRecentPosts(library, [...recent, { refs: ["b.jpg", "d.jpg"], layout: null, picture: "oldest" }])).toEqual(["b.jpg", "d.jpg"]);
     expect(leastRecentPosts(["a.jpg", "c.jpg"], recent)).toEqual(["c.jpg", "a.jpg"]);
   });
-  it("gives each brief without chosen posts different posts, and keeps the planner's choices", () => {
+  it("gives each brief different posts when the planner chose none for any", () => {
+    const briefs = withRefs([
+      { headline: ["one"], picture: "p1" },
+      { headline: ["two"], picture: "p2" },
+    ], library, []);
+    expect(briefs[0].refs).toEqual(["a.jpg", "b.jpg"]);
+    expect(briefs[1].refs).toEqual(["c.jpg", "d.jpg"]);
+  });
+  it("keeps the planner's choices, and gives a brief without any the posts chosen for the others", () => {
     const briefs = withRefs([
       { headline: ["one"], picture: "p1" },
       { headline: ["two"], picture: "p2", refs: ["a.jpg"] },
       { headline: ["three"], picture: "p3" },
     ], library, []);
-    expect(briefs[0].refs).toEqual(["a.jpg", "b.jpg"]);
-    expect(briefs[1].refs).toEqual(["a.jpg"]);
-    expect(briefs[2].refs).toEqual(["c.jpg", "d.jpg"]);
+    expect(briefs.map((b) => b.refs)).toEqual([["a.jpg"], ["a.jpg"], ["a.jpg"]]);
   });
 });
 
@@ -234,9 +240,9 @@ describe("the visual the calendar planned for the post", () => {
 
   it("makes the picture the plan's subject, and no longer asks for a subject of the chosen posts' kind", () => {
     for (const p of [plannerPrompt({ ...base, visual }), carouselPlannerPrompt({ ...base, slides: 5, visual })]) {
-      expect(p).toContain("picture: one sentence describing the picture behind the words: the planned visual's subject and setting, in the materials, light and composition of the posts you chose.");
+      expect(p).toContain("picture: one sentence describing the picture behind the words: the planned visual's subject and setting, as a new scene in the picture style of Northwind's posts (photograph, illustration or render, with their light and colors).");
       expect(p).not.toContain("using the kinds of subjects");
-      expect(p).toContain("It holds no lettering");
+      expect(p).toContain("The picture itself holds no lettering");
     }
   });
 
@@ -253,7 +259,7 @@ describe("the visual the calendar planned for the post", () => {
       expect(carousel).toBe(carouselPlannerPrompt({ ...base, slides: 5 }));
       expect(single).not.toContain("planned");
       expect(carousel).not.toContain("planned");
-      expect(single).toContain("using the kinds of subjects, materials, light and composition of the posts you chose, with a subject the recent designs did not show.");
+      expect(single).toContain("a new scene made for this post's message, in the picture style of Northwind's posts (photograph, illustration or render, with their light and colors), with a subject the recent designs did not show.");
       expect(single).toContain("The options differ from each other in layout or picture, and in headline. Put the strongest first");
     }
     expect(plannedVisualLine("Northwind", null)).toBe("");

@@ -30,7 +30,17 @@ export const BRIEFS_PLANNED = 3;
 export interface Slide {
   /** The words set on the slide: one line, optionally a shorter second line. */
   headline: string[];
-  /** The picture, described positively in the client's own visual vocabulary. */
+  /**
+   * The lettering the post's planned visual calls for beyond the headline
+   * (list items, labels, numbers), in the plan's own words. Only the first
+   * option of a plan may carry any (firstOnlyLabels). Absent for a design
+   * that carries its headline only: every design of a post with no planned
+   * visual, and every brief from before 17 Nov 2026.
+   */
+  labels?: string[];
+  /** Where the labels sit, in a few words ("one in each square"). Only beside labels; the picture never says. */
+  placing?: string;
+  /** The picture: the scene alone, described positively, with no word about lettering. */
   picture: string;
 }
 
@@ -87,11 +97,19 @@ export function leastRecentPosts(library: string[], recent: RecentDesign[], coun
   return [...library].map((p, i) => ({ p, i })).sort((a, b) => rank(a.p) - rank(b.p) || a.i - b.i).slice(0, count).map((x) => x.p);
 }
 
-/** Every brief builds on posts the planner chose, or else on the least recently used ones. */
+/**
+ * Every brief builds on posts the planner chose. One it named none for
+ * builds on the posts the same reply chose for its other options (17 Nov
+ * 2026: they carry the look the planner read as the client's shared one,
+ * which the least recently used posts may not), and only a reply that chose
+ * none at all falls back to the least recently used ones.
+ */
 export function withRefs(briefs: Brief[], library: string[], recent: RecentDesign[]): Brief[] {
   const used: RecentDesign[] = [...recent];
-  return briefs.map((b) => {
+  return briefs.map((b, i) => {
     if (b.refs?.length) return b;
+    const chosen = [...new Set(briefs.flatMap((o, j) => (j !== i ? o.refs ?? [] : [])))].slice(0, MAX_POSTS_PER_DESIGN);
+    if (chosen.length) return { ...b, refs: chosen };
     const refs = leastRecentPosts(library, used);
     used.unshift({ refs, layout: null, picture: "" });
     return { ...b, refs };
@@ -107,39 +125,132 @@ function withChoice(brief: Brief, o: unknown, library: string[]): Brief {
 /** Slides in a carousel option: a cover with the hook, inner slides, and a closing slide. */
 export const CAROUSEL_SLIDES = 5;
 
-const MAX_HEADLINE_WORDS = 12;
+export const MAX_HEADLINE_WORDS = 12;
+/**
+ * The lettering a design may carry beyond its headline (17 Nov 2026, "Yes,
+ * allow more"): the labels its planned visual calls for. Labels over any of
+ * these are taken off and the option stays, with its headline only.
+ */
+export const MAX_LABELS = 6;
+export const MAX_LABEL_WORDS = 8;
+/** Most words on one design in all: its headline and its labels. */
+export const MAX_DESIGN_WORDS = 45;
+/** Most words saying where the labels sit; a longer placing is left out and the labels stay. */
+export const MAX_PLACING_WORDS = 20;
 
-function cleanSlide(o: unknown): Slide | null {
+const wordCount = (s: string) => s.split(" ").filter(Boolean).length;
+
+/** A slide's labels as words and numbers (a piece with neither is no label), [] when it has none, or null when they are not text or are over a limit. */
+function cleanLabels(raw: unknown): string[] | null {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw) || raw.some((l) => typeof l !== "string" && typeof l !== "number")) return null;
+  const labels = raw.map((l) => wordsOnly(String(l))).filter((l) => /[\p{L}\p{N}]/u.test(l));
+  return labels.length > MAX_LABELS || labels.some((l) => wordCount(l) > MAX_LABEL_WORDS) ? null : labels;
+}
+
+/** Where the labels sit, on one line without its closing period, or "" when the reply gives none or more than MAX_PLACING_WORDS. */
+function cleanPlacing(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  const placing = wordsOnly(raw).replace(/[.\s]+$/, "");
+  return wordCount(placing) > MAX_PLACING_WORDS ? "" : placing;
+}
+
+/**
+ * One slide of the planner's reply, or null when its headline or picture is
+ * not well formed. Labels are read only for a post with a planned visual
+ * (`withLabels`). Labels over a limit never drop the slide: it is kept with
+ * its headline only, and `over` says so.
+ */
+function readSlide(o: unknown, withLabels: boolean): { slide: Slide; over: boolean } | null {
   const headline = Array.isArray((o as Slide)?.headline) ? (o as Slide).headline.map((l) => wordsOnly(String(l))).filter(Boolean).slice(0, 2) : [];
   const picture = String((o as Slide)?.picture ?? "").replace(/\s+/g, " ").trim();
-  const words = headline.join(" ").split(" ").filter(Boolean).length;
+  const words = wordCount(headline.join(" "));
   if (!headline.length || !picture || words > MAX_HEADLINE_WORDS) return null;
-  return { headline, picture };
+  const plain = { headline, picture };
+  if (!withLabels) return { slide: plain, over: false };
+  const labels = cleanLabels((o as { labels?: unknown })?.labels);
+  if (!labels || words + labels.reduce((n, l) => n + wordCount(l), 0) > MAX_DESIGN_WORDS) return { slide: plain, over: true };
+  if (!labels.length) return { slide: plain, over: false };
+  const placing = cleanPlacing((o as { placing?: unknown })?.placing);
+  return { slide: { headline, labels, ...(placing ? { placing } : {}), picture }, over: false };
+}
+
+/** What a still's planner reply is read with. */
+export interface ParseOptions {
+  /** The post has a planned visual, so the first option may carry labels. Without one no option has any, whatever the reply holds. */
+  labels?: boolean;
+}
+
+const hasLabels = (b: Brief): boolean => !!b.labels?.length || !!b.slides?.some((x) => x.labels?.length);
+/** A slide with its headline only: its labels go, and with them where they sat. Its picture never spoke of them. */
+function unlabeled<T extends Slide>(x: T): T {
+  const copy = { ...x };
+  delete copy.labels;
+  delete copy.placing;
+  return copy;
+}
+const plainBrief = (b: Brief): Brief => ({ ...unlabeled(b), ...(b.slides ? { slides: b.slides.map(unlabeled) } : {}) });
+
+/**
+ * Only the first option of a plan may carry labels: every later option
+ * carries its headline only, whatever the planner replied. So labels cost a
+ * request at most the designs its first option may make, and when the image
+ * model cannot letter a list a plain design still arrives. A request starts
+ * `candidates` options at most, in order, and goes round the plan when it
+ * holds fewer (requestProgress); a plan whose first option is labeled is
+ * therefore filled up to `candidates` with plain copies of its own options,
+ * so the labeled one is started once and a plain one always follows. A plan
+ * with no labels is returned as it is.
+ */
+export function firstOnlyLabels(briefs: Brief[], candidates = MAX_CANDIDATES): Brief[] {
+  if (!briefs.some(hasLabels)) return briefs;
+  const out = briefs.map((b, i) => (i > 0 && hasLabels(b) ? plainBrief(b) : b));
+  if (!hasLabels(out[0])) return out;
+  for (let k = 0; out.length < candidates; k++) out.push(plainBrief(briefs[k % briefs.length]));
+  return out;
+}
+
+/** The options of a planner's reply, or null when it is not the JSON asked for. */
+function repliedOptions(text: string): unknown[] | null {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  let data: unknown;
+  try { data = JSON.parse(text.slice(start, end + 1)); } catch { return null; }
+  const raw = (data as { options?: unknown })?.options;
+  return Array.isArray(raw) ? raw : null;
 }
 
 /**
  * Carousel briefs from the planner's reply: options whose every slide is well
  * formed and which have the slides asked for. The option's headline and
- * picture are its cover's.
+ * picture are its cover's. Labels are each slide's own; an option with a
+ * slide over a limit is kept without any.
  */
-export function parseCarouselBriefs(text: string, slideCount = CAROUSEL_SLIDES, library: string[] = []): Brief[] {
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start < 0 || end <= start) return [];
-  let data: unknown;
-  try { data = JSON.parse(text.slice(start, end + 1)); } catch { return []; }
-  const raw = (data as { options?: unknown })?.options;
-  if (!Array.isArray(raw)) return [];
+export function parseCarouselBriefs(text: string, slideCount = CAROUSEL_SLIDES, library: string[] = [], opts: ParseOptions = {}): Brief[] {
+  const raw = repliedOptions(text);
+  if (!raw) return [];
   const out: Brief[] = [];
   for (const o of raw) {
     const list = (o as { slides?: unknown })?.slides;
     if (!Array.isArray(list)) continue;
-    const slides = list.map(cleanSlide);
-    if (slides.length !== slideCount || slides.some((x) => !x)) continue;
-    const clean = slides as Slide[];
-    out.push(withChoice({ ...clean[0], slides: clean }, o, library));
+    const read = list.map((x) => readSlide(x, !!opts.labels));
+    if (read.length !== slideCount || read.some((x) => !x)) continue;
+    const slides = read.map((x) => x!.slide);
+    const brief: Brief = { ...slides[0], slides };
+    out.push(withChoice(read.some((x) => x!.over) ? plainBrief(brief) : brief, o, library));
   }
-  return out;
+  return opts.labels ? firstOnlyLabels(out) : out;
+}
+
+/**
+ * A still's briefs from the planner's reply, for a single design or a
+ * carousel. Its options may carry labels only when its post has a planned
+ * visual: the one place that decides it (design-request).
+ */
+export function stillBriefs(text: string, args: { carousel: boolean; library: string[]; visual?: string | null; slides?: number }): Brief[] {
+  const opts: ParseOptions = { labels: !!String(args.visual ?? "").trim() };
+  return args.carousel ? parseCarouselBriefs(text, args.slides ?? CAROUSEL_SLIDES, args.library, opts) : parseBriefs(text, args.library, opts);
 }
 
 /**
@@ -163,7 +274,7 @@ export function parseVideoBriefs(text: string, library: string[] = [], opts: { f
       out.push({ headline: [], picture: footage, footage, text_style: "" });
       continue;
     }
-    const hook = cleanSlide({ headline: o?.headline, picture: footage || (opts.filmed ? "the filmed clip" : "") });
+    const hook = readSlide({ headline: o?.headline, picture: footage || (opts.filmed ? "the filmed clip" : "") }, false)?.slide;
     const textStyle = String(o?.text ?? "").replace(/\s+/g, " ").trim().slice(0, 300);
     // A filmed clip is the footage, so a filmed plan has no footage of its own.
     if (!hook || (!opts.filmed && footage.length < 20) || textStyle.length < 10) continue;
@@ -173,23 +284,15 @@ export function parseVideoBriefs(text: string, library: string[] = [], opts: { f
 }
 
 /** Briefs from the planner's reply, keeping only well-formed ones. */
-export function parseBriefs(text: string, library: string[] = []): Brief[] {
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start < 0 || end <= start) return [];
-  let data: unknown;
-  try { data = JSON.parse(text.slice(start, end + 1)); } catch { return []; }
-  const raw = (data as { options?: unknown })?.options;
-  if (!Array.isArray(raw)) return [];
+export function parseBriefs(text: string, library: string[] = [], opts: ParseOptions = {}): Brief[] {
+  const raw = repliedOptions(text);
+  if (!raw) return [];
   const out: Brief[] = [];
   for (const o of raw) {
-    const headline = Array.isArray((o as Brief)?.headline) ? (o as Brief).headline.map((l) => wordsOnly(String(l))).filter(Boolean).slice(0, 2) : [];
-    const picture = String((o as Brief)?.picture ?? "").replace(/\s+/g, " ").trim();
-    const words = headline.join(" ").split(" ").filter(Boolean).length;
-    if (!headline.length || !picture || words > MAX_HEADLINE_WORDS) continue;
-    out.push(withChoice({ headline, picture }, o, library));
+    const read = readSlide(o, !!opts.labels);
+    if (read) out.push(withChoice(read.slide, o, library));
   }
-  return out;
+  return opts.labels ? firstOnlyLabels(out) : out;
 }
 
 export type JobState = { status: "queued" | "running" | "done" | "failed" | "canceled"; step: string };
@@ -286,31 +389,89 @@ export function noteLine(note: string | null | undefined): string {
 /**
  * The visual the calendar planned for this post. The team reads it there and
  * expects the design to be it, so the planner builds every option on it: what
- * is shown comes from the plan, the look comes from the client's posts. A
- * design holds a headline and no other lettering, so a plan that asks for
- * more (a list, labels, a screen with writing) gives its main line.
+ * is shown comes from the plan, the look comes from the client's posts. The
+ * lettering a plan calls for beyond the headline (a list's items, labels,
+ * numbers) is the first option's labels (17 Nov 2026; until then the planner
+ * was told to leave it out). Colors the plan names are the design's; where
+ * it names none, the client's own.
  */
 export function plannedVisualLine(brand: string, visual: string | null | undefined): string {
   const v = String(visual ?? "").replace(/\s+/g, " ").trim();
   if (!v) return "";
-  return `The team planned this visual for the post and expects the design to be it: """${v}""". Every option shows it. The picture is its subject, setting and colors, in the look of ${brand}'s posts. Where it gives words for the design in quotation marks, the headline is those words exactly, as far as the headline's length allows, never a rewrite of them. Where it asks for more lettering than a headline holds (a list, labels, a screen with writing), the headline carries its main line and the picture shows its subject without lettering. The posts you choose give the layout and the style; the planned visual gives what is shown.`;
+  return `The team planned this visual for the post and expects the design to be it: """${v}""". Every option shows it. The picture is its subject and setting, in the look of ${brand}'s posts. Where it names colors, the design uses those colors; otherwise ${brand}'s own. Where it gives words for the design in quotation marks, the headline is those words exactly, as far as the headline's length allows, never a rewrite of them. Where it calls for lettering beyond the headline (list items, labels, numbers), those pieces are the first option's labels, in the planned visual's own words; words it gives as a label or a list item are labels also when they are in quotation marks, never the headline. The posts you choose give the layout and the style; the planned visual gives what is shown.`;
 }
 
-/** How the picture line opens: the plan's subject when the post has a planned visual, else a subject in the kind the chosen posts show. */
-function pictureLead(visual: string | null | undefined): string {
+/**
+ * What a still takes from the client's posts (17 Nov 2026): the look and
+ * nothing else. Until then each design was a close remake of one chosen
+ * post (its people, objects and composition with a detail changed), and a
+ * post unlike the client's others (a themed one) gave its look to a design
+ * on an unrelated subject. Which posts share the look is the planner's
+ * reading of the posts it is shown, anchored in the colors the app holds
+ * (design/brandLook.ts); nothing in code measures a post. What must be new
+ * is the scene: a person, a place, props and the composition of a past post
+ * are never reproduced, while the client's own product, packaging or app
+ * may appear as its posts show it when the post is about it.
+ */
+export function sharedLookRule(brand: string): string {
+  return `${brand}'s posts set the look of a new design and nothing else: the colors, the type treatment and the layout style. Layout style is how type and picture are arranged (where the headline sits, panels, margins), never the picture's own scene. Every option is built on the look most of the posts share. A post that looks unlike most of the others (other colors, other lettering, a themed or seasonal treatment) is a one-off: an option is built on a one-off only when this new post is about the same subject that one-off was made for. The scene is new every time: no option reproduces a person, a place, the props or the composition of a past post. ${brand}'s own product, packaging or app, as its posts show it, may appear when this post is about it.`;
+}
+
+/** How the picture line opens: a new scene, the plan's subject when the post has a planned visual, in the picture style of the client's posts. */
+function pictureLead(brand: string, visual: string | null | undefined): string {
+  const style = `the picture style of ${brand}'s posts (photograph, illustration or render, with their light and colors)`;
+  const fresh = "It never reproduces a person, a place, the props or the composition of a past post.";
   return String(visual ?? "").trim()
-    ? "one sentence describing the picture behind the words: the planned visual's subject and setting, in the materials, light and composition of the posts you chose."
-    : "one sentence describing the picture behind the words, using the kinds of subjects, materials, light and composition of the posts you chose, with a subject the recent designs did not show.";
+    ? `one sentence describing the picture behind the words: the planned visual's subject and setting, as a new scene in ${style}. ${fresh}`
+    : `one sentence describing the picture behind the words: a new scene made for this post's message, in ${style}, with a subject the recent designs did not show. ${fresh}`;
 }
 
+const planned = (visual: string | null | undefined): boolean => !!String(visual ?? "").trim();
+
+/** The picture is the scene alone: it holds no lettering and says nothing of the words set on the design. */
+function pictureLettering(visual: string | null | undefined): string {
+  return `The picture itself holds no lettering, numbers, signs, screens with writing, logos or brand marks, and names no brand: ${planned(visual) ? "the headline and the labels are the only words on the design, and the picture says nothing of them" : "the headline is the only lettering on the design"}.`;
+}
+
+/** No real person in a picture, whatever the client's posts show. */
+const NO_PERSON = "It shows no real or identifiable person and no portrait standing in for one: where the picture would show a real person, use an object, a scene or hands instead.";
+
+/** The labels the first option may carry, asked for only of a post with a planned visual; "" without one. */
+function labelsAsk(visual: string | null | undefined): string {
+  return planned(visual)
+    ? `labels: only on the first option, and only when the planned visual calls for lettering beyond the headline (list items, labels, numbers): those pieces in the planned visual's own words, one label for each piece. Words and numbers only: no symbols and no emoji. At most ${MAX_LABELS} labels, each of at most ${MAX_LABEL_WORDS} words, and at most ${MAX_DESIGN_WORDS} words on the design with the headline; when the planned visual calls for more, give the pieces that carry its point within these limits. Leave labels out when the planned visual calls for no lettering beyond the headline.`
+    : "";
+}
+
+/** Where the labels sit, asked for beside them and kept out of the picture; "" for a post with no planned visual. */
+function placingAsk(visual: string | null | undefined): string {
+  return planned(visual) ? `placing: only with labels: where the labels sit, in at most ${MAX_PLACING_WORDS} words, for example "stacked under the headline" or "one in each square".` : "";
+}
+
+/** Only the first option may carry labels (firstOnlyLabels holds it); "" for a post with no planned visual. */
+function laterOptionsPlain(visual: string | null | undefined, carousel = false): string {
+  if (!planned(visual)) return "";
+  return carousel
+    ? "Only the first option may carry labels, each slide its own. Every later option carries each slide's headline only, with no labels and no placing, so a design is made even when the labels cannot be set."
+    : "Only the first option may carry labels. Every later option carries the headline only, with no labels and no placing, so a design is made even when the labels cannot be set.";
+}
+
+/** The posts a still is built on: two that carry the shared look, so what they have in common is the look and not one post's scene. */
+const CHOOSE_LOOK_POSTS = (brand: string) =>
+  `- posts: the numbers of two of ${brand}'s posts that carry the shared look and show different scenes from each other, with a layout that suits what this post says (a quote suits a quote layout, a comparison or list a comparison or list layout, a product or feature a product layout, a statement a statement layout); one post when no second one fits. They give the colors, the type treatment and the layout style, never the picture. A one-off is chosen only when this post is about the subject it was made for. When the recent designs were built on a post and another suits the content as well, choose the other.\n` +
+  `- layout: a few words naming the layout of the posts you chose.`;
+
+/** The posts a video's hook takes its type from. */
 const CHOOSE_POSTS = (brand: string) =>
   `- posts: the numbers of one or two of ${brand}'s posts whose layout suits what this post says (a quote suits a quote layout, a comparison or list a comparison or list layout, a product or feature a product layout, a statement a statement layout). When the recent designs were built on a post and another suits the content as well, choose the other.\n` +
   `- layout: a few words naming the layout of the posts you chose.`;
 
 /** The planner's instruction for carousels: every option is a set of slides read in order. */
-export function carouselPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; slides: number; postCount: number; recent: string; guidance?: string; otherPlatforms?: boolean; note?: string | null; visual?: string | null }): string {
+export function carouselPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; slides: number; postCount: number; recent: string; guidance?: string; otherPlatforms?: boolean; note?: string | null; visual?: string | null; colors?: string }): string {
   return [
     `The images are ${args.brand}'s own published posts, numbered Post 1 to Post ${args.postCount}.`,
+    sharedLookRule(args.brand),
+    args.colors ?? "",
     otherPlatformsLine(args),
     args.recent,
     args.guidance ?? "",
@@ -321,12 +482,17 @@ export function carouselPlannerPrompt(args: { brand: string; platform: string; c
     noteLine(args.note),
     `Each option has exactly ${args.slides} slides, read in order. Slide 1 carries the hook. The middle slides each carry one point from the copy, in the copy's order. The last slide closes with the copy's call to action or takeaway.${String(args.visual ?? "").trim() ? " Where the planned visual says what each slide shows or says, the slides follow it in that order." : ""}`,
     "For each option give:",
-    CHOOSE_POSTS(args.brand),
+    CHOOSE_LOOK_POSTS(args.brand),
     "- slides, and for each slide:",
     `  - headline: the words set on that slide, written in ${args.brand}'s voice from the copy, in the copy's language. One line of at most 8 words, optionally a second, shorter line. Words only: an emoji stays in the post's copy.`,
-    `  - picture: ${pictureLead(args.visual)} Describe what is in the picture, all of it in sharp focus. It holds no lettering, numbers, signs, screens with writing, logos or brand marks, and names no brand. It shows no real or identifiable person and no portrait standing in for one: where a chosen post has a person, use an object, a scene or hands instead. The slides of one option share one setting and look, so they read as a series, and each slide shows a different subject or moment, so no two slides repeat a picture.`,
+    labelsAsk(args.visual) ? `  - ${labelsAsk(args.visual)}` : "",
+    placingAsk(args.visual) ? `  - ${placingAsk(args.visual)}` : "",
+    `  - picture: ${pictureLead(args.brand, args.visual)} Describe what is in the picture, all of it in sharp focus. ${pictureLettering(args.visual)} ${NO_PERSON} The slides of one option share one setting and look, so they read as a series, and each slide shows a different subject or moment, so no two slides repeat a picture.`,
     "The options differ from each other in layout or setting, and in wording. Put the strongest first: it is the one that will be made, so it should be the one you would publish.",
-    `Reply with JSON only: {"options":[{"posts":[2],"layout":"...","slides":[{"headline":["line one","optional line two"],"picture":"..."}]}]}`,
+    laterOptionsPlain(args.visual, true),
+    planned(args.visual)
+      ? `Reply with JSON only: {"options":[{"posts":[2,5],"layout":"...","slides":[{"headline":["line one","optional line two"],"labels":["...","..."],"placing":"...","picture":"..."}]},{"posts":[4,7],"layout":"...","slides":[{"headline":["line one","optional line two"],"picture":"..."}]}]}`
+      : `Reply with JSON only: {"options":[{"posts":[2,5],"layout":"...","slides":[{"headline":["line one","optional line two"],"picture":"..."}]}]}`,
   ].filter(Boolean).join("\n");
 }
 
@@ -624,12 +790,15 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
 
 /**
  * The planner's instruction. The pictures it writes go to the image model as
- * they are. A Story (story: true) gets one line more; its headline limits are
+ * they are. `colors` is the line of color facts the app holds about the
+ * client (design/brandLook.ts, brandColorsLine), "" when it holds none. A Story (story: true) gets one line more; its headline limits are
  * a feed post's.
  */
-export function plannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; postCount: number; recent: string; guidance?: string; story?: boolean; otherPlatforms?: boolean; note?: string | null; visual?: string | null }): string {
+export function plannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; postCount: number; recent: string; guidance?: string; story?: boolean; otherPlatforms?: boolean; note?: string | null; visual?: string | null; colors?: string }): string {
   return [
     `The images are ${args.brand}'s own published posts, numbered Post 1 to Post ${args.postCount}.`,
+    sharedLookRule(args.brand),
+    args.colors ?? "",
     otherPlatformsLine(args),
     args.recent,
     args.guidance ?? "",
@@ -640,10 +809,15 @@ export function plannerPrompt(args: { brand: string; platform: string; copy: str
     args.story ? "This post is a Story: its frame is seen full screen for a few seconds, so the headline carries the message, and a second line may carry the call to action." : "",
     noteLine(args.note),
     "For each option give:",
-    CHOOSE_POSTS(args.brand),
+    CHOOSE_LOOK_POSTS(args.brand),
     `- headline: the words that will be set on the design, written in ${args.brand}'s voice from the post's message, in the copy's language. One line of at most 8 words, optionally a second, shorter line. Words only: an emoji stays in the post's copy.`,
-    `- picture: ${pictureLead(args.visual)} Describe what is in the picture, all of it in sharp focus. It holds no lettering, numbers, signs, screens with writing, logos or brand marks, and names no brand. It shows no real or identifiable person and no portrait standing in for one: where a chosen post has a person, use an object, a scene or hands instead.`,
+    labelsAsk(args.visual) ? `- ${labelsAsk(args.visual)}` : "",
+    placingAsk(args.visual) ? `- ${placingAsk(args.visual)}` : "",
+    `- picture: ${pictureLead(args.brand, args.visual)} Describe what is in the picture, all of it in sharp focus. ${pictureLettering(args.visual)} ${NO_PERSON}`,
     `The options differ from each other in layout or picture, and in headline${String(args.visual ?? "").trim() ? " where the planned visual does not give the words" : ""}. Put the strongest first: it is the one that will be made, so it should be the one you would publish.`,
-    'Reply with JSON only: {"options":[{"posts":[2],"layout":"...","headline":["line one","optional line two"],"picture":"..."}]}',
+    laterOptionsPlain(args.visual),
+    planned(args.visual)
+      ? 'Reply with JSON only: {"options":[{"posts":[2,5],"layout":"...","headline":["line one","optional line two"],"labels":["...","..."],"placing":"...","picture":"..."},{"posts":[4,7],"layout":"...","headline":["line one","optional line two"],"picture":"..."}]}'
+      : 'Reply with JSON only: {"options":[{"posts":[2,5],"layout":"...","headline":["line one","optional line two"],"picture":"..."}]}',
   ].filter(Boolean).join("\n");
 }

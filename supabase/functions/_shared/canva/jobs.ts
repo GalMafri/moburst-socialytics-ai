@@ -198,6 +198,8 @@ export async function startOption(admin: any, req: DesignRequest, given: Setting
       // The files finish may stamp, in order: the ground under the slot chooses among them (17 Nov 2026).
       ...(start.logos && start.stamp ? { stamp: start.stamp } : {}),
       copy: slide.headline,
+      // The lettering beyond the headline, when the planned visual calls for any (options.ts); checked with the headline (pipeline.ts, wordsMatch).
+      ...(slide.labels?.length ? { labels: slide.labels, ...(slide.placing ? { placing: slide.placing } : {}) } : {}),
       placement: story ? storyLogoPlacement(settings.placement, lw, lh) : settings.placement,
       title: `${brandName} ${req.platform ?? ""} option ${optionIndex + 1}${carousel ? ` slide ${i + 1}` : ""}`.replace(/\s+/g, " "),
       layout: brief.layout ?? null,

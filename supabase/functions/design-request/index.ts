@@ -34,11 +34,12 @@ import { createClient } from "../_shared/supabase.ts";
 import { AuthzError, requireStaff, requireStaffOrSystem } from "../_shared/auth/requireStaff.ts";
 import { requireMember } from "../_shared/auth/requireMember.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
-import { BRIEFS_PLANNED, CAROUSEL_SLIDES, OPTIONS_WANTED, type RecentDesign, carouselPlannerPrompt, filmedNeed, parseBriefs, parseShotBrief, shotBriefPrompt, parseCarouselBriefs, parseVideoBriefs, plannerPrompt, recentLines, videoPlannerPrompt, withRefs } from "../_shared/canva/options.ts";
+import { BRIEFS_PLANNED, CAROUSEL_SLIDES, OPTIONS_WANTED, type RecentDesign, carouselPlannerPrompt, filmedNeed, parseShotBrief, shotBriefPrompt, parseVideoBriefs, plannerPrompt, recentLines, stillBriefs, videoPlannerPrompt, withRefs } from "../_shared/canva/options.ts";
 import { type DesignRequest, type Settings, endRequest, startOption } from "../_shared/canva/jobs.ts";
 import { canFilm, filmingOutcome, postInstant } from "../_shared/design/requestRules.ts";
 import { currentCopyOf, designKind, type PassStart } from "../_shared/design/weekRules.ts";
 import { isStoryPost } from "../_shared/design/story.ts";
+import { brandColors, brandColorsLine } from "../_shared/design/brandLook.ts";
 import { wakeWorker, wakeVideoWorker } from "../_shared/canva/worker.ts";
 import { DESIGN_ANGLE } from "../_shared/canva/jobs.ts";
 import { learnFromNote, learningLines, recordFeedback } from "../_shared/design-prompts/feedback.ts";
@@ -293,8 +294,10 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
   const video = request.kind === "video";
   const common = { brand, platform: request.platform ?? "social", copy: request.post_copy, voice, count: BRIEFS_PLANNED, postCount: library.length, recent, guidance, otherPlatforms, note: request.note ?? null, visual: (request as any).visual_direction ?? null };
   const filmed = video && request.footage_path ? (request.on_camera || "the speaker") : null;
-  const instruction = video ? videoPlannerPrompt({ ...common, visual: (request as any).visual_direction ?? null, filmed, style: videoStyle?.profile ?? null, videos: videoStyle?.videos, framesPer: videoStyle?.frames_per_video }) : carousel ? carouselPlannerPrompt({ ...common, slides: CAROUSEL_SLIDES }) : plannerPrompt({ ...common, story: isStoryPost(request) });
-  let briefs = [] as ReturnType<typeof parseBriefs>;
+  // The colors the app holds about the client, so a still's planner tells the look its posts share from a one-off (brandLook.ts).
+  const colors = brandColorsLine(brand, brandColors(settings, client?.brand_identity));
+  const instruction = video ? videoPlannerPrompt({ ...common, visual: (request as any).visual_direction ?? null, filmed, style: videoStyle?.profile ?? null, videos: videoStyle?.videos, framesPer: videoStyle?.frames_per_video }) : carousel ? carouselPlannerPrompt({ ...common, colors, slides: CAROUSEL_SLIDES }) : plannerPrompt({ ...common, colors, story: isStoryPost(request) });
+  let briefs = [] as ReturnType<typeof stillBriefs>;
   for (let attempt = 0; attempt < 2 && briefs.length < OPTIONS_WANTED; attempt++) {
     const result = await anthropicMessages({
       apiKey,
@@ -304,7 +307,7 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
         messages: [{ role: "user", content: [...content, { type: "text", text: instruction }] }],
       },
     });
-    briefs = video ? parseVideoBriefs(result.text, videoStyle ? [] : library, { filmed: !!filmed, textless: !!videoStyle && videoStyle.profile?.on_screen_text === "none" }) : carousel ? parseCarouselBriefs(result.text, CAROUSEL_SLIDES, library) : parseBriefs(result.text, library);
+    briefs = video ? parseVideoBriefs(result.text, videoStyle ? [] : library, { filmed: !!filmed, textless: !!videoStyle && videoStyle.profile?.on_screen_text === "none" }) : stillBriefs(result.text, { carousel, library, visual: common.visual });
   }
   if (!briefs.length) throw new Error("The options could not be planned.");
   briefs = withRefs(briefs, library, recentList);
