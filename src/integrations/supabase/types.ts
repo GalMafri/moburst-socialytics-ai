@@ -4658,6 +4658,9 @@ export type Database = {
       get_user_detail: {
         Args: { p_email: string }
         Returns: {
+          amount: number
+          at: string
+          kind: string
           metric: string
           tone: string
           value: string
@@ -4743,6 +4746,7 @@ export type Database = {
         }
       }
       open_picture_call: { Args: never; Returns: string }
+      posting_time_hhmm: { Args: { t: string }; Returns: string }
       purge_raw_events: {
         Args: { p_keep_months?: number }
         Returns: {
@@ -4887,16 +4891,11 @@ export type Database = {
         }[]
       }
       set_design_logo_other: {
-        Args: { p_client: string; p_path: string | null }
+        Args: { p_client: string; p_path: string }
         Returns: undefined
       }
       settle_design_logo_set: {
-        Args: {
-          p_client: string
-          p_of: string
-          p_person: Json | null
-          p_set: Json
-        }
+        Args: { p_client: string; p_of: string; p_person: Json; p_set: Json }
         Returns: boolean
       }
       sprout_brand_decline: {
