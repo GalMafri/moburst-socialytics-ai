@@ -1989,40 +1989,58 @@ export type Database = {
       }
       design_reference_reviews: {
         Row: {
+          caption_hash: string | null
           client_id: string
           confidence: number | null
           content_hash: string | null
+          evidence: string | null
+          kind: string | null
           network: string
+          occasion: string | null
           path: string | null
           posted_at: string | null
+          profile_id: string | null
           reason: string | null
           reviewed_at: string
+          rule: number
           source_post_id: string
           source_url: string | null
           verdict: string
         }
         Insert: {
+          caption_hash?: string | null
           client_id: string
           confidence?: number | null
           content_hash?: string | null
+          evidence?: string | null
+          kind?: string | null
           network?: string
+          occasion?: string | null
           path?: string | null
           posted_at?: string | null
+          profile_id?: string | null
           reason?: string | null
           reviewed_at?: string
+          rule?: number
           source_post_id: string
           source_url?: string | null
           verdict: string
         }
         Update: {
+          caption_hash?: string | null
           client_id?: string
           confidence?: number | null
           content_hash?: string | null
+          evidence?: string | null
+          kind?: string | null
           network?: string
+          occasion?: string | null
           path?: string | null
           posted_at?: string | null
+          profile_id?: string | null
           reason?: string | null
           reviewed_at?: string
+          rule?: number
           source_post_id?: string
           source_url?: string | null
           verdict?: string

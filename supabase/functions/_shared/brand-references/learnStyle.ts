@@ -10,19 +10,29 @@
 // opens a page.
 //
 // The weekly check (design: docs/superpowers/specs/2026-11-02-design-refs-
-// refresh-design.md): one Sprout read; new posts reviewed (discover.ts); the
-// library picked per platform (corpus.ts); the look learned again only when
-// the library changes by two posts, a platform reaches its minimum, or a
-// person keeps, leaves out or uploads a post. Otherwise no model is called.
-// The rulebook reads the library newest first, each image labeled with its
-// platform and date, with the previous rulebook: a core, one section per
-// platform with enough posts, and whether the newest posts show a new look.
+// refresh-design.md; the library's rules: docs/superpowers/plans/2026-11-17-
+// reference-library.md and corpus.ts): a Sprout read of 90 days; reviews of
+// posts the read no longer returns are removed; posts are reviewed
+// (discover.ts); the library is picked (corpus.ts). A library a person chose
+// is exactly that; an automatic one holds everyday posts only, and when 90
+// days hold fewer than 3 the same check reads 365 days, one part of the year
+// per read, and remembers how far it got between runs. With 1 or 2 everyday
+// posts the library is those and the stored look stays; with none, the
+// client keeps its library. The look is learned again only when the library
+// changes by two posts, a platform reaches its minimum, or a person keeps,
+// leaves out or uploads a post. Otherwise no model is called. The rulebook
+// reads the library newest first, each image labeled with its platform and
+// date, with the previous rulebook: a core, one section per platform with
+// enough posts, and whether the newest posts show a new look.
 
 import { libraryEntries, postLabel, referencesFor, shortDay } from "../design-prompts/designRefs.ts";
-import { referenceFingerprint, sproutCandidates } from "./candidates.ts";
+import { type Candidate, referenceFingerprint, sproutCandidates } from "./candidates.ts";
 import { defaultSproutCustomerId } from "../sprout/customer.ts";
-import { anthropicKeyFor, type CheckIO, liveCheckIO, reviewPosts } from "./discover.ts";
-import { type Choice, choicesKey, qualifiedPlatforms, relearnReason, type Review, reviewQueue, type Selection, selectLibrary, type StoredEntry } from "./corpus.ts";
+import { anthropicKeyFor, type CheckIO, liveCheckIO, READ_CAP, READ_STOP_MS, reviewPosts, SLICE_START_BUDGET_MS } from "./discover.ts";
+import {
+  carriedCandidates, type Choice, choicesKey, type CorpusInput, occasionPosts, PIPELINE_VERSION, qualifiedPlatforms, relearnReason, type Review, reviewCounts, reviewQueue,
+  readVerdict, type Selection, selectLibrary, siblings, SLICE_DAYS, type StoredEntry, THIN_WINDOW_DAYS,
+} from "./corpus.ts";
 import { base64Bytes, brandBookFitsRequest } from "../brand/brandBookLimits.ts";
 import { StyleError } from "./errors.ts";
 import { anthropicFetch } from "../anthropic.ts";
@@ -189,7 +199,7 @@ export function rulebookRequestText(brand: string, sel: Pick<Selection, "platfor
   const earlier: Record<string, unknown> = {};
   for (const f of CORE_FIELDS) if (typeof p?.[f] === "string" && String(p[f]).trim()) earlier[f] = p[f];
   // Only sections learned from a platform's own posts carry forward (the older rulebooks wrote rules for platforms the brand never posted on).
-  if (p?.reference_pipeline_version === 2 && p.platforms && typeof p.platforms === "object") {
+  if (Number(p?.reference_pipeline_version) >= 2 && p?.platforms && typeof p.platforms === "object") {
     earlier.platforms = Object.fromEntries(Object.entries(p.platforms as Record<string, { rules?: unknown }>).filter(([, v]) => typeof v?.rules === "string").map(([k, v]) => [k, v.rules]));
   }
   lines.push(Object.keys(earlier).length
@@ -231,18 +241,50 @@ export function liveRefsIO(): RefsIO {
 
 export type RefreshOutcome =
   | { kind: "no_accounts" }
-  /** More posts to review than one run takes: the rest a minute later. */
-  | { kind: "in_progress"; reviewed: number; left: number }
-  /** Fewer than 3 designed posts in all: the last references stay. */
-  | { kind: "too_few"; designed: number; reviewed: number; posts_read: number }
+  /** More posts to review, or more of the year to read, than one run takes: the rest a minute later, from where `progress` says. */
+  | { kind: "in_progress"; reviewed: number; left: number; progress: RefsProgress }
+  /** Fewer than 3 everyday posts in all and no look learned yet: the last references stay. `detail` is what the check found, for the step's result. */
+  | { kind: "too_few"; designed: number; reviewed: number; posts_read: number; detail: Record<string, unknown> }
   // deno-lint-ignore no-explicit-any
   | { kind: "done"; result: Record<string, unknown>; synthesis: any; library: StoredEntry[] };
+
+/**
+ * How far a check has got, kept in the step's result between runs so the
+ * next run goes on from there and reads only what is left.
+ */
+export interface RefsProgress {
+  /** When the check began. */
+  at: string;
+  /**
+   * Once the check reads past 90 days: the first day (YYYY-MM-DD) it has
+   * already read and reviewed, back from today. The next run reads only the
+   * part of the year before it. Null while the check is still on the last 90 days.
+   */
+  covered_from: string | null;
+}
+
+/** A check is picked up where it stopped for this long; after that it starts again from the last 90 days. */
+const PROGRESS_FRESH_MS = 6 * 3_600_000;
+const dayOf = (d: Date) => d.toISOString().slice(0, 10);
+const dayStart = (day: string) => new Date(`${day}T00:00:00.000Z`);
+
+/** The progress a run may go on from, or null when there is none it can trust (none stored, too old, or outside the year being read). */
+export function resumable(value: unknown, now: Date): RefsProgress | null {
+  const p = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  const began = typeof p?.at === "string" ? Date.parse(p.at) : NaN;
+  if (!p || !Number.isFinite(began) || began > now.getTime() || now.getTime() - began > PROGRESS_FRESH_MS) return null;
+  if (p.covered_from == null) return { at: String(p.at), covered_from: null };
+  const day = typeof p.covered_from === "string" && /^\d{4}-\d{2}-\d{2}$/.test(p.covered_from) ? p.covered_from : "";
+  const newest = dayOf(new Date(now.getTime() - WINDOW_DAYS * DAY));
+  const oldest = dayOf(new Date(now.getTime() - THIN_WINDOW_DAYS * DAY));
+  return day && day <= newest && day >= oldest ? { at: String(p.at), covered_from: day } : null;
+}
 
 const asPaths = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && !!x) : []);
 
 async function readReviews(db: Db, clientId: string): Promise<Review[]> {
   const { data, error } = await db.from("design_reference_reviews")
-    .select("source_post_id, network, posted_at, source_url, content_hash, verdict, path, confidence, reason, reviewed_at").eq("client_id", clientId);
+    .select("source_post_id, network, posted_at, source_url, content_hash, verdict, path, confidence, reason, reviewed_at, kind, occasion, evidence, caption_hash, rule, profile_id").eq("client_id", clientId);
   if (error) throw new StyleError("provider", "The reviewed posts could not be read. It will be tried again.");
   return (data ?? []) as Review[];
 }
@@ -298,15 +340,37 @@ async function rulebookImages(db: Db, library: StoredEntry[]): Promise<{ content
   return { content, count };
 }
 
+/** Reviews removed in one request: a list of post ids longer than this is sent in parts. */
+const REMOVE_AT_ONCE = 100;
+
+/** What the lifecycle gives a check beside the client: the social read's scores, and where an earlier run of the same check stopped. */
+export interface RefreshOptions {
+  multiples?: Record<string, number>;
+  notNow?: string[];
+  /** The step's stored progress (RefsProgress), as it was left; anything else starts the check from the beginning. */
+  resume?: unknown;
+  /** How many runs of this check failed in a row before this one. */
+  failedBefore?: number;
+}
+
 /**
- * The weekly check of one client's design references. One Sprout read; new
- * posts that could reach the library reviewed; the library picked; the look
- * learned again only when it changed enough or a person chose. Writes the
- * library (clients.harvested_design_references and every settings row) and,
- * after a relearn, the rulebook. The last references stay whenever it cannot
- * finish.
+ * The weekly check of one client's design references. A Sprout read of 90
+ * days; when those hold fewer than 3 everyday posts, the rest of the year,
+ * one part of SLICE_DAYS per read; reviews of posts that are no longer the
+ * client's removed; posts that could reach the library reviewed; the library
+ * picked; the look learned again only when it changed enough or a person
+ * chose. Writes the library (clients.harvested_design_references and every
+ * settings row) and, after a relearn, the rulebook. The last references stay
+ * whenever it cannot finish.
+ *
+ * One run is bounded: it starts no further part of the year after
+ * SLICE_START_BUDGET_MS, gives up a part's read at READ_STOP_MS, and starts
+ * no review after REVIEW_BUDGET_MS (discover.ts). What is left goes on a
+ * minute later from `progress`: a run of a check that is past 90 days reads
+ * only the part of the year it is on, never the days it already covered, and
+ * every run either reviews posts or moves on to an older part.
  */
-export async function refreshReferences(db: Db, clientId: string, io: RefsIO, perf: { multiples?: Record<string, number>; notNow?: string[] } = {}): Promise<RefreshOutcome> {
+export async function refreshReferences(db: Db, clientId: string, io: RefsIO, perf: RefreshOptions = {}): Promise<RefreshOutcome> {
   const started = Date.now();
   const now = io.now();
   const { data: client, error: clientErr } = await db.from("clients")
@@ -318,53 +382,174 @@ export async function refreshReferences(db: Db, clientId: string, io: RefsIO, pe
   if (!ids.length) return { kind: "no_accounts" };
   const customer = String(client.sprout_customer_id || defaultSproutCustomerId());
   const fingerprint = referenceFingerprint(ids, customer);
+  const activeProfiles = (profiles ?? []).map((p: { sprout_profile_id: unknown; network_type: unknown }) => ({ id: String(p.sprout_profile_id), network: String(p.network_type ?? "") }));
 
   const [stored, choices] = await Promise.all([readReviews(db, clientId), readChoices(db, clientId)]);
   let reviews = [...stored, ...(await seedReviews(db, clientId, client.harvested_design_references, stored, now))];
   const uploads = asPaths(client.design_references);
   const previous = client.design_style_synthesis && typeof client.design_style_synthesis === "object" ? client.design_style_synthesis : null;
-  const lookSince: string | null = previous?.reference_pipeline_version === 2 && typeof previous.look_change?.since === "string" ? previous.look_change.since : null;
+  const lookSince: string | null = Number(previous?.reference_pipeline_version) >= 2 && typeof previous.look_change?.since === "string" ? previous.look_change.since : null;
+  const profilePlatforms = (profiles ?? []).map((p: { network_type: unknown }) => String(p.network_type ?? ""));
+  const storedLibrary: Array<{ path?: string; upload?: boolean; source_post_id?: string }> = Array.isArray(client.harvested_design_references) ? client.harvested_design_references : [];
+  const keptPaths = new Set(Object.entries(choices).filter(([, c]) => c === "kept").map(([p]) => p));
+  const leftOut = new Set(Object.entries(choices).filter(([, c]) => c === "left_out").map(([p]) => p));
 
-  const rows = await io.readPosts({ profileIds: ids, customer, since: new Date(now.getTime() - WINDOW_DAYS * DAY), until: now });
-  const candidates = sproutCandidates(rows, ids);
-  const input = {
-    candidates, reviews, choices, uploads, previous: client.harvested_design_references, lookSince,
-    profilePlatforms: (profiles ?? []).map((p: { network_type: unknown }) => String(p.network_type ?? "")), now,
+  // The library before this check, minus what is removed below.
+  let before = storedLibrary;
+  // The posts the library is picked from: the ones this run read and, on a run that goes on with an older part of the year, the ones earlier runs read.
+  let candidates: Candidate[] = [];
+  let postsRead = 0, removed = 0, reviewed = 0, modelCalls = 0, windowDays = WINDOW_DAYS;
+  const inputNow = (): CorpusInput => ({
+    candidates, reviews, choices, uploads, previous: before, lookSince, profilePlatforms, now,
     // The social read's scores and the strategy's "not now" platforms (onboarding from social profiles, section 5).
     multiples: perf.multiples, notNow: perf.notNow,
-  };
+  });
+  let input: CorpusInput = inputNow();
+  let sel!: Selection;
 
-  let reviewed = 0, modelCalls = 0;
-  const queue = reviewQueue(input);
-  if (queue.length) {
-    const run = await reviewPosts(db, client, queue, reviews, io, await io.apiKey(db), started);
+  /** One read of the days from `since` to `until`, and the reviews it leads to. Answers how many posts are still waiting for a review. */
+  const readAndReview = async (since: Date, until: Date, stopAt?: number): Promise<number> => {
+    // A read that fails throws here, before anything is removed.
+    const rows = await io.readPosts({ profileIds: ids, customer, since, until, ...(stopAt ? { stopAt } : {}) });
+    postsRead += rows.length;
+    // Posts that are no longer the client's leave, reviews and all; kept ones stay. Only on positive evidence (corpus.ts
+    // readVerdict): a designed post the read did not return and proves nothing about keeps its review and its place.
+    // A read cut at its cap proves nothing at all.
+    const verdict = readVerdict(reviews, rows, activeProfiles, { since, until }, keptPaths, rows.length >= READ_CAP);
+    const gone = verdict.gone;
+    if (gone.length) {
+      const goneIds = gone.map((r) => r.source_post_id);
+      for (let at = 0; at < goneIds.length; at += REMOVE_AT_ONCE) {
+        const { error } = await db.from("design_reference_reviews").delete().eq("client_id", clientId).in("source_post_id", goneIds.slice(at, at + REMOVE_AT_ONCE));
+        if (error) throw new StyleError("provider", "The reviewed posts could not be updated. It will be tried again.");
+      }
+      const goneSet = new Set(goneIds);
+      reviews = reviews.filter((r) => !goneSet.has(r.source_post_id));
+      candidates = candidates.filter((c) => !goneSet.has(c.source_post_id));
+      // A stored image another post still uses (the same image on another platform) keeps its place.
+      const still = new Set(reviews.filter((r) => r.verdict === "designed" && r.path).map((r) => r.path));
+      const gonePaths = new Set(gone.map((r) => r.path).filter((p) => p && !still.has(p) && !keptPaths.has(p)));
+      before = before.filter((e) => !gonePaths.has(e?.path ?? null));
+      removed += gone.length;
+    }
+    const have = new Set(candidates.map((c) => c.source_post_id));
+    candidates = [...candidates, ...sproutCandidates(rows, ids), ...verdict.unproven.filter((c) => !have.has(c.source_post_id))];
+    input = inputNow();
+    const queue = reviewQueue(input);
+    if (!queue.length) return 0;
+    const run = await reviewPosts(db, client, queue, reviews, io, await io.apiKey(db), started, perf.failedBefore ?? 0);
     const fresh = new Map(run.rows.map((r) => [r.source_post_id, r]));
     reviews = [...reviews.filter((r) => !fresh.has(r.source_post_id)), ...run.rows];
-    input.reviews = reviews;
-    reviewed = run.rows.length;
+    input = inputNow();
+    reviewed += run.rows.length;
     modelCalls += run.modelCalls;
-    const left = reviewQueue(input).length;
-    if (left) return { kind: "in_progress", reviewed, left };
+    return reviewQueue(input).length;
+  };
+
+  const resume = resumable(perf.resume, now);
+  const waits = (left: number, coveredFrom: string | null): RefreshOutcome => ({ kind: "in_progress", reviewed, left, progress: { at: resume?.at ?? now.toISOString(), covered_from: coveredFrom } });
+  // The first day already read and reviewed, once the check goes past 90 days.
+  let coveredFrom = resume?.covered_from ?? null;
+  // Whether this run has done anything yet: a run always does one read's worth before it may stop for time.
+  let worked = false;
+  if (coveredFrom) {
+    // An earlier run of this check read and reviewed these days: they are known from their reviews and not read again.
+    candidates = carriedCandidates(reviews, coveredFrom);
+    input = inputNow();
+  } else {
+    const since = new Date(now.getTime() - WINDOW_DAYS * DAY);
+    const left = await readAndReview(since, now);
+    if (left) return waits(left, null);
+    sel = selectLibrary(input);
+    worked = true;
+    // A person's library needs no more posts; an automatic one with too few everyday posts reads the rest of the year.
+    if (sel.owner !== "person" && !sel.enough) coveredFrom = dayOf(since);
+  }
+  if (coveredFrom) {
+    const oldestDay = dayOf(new Date(now.getTime() - THIN_WINDOW_DAYS * DAY));
+    while (coveredFrom > oldestDay) {
+      if (worked && Date.now() - started >= SLICE_START_BUDGET_MS) return waits(0, coveredFrom);
+      const earlier = dayOf(new Date(dayStart(coveredFrom).getTime() - SLICE_DAYS * DAY));
+      const fromDay: string = earlier > oldestDay ? earlier : oldestDay;
+      const left = await readAndReview(dayStart(fromDay), new Date(dayStart(coveredFrom).getTime() - 1), started + READ_STOP_MS);
+      // The part is not finished: the next run reads this same part again, and nothing before it.
+      if (left) return waits(left, coveredFrom);
+      coveredFrom = fromDay;
+      worked = true;
+    }
+    windowDays = THIN_WINDOW_DAYS;
+    sel = selectLibrary(input);
   }
 
-  let sel = selectLibrary(input);
-  const leftOut = new Set(Object.entries(choices).filter(([, c]) => c === "left_out").map(([p]) => p));
-  if (!sel.enough) {
-    // The last references stay, but a post a person left out never returns.
-    const kept = (Array.isArray(client.harvested_design_references) ? client.harvested_design_references : []).filter((r: { path?: string }) => r?.path && !leftOut.has(r.path));
-    if (kept.length && kept.length !== (client.harvested_design_references ?? []).length) {
-      await writeLibrary(db, clientId, kept, null, now);
+  // Never commit evidence from accounts that were reassigned mid-run.
+  const sameAccounts = async () => {
+    const { data: currentProfiles, error: currentErr } = await db.from("sprout_profiles").select("sprout_profile_id").eq("client_id", clientId).eq("is_active", true);
+    const { data: currentClient } = await db.from("clients").select("sprout_customer_id").eq("id", clientId).maybeSingle();
+    const current = referenceFingerprint((currentProfiles ?? []).map((p: { sprout_profile_id: unknown }) => String(p.sprout_profile_id)), String(currentClient?.sprout_customer_id || defaultSproutCustomerId()));
+    if (currentErr || !currentClient || current !== fingerprint) {
+      throw new StyleError("accounts_changed", "The client's social accounts changed while its style was being learned.");
     }
-    return { kind: "too_few", designed: sel.library.length, reviewed, posts_read: rows.length };
+  };
+  const listed = (e: StoredEntry) => ({ path: e.path, platform: e.platform ?? null, posted_at: e.posted_at ?? null, source_url: e.source_url ?? null });
+  /** What the check found, for the step's result and the setup card. */
+  const found = () => ({
+    // How many of the library's references a person chose (uploads and kept posts): the card's sentence counts them apart from the posts the app found.
+    chosen: sel.library.filter((e) => e.upload || e.kept).length,
+    suggestions: sel.suggestions.map(listed),
+    occasions: sel.owner === "person" ? [] : occasionPosts(input).map((e) => ({ ...listed(e), occasion: e.occasion ?? null })),
+    ...reviewCounts(input), window_days: windowDays, removed,
+  });
+  const checked = () => ({ checked_at: now.toISOString(), posts_read: postsRead, reviewed, model_calls: modelCalls });
+
+  // Too few everyday posts for an automatic library, in a whole year.
+  if (!sel.enough) {
+    // The last references, minus what a person left out and what was removed above.
+    const last = before.filter((r) => r?.path && !leftOut.has(r.path)) as StoredEntry[];
+    const stays = {
+      platforms: sel.platforms, relearned: null, synthesized_at: previous?.synthesized_at ?? null,
+      ...(previous?.look_change?.since ? { look_since: previous.look_change.since } : {}),
+      owner: sel.owner, ...found(),
+    };
+    if (previous && sel.library.length >= 1) {
+      // One or two everyday posts (or a person's one or two picks): the library is those, and the stored look stays.
+      await sameAccounts();
+      await writeLibrary(db, clientId, sel.library, null, now, client.harvested_design_references);
+      // How many different everyday posts the app found for it, beside what a person chose: cross-posts of one post count once.
+      const groups = siblings(reviews);
+      const everyday = new Set(sel.library.filter((e) => !e.upload && !e.kept).map((e) => groups.get(String(e.source_post_id ?? ""))?.group ?? e.path));
+      return { kind: "done", synthesis: previous, library: sel.library, result: { ...checked(), references: sel.library.length, ...stays, thin: true, thin_everyday: everyday.size } };
+    }
+    if (previous && last.length >= 1) {
+      // No everyday post and nothing a person chose: the client keeps its library as it is.
+      if (JSON.stringify(last) !== JSON.stringify(storedLibrary)) {
+        await sameAccounts();
+        await writeLibrary(db, clientId, last, null, now, client.harvested_design_references);
+      }
+      const sib = siblings(reviews);
+      const social = last.filter((e) => !e.upload);
+      const occasionOnly = social.length > 0 && social.every((e) =>
+        reviews.some((r) => (e.source_post_id ? r.source_post_id === e.source_post_id : r.path === e.path) && sib.get(r.source_post_id)?.kind === "occasion"));
+      return { kind: "done", synthesis: previous, library: last, result: { ...checked(), references: last.length, ...stays, no_everyday: true, occasion_only: occasionOnly } };
+    }
+    // No look learned yet: the last references stay, but a post a person left out, or one that was removed, never returns.
+    if (last.length && last.length !== storedLibrary.length) {
+      await sameAccounts();
+      await writeLibrary(db, clientId, last, null, now);
+    }
+    return { kind: "too_few", designed: sel.library.length, reviewed, posts_read: postsRead, detail: found() };
   }
 
   const key = choicesKey(choices, uploads);
   const reason = relearnReason(sel, previous, key);
   // deno-lint-ignore no-explicit-any
   let synthesis: any = null;
-  if (reason) {
+  const images = reason ? await rulebookImages(db, sel.library) : null;
+  // A library a person chose is theirs whether or not the look can be learned from it: when fewer than 3 of its files
+  // can be sent to the model (a file over the size the model takes), the library is written, the stored look stays,
+  // and the learning is tried again on the next check.
+  const lookWaits = !!images && images.count < 3 && sel.owner === "person";
+  if (reason && images && !lookWaits) {
     const qualified = qualifiedPlatforms(sel);
-    const images = await rulebookImages(db, sel.library);
     if (images.count < 3) throw new StyleError("provider", "The references could not be loaded. It will be tried again.");
     const apiKey = await io.apiKey(db);
     const text = await io.learn({
@@ -372,18 +557,21 @@ export async function refreshReferences(db: Db, clientId: string, io: RefsIO, pe
       content: [{ type: "text", text: `Analyze these posts by "${client.name}" and write the JSON rulebook.` }, ...images.content, { type: "text", text: rulebookRequestText(client.name, sel, previous) }],
     });
     modelCalls++;
-    const window = { from: new Date(now.getTime() - WINDOW_DAYS * DAY).toISOString().slice(0, 10), to: now.toISOString().slice(0, 10) };
+    const window = { from: new Date(now.getTime() - windowDays * DAY).toISOString().slice(0, 10), to: now.toISOString().slice(0, 10) };
     const book = parseRulebook(text, qualified, window);
     if (!book) throw new StyleError("provider", "The style analysis came back incomplete. It will be tried again.");
     // A new look: posts from before it leave the library (kept ones stay).
-    if (book.look_change.changed && book.look_change.since !== lookSince) sel = selectLibrary({ ...input, lookSince: book.look_change.since });
+    if (book.look_change.changed && book.look_change.since !== lookSince) {
+      input = { ...input, lookSince: book.look_change.since };
+      sel = selectLibrary(input);
+    }
     const at = now.toISOString();
     synthesis = {
       ...book.core,
       platform_adaptations: adaptationsText(book.platforms),
       platforms: Object.fromEntries(qualified.map((p) => [p, { rules: book.platforms[p], posts: sel.platforms[p]?.posts ?? 0, learned_at: at }])),
       look_change: book.look_change.changed ? { since: book.look_change.since, what: book.look_change.what, seen_at: at } : (lookSince ? previous.look_change : null),
-      reference_pipeline_version: 2,
+      reference_pipeline_version: PIPELINE_VERSION,
       reference_profile_fingerprint: fingerprint,
       choices_key: key,
       source_posts: sel.library.map(({ path, platform, posted_at, source_url, source_post_id, kept, upload }) => ({ path, platform, posted_at, source_url, source_post_id, kept, upload })),
@@ -393,22 +581,16 @@ export async function refreshReferences(db: Db, clientId: string, io: RefsIO, pe
     };
   }
 
-  // Never commit evidence from accounts that were reassigned mid-run.
-  const { data: currentProfiles, error: currentErr } = await db.from("sprout_profiles").select("sprout_profile_id").eq("client_id", clientId).eq("is_active", true);
-  const { data: currentClient } = await db.from("clients").select("sprout_customer_id").eq("id", clientId).maybeSingle();
-  const current = referenceFingerprint((currentProfiles ?? []).map((p: { sprout_profile_id: unknown }) => String(p.sprout_profile_id)), String(currentClient?.sprout_customer_id || defaultSproutCustomerId()));
-  if (currentErr || !currentClient || current !== fingerprint) {
-    throw new StyleError("accounts_changed", "The client's social accounts changed while its style was being learned.");
-  }
-
+  await sameAccounts();
   await writeLibrary(db, clientId, sel.library, synthesis, now, client.harvested_design_references);
   const learned = synthesis ?? previous;
   return {
     kind: "done", synthesis: learned, library: sel.library,
     result: {
-      checked_at: now.toISOString(), posts_read: rows.length, reviewed, model_calls: modelCalls, references: sel.library.length,
-      platforms: sel.platforms, relearned: reason, synthesized_at: learned?.synthesized_at ?? null,
+      ...checked(), references: sel.library.length,
+      platforms: sel.platforms, relearned: synthesis ? reason : null, synthesized_at: learned?.synthesized_at ?? null,
       ...(learned?.look_change?.since ? { look_since: learned.look_change.since } : {}),
+      owner: sel.owner, ...found(), ...(lookWaits ? { look_waits: true } : {}),
     },
   };
 }

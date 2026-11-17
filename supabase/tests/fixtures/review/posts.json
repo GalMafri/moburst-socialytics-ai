@@ -1,0 +1,147 @@
+{
+  "brand": "Harbor Coffee",
+  "posts": [
+    {
+      "file": "01-cold-brew.jpg",
+      "platform": "Instagram",
+      "date": "2026-09-16",
+      "caption": "Slow steeped for 18 hours and poured over ice. Our cold brew is on tap all day.",
+      "expect": "everyday"
+    },
+    {
+      "file": "02-hours.jpg",
+      "platform": "Facebook",
+      "date": "2026-08-11",
+      "caption": "We are open every day from 7am to 6pm. See you at the counter.",
+      "expect": "everyday"
+    },
+    {
+      "file": "03-single-origin.jpg",
+      "platform": "Instagram",
+      "date": "2026-10-06",
+      "caption": "Every bag we sell comes from a single farm and is roasted here in the shop.",
+      "expect": "everyday"
+    },
+    {
+      "file": "04-storage-tip.jpg",
+      "platform": "LinkedIn",
+      "date": "2026-09-02",
+      "caption": "A quick tip for better coffee at home: store your beans in an airtight jar, away from light.",
+      "expect": "everyday"
+    },
+    {
+      "file": "05-oat-milk.jpg",
+      "platform": "Instagram",
+      "date": "2026-08-25",
+      "caption": "Oat milk is now free in any drink. Just ask.",
+      "expect": "everyday"
+    },
+    {
+      "file": "06-pastries.jpg",
+      "platform": "Facebook",
+      "date": "2026-10-13",
+      "caption": "Croissants, scones and banana bread, baked fresh every morning.",
+      "expect": "everyday"
+    },
+    {
+      "file": "07-espresso-fact.jpg",
+      "platform": "LinkedIn",
+      "date": "2026-09-23",
+      "caption": "Did you know? A shot of espresso has less caffeine than a cup of drip coffee.",
+      "expect": "everyday"
+    },
+    {
+      "file": "08-small-batches.jpg",
+      "platform": "Instagram",
+      "date": "2026-08-04",
+      "caption": "Small batches mean we can taste every roast before it reaches your cup.",
+      "expect": "everyday"
+    },
+    {
+      "file": "09-on-tap.jpg",
+      "platform": "Instagram",
+      "date": "2026-07-04",
+      "caption": "Our nitro cold brew is poured to order, creamy with no milk at all.",
+      "expect": "everyday",
+      "note": "published on a holiday date"
+    },
+    {
+      "file": "10-house-blend.jpg",
+      "platform": "Facebook",
+      "date": "2026-12-25",
+      "caption": "Our house blend: cocoa and toasted almond, roasted medium.",
+      "expect": "everyday",
+      "note": "published on a holiday date"
+    },
+    {
+      "file": "11-halloween.jpg",
+      "platform": "Instagram",
+      "date": "2026-10-31",
+      "caption": "Happy Halloween from all of us at Harbor Coffee! Pumpkin spice is poured with a side of spooky.",
+      "expect": "holiday"
+    },
+    {
+      "file": "12-seasons-greetings.jpg",
+      "platform": "Facebook",
+      "date": "2025-12-23",
+      "caption": "Warm wishes for the holidays from the whole Harbor Coffee crew.",
+      "expect": "holiday"
+    },
+    {
+      "file": "13-pink-ribbon.jpg",
+      "platform": "Instagram",
+      "date": "2026-10-09",
+      "caption": "This October we are pouring pink. A dollar from every latte goes to breast cancer research.",
+      "expect": "awareness"
+    },
+    {
+      "file": "14-pride.jpg",
+      "platform": "LinkedIn",
+      "date": "2026-06-05",
+      "caption": "Proud to celebrate Pride Month with our team and our neighbors.",
+      "expect": "awareness"
+    },
+    {
+      "file": "15-street-fair.jpg",
+      "platform": "Facebook",
+      "date": "2026-06-08",
+      "caption": "Find us at the Harbor Street Fair this Saturday, June 13. We will be at booth 12 with free samples.",
+      "expect": "event"
+    },
+    {
+      "file": "16-grand-opening.jpg",
+      "platform": "Instagram",
+      "date": "2026-03-02",
+      "caption": "Mark your calendar: our Pier Street shop opens its doors on March 7.",
+      "expect": "event"
+    },
+    {
+      "file": "17-barista-of-the-month.jpg",
+      "platform": "LinkedIn",
+      "date": "2026-09-30",
+      "caption": "Meet Maya, our barista of the month. Three years behind the bar and still the best flat white in town.",
+      "expect": "person"
+    },
+    {
+      "file": "18-staff-quote.jpg",
+      "platform": "Instagram",
+      "date": "2026-08-19",
+      "caption": "Words to live by from Dana, who runs our Main Street shop.",
+      "expect": "person"
+    },
+    {
+      "file": "19-bingo.jpg",
+      "platform": "Instagram",
+      "date": "2026-09-10",
+      "caption": "How many can you tick off? Play coffee bingo and tag a friend.",
+      "expect": "contest"
+    },
+    {
+      "file": "20-giveaway.jpg",
+      "platform": "Facebook",
+      "date": "2026-10-20",
+      "caption": "GIVEAWAY: win a month of free coffee! Comment with your usual order to enter. Winner drawn Friday.",
+      "expect": "contest"
+    }
+  ]
+}

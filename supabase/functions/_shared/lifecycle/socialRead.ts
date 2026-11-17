@@ -48,6 +48,7 @@ import { defaultSproutCustomerId } from "../sprout/customer.ts";
 import type { BioRead, InstagramBio } from "../apify/instagramProfile.ts";
 import { pageUrlOf, type LinkedInPage, type PageRead } from "../apify/linkedinPage.ts";
 import type { SocialBrandInput, SocialBrandRead } from "../brand/research.ts";
+import { brandPosts } from "../brand-references/posts.ts";
 import { countryCode, followersZone, regionsFor, replacesLocation, resolveSocialLocation, SOURCE_RANK, zoneOf, type Address, type Headquarters, type LocationSource } from "./location.ts";
 import { AGENCY_SOURCE, agencyZone, zoneFromAgency, zoneHasSource } from "./agencyZone.ts";
 import { lifecycleMayWrite, setBy, sourceOf, writeClientFields } from "./fields.ts";
@@ -623,7 +624,7 @@ async function readPage(profiles: ProfileRef[], prev: LinkedInPageState | null, 
 /** The images the brand read is shown: the chosen profile picture, then the top designed posts in the client's library. */
 async function readImages(db: Db, client: Row, logo: Picture | null, multiples: Record<string, number>): Promise<SocialBrandInput["images"]> {
   const images: SocialBrandInput["images"] = logo ? [{ bytes: logo.bytes, label: `${logo.platform} profile picture` }] : [];
-  const library = (Array.isArray(client.harvested_design_references) ? client.harvested_design_references : []).filter((r: Row) => r?.path && !r.upload);
+  const library: Row[] = await brandPosts(db, { id: String(client.id), harvested_design_references: client.harvested_design_references }, 16, { everydayFirst: true });
   const ranked = [...library].sort((a: Row, b: Row) => (multiples[String(b.source_post_id)] ?? 0) - (multiples[String(a.source_post_id)] ?? 0) || String(b.posted_at ?? "").localeCompare(String(a.posted_at ?? "")));
   for (const r of ranked.slice(0, DESIGNED_IMAGES)) {
     try {

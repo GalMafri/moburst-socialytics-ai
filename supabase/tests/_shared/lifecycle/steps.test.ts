@@ -6,6 +6,8 @@ import { rowAfter, type StepRow } from "../../../functions/_shared/lifecycle/pol
 import { NotInStorage, PictureError } from "../../../functions/_shared/picture/client";
 import { ResearchError } from "../../../functions/_shared/brand/research";
 import { textHash } from "../../../functions/_shared/lifecycle/names";
+import { StyleError } from "../../../functions/_shared/brand-references/errors";
+import { choicesKey } from "../../../functions/_shared/brand-references/corpus";
 
 const original = { ...deps };
 afterEach(() => { Object.assign(deps, original); vi.restoreAllMocks(); });
@@ -2112,9 +2114,9 @@ describe("design_refs (references that refresh themselves)", () => {
   const profiles = (...keys: string[]) => keys.map((k) => ({ client_id: "c1", sprout_profile_id: NETWORKS[k][1], network_type: NETWORKS[k][2], is_active: true }));
   const media = (guid: string) => `https://network-media.sproutsocial.com/${guid.replace(":", "-")}.jpg`;
   /** A designed feed post, as Sprout's analytics/posts sends it. */
-  const post = (guid: string, day: string) => {
+  const post = (guid: string, day: string, text = "") => {
     const [network, profile] = NETWORKS[guid.split(":")[0]];
-    return { guid, perma_link: `https://social.example/${guid}`, customer_profile_id: String(profile), network, created_time: `${day}T15:00:00Z`, content_category: "PHOTO", visual_media: [{ media_type: "PHOTO", media_url: media(guid) }] };
+    return { guid, perma_link: `https://social.example/${guid}`, customer_profile_id: String(profile), network, created_time: `${day}T15:00:00Z`, content_category: "PHOTO", visual_media: [{ media_type: "PHOTO", media_url: media(guid) }], text };
   };
   const pathOf = (guid: string) => `c1/social-${createHash("sha256").update(media(guid)).digest("hex")}.jpg`;
   const rulebook = (platforms: string[], look: Record<string, unknown> = { changed: false, since: null, what: "" }) => JSON.stringify({
@@ -2122,20 +2124,44 @@ describe("design_refs (references that refresh themselves)", () => {
     color_usage: "Navy ground, coral accent.", surface_and_texture: "Flat.", logo_and_marks_treatment: "Wordmark bottom center, small.", mood_and_voice_visual: "Confident.",
     anti_patterns: "Never use gradients.", platforms: Object.fromEntries(platforms.map((p) => [p, `${p} posts set the headline larger.`])), look_change: look,
   });
-  type Calls = { read: number; review: number; learn: number; learned: Array<{ content: Array<{ type: string; text?: string }> }> };
+  type Asked = { imageUrl: string; platform: string; postedAt: string; caption: string };
+  type Calls = { read: number; windows: number[]; image: number; review: number; asked: Asked[]; learn: number; learned: Array<{ content: Array<{ type: string; text?: string }> }> };
+  const EVERYDAY = { usable: true, confidence: 0.95, reason: "Branded type over a color block", kind: "everyday", occasion: null, evidence: "" };
+  const HOLIDAY = { usable: true, confidence: 0.95, reason: "Branded type over a pumpkin pattern", kind: "occasion", occasion: "holiday", evidence: "Happy Halloween" };
+  /** Sprout, the images and the models. The read answers as Sprout does: the posts published inside the window asked for. */
   function fakeIO(posts: () => Record<string, unknown>[], over: Record<string, unknown> = {}): Calls {
-    const calls: Calls = { read: 0, review: 0, learn: 0, learned: [] };
+    const calls: Calls = { read: 0, windows: [], image: 0, review: 0, asked: [], learn: 0, learned: [] };
     deps.refsIO = (() => ({
       now: () => new Date(NOW), apiKey: async () => "key",
-      readPosts: async () => { calls.read++; return posts(); },
-      image: async (url: string) => ({ bytes: new TextEncoder().encode(url), mime: "image/jpeg" }),
-      review: async () => { calls.review++; return { usable: true, confidence: 0.95, reason: "Branded type over a color block" }; },
+      readPosts: async (a: { since: Date; until: Date }) => {
+        calls.read++;
+        calls.windows.push(Math.round((a.until.getTime() - a.since.getTime()) / 86_400_000));
+        return posts().filter((p) => Date.parse(String(p.created_time)) >= a.since.getTime() && Date.parse(String(p.created_time)) <= a.until.getTime());
+      },
+      image: async (url: string) => { calls.image++; return { bytes: new TextEncoder().encode(url), mime: "image/jpeg" }; },
+      review: async (a: Asked) => { calls.review++; calls.asked.push(a); return EVERYDAY; },
       learn: async (a: Calls["learned"][number]) => { calls.learn++; calls.learned.push(a); return rulebook(["Instagram"]); },
       ...over,
     })) as never;
     return calls;
   }
-  const refsClient = (over: Record<string, unknown> = {}) => client({ name: "Pay The Pyper", design_style_synthesis: null, design_refs_harvested_at: null, ...over });
+  /** The year past 90 days, as it is read: six parts of 45 days and the 5 days left (365 = 90 + 6 x 45 + 5). */
+  const YEAR = [90, 45, 45, 45, 45, 45, 45, 5];
+  /** The reviewer as the tests need it: a caption that says Halloween is a holiday post, any other is an everyday one. */
+  const byCaption = (calls: () => Calls) => ({ review: async (a: Asked) => { calls().review++; calls().asked.push(a); return /halloween/i.test(a.caption) ? HOLIDAY : EVERYDAY; } });
+  const refsClient = (over: Record<string, unknown> = {}) => client({ name: "Harbor Coffee", website_url: "https://www.harborcoffee.example/", design_style_synthesis: null, design_refs_harvested_at: null, ...over });
+  /** A post in the library, as the step stores it. */
+  const entry = (guid: string, day: string) => ({
+    path: pathOf(guid), platform: guid.startsWith("li") ? "LinkedIn" : "Instagram", posted_at: `${day}T15:00:00Z`, source_url: `https://social.example/${guid}`, source_post_id: guid, source: "sprout",
+    quality_checked: true, classification: "Branded type over a color block", confidence: 0.9, content_hash: createHash("sha256").update(media(guid)).digest("hex"),
+  });
+  /** A review as it was stored before the occasion question (rule 1, no answer), made the day before the check. */
+  const reviewedBefore = (guid: string, day: string, over: Record<string, unknown> = {}) => ({
+    client_id: "c1", source_post_id: guid, network: NETWORKS[guid.split(":")[0]][0], posted_at: `${day}T15:00:00Z`, source_url: `https://social.example/${guid}`,
+    content_hash: createHash("sha256").update(media(guid)).digest("hex"), verdict: "designed", path: pathOf(guid), confidence: 0.9, reason: "Branded type over a color block", reviewed_at: "2026-11-01T10:00:00.000Z", ...over,
+  });
+  /** The look as it was learned before the library's rules (version 2). */
+  const learnedBefore = { ...JSON.parse(rulebook([])), platforms: {}, look_change: null, reference_pipeline_version: 2, synthesized_at: "2026-10-20T09:00:00.000Z", source_count: 4, choices_key: "before" };
   function world(c: Record<string, unknown>, keys: string[], tables: Record<string, Record<string, unknown>[]> = {}) {
     const libraryWrites: Array<{ p_client: string; p_reference_paths: string[] }> = [];
     const db = dbWith({ clients: [c], sprout_profiles: profiles(...keys), design_reference_reviews: [], design_reference_choices: [], ...tables }, {
@@ -2153,21 +2179,25 @@ describe("design_refs (references that refresh themselves)", () => {
     const calls = fakeIO(() => posts);
     const out = await STEPS.design_refs.run(db, c, ctx());
     expect(out).toMatchObject({ status: "done", result: { relearned: "first", reviewed: 7, model_calls: 8, references: 7, synthesized_at: NOW,
-      platforms: { Instagram: { posts: 5, own_rules: true }, LinkedIn: { posts: 2, own_rules: false } } } });
+      platforms: { Instagram: { posts: 5, own_rules: true }, LinkedIn: { posts: 2, own_rules: false } },
+      owner: "app", suggestions: [], occasions: [], everyday: 7, occasion: 0, unanswered: 0, sibling_disagreements: 0, window_days: 90, removed: 0 } });
     // The check's own date is when it ran: no reused date postpones the next check.
     expect("doneAt" in out).toBe(false);
-    expect(calls).toMatchObject({ read: 1, review: 7, learn: 1 });
+    expect(calls).toMatchObject({ read: 1, windows: [90], review: 7, learn: 1 });
+    // The reviewer is shown each post's platform, date and caption.
+    expect(calls.asked.find((a) => a.postedAt === "2026-10-30T15:00:00Z")).toMatchObject({ platform: "LinkedIn", caption: "" });
     // Newest first, labeled; LinkedIn has no section of its own below 4 posts.
     const labels = calls.learned[0].content.filter((b) => b.type === "text").map((b) => b.text);
     expect(labels.slice(1, 4)).toEqual(["Post 1 (Instagram, Nov 1, 2026):", "Post 2 (LinkedIn, Oct 30, 2026):", "Post 3 (Instagram, Oct 29, 2026):"]);
     expect(labels.at(-1)).toContain("Platforms with rules of their own: Instagram (5 posts).");
     expect(labels.at(-1)).toContain("These follow the core, with too few posts for rules of their own: LinkedIn (2 posts).");
-    expect(c.design_style_synthesis).toMatchObject({ reference_pipeline_version: 2, platforms: { Instagram: { rules: "Instagram posts set the headline larger.", posts: 5 } }, source_count: 7 });
+    expect(c.design_style_synthesis).toMatchObject({ reference_pipeline_version: 3, platforms: { Instagram: { rules: "Instagram posts set the headline larger.", posts: 5 } }, source_count: 7 });
     expect(Object.keys(c.design_style_synthesis.platforms)).toEqual(["Instagram"]);
     expect(c.design_style_synthesis.platform_adaptations).toBe("Instagram: Instagram posts set the headline larger.");
     expect(c.harvested_design_references.slice(0, 3).map((e: { path: string }) => e.path)).toEqual([pathOf("ig:0"), pathOf("li:0"), pathOf("ig:1")]);
     expect(libraryWrites).toEqual([{ p_client: "c1", p_reference_paths: c.harvested_design_references.map((e: { path: string }) => e.path) }]);
     expect(db.tables.design_reference_reviews).toHaveLength(7);
+    for (const r of db.tables.design_reference_reviews) expect(r).toMatchObject({ verdict: "designed", kind: "everyday", rule: 2 });
   });
 
   it("makes no model call in a week with no new posts, and never reviews a post twice", async () => {
@@ -2183,15 +2213,17 @@ describe("design_refs (references that refresh themselves)", () => {
     expect(out).toMatchObject({ status: "done", result: { relearned: null, reviewed: 0, model_calls: 0, synthesized_at: learnedAt, checked_at: "2026-11-09T10:00:00.000Z" } });
   });
 
-  it("counts the posts reviewed before reviews were stored as reviewed", async () => {
+  it("counts the posts reviewed before reviews were stored as designed: each is asked the occasion question from its stored image, never read again", async () => {
     const c = refsClient({ harvested_design_references: igWeek.slice(0, 3).map((d, i) => ({ path: `c1/social-old${i}.jpg`, source_post_id: `ig:${i}`, platform: "INSTAGRAM", posted_at: `${d}T15:00:00Z`, quality_checked: true, classification: "Branded" })) });
     const { db } = world(c, ["ig"]);
     for (let i = 0; i < 3; i++) db.uploads.set(`design-references/c1/social-old${i}.jpg`, "image");
     const calls = fakeIO(() => igWeek.slice(0, 4).map((d, i) => post(`ig:${i}`, d)));
     await STEPS.design_refs.run(db, c, ctx());
-    // Only the fourth post is new to the model.
-    expect(calls.review).toBe(1);
+    // Only the fourth post's image is new; the three in the library are asked from the files they already have.
+    expect(calls).toMatchObject({ image: 1, review: 4 });
+    expect(calls.asked.map((a) => a.imageUrl).filter((u) => u.includes("/c1/social-old")).sort()).toEqual([0, 1, 2].map((i) => `https://project.test/storage/v1/object/public/design-references/c1/social-old${i}.jpg`));
     expect(db.tables.design_reference_reviews.map((r) => r.source_post_id).sort()).toEqual(["ig:0", "ig:1", "ig:2", "ig:3"]);
+    expect(db.tables.design_reference_reviews.find((r) => r.source_post_id === "ig:0")).toMatchObject({ verdict: "designed", path: "c1/social-old0.jpg", reason: "Branded", kind: "everyday", rule: 2 });
   });
 
   it("takes one new post into the library without learning the look again; two new posts learn it again", async () => {
@@ -2214,7 +2246,7 @@ describe("design_refs (references that refresh themselves)", () => {
     expect(two).toMatchObject({ review: 2, learn: 1 });
     expect(second).toMatchObject({ status: "done", result: { relearned: "posts", synthesized_at: "2026-11-16T10:00:00.000Z" } });
     // The previous rulebook goes with the images.
-    expect(two.learned[0].content.at(-1)!.text).toContain("Pay The Pyper's earlier rulebook, learned Nov 2, 2026:");
+    expect(two.learned[0].content.at(-1)!.text).toContain("Harbor Coffee's earlier rulebook, learned Nov 2, 2026:");
     expect(c.design_style_synthesis.synthesized_at).not.toBe(learnedAt);
   });
 
@@ -2223,6 +2255,8 @@ describe("design_refs (references that refresh themselves)", () => {
     const { db } = world(c, ["ig", "li"]);
     const key = await STEPS.design_refs.inputs(db, c, new Map());
     expect(key).toMatch(/^1676448:7,8\|chosen:/);
+    // The key ends in the library rule's version: a change of the rule rebuilds every client's library once.
+    expect(key).toMatch(/\|rule:2$/);
     db.tables.design_reference_choices.push({ client_id: "c1", path: "c1/social-a.jpg", choice: "kept" });
     const kept = await STEPS.design_refs.inputs(db, c, new Map());
     expect(kept).not.toBe(key);
@@ -2239,7 +2273,7 @@ describe("design_refs (references that refresh themselves)", () => {
     const { db } = world(c, ["ig"], { design_reference_choices: [] });
     const posts = days.map((d, i) => post(`ig:${i}`, d));
     // The team kept one of the older posts.
-    db.tables.design_reference_reviews.push({ client_id: "c1", source_post_id: "ig:5", network: "INSTAGRAM", posted_at: "2026-10-05T15:00:00Z", source_url: null, content_hash: "h5", verdict: "designed", path: pathOf("ig:5"), confidence: 0.9, reason: "r", reviewed_at: NOW });
+    db.tables.design_reference_reviews.push({ client_id: "c1", source_post_id: "ig:5", network: "INSTAGRAM", posted_at: "2026-10-05T15:00:00Z", source_url: null, content_hash: "h5", verdict: "designed", path: pathOf("ig:5"), confidence: 0.9, reason: "r", reviewed_at: NOW, kind: "everyday", rule: 2 });
     db.tables.design_reference_choices.push({ client_id: "c1", path: pathOf("ig:5"), choice: "kept" });
     db.uploads.set(`design-references/${pathOf("ig:5")}`, "image");
     fakeIO(() => posts, { learn: async () => rulebook(["Instagram"], { changed: true, since: "2026-10-20", what: "A new coral and navy palette with a serif headline." }) });
@@ -2248,16 +2282,18 @@ describe("design_refs (references that refresh themselves)", () => {
     expect(c.harvested_design_references.map((e: { path: string }) => e.path)).toEqual([pathOf("ig:5"), pathOf("ig:0"), pathOf("ig:1"), pathOf("ig:2")]);
     expect(c.design_style_synthesis.look_change).toMatchObject({ since: "2026-10-20", what: "A new coral and navy palette with a serif headline." });
     // brand_read keys on the new look (the client row carries it as look_since), so the logo file and colors follow a rebrand.
-    expect(await STEPS.brand_read.inputs(db, { ...c, look_since: c.design_style_synthesis.look_change.since }, new Map())).toBe("moburst.com|look:2026-10-20");
-    expect(await STEPS.brand_read.inputs(db, c, new Map())).toBe("moburst.com");
+    expect(await STEPS.brand_read.inputs(db, { ...c, look_since: c.design_style_synthesis.look_change.since }, new Map())).toBe("harborcoffee.example|look:2026-10-20");
+    expect(await STEPS.brand_read.inputs(db, c, new Map())).toBe("harborcoffee.example");
   });
 
   it("with fewer than 3 designed posts, waits a week and keeps the last references, minus any a person left out", async () => {
     const before = [{ path: "c1/social-a.jpg", quality_checked: true, platform: "INSTAGRAM", posted_at: "2026-06-01T00:00:00Z" }, { path: "c1/social-b.jpg", quality_checked: true, platform: "INSTAGRAM", posted_at: "2026-06-02T00:00:00Z" }];
     const c = refsClient({ harvested_design_references: before });
     const { db } = world(c, ["ig"], { design_reference_choices: [{ client_id: "c1", path: "c1/social-b.jpg", choice: "left_out" }] });
-    fakeIO(() => []);
-    expect(await STEPS.design_refs.run(db, c, ctx())).toMatchObject({ status: "waiting", reason: "designed_posts", recheckDays: 7 });
+    const calls = fakeIO(() => []);
+    // No look was ever learned for it, so there is nothing to keep designing from: it waits. Both windows were read first.
+    expect(await STEPS.design_refs.run(db, c, ctx())).toMatchObject({ status: "waiting", reason: "designed_posts", recheckDays: 7, result: { designed: 0, posts_read: 0, window_days: 365, occasions: [] } });
+    expect(calls).toMatchObject({ read: 8, windows: YEAR, review: 0, learn: 0 });
     expect(c.harvested_design_references.map((e: { path: string }) => e.path)).toEqual(["c1/social-a.jpg"]);
   });
 
@@ -2286,6 +2322,298 @@ describe("design_refs (references that refresh themselves)", () => {
     // Each review that did not finish is noted for developers, off the output here.
     expect(warn.mock.calls.length).toBeGreaterThan(0);
     for (const call of warn.mock.calls) expect(call).toEqual(["[brand-discovery] review did not finish", expect.any(String), "overloaded"]);
+  });
+
+  describe("the library's rules (17 Nov 2026)", () => {
+    const fourDays = igWeek.slice(0, 4);
+    /** A client whose library and reviews date from before the rules: four Instagram posts, a look learned from them. */
+    function before(captions: string[] = [], over: Record<string, unknown> = {}, keys: string[] = ["ig"]) {
+      const guids = fourDays.map((_, i) => `ig:${i}`);
+      const c = refsClient({ harvested_design_references: guids.map((g, i) => entry(g, fourDays[i])), design_style_synthesis: learnedBefore, ...over });
+      const w = world(c, keys, { design_reference_reviews: guids.map((g, i) => reviewedBefore(g, fourDays[i])) });
+      for (const g of guids) w.db.uploads.set(`design-references/${pathOf(g)}`, "image");
+      const posts = guids.map((g, i) => post(g, fourDays[i], captions[i] ?? "Fresh beans roasted every morning."));
+      return { c, ...w, posts, guids };
+    }
+
+    it("the first check after the change asks every designed post once and learns the look once; the next check calls no model", async () => {
+      const { c, db, posts, guids } = before();
+      const calls = fakeIO(() => posts);
+      const out = await STEPS.design_refs.run(db, c, ctx());
+      // Each is asked from its stored image: none is read from the network again.
+      expect(calls).toMatchObject({ read: 1, image: 0, review: 4, learn: 1 });
+      expect(out).toMatchObject({ status: "done", result: { relearned: "first", reviewed: 4, model_calls: 5, references: 4, owner: "app", everyday: 4, window_days: 90 } });
+      expect(c.design_style_synthesis).toMatchObject({ reference_pipeline_version: 3, synthesized_at: NOW });
+      expect(c.harvested_design_references.map((e: { path: string }) => e.path)).toEqual(guids.map(pathOf));
+      for (const r of db.tables.design_reference_reviews) expect(r).toMatchObject({ verdict: "designed", reason: "Branded type over a color block", kind: "everyday", rule: 2 });
+
+      const again = fakeIO(() => posts, { now: () => new Date("2026-11-09T10:00:00Z") });
+      expect(await STEPS.design_refs.run(db, c, ctx({ force: true }))).toMatchObject({ status: "done", result: { relearned: null, reviewed: 0, model_calls: 0 } });
+      expect(again).toMatchObject({ read: 1, image: 0, review: 0, learn: 0 });
+    });
+
+    it("a library a person chose (5 uploads) is exactly those; the client's everyday posts are offered, never added", async () => {
+      const uploads = [1, 2, 3, 4, 5].map((n) => `c1/uploads/reference-${n}.png`);
+      const { c, db, libraryWrites, posts, guids } = before([], { design_references: uploads });
+      c.harvested_design_references = [...uploads.map((path) => ({ path, upload: true, kept: true })), ...c.harvested_design_references];
+      for (const u of uploads) db.uploads.set(`design-references/${u}`, "image");
+      const calls = fakeIO(() => posts);
+      const out = await STEPS.design_refs.run(db, c, ctx());
+      expect(out).toMatchObject({ status: "done", result: { owner: "person", references: 5, occasions: [], window_days: 90 } });
+      expect(libraryWrites.at(-1)).toEqual({ p_client: "c1", p_reference_paths: uploads });
+      expect(c.harvested_design_references).toEqual(uploads.map((path) => ({ path, upload: true, kept: true })));
+      // The posts that left are offered with their platform, date and link.
+      const result = (out as { result: { suggestions: Array<Record<string, unknown>> } }).result;
+      expect(result.suggestions.map((s) => s.path)).toEqual(guids.map(pathOf));
+      expect(result.suggestions[0]).toEqual({ path: pathOf("ig:0"), platform: "Instagram", posted_at: `${fourDays[0]}T15:00:00Z`, source_url: "https://social.example/ig:0" });
+      // The look is learned from the five the person chose, and only from them.
+      expect(calls).toMatchObject({ read: 1, windows: [90], learn: 1 });
+      expect(calls.learned[0].content.filter((b) => b.type === "image")).toHaveLength(5);
+      expect(c.design_style_synthesis.source_posts.map((p: { path: string }) => p.path)).toEqual(uploads);
+    });
+
+    it("a library a person chose is written even when its files are too large to learn the look from; the stored look stays", async () => {
+      const uploads = [1, 2, 3].map((n) => `c1/uploads/large-${n}.png`);
+      const { c, db, libraryWrites, posts } = before([], { design_references: uploads });
+      // Two of the three are over the size one image may have in the request.
+      db.uploads.set(`design-references/${uploads[0]}`, "image");
+      for (const u of uploads.slice(1)) db.uploads.set(`design-references/${u}`, new Uint8Array(4 * 1024 * 1024 + 1));
+      const calls = fakeIO(() => posts);
+      const out = await STEPS.design_refs.run(db, c, ctx());
+      expect(out).toMatchObject({ status: "done", result: { owner: "person", references: 3, relearned: null, look_waits: true, synthesized_at: learnedBefore.synthesized_at } });
+      expect(calls.learn).toBe(0);
+      expect(libraryWrites.at(-1)).toEqual({ p_client: "c1", p_reference_paths: uploads });
+      expect(c.harvested_design_references.map((e: { path: string }) => e.path)).toEqual(uploads);
+      expect(c.design_style_synthesis).toBe(learnedBefore);
+    });
+
+    it("a post made for an occasion leaves an automatic library, and is listed with what it was made for", async () => {
+      const { c, db, libraryWrites, posts } = before(["Happy Halloween from Harbor Coffee!"]);
+      const calls: Calls = fakeIO(() => posts, byCaption(() => calls));
+      const out = await STEPS.design_refs.run(db, c, ctx());
+      expect(out).toMatchObject({ status: "done", result: { owner: "app", references: 3, everyday: 3, occasion: 1 } });
+      expect(libraryWrites.at(-1)!.p_reference_paths).toEqual([pathOf("ig:1"), pathOf("ig:2"), pathOf("ig:3")]);
+      expect((out as { result: { occasions: unknown[] } }).result.occasions).toEqual([{ path: pathOf("ig:0"), platform: "Instagram", posted_at: `${fourDays[0]}T15:00:00Z`, source_url: "https://social.example/ig:0", occasion: "holiday" }]);
+      expect(db.tables.design_reference_reviews.find((r) => r.source_post_id === "ig:0")).toMatchObject({ verdict: "designed", kind: "occasion", occasion: "holiday", evidence: "Happy Halloween", rule: 2 });
+
+      // A person's Keep outranks the rule: the same post is back in on the next check.
+      db.tables.design_reference_choices.push({ client_id: "c1", path: pathOf("ig:0"), choice: "kept" });
+      const next: Calls = fakeIO(() => posts, { ...byCaption(() => next), now: () => new Date("2026-11-03T10:00:00Z") });
+      await STEPS.design_refs.run(db, c, ctx());
+      expect(libraryWrites.at(-1)!.p_reference_paths).toEqual([pathOf("ig:0"), pathOf("ig:1"), pathOf("ig:2"), pathOf("ig:3")]);
+      expect(next.review).toBe(0);
+    });
+
+    it("a client whose posts were all made for occasions keeps its library and its look, after reading a whole year", async () => {
+      const { c, db, libraryWrites, posts, guids } = before(fourDays.map(() => "Happy Halloween from Harbor Coffee!"));
+      const stored = c.harvested_design_references;
+      const calls: Calls = fakeIO(() => posts, byCaption(() => calls));
+      const out = await STEPS.design_refs.run(db, c, ctx());
+      expect(out).toMatchObject({ status: "done", result: { no_everyday: true, occasion_only: true, references: 4, relearned: null, synthesized_at: learnedBefore.synthesized_at, owner: "app", occasion: 4, everyday: 0, window_days: 365 } });
+      expect(calls).toMatchObject({ read: 8, windows: YEAR, review: 4, learn: 0 });
+      expect(c.harvested_design_references).toBe(stored);
+      expect(c.harvested_design_references.map((e: { path: string }) => e.path)).toEqual(guids.map(pathOf));
+      expect(c.design_style_synthesis).toBe(learnedBefore);
+      expect(libraryWrites).toEqual([]);
+      expect((out as { result: { occasions: unknown[] } }).result.occasions).toHaveLength(4);
+    });
+
+    it("a client with 2 everyday posts builds on those 2 and keeps its look", async () => {
+      const { c, db, libraryWrites, posts } = before(["Happy Halloween from Harbor Coffee!", "", "Our Halloween special is back."]);
+      const calls: Calls = fakeIO(() => posts, byCaption(() => calls));
+      const out = await STEPS.design_refs.run(db, c, ctx());
+      expect(out).toMatchObject({ status: "done", result: { thin: true, thin_everyday: 2, chosen: 0, references: 2, relearned: null, synthesized_at: learnedBefore.synthesized_at, owner: "app", window_days: 365 } });
+      expect("no_everyday" in (out as { result: object }).result).toBe(false);
+      expect(calls).toMatchObject({ read: 8, review: 4, learn: 0 });
+      expect(c.harvested_design_references.map((e: { path: string }) => e.path)).toEqual([pathOf("ig:1"), pathOf("ig:3")]);
+      expect(libraryWrites.at(-1)).toEqual({ p_client: "c1", p_reference_paths: [pathOf("ig:1"), pathOf("ig:3")] });
+      expect(c.design_style_synthesis).toBe(learnedBefore);
+    });
+
+    it("with fewer than 3 everyday posts in 90 days, reads 365 days in the same check and learns from what the year holds", async () => {
+      const c = refsClient();
+      const { db, libraryWrites } = world(c, ["ig"]);
+      // Two posts this autumn, three from the spring.
+      const posts = [post("ig:0", "2026-10-29"), post("ig:1", "2026-10-12"), post("ig:2", "2026-05-20"), post("ig:3", "2026-04-14"), post("ig:4", "2026-03-02")];
+      const calls = fakeIO(() => posts);
+      const out = await STEPS.design_refs.run(db, c, ctx());
+      expect(out).toMatchObject({ status: "done", result: { window_days: 365, references: 5, relearned: "first", reviewed: 5, posts_read: 5, owner: "app" } });
+      expect(calls).toMatchObject({ read: 8, windows: YEAR, review: 5, learn: 1 });
+      expect(libraryWrites.at(-1)!.p_reference_paths).toEqual(["ig:0", "ig:1", "ig:2", "ig:3", "ig:4"].map(pathOf));
+    });
+
+    describe("a check that takes more than one run", () => {
+      const base = { client_id: "c1", step: "design_refs", inputs_key: "k" };
+      /** Runs the step as the lifecycle does: again a minute later while it is still at work, each time with the row the last run left. */
+      async function runs(db: ReturnType<typeof dbWith>, c: Record<string, unknown>, each: (n: number) => Calls, first: StepRow | null = null) {
+        const outs: Array<Awaited<ReturnType<typeof STEPS.design_refs.run>>> = [];
+        const reads: number[][] = [];
+        let prev: StepRow | null = first;
+        for (let n = 0; n < 12; n++) {
+          const calls = each(n);
+          const out = await STEPS.design_refs.run(db, c, ctx({ previous: prev }));
+          outs.push(out);
+          reads.push(calls.windows);
+          prev = rowAfter(prev, base, out, new Date(NOW));
+          if (!(out.status === "waiting" && out.reason === "in_progress")) break;
+        }
+        return { outs, reads, last: prev! };
+      }
+      /** A clock that moves only when Sprout is read: each read takes 20 seconds. */
+      function slowReads(posts: () => Record<string, unknown>[], over: Record<string, unknown> = {}) {
+        let clock = Date.parse(NOW);
+        vi.spyOn(Date, "now").mockImplementation(() => clock);
+        return () => {
+          const calls: Calls = fakeIO(posts, over);
+          const io = deps.refsIO() as unknown as { readPosts: (a: unknown) => Promise<unknown> };
+          deps.refsIO = (() => ({ ...io, readPosts: async (a: unknown) => { clock += 20_000; return io.readPosts(a); } })) as never;
+          return calls;
+        };
+      }
+      // Two posts this autumn, three from the spring: the library needs the year.
+      const yearPosts = () => [post("ig:0", "2026-10-29"), post("ig:1", "2026-10-12"), post("ig:2", "2026-05-20"), post("ig:3", "2026-04-14"), post("ig:4", "2026-03-02")];
+
+      it("reads the last 90 days once, then one part of the year per read, and never a day twice", async () => {
+        const c = refsClient();
+        const { db, libraryWrites } = world(c, ["ig"]);
+        const { outs, reads } = await runs(db, c, slowReads(yearPosts));
+        // Each run starts no further part after 30 seconds: two reads a run here. The 90 days are read by the first run alone.
+        expect(reads).toEqual([[90, 45], [45, 45], [45, 45], [45, 5]]);
+        expect(reads.flat()).toEqual(YEAR);
+        expect(outs.slice(0, 3).map((o) => (o as { result: { progress: unknown } }).result.progress)).toEqual([
+          { at: NOW, covered_from: "2026-06-20" }, { at: NOW, covered_from: "2026-03-22" }, { at: NOW, covered_from: "2025-12-22" },
+        ]);
+        for (const o of outs.slice(0, 3)) expect(o).toMatchObject({ status: "waiting", reason: "in_progress", recheckMinutes: 1 });
+        // The library is the one a single run would have picked: the days read by earlier runs are known from their reviews.
+        expect(outs.at(-1)).toMatchObject({ status: "done", result: { window_days: 365, references: 5, relearned: "first", owner: "app", everyday: 5 } });
+        expect("progress" in (outs.at(-1) as { result: object }).result).toBe(false);
+        expect(libraryWrites.at(-1)!.p_reference_paths).toEqual(["ig:0", "ig:1", "ig:2", "ig:3", "ig:4"].map(pathOf));
+        expect(c.harvested_design_references[2]).toMatchObject({ path: pathOf("ig:2"), platform: "Instagram", posted_at: "2026-05-20T15:00:00Z", source_url: "https://social.example/ig:2", source_post_id: "ig:2", quality_checked: true });
+      });
+
+      it("goes on with the same part of the year while that part still has posts to review, and reads nothing else", async () => {
+        const c = refsClient();
+        const { db } = world(c, ["ig"]);
+        // Thirty plain photos in one spring fortnight, two a day: more than one run reviews.
+        const spring = Array.from({ length: 30 }, (_, i) => post(`ig:s${i}`, `2026-05-${30 - Math.floor(i / 2)}`));
+        const plain = { usable: false, confidence: 0.95, reason: "A plain photograph" };
+        const reviewer = (calls: () => Calls) => ({ review: async (a: Asked) => { calls().review++; calls().asked.push(a); return plain; } });
+        let made: Calls;
+        const { outs, reads } = await runs(db, c, () => (made = fakeIO(() => [post("ig:0", "2026-10-29"), ...spring], reviewer(() => made))));
+        // Run 1: the 90 days, the first older part (empty), then the part with the photos: one platform's 6 reviewed, 6 more waiting.
+        // Runs 2 to 4: that part again and nothing else. Run 5: its last 6, then the rest of the year.
+        expect(reads).toEqual([[90, 45, 45], [45], [45], [45], [45, 45, 45, 45, 45, 5]]);
+        expect(outs[0]).toMatchObject({ status: "waiting", reason: "in_progress", result: { reviewed: 7, left: 6, progress: { at: NOW, covered_from: "2026-06-20" } } });
+        for (const o of outs.slice(1, 4)) expect(o).toMatchObject({ status: "waiting", reason: "in_progress", result: { reviewed: 6, left: 6, progress: { covered_from: "2026-06-20" } } });
+        expect(db.tables.design_reference_reviews).toHaveLength(31);
+        // One everyday post in a year and no look learned yet: it waits, and its progress is cleared.
+        expect(outs[4]).toMatchObject({ status: "waiting", reason: "designed_posts", result: { window_days: 365, progress: null } });
+      });
+
+      it("starts again from the last 90 days when the stored progress is old, or is not for this year", async () => {
+        const c = refsClient();
+        const { db } = world(c, ["ig"]);
+        const stale = (progress: unknown) => row("design_refs", { status: "waiting", result: { waiting_for: "in_progress", progress } });
+        for (const progress of [{ at: "2026-11-02T03:00:00.000Z", covered_from: "2026-06-20" }, { at: NOW, covered_from: "2024-01-01" }, { at: NOW, covered_from: "tomorrow" }, "2026-06-20", null]) {
+          const calls = fakeIO(yearPosts);
+          await STEPS.design_refs.run(db, c, ctx({ previous: stale(progress) }));
+          expect(calls.windows[0], JSON.stringify(progress)).toBe(90);
+        }
+        // Progress from under 6 hours ago is picked up: the 90 days are not read.
+        const calls = fakeIO(yearPosts);
+        await STEPS.design_refs.run(db, c, ctx({ previous: stale({ at: "2026-11-02T05:00:00.000Z", covered_from: "2026-06-20" }) }));
+        expect(calls.windows[0]).toBe(45);
+        expect(calls.windows).not.toContain(90);
+      });
+
+      it("after two failed runs in a row, a post the model can never review no longer holds the check back", async () => {
+        const { c, db, libraryWrites, posts, guids } = before();
+        const answered = { kind: "everyday", rule: 2, reviewed_at: "2026-11-01T00:00:00.000Z", profile_id: "7" };
+        // Three posts are answered; the fourth was stored before the question and the model errors on it every time.
+        db.tables.design_reference_reviews = [...guids.slice(0, 3).map((g, i) => reviewedBefore(g, fourDays[i], answered)), reviewedBefore(guids[3], fourDays[3])];
+        vi.spyOn(console, "warn").mockImplementation(() => {});
+        const refuses = { review: async () => { throw new Error("the image could not be processed"); } };
+        fakeIO(() => posts, refuses);
+        // The first two runs fail and change nothing: the row is as it was.
+        expect(await STEPS.design_refs.run(db, c, ctx())).toMatchObject({ status: "failed" });
+        expect(await STEPS.design_refs.run(db, c, ctx({ previous: row("design_refs", { status: "failed", attempts: 1, error: "e" }) }))).toMatchObject({ status: "failed" });
+        expect(db.tables.design_reference_reviews.find((r) => r.source_post_id === guids[3])!.rule ?? 1).toBe(1);
+        expect(libraryWrites).toEqual([]);
+        // The third records it as not answered, and the library is written from the other three.
+        const out = await STEPS.design_refs.run(db, c, ctx({ previous: row("design_refs", { status: "failed", attempts: 2, error: "e" }) }));
+        expect(out).toMatchObject({ status: "done", result: { references: 3, unanswered: 1 } });
+        expect(db.tables.design_reference_reviews.find((r) => r.source_post_id === guids[3])).toMatchObject({ verdict: "designed", kind: null, rule: 2 });
+        expect(libraryWrites.at(-1)!.p_reference_paths).toEqual(guids.slice(0, 3).map(pathOf));
+      });
+    });
+
+    it("a read that comes back empty for an active account removes nothing: no review, no reference, no change to the look", async () => {
+      const { c, db, libraryWrites, guids } = before();
+      const answered = { kind: "everyday", rule: 2, reviewed_at: "2026-11-01T00:00:00.000Z", profile_id: "7" };
+      db.tables.design_reference_reviews = guids.map((g, i) => reviewedBefore(g, fourDays[i], answered));
+      // The look was learned from these four under the current rules.
+      const learned = { ...learnedBefore, reference_pipeline_version: 3, choices_key: choicesKey({}, []), platforms: { Instagram: { rules: "r", posts: 4, learned_at: NOW } }, source_posts: guids.map((g) => ({ path: pathOf(g) })) };
+      c.design_style_synthesis = learned;
+      // Sprout answers, with no posts at all.
+      const calls = fakeIO(() => []);
+      const out = await STEPS.design_refs.run(db, c, ctx());
+      expect(out).toMatchObject({ status: "done", result: { removed: 0, references: 4, relearned: null, posts_read: 0, window_days: 90, everyday: 4 } });
+      expect(db.tables.design_reference_reviews.map((r) => r.source_post_id).sort()).toEqual([...guids].sort());
+      expect(c.harvested_design_references.map((e: { path: string }) => e.path)).toEqual(guids.map(pathOf));
+      expect(libraryWrites.at(-1)!.p_reference_paths).toEqual(guids.map(pathOf));
+      expect(c.design_style_synthesis).toBe(learned);
+      expect(calls).toMatchObject({ read: 1, review: 0, learn: 0 });
+    });
+
+    it("a read that returns one account's posts and nothing for another active account removes nothing of the silent one", async () => {
+      const { c, db, posts, guids } = before([], {}, ["ig", "li"]);
+      const answered = { kind: "everyday", rule: 2, reviewed_at: "2026-11-01T00:00:00.000Z" };
+      db.tables.design_reference_reviews = [
+        ...guids.map((g, i) => reviewedBefore(g, fourDays[i], { ...answered, profile_id: "7" })),
+        reviewedBefore("li:quiet", "2026-10-28", { ...answered, profile_id: "8" }),
+        reviewedBefore("ig:deleted", "2026-10-27", { ...answered, profile_id: "7" }),
+      ];
+      fakeIO(() => posts);
+      const out = await STEPS.design_refs.run(db, c, ctx());
+      // Instagram answered, so its missing post is gone. LinkedIn is active and returned nothing: its review stays.
+      expect(out).toMatchObject({ status: "done", result: { removed: 1 } });
+      expect(db.tables.design_reference_reviews.map((r) => r.source_post_id).sort()).toEqual([...guids, "li:quiet"].sort());
+    });
+
+    it("a reviewed post the read no longer returns loses its review and its place; a kept one stays", async () => {
+      // LinkedIn was disconnected: only the Instagram account is active, and the read returns only its posts.
+      const { c, db, libraryWrites, posts, guids } = before();
+      const answered = { kind: "everyday", rule: 2, reviewed_at: "2026-11-01T00:00:00.000Z" };
+      db.tables.design_reference_reviews = [
+        ...guids.map((g, i) => reviewedBefore(g, fourDays[i], answered)),
+        reviewedBefore("li:gone", "2026-10-28", answered), reviewedBefore("li:kept", "2026-10-27", answered), reviewedBefore("li:summer", "2026-06-10", answered),
+        reviewedBefore("li:photo", "2026-10-25", { verdict: "not_designed", path: null }),
+      ];
+      c.harvested_design_references = [...c.harvested_design_references, entry("li:gone", "2026-10-28"), entry("li:kept", "2026-10-27")];
+      db.tables.design_reference_choices.push({ client_id: "c1", path: pathOf("li:kept"), choice: "kept" });
+      for (const g of ["li:gone", "li:kept"]) db.uploads.set(`design-references/${pathOf(g)}`, "image");
+      const calls = fakeIO(() => posts);
+      const out = await STEPS.design_refs.run(db, c, ctx());
+      expect(out).toMatchObject({ status: "done", result: { removed: 2, references: 5, window_days: 90 } });
+      // Gone: the two dated inside the window. The kept one stays, and so does one from before the window.
+      expect(db.tables.design_reference_reviews.map((r) => r.source_post_id).sort()).toEqual([...guids, "li:kept", "li:summer"].sort());
+      // Taken in turn across platforms, as always: Instagram's newest, then the kept LinkedIn post.
+      expect(libraryWrites.at(-1)!.p_reference_paths).toEqual([pathOf("ig:0"), pathOf("li:kept"), pathOf("ig:1"), pathOf("ig:2"), pathOf("ig:3")]);
+      expect(c.harvested_design_references.map((e: { path: string }) => e.path)).not.toContain(pathOf("li:gone"));
+      expect(calls.review).toBe(0);
+    });
+
+    it("removes nothing when the read fails", async () => {
+      const { c, db, libraryWrites, guids } = before();
+      db.tables.design_reference_reviews.push(reviewedBefore("li:gone", "2026-10-28"));
+      const stored = c.harvested_design_references;
+      const calls = fakeIO(() => [], { readPosts: async () => { calls.read++; throw new StyleError("provider", "Published-post lookup did not answer. It will be tried again."); } });
+      expect(await STEPS.design_refs.run(db, c, ctx())).toMatchObject({ status: "failed" });
+      expect(calls).toMatchObject({ read: 1, review: 0, learn: 0 });
+      expect(db.tables.design_reference_reviews.map((r) => r.source_post_id).sort()).toEqual([...guids, "li:gone"].sort());
+      expect(c.harvested_design_references).toBe(stored);
+      expect(libraryWrites).toEqual([]);
+    });
   });
 });
 

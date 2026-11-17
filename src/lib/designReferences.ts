@@ -4,7 +4,10 @@
 // learned and from how many posts, one line per platform for designs and for
 // copy, and a new look when the client's posts show one. Plain sentences
 // only; the numbers come from the design_refs step's result, the learned
-// look and the voice profile. Pure, so it can be tested.
+// look and the voice profile. It also says who picks the references (the
+// library's rules: docs/superpowers/plans/2026-11-17-reference-library.md):
+// the team, once it has chosen 3 or more, or the client's everyday posts.
+// Pure, so it can be tested.
 
 import { formatDate } from "@/lib/display";
 
@@ -49,9 +52,11 @@ export function checkedLine(step: RefsStep | null, synthesis: unknown, reference
     learnedAt ? `Look learned ${learnedAt} from ${plural(from, "post", "posts")}.` : "",
   ];
   if (waitingFor === "designed_posts") {
+    // Since the library's rules a client waits for everyday posts (posts made for an occasion do not count): a result that says how many days it read is one of those.
+    const everyday = typeof obj(step.result).window_days === "number";
     parts.push(references
-      ? "There are fewer than 3 new designed posts, so these references stay until there are more."
-      : "The client has fewer than 3 designed posts so far. Its posts are checked again every week.");
+      ? (everyday ? "There are fewer than 3 everyday designed posts, so these references stay until there are more." : "There are fewer than 3 new designed posts, so these references stay until there are more.")
+      : (everyday ? "The client has fewer than 3 everyday designed posts so far. Its posts are checked again every week." : "The client has fewer than 3 designed posts so far. Its posts are checked again every week."));
   }
   return parts.filter(Boolean).join(" ");
 }
@@ -82,6 +87,50 @@ export function lookLine(synthesis: unknown): string {
   if (typeof change.since !== "string" || !change.since) return "";
   const what = typeof change.what === "string" ? change.what.trim().replace(/\.+$/, "") : "";
   return `New look in posts since ${formatDate(change.since)}${what ? `: ${what}.` : "."}`;
+}
+
+/** What an occasion post was made for, as the setup card names it (brand-references/candidates.ts OCCASIONS). */
+export const OCCASION_WORDS: Record<string, string> = {
+  holiday: "Holiday or season", awareness: "Awareness day or month", event: "Dated event", person: "Named person", contest: "Contest or game",
+};
+
+const referenceWords = (n: number) => (n === 1 ? "1 reference" : `${n} references`);
+
+/**
+ * Who picks the references and what designs build on, as one sentence that
+ * is true of the library as it stands; empty for a result from before the
+ * rule. `chosen` is how many of the library's references the team chose
+ * (uploads and kept posts); `thin_everyday` is how many different everyday
+ * posts were found beside them.
+ */
+export function ownerLine(step: RefsStep | null): string {
+  const r = obj(step?.result);
+  const n = typeof r.references === "number" ? r.references : 0;
+  const chosen = typeof r.chosen === "number" ? r.chosen : 0;
+  if (r.owner === "person") return `Designs use the ${n} references your team chose. New posts are not added on their own.`;
+  if (r.occasion_only === true) return "No everyday designed post was found in the last year, so designs still build on the references below, which were made for occasions. Upload 3 or more references to replace them.";
+  if (r.no_everyday === true) return "No everyday designed post was found in the last year, so the references below stay as they are. Upload 3 or more references to replace them.";
+  if (r.thin === true) {
+    // Fewer than 3 different references in all: what the team chose, and the everyday posts found beside them.
+    const found = typeof r.thin_everyday === "number" ? r.thin_everyday : n;
+    if (chosen > 0 && found === 0) return `Designs build on the ${referenceWords(chosen)} your team chose. No everyday designed post was found in the last year to add to ${chosen === 1 ? "it" : "them"}.`;
+    if (chosen > 0 && found === 1) return `Designs build on the ${referenceWords(chosen)} your team chose and the 1 everyday designed post found in the last year.`;
+    if (chosen > 0 && found === 2) return `Designs build on the ${referenceWords(chosen)} your team chose and the 2 everyday designed posts found in the last year.`;
+    if (found === 1) return "Only 1 everyday designed post was found in the last year, so designs build on that one.";
+    if (found === 2) return "Only 2 everyday designed posts were found in the last year, so designs build on those.";
+    return "";
+  }
+  if (r.owner === "app" && chosen > 0) return `Designs use the ${referenceWords(chosen)} your team chose and this client's everyday posts, picked from its accounts every week.`;
+  if (r.owner === "app") return "Designs use this client's everyday posts, picked from its accounts every week.";
+  return "";
+}
+
+/** How close the team is to owning the library; empty unless it has chosen 1 or 2. */
+export function chosenLine(owner: unknown, chosen: number): string {
+  if (owner !== "app") return "";
+  if (chosen === 1) return "Your team has chosen 1 reference. With 3 or more, designs use only the references your team chose.";
+  if (chosen === 2) return "Your team has chosen 2 references. With 3 or more, designs use only the references your team chose.";
+  return "";
 }
 
 /** The background a client's design settings start from until a person or the brand's own color sets it. It is stored client data (the saved background of a design), so it lives here and not in a component. */

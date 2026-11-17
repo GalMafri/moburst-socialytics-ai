@@ -26,7 +26,8 @@
 // A demo copy (a client the API demo made) runs only the steps its demo job asks for (run.ts).
 
 import { referenceFingerprint } from "../brand-references/candidates.ts";
-import { choicesKey } from "../brand-references/corpus.ts";
+import { choicesKey, LIBRARY_RULE } from "../brand-references/corpus.ts";
+import { brandPosts } from "../brand-references/posts.ts";
 import { StyleError } from "../brand-references/errors.ts";
 import { liveRefsIO, readChoices, refreshReferences } from "../brand-references/learnStyle.ts";
 import { defaultSproutCustomerId } from "../sprout/customer.ts";
@@ -368,7 +369,7 @@ async function writeDesignSettings(db: Db, client: ClientRow, ctx: StepContext, 
   const logo: LogoFile | null = standing ? standing.logo : await imaging.logoPng(db, client.id, String(client.logo_url));
   if (!logo) return { outcome: { status: "waiting", reason: "logo_file", result: { logo_url: client.logo_url } } };
   // Where the client's own posts put the logo, read from its posts, not its uploads.
-  const posts = referencesFor([], (Array.isArray(client.harvested_design_references) ? client.harvested_design_references : []).filter((r: { upload?: boolean }) => !r?.upload), MAX_REFS, null);
+  const posts = referencesFor([], await brandPosts(db, { id: String(client.id), harvested_design_references: client.harvested_design_references }), MAX_REFS, null);
   const inputs = spotInputs(client, ctx.rows.get("design_refs"));
   const kept = storedSpotRead(existing, ctx.rows.get("design_settings") ?? null, inputs);
   let spot: LogoSpot | null = null;
@@ -1413,7 +1414,11 @@ export const STEPS: Record<string, StepDef> = {
   // (brand-references/learnStyle.ts refreshReferences). done_at is the check;
   // the result's synthesized_at is the last real learning, which
   // design_settings keys on. A client with fewer than 3 designed posts keeps
-  // its last references and is checked again in a week.
+  // its last references and is checked again in a week. The key ends in the
+  // library rule's version (corpus.ts LIBRARY_RULE): when the rule changes,
+  // every client's library is rebuilt once, on its next look. A check that
+  // needs more than one run keeps how far it got in its result (progress),
+  // and the next run, a minute later, goes on from there.
   design_refs: {
     policy: { refreshDays: 7, recheckDays: 7 },
     async inputs(db, client) {
@@ -1424,16 +1429,20 @@ export const STEPS: Record<string, StepDef> = {
       const uploads = Array.isArray(client.design_references) ? client.design_references.filter((p: unknown): p is string => typeof p === "string" && !!p) : [];
       const choices = await readChoices(db, client.id);
       const notNow = await notNowPlatforms(db, client.id);
-      return `${referenceFingerprint(ids, String(client.sprout_customer_id || defaultSproutCustomerId()))}|chosen:${choicesKey(choices, uploads)}${notNow.length ? `|not_now:${notNow.join(",")}` : ""}`;
+      return `${referenceFingerprint(ids, String(client.sprout_customer_id || defaultSproutCustomerId()))}|chosen:${choicesKey(choices, uploads)}${notNow.length ? `|not_now:${notNow.join(",")}` : ""}|rule:${LIBRARY_RULE}`;
     },
-    async run(db, client, { rows }) {
+    async run(db, client, { rows, previous }) {
       try {
         // The social read's scores order each platform's slots; a platform the strategy marks "not now" gets no section.
         const multiples = (socialResult(rows)?.multiples ?? undefined) as Record<string, number> | undefined;
-        const out = await refreshReferences(db, String(client.id), deps.refsIO(), { multiples, notNow: await notNowPlatforms(db, client.id) });
+        // A check that did not finish in one run goes on from where it stopped (the result's progress), so a run reads
+        // only what is left; a check that failed before says how many times in a row.
+        const out = await refreshReferences(db, String(client.id), deps.refsIO(), {
+          multiples, notNow: await notNowPlatforms(db, client.id), resume: previous?.result?.progress, failedBefore: previous?.status === "failed" ? previous.attempts : 0,
+        });
         if (out.kind === "no_accounts") return { status: "waiting", reason: "social_accounts" };
-        if (out.kind === "in_progress") return { status: "waiting", reason: "in_progress", recheckMinutes: 1, result: { reviewed: out.reviewed, left: out.left } };
-        if (out.kind === "too_few") return { status: "waiting", reason: "designed_posts", recheckDays: 7, result: { designed: out.designed, posts_read: out.posts_read } };
+        if (out.kind === "in_progress") return { status: "waiting", reason: "in_progress", recheckMinutes: 1, result: { reviewed: out.reviewed, left: out.left, progress: out.progress } };
+        if (out.kind === "too_few") return { status: "waiting", reason: "designed_posts", recheckDays: 7, result: { designed: out.designed, posts_read: out.posts_read, ...out.detail, progress: null } };
         return { status: "done", result: out.result };
       } catch (e) {
         if (!(e instanceof StyleError)) throw e;

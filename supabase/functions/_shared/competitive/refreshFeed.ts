@@ -15,6 +15,7 @@ import { readSelection } from "./selectionTracking.ts";
 import { selectedFeedSources, collectLinkedInSource } from "./linkedinSource.ts";
 import { rivalIqFetch } from "./rivaliqFetch.ts";
 import { harvestedPaths, type HarvestedRef } from "../design-prompts/designRefs.ts";
+import { rulesLibrary } from "../brand-references/corpus.ts";
 import { pipelineEngineDeps, readEngine } from "../pipelines/engine.ts";
 import { shadowLinkedInSource } from "../pipelines/shadow.ts";
 import { feedLinkedInAnswer } from "../pipelines/feedLinkedIn.ts";
@@ -198,13 +199,28 @@ const HARVEST_CAP = 8;
 /** A reference has to be an image the readers accept, and small enough for them. */
 const HARVEST_MAX_BYTES = 4 * 1024 * 1024;
 
+/** Whether a stored file is one this harvest made for the client (`<folder>/harvested-<client>-<post>.<ext>`): the only files it may ever remove. */
+export function harvestFile(path: unknown, clientId: string): boolean {
+  return typeof path === "string" && path.split("/").pop()!.startsWith(`harvested-${clientId}-`);
+}
+
 /**
  * Stores the client's own recent creative as design references.
  *
  * Selection uses the uniquely verified tracked client, which need not be
  * the landscape's focus company.
+ *
+ * Two limits it never crosses (17 Nov 2026):
+ *   * A library the reference rules wrote is not its to touch
+ *     (brand-references/corpus.ts rulesLibrary): any library holding an
+ *     upload, a kept post or a reviewed post, or one the design_refs step
+ *     recorded an owner for, is left exactly as it is. Nothing is fetched,
+ *     merged, reordered, trimmed or removed.
+ *   * It removes only files it made itself (harvestFile). An entry whose file
+ *     it did not make keeps its place in the list and its file, whatever the
+ *     list holds.
  */
-async function harvestOwnCreative(
+export async function harvestOwnCreative(
   admin: any,
   clientId: string,
   clientCompanyId: string,
@@ -213,17 +229,25 @@ async function harvestOwnCreative(
 ): Promise<{ added: number; kept: number; skipped: string[] }> {
   const skipped: string[] = [];
   try {
-    const { data: row } = await admin
+    const { data: row, error: rowError } = await admin
       .from("clients")
       .select("harvested_design_references")
       .eq("id", clientId)
       .maybeSingle();
-    const existing: HarvestedRef[] = Array.isArray(row?.harvested_design_references)
-      ? (row!.harvested_design_references as HarvestedRef[]).filter((r) => r && typeof r.path === "string")
-      : [];
-    // Onboarded clients use quality-reviewed Sprout references. The legacy
-    // competitor-feed thumbnail harvest must never overwrite that corpus.
-    if (existing.some(r => r.quality_checked === true)) return { added: 0, kept: existing.length, skipped };
+    // A library that cannot be read is not harvested into: nothing is known about what it holds.
+    if (rowError || !row) return { added: 0, kept: 0, skipped };
+    const stored: unknown[] = Array.isArray(row.harvested_design_references) ? row.harvested_design_references : [];
+    const { data: refsStep, error: stepError } = await admin
+      .from("client_lifecycle_steps")
+      .select("result")
+      .eq("client_id", clientId)
+      .eq("step", "design_refs")
+      .maybeSingle();
+    // The reference rules' library (a person's uploads and kept posts, reviewed
+    // posts, or a library the design_refs step answers for) is never this
+    // harvest's to touch. When that cannot be told, it is not touched either.
+    if (stepError || rulesLibrary(stored, refsStep?.result)) return { added: 0, kept: stored.length, skipped };
+    const existing: HarvestedRef[] = (stored as HarvestedRef[]).filter((r) => r && typeof r.path === "string");
     const seen = new Set(existing.map((r) => String(r.source_post_id || "")));
 
     const mine = socialPosts
@@ -268,11 +292,19 @@ async function harvestOwnCreative(
 
     if (added.length === 0) return { added: 0, kept: existing.length, skipped };
 
-    // Newest first, capped. Anything pushed out is deleted, so the bucket
-    // does not grow without limit.
+    // Newest first, with the harvest's own files capped. One of its own files
+    // pushed out is deleted, so the bucket does not grow without limit. An
+    // entry whose file it did not make is never trimmed and never deleted.
     const merged = [...added, ...existing].sort((a, b) => String(b.posted_at || "").localeCompare(String(a.posted_at || "")));
-    const keep = merged.slice(0, HARVEST_CAP);
-    const drop = merged.slice(HARVEST_CAP).map((r) => r.path);
+    const keep: HarvestedRef[] = [];
+    const pushedOut: string[] = [];
+    let own = 0;
+    for (const r of merged) {
+      if (!harvestFile(r.path, clientId) || own++ < HARVEST_CAP) keep.push(r);
+      else pushedOut.push(r.path);
+    }
+    // The one removal here, and only ever of files this harvest made.
+    const drop = pushedOut.filter((path) => harvestFile(path, clientId));
     if (drop.length > 0) await admin.storage.from("design-references").remove(drop).catch(() => {});
 
     await admin
