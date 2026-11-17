@@ -11,8 +11,8 @@ describe("the picture service contract", () => {
     expect(PICTURE_SERVICE_URL).toBe("https://moburst-socialytics.vercel.app");
     expect(PICTURE_API_BASE).toBe("/api/picture");
   });
-  it("lists the eight routes", () => {
-    expect(PICTURE_ROUTES).toEqual(["canvas", "locate", "read", "finish", "transcode", "title-read", "logo-set", "post-logos"]);
+  it("lists the ten routes", () => {
+    expect(PICTURE_ROUTES).toEqual(["canvas", "locate", "read", "finish", "transcode", "title-read", "logo-set", "post-logos", "slot", "slot-file"]);
   });
   it("still takes a locate request with one logo and one background", () => {
     // The type check is the test: a job with one file sends exactly this.

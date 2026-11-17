@@ -1,9 +1,10 @@
 // supabase/functions/_shared/picture/contract.ts
 //
 // The contract between Socialytics' edge workers and the picture service on
-// Vercel (12 Nov 2026): every picture job runs in the service, on eight
-// routes (canvas, locate, read, finish, transcode, title read-back, and since
-// 16 Nov 2026 the logo set and the posts' logos), and the workers only send
+// Vercel (12 Nov 2026): every picture job runs in the service, on ten
+// routes (canvas, locate, read, finish, transcode, title read-back, since
+// 16 Nov 2026 the logo set and the posts' logos, and since 17 Nov 2026 the
+// slot and the cleaned slot's file), and the workers only send
 // signed storage URLs and read back sizes and facts. This file imports nothing, so the
 // Deno workers and the Node server can both import it and cannot drift apart.
 //
@@ -85,6 +86,51 @@ export type LocateResult = {
   file?: LogoFileName | null; matched?: LogoFileName; scores?: number[]; gaps?: Partial<Record<LogoFileName, number>>; stamp?: Rect;
   ground?: Rgb; lost?: boolean;
 };
+
+/**
+ * Where the logo goes on a design (17 Nov 2026, _shared/design/logoSlot.ts).
+ * The templates are a locate request's: the canvas file over the canvas
+ * color first, then the template for the other ground when the job has one.
+ * Each is searched for in either tone. `slot` is the found rectangle when
+ * the best match is the logo by the existing test (`from` "drawn"), else
+ * the rectangle the canvas carried (`from` "canvas"); `of` is the file
+ * whose shape the slot has. `canvas` is that canvas rectangle in the
+ * design's pixels. `drawn`, `score`, `matched`, `index` and `scores` are
+ * the best match whatever it scored, for review; `index` is the template
+ * that gave it.
+ */
+export type SlotRequest = PictureMeta & { design: string; placement: Placement; scales: [number, number]; templates: [LogoTemplate] | [LogoTemplate, LogoTemplate] };
+export type SlotResult = {
+  slot: Rect; from: "drawn" | "canvas"; of: LogoFileName; index: number;
+  frame: [number, number]; canvas: Rect;
+  drawn: Rect; score: number; matched: LogoFileName; scores: number[];
+};
+/** One file that may be stamped. `last`: a made copy the client's own posts do not show, tried after the others. */
+export type StampFile = { file: LogoFileName; logo: string; last?: boolean };
+/**
+ * The cleaned slot: `picture` is the design with the model's drawing taken
+ * out, `rect` the slot in `frame` pixels, `of` the listed file whose shape
+ * the slot has, `files` one to three files in stamp order, each name once.
+ * `drawn` names the listed file and the color of the template that found
+ * the drawing, which is then looked for again at the slot.
+ *
+ * The answer: `ground` is the picture's own color under the slot (null when
+ * the slot has no pixel on the picture) and `flat` how much of the slot is
+ * near it; `file` is the first file whose whole parts all show there, null
+ * when none does; `rect` is where it is stamped, in `frame` pixels; `shows`
+ * is each file's weakest whole part against the ground.
+ */
+export type SlotFileRequest = PictureMeta & {
+  picture: string; rect: Rect; frame: [number, number]; of: LogoFileName;
+  files: StampFile[];
+  drawn?: { file: LogoFileName; ground: Rgb };
+};
+export type SlotFileResult = {
+  ground: Rgb | null; flat: number;
+  file: LogoFileName | null; rect: Rect;
+  shows: Partial<Record<LogoFileName, number>>;
+  drawn?: { score: number; found: boolean };
+};
 export type ReadRequest = PictureMeta & { picture: string; page: Size; band?: Rect; area?: Rect; out: { page: string; band?: string; area?: string } };
 export type ReadResult = { picture: Size; page: Size; band?: Size; area?: Size };
 export type FinishRequest = PictureMeta & { picture: string; logo: string; rect: Rect; frame: [number, number]; output: Size; out: string };
@@ -115,8 +161,8 @@ export type PostLogo = { found: false; score: number }
 /** One entry per post, in the order sent; null for a post that could not be read. */
 export type PostLogosResult = { posts: Array<PostLogo | null> };
 
-export type PictureRoute = "canvas" | "locate" | "read" | "finish" | "transcode" | "title-read" | "logo-set" | "post-logos";
-export const PICTURE_ROUTES: readonly PictureRoute[] = ["canvas", "locate", "read", "finish", "transcode", "title-read", "logo-set", "post-logos"];
-export type PictureRequests = { canvas: CanvasRequest; locate: LocateRequest; read: ReadRequest; finish: FinishRequest; transcode: TranscodeRequest; "title-read": TitleReadRequest; "logo-set": LogoSetRequest; "post-logos": PostLogosRequest };
-export type PictureResults = { canvas: CanvasResult; locate: LocateResult; read: ReadResult; finish: FinishResult; transcode: TranscodeResult; "title-read": TitleReadResult; "logo-set": LogoSetResult; "post-logos": PostLogosResult };
+export type PictureRoute = "canvas" | "locate" | "read" | "finish" | "transcode" | "title-read" | "logo-set" | "post-logos" | "slot" | "slot-file";
+export const PICTURE_ROUTES: readonly PictureRoute[] = ["canvas", "locate", "read", "finish", "transcode", "title-read", "logo-set", "post-logos", "slot", "slot-file"];
+export type PictureRequests = { canvas: CanvasRequest; locate: LocateRequest; read: ReadRequest; finish: FinishRequest; transcode: TranscodeRequest; "title-read": TitleReadRequest; "logo-set": LogoSetRequest; "post-logos": PostLogosRequest; slot: SlotRequest; "slot-file": SlotFileRequest };
+export type PictureResults = { canvas: CanvasResult; locate: LocateResult; read: ReadResult; finish: FinishResult; transcode: TranscodeResult; "title-read": TitleReadResult; "logo-set": LogoSetResult; "post-logos": PostLogosResult; slot: SlotResult; "slot-file": SlotFileResult };
 export type PictureAnswer<R extends PictureRoute> = { ok: true; result: PictureResults[R]; ms: number } | { ok: false; reason: string };

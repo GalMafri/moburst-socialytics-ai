@@ -281,6 +281,25 @@ describe("startOption and the client's logo set", () => {
     expect(job.input.placement).toEqual(settings.placement);
   });
 
+  it("carries the files the design may be stamped with beside the set: the copies the service made, whether or not a post shows them", async () => {
+    // The set holds no second file and no white file (no post shows one), and the service made both copies.
+    const row: Settings = { ...settings, logo_set: set({ other: null, white: null, canvas: { file: "stored", ground: "#F7E8E5", from: "client_posts" }, posts: { read: 8, found: 0, shown: { stored: 0, other: 0, white: 0 } } }) };
+    const db = world(row);
+    await startOption(db, request(), row, "Northwind Hockey", 0, 0);
+    const [job] = db.tables.canva_finish_jobs;
+    expect(job.input.logos.files).toEqual({ stored: "c1/logo.png" });
+    expect(job.input.stamp).toEqual([{ file: "stored", path: "c1/logo.png" }, { file: "other", path: OTHER }, { file: "white", path: WHITE }]);
+    // Logos were found on the client's posts and none shows the white copy: it is tried last.
+    const seen: Settings = { ...settings, logo_set: set({ white: null, posts: { read: 8, found: 4, shown: { stored: 1, other: 3, white: 0 } } }) };
+    const other = world(seen);
+    await startOption(other, request(), seen, "Northwind Hockey", 0, 0);
+    expect(other.tables.canva_finish_jobs[0].input.stamp).toEqual([{ file: "stored", path: "c1/logo.png" }, { file: "other", path: OTHER }, { file: "white", path: WHITE, last: true }]);
+    // A job with one file has no list, and neither has a video.
+    const one = world({ ...settings });
+    await startOption(one, request(), { ...settings }, "Northwind Hockey", 0, 0);
+    expect("stamp" in one.tables.canva_finish_jobs[0].input).toBe(false);
+  });
+
   it("leaves the settings it returns unchanged and gives a video job the stored file", async () => {
     const row: Settings = { ...settings, logo_set: set() };
     const before = structuredClone(row);
@@ -297,6 +316,7 @@ describe("startOption and the client's logo set", () => {
     expect(job.input.logo_path).toBe("c1/logo.png");
     expect(job.input.logo_size).toEqual([701, 251]);
     expect("logos" in job.input).toBe(false);
+    expect("stamp" in job.input).toBe(false);
   });
 
   it("starts a job with the one file when there is no set or the set belongs to another logo", async () => {

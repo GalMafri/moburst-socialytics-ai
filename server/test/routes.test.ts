@@ -10,7 +10,7 @@
 import { describe, expect, it } from "vitest";
 import { canvasLogoRect } from "../../supabase/functions/_shared/canva/brief.ts";
 import { PUBLIC_DEFAULTS } from "../../public-env.ts";
-import { PICTURE_CALL_HEADER, READ_JPEG_QUALITY, type LocateResult, type LogoSetResult, type Placement, type PostLogo, type Rgb } from "../../supabase/functions/_shared/picture/contract.ts";
+import { PICTURE_CALL_HEADER, READ_JPEG_QUALITY, type LocateResult, type LogoSetResult, type Placement, type PostLogo, type Rgb, type SlotFileResult, type SlotResult } from "../../supabase/functions/_shared/picture/contract.ts";
 import { partsOf, wholeExposedInks } from "../../supabase/functions/_shared/design/logoTone.ts";
 import { blank, box, drawLogo, flat, inked, mark } from "../../supabase/tests/_shared/design/draw.ts";
 import { createApp } from "../src/app.ts";
@@ -21,6 +21,7 @@ import { readPictures } from "../src/picture/read.ts";
 import { decodeRaster, encodeJpeg, encodePng, raster, type Raster } from "../src/picture/raster.ts";
 import { titleRead } from "../src/picture/title.ts";
 import { locateTemplates } from "../src/picture/tone.ts";
+import { findSlot, slotFile } from "../src/picture/slot.ts";
 import { pagePicture, ringAndBarLogo, wideLogo } from "./fixtures.ts";
 
 const BIG = 60_000;
@@ -737,5 +738,159 @@ describe("what the service answers when it cannot work", () => {
     expect(text).not.toContain(CALL);
     expect(text).not.toContain("store.test");
     expect(text).not.toContain("http");
+  });
+});
+
+describe("POST /api/picture/slot", () => {
+  const W = 320, H = 240;
+  const placement: Placement = { anchor: "left", left: 0.1875, width: 0.25, top: 0.125 };
+  const scales: [number, number] = [0.45, 1.35];
+  const shape = mark(40, 16, [24, 28, 40]);
+  const usual = canvasLogoRect(placement, 40, 16, W, H);
+  const drawn = { x: usual.x + 6, y: usual.y + 4, width: Math.round(usual.width * 0.8), height: Math.round((usual.width * 0.8 * 16) / 40) };
+  const LIGHT: Rgb = [255, 255, 255], DARK: Rgb = [11, 14, 26];
+  const base = { ...meta, design: `${GET}design.png`, placement, scales };
+  async function store(design: Raster, logos: Record<string, Raster>) {
+    const files: Record<string, Uint8Array> = { "design.png": await encodePng(design) };
+    for (const [name, r] of Object.entries(logos)) files[`${name}.png`] = await encodePng(r);
+    return harness(files);
+  }
+  const result = (json: Record<string, unknown>) => json.result as SlotResult;
+
+  it("answers the found rectangle as the slot for a logo drawn in the file's tone or in the other one, with one template", async () => {
+    const template = [{ file: "stored", logo: `${GET}stored.png`, ground: LIGHT }];
+    const same = drawLogo(flat(W, H, [236, 240, 244]), shape, drawn);
+    const a = await store(same, { stored: shape });
+    const first = await a.call("slot", { ...base, templates: template });
+    expect(first.status).toBe(200);
+    expect(first.json).toEqual({ ok: true, result: findSlot(same, [{ file: "stored", raster: shape, ground: LIGHT }], placement, scales), ms: 5 });
+    const got = result(first.json);
+    expect(got.from).toBe("drawn");
+    expect(got.of).toBe("stored");
+    expect(got.slot).toEqual(got.drawn);
+    expect(got.canvas).toEqual(usual);
+    expect(got.frame).toEqual([W, H]);
+    expect(got.index).toBe(0);
+    expect(got.score).toBeGreaterThanOrEqual(0.75);
+    expect(Object.keys(a.puts)).toEqual([]);
+    expect(a.lines[0]).toMatchObject({ route: "slot", ok: true, in: { design: "320x240", template0: "40x16" }, out: {} });
+    expect(JSON.stringify(a.lines)).not.toContain("http");
+
+    // The same logo in white on a deep color, against the same dark file over a light ground.
+    const b = await store(drawLogo(flat(W, H, [98, 2, 73]), shape, drawn, [255, 255, 255]), { stored: shape });
+    const other = result((await b.call("slot", { ...base, templates: template })).json);
+    expect(other.from).toBe("drawn");
+    expect(other.slot).toEqual(got.slot);
+    expect(Math.abs(other.score - got.score)).toBeLessThan(0.01);
+  });
+
+  it("answers the rectangle the canvas carried when what was drawn is no close match, and when nothing was drawn", async () => {
+    // Bars where the logo was, and a stray shape lower down: neither is the logo.
+    const design = flat(W, H, [98, 2, 73]);
+    for (let i = 0; i < 6; i++) box(design, drawn.x + i * 11, drawn.y, drawn.x + i * 11 + 4, drawn.y + drawn.height, [255, 255, 255]);
+    box(design, 40, 150, 200, 170, [255, 255, 255]);
+    const { call } = await store(design, { stored: shape, other: inked(shape, [255, 255, 255]) });
+    const templates = [{ file: "stored", logo: `${GET}stored.png`, ground: LIGHT }, { file: "other", logo: `${GET}other.png`, ground: DARK }];
+    const got = result((await call("slot", { ...base, templates })).json);
+    expect(got.from).toBe("canvas");
+    expect(got.slot).toEqual(usual);
+    // The slot has the canvas file's shape, whichever template scored best.
+    expect(got.of).toBe("stored");
+    expect(got.score).toBeLessThan(0.75);
+    expect(got.scores).toHaveLength(2);
+
+    const empty = await store(flat(W, H, [98, 2, 73]), { stored: shape });
+    const none = result((await empty.call("slot", { ...base, templates: [templates[0]] })).json);
+    expect(none.from).toBe("canvas");
+    expect(none.slot).toEqual(usual);
+  });
+
+  it("refuses a body with no template, three templates, or a field it does not know", async () => {
+    const { call } = await store(flat(W, H, [0, 0, 0]), { stored: shape });
+    const t = { file: "stored", logo: `${GET}stored.png`, ground: LIGHT };
+    expect((await call("slot", { ...base, templates: [] })).status).toBe(400);
+    expect((await call("slot", { ...base, templates: [t, { ...t, ground: DARK }, { ...t, file: "white" }] })).status).toBe(400);
+    expect((await call("slot", { ...base, templates: [t], compare: [] })).status).toBe(400);
+    expect((await call("slot", { ...base, templates: [t, t] })).json.reason).toBe("The request is not well formed: templates.1.file");
+  });
+});
+
+describe("POST /api/picture/slot-file", () => {
+  const W = 320, H = 240;
+  const shape = mark(40, 16, [0, 0, 0]);
+  const white = inked(shape, [255, 255, 255]);
+  const rect = { x: 66, y: 34, width: 64, height: 26 };
+  const base = { ...meta, picture: `${GET}picture.png`, rect, frame: [W, H] as [number, number], of: "stored" };
+  const files = [{ file: "stored", logo: `${GET}stored.png` }, { file: "other", logo: `${GET}other.png` }];
+  async function store(picture: Raster, logos: Record<string, Raster> = { stored: shape, other: white }) {
+    const all: Record<string, Uint8Array> = { "picture.png": await encodePng(picture) };
+    for (const [name, r] of Object.entries(logos)) all[`${name}.png`] = await encodePng(r);
+    return harness(all);
+  }
+  const result = (json: Record<string, unknown>) => json.result as SlotFileResult;
+
+  it("reads the ground under the slot and names the first file that shows whole on it", async () => {
+    const plum = await store(flat(W, H, [98, 2, 73]));
+    const { status, json } = await plum.call("slot-file", { ...base, files });
+    expect(status).toBe(200);
+    expect(json).toEqual({ ok: true, result: slotFile(flat(W, H, [98, 2, 73]), rect, [W, H], "stored", [{ file: "stored", raster: shape }, { file: "other", raster: white }]), ms: 5 });
+    const got = result(json);
+    expect(got.ground).toEqual([98, 2, 73]);
+    expect(got.flat).toBe(1);
+    expect(got.file).toBe("other");
+    expect(got.rect).toEqual(rect);
+    expect(got.shows.stored).toBeCloseTo(1.62, 1);
+    expect(got.shows.other).toBeGreaterThan(12);
+    expect(got).not.toHaveProperty("drawn");
+    expect(Object.keys(plum.puts)).toEqual([]);
+    expect(plum.lines[0]).toMatchObject({ route: "slot-file", ok: true, in: { picture: "320x240", "file.stored": "40x16", "file.other": "40x16" }, out: {} });
+
+    // A light ground: the stored file.
+    const lavender = await store(flat(W, H, [215, 197, 247]));
+    expect(result((await lavender.call("slot-file", { ...base, files })).json).file).toBe("stored");
+    // A copy the client's posts never show waits behind a stored file that is only weak.
+    const weak = await store(flat(W, H, [98, 2, 73]));
+    expect(result((await weak.call("slot-file", { ...base, files: [files[0], { ...files[1], last: true }] })).json).file).toBe("stored");
+  });
+
+  it("names no file when none shows, and the slot scaled to the picture's own size", async () => {
+    // The picture is twice the frame the slot was found in; only the slot's own area is near white.
+    const picture = flat(W * 2, H * 2, [10, 10, 10]);
+    box(picture, rect.x * 2, rect.y * 2, (rect.x + rect.width) * 2, (rect.y + rect.height) * 2, [250, 250, 250]);
+    const { call } = await store(picture, { white });
+    const got = result((await call("slot-file", { ...base, of: "white", files: [{ file: "white", logo: `${GET}white.png` }] })).json);
+    expect(got.ground).toEqual([250, 250, 250]);
+    expect(got.file).toBeNull();
+    expect(got.shows.white).toBeLessThan(1.5);
+  });
+
+  it("says whether the drawing that was found is still there after cleaning", async () => {
+    const left = drawLogo(flat(W, H, [98, 2, 73]), shape, rect, [255, 255, 255]);
+    const drawn = { file: "stored", ground: [255, 255, 255] };
+    const still = result((await (await store(left)).call("slot-file", { ...base, files, drawn })).json);
+    expect(still.drawn?.found).toBe(true);
+    expect(still.drawn?.score).toBeGreaterThanOrEqual(0.75);
+    const clean = result((await (await store(flat(W, H, [98, 2, 73]))).call("slot-file", { ...base, files, drawn })).json);
+    expect(clean.drawn).toEqual({ score: clean.drawn!.score, found: false });
+    expect(clean.drawn!.score).toBeLessThan(0.75);
+    expect(clean.file).toBe("other");
+  });
+
+  it("fits a file of another shape to the slot's width and center", async () => {
+    const taller = mark(80, 34, [255, 255, 255]);
+    const { call } = await store(flat(W, H, [20, 20, 20]), { stored: shape, other: taller });
+    const got = result((await call("slot-file", { ...base, files })).json);
+    expect(got.file).toBe("other");
+    const height = Math.round((rect.width * 34) / 80);
+    expect(got.rect).toEqual({ x: rect.x, y: Math.round(rect.y + rect.height / 2 - height / 2), width: rect.width, height });
+  });
+
+  it("refuses a file named twice, no file, a drawing or a shape of a file that is not listed, and a field it does not know", async () => {
+    const { call } = await store(flat(W, H, [0, 0, 0]));
+    expect((await call("slot-file", { ...base, files: [] })).status).toBe(400);
+    expect((await call("slot-file", { ...base, files: [files[0], files[0]] })).json.reason).toBe("The request is not well formed: files.1.file");
+    expect((await call("slot-file", { ...base, files, drawn: { file: "white", ground: [0, 0, 0] } })).json.reason).toBe("The request is not well formed: drawn.file");
+    expect((await call("slot-file", { ...base, of: "white", files })).json.reason).toBe("The request is not well formed: of");
+    expect((await call("slot-file", { ...base, files, placement: { anchor: "center", width: 0.2, top: 0.1 } })).status).toBe(400);
   });
 });

@@ -408,3 +408,51 @@ Run: `npx tsx server/scripts/tone-replay.ts` on the tree of commit `4ce38b09` (t
 Slowest locate 9.9 s and slowest read of one post 11.7 s, with the two runs sharing the laptop.
 
 What this run does not prove. No entry holds a standing logo, so the count of plan Ruling 84 is proved by its tests alone (`logoPick.test.ts` and `steps.test.ts`), and by no row here. No entry has both a chosen logo and a live row, so no window row was run beside a chosen logo.
+
+## The slot: replay on every stored design, with the real requests of 17 Nov (17 Nov 2026)
+
+Spec section 13, plan rulings 85 to 98. Run: `npx tsx server/scripts/tone-replay.ts` on the tree of commit `f5fcaf6d` with the script of the commit that adds this section, both manifests at the same time on a laptop running other work. No model call. The only network reads are GETs of the product's public storage, for the stored copies of each live set. Nothing was written outside a scratch folder.
+
+What a slot row is. Each design keeps the row it had (what the `locate` route still answers a worker from before this change) and gains a slot row: the service's slot search on the design, then the service's cleaned-slot function, with the stamp list a job would carry. The paid removal cannot be run here, so the cleaned picture is a stand-in: the design with the slot and its surround painted with the ground around it (the middle pixel of the ring). One design has its job's real logo-free picture on disk, and its row uses that.
+
+Expected values were written before the run by a second, separate writing of the rule (a script outside the repository, from recorded measurements only: the earlier run's found or not and its ground around a found logo, the ground around the canvas rectangle, each file's whole-part colors, the posts' counts). For the nine designs of 17 Nov, which no earlier run has, the expected slot was written by hand from that day's measurements. No expected value was changed after a run.
+
+Manifests: the two of the section above, unchanged, with the nine designs of the two real requests of 17 Nov added to the live entries of their clients, and the real logo-free picture named on its design.
+
+- Main's manifest (29 entries): exit 0, 0 of 494 rows differ (25 settings, 29 sets, 270 posts, 14 windows, 78 designs, 78 slots). The 407 earlier rows keep their result, and the nine new designs fail the old locate as they did live.
+- The manifest of section 12 (15 entries): exit 0, 0 of 287 rows differ (13 settings, 14 choices, 15 sets, 159 posts, 43 designs, 43 slots). The 244 earlier rows keep their result.
+
+Every design gets a file: 121 of 121 slot rows name one, and none is made again for its ground. By what the old step gave the same design:
+
+| The old locate | Designs | The slot | The file now |
+|---|---|---|---|
+| passed, stored file stamped | 65 | where the model drew it | the stored file, all 65 |
+| passed, second file stamped | 13 | where the model drew it | the second file, all 13 |
+| passed, white file stamped | 2 | where the model drew it | the white file, both |
+| made again: found, and no file that could be named showed around the drawing | 7 | where the model drew it | the second file on 5, the white file on 2 |
+| made again: not found | 31 | the canvas rectangle | the stored file on 8, the second file on 22, the white file on 1 |
+| made again: not found (the three DermaAngel designs of 17 Nov) | 3 | where the model drew it, found in either tone at 0.918, 0.928 and 0.869 | the stored file |
+
+So no design that passed before gets another file, and reading the search in either tone turns no earlier row from not found to found. The searches of the client's posts are unchanged (429 post rows, all as before).
+
+The real requests of 17 Nov, each expected before the run:
+
+| Design | Slot | Ground under it | File | Each file's weakest part there |
+|---|---|---|---|---|
+| European Wax Center 669ad0d8, design 1 | canvas rectangle (best match 0.547) | #620249 | the white copy | stored 1.62, copy 12.93 |
+| 669ad0d8, design 2 | canvas rectangle (0.159) | #67034B | the white copy | 1.69, 12.42 |
+| 3c85cc00, design 1 | canvas rectangle (0.162) | #080102 | the white copy | 1.02, 20.68 |
+| 3c85cc00, design 2 | canvas rectangle (0.185) | #150203 | the white copy | 1.04, 20.16 |
+| 6058c203, design 1 | canvas rectangle (0.684) | #D7C5F7 | the stored black file | 13.22, 1.59 |
+| 6058c203, design 2 | canvas rectangle (0.643) | #D8C7F7 | the stored black file | 13.43, 1.56 |
+| DermaAngel US b135df41, design 1 | where it was drawn (0.918) | #D4F0F5 | the stored cyan | stored 1.83, near-black copy 16.1 (last), white 1.19 |
+| b135df41, design 2 | where it was drawn (0.928) | #D4F1F7 | the stored cyan | 1.85, 16.23, 1.18 |
+| b135df41, design 3 | where it was drawn (0.869) | #D5F2F7 | the stored cyan | 1.86, 16.37, 1.17 |
+
+The requests of 16 Nov. Pay The Pyper: the 18 designs on light pictures keep the stored file where the model drew it; cf6cbd60 design-1 keeps the copy with the white letter; design-2, which was delivered with two letters of three on a dark band, has the canvas rectangle as its slot and, on its job's real logo-free picture, the ground #1A1918 (flat 1.00, against 0.54 on the design before the removal) and the copy with the white letter (the stored file 1.00:1 there, the copy 6.03:1). Twos, with the wordmark its posts show: the three designs that drew the wordmark at its place keep it where it was drawn; the six that drew it above the headline or drew an outline of the old icon get the canvas rectangle and the stored white wordmark (2.74 to 15.98:1 on the wood under it).
+
+Looked at, at full size (the area around the logo, 1:1): the nine designs of 17 Nov with the chosen file stamped by the finish function on the stand-in. The white copy on plum and on dark red velvet, the black file on lavender and the stored cyan on pale blue all read clearly; on the stand-in the painted area shows as a flat box on the velvet, which the real removal redraws. Scratch files: `/private/tmp/claude-501/-Users-user-Desktop/9c67f1f0-e01f-4bec-9d3f-be9198793d9a/scratchpad/logo-slot/looks/`.
+
+Slowest slot row 39.8 s on the loaded laptop (search and cleaned slot together, two runs sharing it); most take 2 to 8 s. The service's own speed is not measured here.
+
+What this run does not prove. No paid step ran. Whether the removal takes out a drawing the search did not recognize is seen on one real picture only (the row above); the read for marks with its new question has not been asked once; the stand-in says nothing about how the real removal leaves a textured ground.

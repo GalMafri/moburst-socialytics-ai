@@ -5,20 +5,25 @@
 //      on a canvas that carries the client's logo file, with the client's own
 //      posts as its visual language (brief.ts). It is drawn at twice the
 //      page's size so the post stays sharp.
-//   2. locate:   where the model drew the logo, at the client's usual spot and
-//                at a size the client uses (logoMatch.ts). A design without
-//                one there is designed again.
+//   2. locate:   the slot, where the logo goes (logoSlot.ts, 17 Nov 2026):
+//                where the model drew the logo when the search finds it at a
+//                size the client uses (logoMatch.ts), else where the canvas
+//                carried it. The model redraws the logo in the tone and
+//                weight its picture needs, so no design is made again here.
 //   3. unlogo:   the same picture redrawn whole with every logo and brand
-//                mark taken out, then read for any other brand's marks
-//                (marks); marks found are named in the next removal, twice at
+//                mark taken out. Then (marks) the cleaned slot is measured:
+//                the drawing gone, the ground under the slot, and the logo
+//                file whose whole parts all show on it; and the picture is
+//                read for any logo left, the client's own or another
+//                brand's. Marks found are named in the next removal, twice at
 //                most, before the post is designed again. The redraw is
 //                whole (patching boxes left blocks
 //                and stray letters on 13 Oct). The logo's place stays clear:
 //                a frame line broken around the logo in the brand's style
 //                stays broken (closing it put the line through Bader's logo).
-//   4. finish:   the client's logo file laid exactly where and at the size the
-//                model drew it, so the design keeps the room it made for it,
-//                then brought down to the delivered size.
+//   4. finish:   the logo file chosen for the ground, laid in the slot, so
+//                the design keeps the room it made for the logo, then brought
+//                down to the delivered size.
 //   5. verify:   the words on the finished post are read back and must be the
 //                headline's words exactly, and nothing may touch or cross the
 //                logo (seen at full size around its known place); otherwise
@@ -39,14 +44,18 @@ export function removePrompt(brand: string, alsoRemove?: string | null): string 
 }
 
 /**
- * The instruction for reading the logo-free picture for any other brand's
- * marks (14 Oct: three stripes and a swoosh-like stripe on football boots
- * stayed after the general removal).
+ * The instruction for reading the logo-free picture for any logo left on it
+ * (14 Oct: three stripes and a swoosh-like stripe on football boots stayed
+ * after the general removal). Since 17 Nov 2026 it asks about the client's
+ * own logo too: the picture is read before the logo file is laid on it, so
+ * a logo of the client's still on it is the model's drawing, at the slot or
+ * anywhere else, and goes the way another brand's mark does.
  */
 export function marksPrompt(brand: string): string {
-  return `This social post for ${brand} should carry no other brand's marks. ` +
-    "Does any clothing, shoe, ball, equipment, sign or object in it show a real brand's logo, name, emblem or signature pattern, such as stripes, a swoosh, a formstrip, a crest or a monogram? " +
-    "The post's own headline and words are fine. " +
+  return `This picture is a social post for ${brand} before its logo is added, so it should carry no logo at all. ` +
+    `Does it show ${brand}'s own logo, wordmark or symbol anywhere, drawn as a mark of its own or on an object? ` +
+    "Or does any clothing, shoe, ball, equipment, sign or object in it show another real brand's logo, name, emblem or signature pattern, such as stripes, a swoosh, a formstrip, a crest or a monogram? " +
+    `The post's own headline and words are fine, also where they name ${brand}. ` +
     'Reply with JSON only: {"marks": true or false, "where": "each mark and where it is, or empty"}';
 }
 

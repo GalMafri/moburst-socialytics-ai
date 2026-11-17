@@ -1,0 +1,135 @@
+// supabase/functions/_shared/design/logoSlot.ts
+//
+// The model marks the slot, the app places the file (17 Nov 2026, spec
+// 2026-11-16-logo-tone-design.md, section 13). The image model never gets
+// the final word on the logo: it redraws the canvas logo in the tone and
+// weight that suit its picture, so what it drew only says where the logo
+// goes. This file holds what decides from there on:
+//
+//   the slot       where the logo goes on a design: the rectangle the model
+//                  drew the logo at when the search finds it by the existing
+//                  test, else the rectangle the canvas carried;
+//   the ground     the picture's own color under the slot once the model's
+//                  drawing is cleaned out, as one real pixel;
+//   the file       the first file of the client's set, in order, whose
+//                  whole parts all show on that ground;
+//   the drawing    whether the template that found the drawing still finds
+//                  it on the cleaned picture.
+//
+// No design is made again because the drawing is no close match of the
+// file. Every measure here is exact: a known rectangle, real pixels, the
+// files' own colors and the two contrasts the product already has
+// (logoTone.ts, showsWhole and hidesPart).
+//
+// Free of Deno and network imports: the picture service, the design worker,
+// the replay and the tests all import it.
+
+import { weakestContrast } from "../lifecycle/designSettings.ts";
+import type { LogoFileName, Rect, Rgb } from "../picture/contract.ts";
+import { findLogo, LOGO_MIN_SCORE, logoFound } from "./logoMatch.ts";
+import { hidesPart, PART_STEP, showsWhole, stampRect, type Raster } from "./logoTone.ts";
+
+/** Where the logo goes: the rectangle, why, and the file whose shape the rectangle has. */
+export type Slot = { rect: Rect; from: "drawn" | "canvas"; of: LogoFileName };
+
+/**
+ * The slot. `found` is the search's best match: the matched template's
+ * file, where, its score and that file's usual rectangle. `canvas` is the
+ * canvas file and the rectangle the canvas carried it at.
+ *
+ * When the match is the logo by the existing test (logoFound: 0.75 or more,
+ * at a size the client uses), the slot is where the model drew it. In every
+ * other case it is the canvas rectangle. A weaker match is never the slot,
+ * wherever it sits, so a stray match on a headline cannot move the logo.
+ */
+export function slotOf(found: { matched: LogoFileName; rect: Rect; score: number; usual: Rect }, canvas: { file: LogoFileName; rect: Rect }): Slot {
+  if (logoFound({ width: found.rect.width, score: found.score }, found.usual.width)) return { rect: found.rect, from: "drawn", of: found.matched };
+  return { rect: canvas.rect, from: "canvas", of: canvas.file };
+}
+
+/**
+ * The ground under the slot, read on the picture with the model's drawing
+ * cleaned out: of every second pixel on every second row inside the
+ * rectangle, the one in the middle by brightness (equal ones by position).
+ * A real pixel of the picture. `flat` is the share of the sampled pixels
+ * within 16 per channel of it. Null when the rectangle has no pixel on the
+ * picture.
+ */
+export function groundUnder(picture: Raster, rect: Rect): { ground: Rgb; flat: number } | null {
+  const d = picture.data;
+  const sampled: Array<[number, number]> = [];
+  for (let y = rect.y; y < rect.y + rect.height; y += 2) {
+    if (y < 0 || y >= picture.height) continue;
+    for (let x = rect.x; x < rect.x + rect.width; x += 2) {
+      if (x < 0 || x >= picture.width) continue;
+      const p = (y * picture.width + x) * 4;
+      sampled.push([0.299 * d[p] + 0.587 * d[p + 1] + 0.114 * d[p + 2], p]);
+    }
+  }
+  if (!sampled.length) return null;
+  sampled.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const m = sampled[sampled.length >> 1][1];
+  const ground: Rgb = [d[m], d[m + 1], d[m + 2]];
+  let near = 0;
+  for (const [, p] of sampled) {
+    if (Math.abs(d[p] - ground[0]) <= PART_STEP && Math.abs(d[p + 1] - ground[1]) <= PART_STEP && Math.abs(d[p + 2] - ground[2]) <= PART_STEP) near++;
+  }
+  return { ground, flat: near / sampled.length };
+}
+
+/** One file that may be stamped: its name, the colors of its whole exposed parts, and whether it is a made copy the client's own posts do not show. */
+export type StampInks = { file: LogoFileName; inks: Rgb[]; last?: boolean };
+
+/**
+ * The file that is stamped on a ground. `files` are in stamp order: the
+ * stored file, the second file, the white copy. The first file whose whole
+ * parts all show on the ground (3:1 or more for each) is stamped. When none
+ * does, the first with no whole part under 1.5:1: weaker, and still the
+ * logo. A made copy marked `last` is tried after every other file, at both
+ * lines. When no file is left, none is named and the design is made again.
+ *
+ * `shows` is each file's weakest whole part against the ground, to two
+ * places, for review. A file with no whole part has nothing to test and
+ * shows anywhere.
+ */
+export function pickStamp(files: StampInks[], ground: Rgb): { file: LogoFileName | null; shows: Partial<Record<LogoFileName, number>> } {
+  const shows: Partial<Record<LogoFileName, number>> = {};
+  for (const f of files) {
+    const weakest = weakestContrast(f.inks, ground);
+    if (Number.isFinite(weakest)) shows[f.file] = Math.round(weakest * 100) / 100;
+  }
+  const first = files.filter((f) => !f.last), after = files.filter((f) => f.last);
+  for (const group of [first, after]) {
+    const whole = group.find((f) => showsWhole(f.inks, ground));
+    if (whole) return { file: whole.file, shows };
+    const weak = group.find((f) => !hidesPart(f.inks, ground));
+    if (weak) return { file: weak.file, shows };
+  }
+  return { file: null, shows };
+}
+
+/** How far around the slot, as a share of the picture, the drawing is looked for again after cleaning. */
+const STILL_REACH = 0.03;
+/** The sizes it is looked for at, as shares of the slot's width. */
+const STILL_SCALES: [number, number] = [0.9, 1.1];
+
+/**
+ * Whether the drawing that was found on the design is still on the cleaned
+ * picture: the template that found it is searched for again at the slot,
+ * in either tone, with the same bar (0.75). A picture cleaned to a flat or
+ * softly shaded ground has no such match.
+ */
+export function stillDrawn(picture: Raster, template: { raster: Raster; ground: Rgb }, rect: Rect): { score: number; found: boolean } {
+  const f = findLogo(picture.data, picture.width, picture.height, template.raster.data, template.raster.width, template.raster.height, rect, template.ground, { reach: STILL_REACH, scales: STILL_SCALES, either: true });
+  return { score: f.score, found: f.score >= LOGO_MIN_SCORE };
+}
+
+/**
+ * Where a file is stamped in a slot: the slot itself for a file of the
+ * slot's own shape (every made copy has the stored file's), else the same
+ * width and center with the file's own proportions. `of` is the file the
+ * slot's shape came from; with none, the slot is used as it is.
+ */
+export function fitRect(rect: Rect, of: Raster | null, file: Raster): Rect {
+  return (of ? stampRect(rect, of, file) : null) ?? rect;
+}

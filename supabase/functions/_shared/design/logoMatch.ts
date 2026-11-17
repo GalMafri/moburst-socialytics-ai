@@ -63,6 +63,28 @@ function ncc(img: Float32Array, iw: number, t: Float32Array, tw: number, th: num
   return (sIT - tMean * sI) / Math.sqrt(varI * tNorm);
 }
 
+/**
+ * The same correlation read in either tone (17 Nov 2026): its strength
+ * whatever its sign, so a shape drawn lighter than its ground scores what
+ * the same shape drawn darker than its ground does. A spot with no
+ * variation is no match in either reading. A function of its own, so the
+ * search every earlier caller makes runs exactly the code it ran before.
+ */
+function nccEither(img: Float32Array, iw: number, t: Float32Array, tw: number, th: number, tNorm: number, x: number, y: number): number {
+  let sI = 0, sII = 0, sIT = 0;
+  const n = tw * th;
+  for (let j = 0; j < th; j++) {
+    const row = (y + j) * iw + x, trow = j * tw;
+    for (let i = 0; i < tw; i++) {
+      const v = img[row + i];
+      sI += v; sII += v * v; sIT += v * t[trow + i];
+    }
+  }
+  const varI = sII - (sI * sI) / n;
+  if (varI <= 1e-6 || tNorm <= 1e-6) return -1;
+  return Math.abs(sIT) / Math.sqrt(varI * tNorm);
+}
+
 interface Candidate { x: number; y: number; width: number; height: number; score: number }
 
 /**
@@ -97,7 +119,7 @@ export function templateSize(lw: number, lh: number, widest: number): [number, n
 }
 
 function bestAt(img: Float32Array, iw: number, ih: number, logo: Float32Array, lw: number, lh: number,
-  widths: number[], cx: [number, number], cy: [number, number]): Candidate {
+  widths: number[], cx: [number, number], cy: [number, number], either = false): Candidate {
   let best: Candidate = { x: 0, y: 0, width: 0, height: 0, score: -2 };
   for (const tw of widths) {
     const th = Math.max(2, Math.round((tw * lh) / lw));
@@ -113,7 +135,7 @@ function bestAt(img: Float32Array, iw: number, ih: number, logo: Float32Array, l
     // sum((I - mI)(T - mT)) = sum(I * (T - mT)), so the zero-mean template is enough.
     for (let y = Math.max(0, cy[0]); y <= Math.min(ih - th, cy[1]); y++) {
       for (let x = Math.max(0, cx[0]); x <= Math.min(iw - tw, cx[1]); x++) {
-        const s = ncc(img, iw, t0, tw, th, 0, norm, x, y);
+        const s = either ? nccEither(img, iw, t0, tw, th, norm, x, y) : ncc(img, iw, t0, tw, th, 0, norm, x, y);
         if (s > best.score) best = { x, y, width: tw, height: th, score: s };
       }
     }
@@ -126,10 +148,17 @@ function bestAt(img: Float32Array, iw: number, ih: number, logo: Float32Array, l
  * (the spot the canvas gave it). `image` and `logo` are RGBA; the logo is
  * judged over `background` (the canvas colour the model was given). Returns
  * the rectangle in the design's pixels and the match score (1 is identical).
+ *
+ * `either` (17 Nov 2026) reads a match in either tone: the model redraws the
+ * logo in the tone its picture needs, so a one-color logo drawn darker than
+ * its ground and the same logo drawn lighter than its ground are found
+ * alike, with one template. The search that finds where the logo goes on a
+ * design asks for it; every other caller is searched as before.
  */
 export function findLogo(image: ArrayLike<number>, iw: number, ih: number, logo: ArrayLike<number>, lw: number, lh: number,
-  expected: Rect, background: [number, number, number], opts: { reach?: number; scales?: [number, number] } = {}): Candidate {
+  expected: Rect, background: [number, number, number], opts: { reach?: number; scales?: [number, number]; either?: boolean } = {}): Candidate {
   const reach = opts.reach ?? 0.15;
+  const either = opts.either === true;
   const [sMin, sMax] = opts.scales ?? [0.75, 1.3];
   const img = luminance(image, iw, ih);
   let tpl = luminance(logo, lw, lh, background);
@@ -149,7 +178,7 @@ export function findLogo(image: ArrayLike<number>, iw: number, ih: number, logo:
   for (let s = sMin; s <= sMax + 1e-9; s += 0.04) widths.push(Math.round(ew * s));
   const rx = Math.round((reach * iw) / f), ry = Math.round((reach * ih) / f);
   const ex = Math.round(expected.x / f), ey = Math.round(expected.y / f);
-  let c = bestAt(coarse, cw, ch, tpl, lw, lh, widths, [ex - rx, ex + rx], [ey - ry, ey + ry]);
+  let c = bestAt(coarse, cw, ch, tpl, lw, lh, widths, [ex - rx, ex + rx], [ey - ry, ey + ry], either);
 
   // Finer levels, halving each time, each searching a few pixels around the last.
   let level = f;
@@ -161,7 +190,7 @@ export function findLogo(image: ArrayLike<number>, iw: number, ih: number, logo:
     const w0 = rect.width / level;
     const ws = [-0.03, -0.015, 0, 0.015, 0.03].map((d) => Math.round(w0 * (1 + d)));
     const x0 = Math.round(rect.x / level), y0 = Math.round(rect.y / level), r = 3;
-    c = bestAt(im, lw2, lh2, tpl, lw, lh, [...new Set(ws)], [x0 - r, x0 + r], [y0 - r, y0 + r]);
+    c = bestAt(im, lw2, lh2, tpl, lw, lh, [...new Set(ws)], [x0 - r, x0 + r], [y0 - r, y0 + r], either);
     rect = { x: c.x * level, y: c.y * level, width: c.width * level, height: c.height * level };
   }
   return { ...rect, score: c.score };

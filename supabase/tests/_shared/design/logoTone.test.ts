@@ -8,7 +8,7 @@ import { logoFound } from "../../../functions/_shared/design/logoMatch";
 import { bestNeutral, contrast, weakestContrast } from "../../../functions/_shared/lifecycle/designSettings";
 import type { LogoFileName, LogoSetResult, Placement, PostLogo, Rgb } from "../../../functions/_shared/picture/contract";
 import {
-  DARK, LIGHT, chooseSet, colorGap, figure, groundAround, hidesPart, isSmall, jobLogos, lostOn, nameFile, ownGround, partsOf, postSearchPlan, restGround, sameLogo, searchTemplates, showsOn, showsWhole, stampRect, wholeExposedInks, wholeInks,
+  DARK, LIGHT, chooseSet, colorGap, figure, groundAround, hidesPart, isSmall, jobLogos, lostOn, nameFile, ownGround, partsOf, postSearchPlan, restGround, sameLogo, searchTemplates, showsOn, showsWhole, stampList, stampRect, wholeExposedInks, wholeInks,
   type Found, type LogoSet, type Raster, type SetPaths,
 } from "../../../functions/_shared/design/logoTone";
 import { blank, box, drawLogo, flat, inked, mark } from "./draw";
@@ -865,5 +865,61 @@ describe("what a job reads from the set", () => {
     // Replaced by another file.
     expect(jobLogos(row(stored({ other: person, person: { path: "c1/design-settings/logo-other-10.png", of: OF, at: AT } })))).toBeNull();
     expect(jobLogos(row(stored()))).not.toBeNull();
+  });
+});
+
+describe("the files a design may be stamped with", () => {
+  const LOGO = "c9/design-settings/logo-site-aaaa.png";
+  const COPY = { other: "c9/design-settings/logo-aaaa-other.png", white: "c9/design-settings/logo-aaaa-white.png" };
+  const when = "2026-11-17T09:00:00.000Z";
+  const set = (over: Record<string, unknown> = {}) => ({
+    of: LOGO, rule: 2, own: "light", both: false, inks: [[20, 30, 60]], other: null, white: null, made: { other: null, white: null }, site: null,
+    posts: { read: 0, found: 0, shown: { stored: 0, other: 0, white: 0 } }, canvas: { file: "stored", ground: "#FAFAFA", from: "settings" }, at: when, ...over,
+  });
+  const stamp = (s: unknown) => stampList(LOGO, s as Partial<LogoSet>);
+
+  it("lists the stored file, the second file and the white copy, with the copies the service made whether or not a post shows them", () => {
+    // No copy was made: the stored file alone.
+    expect(stamp(set())).toEqual([{ file: "stored", path: LOGO }]);
+    // Both copies were made and no post was found: all three, none last. The templates do not change with it.
+    const job = jobLogos({ logo_path: LOGO, background: "#FAFAFA", logo_set: set({ made: COPY }) })!;
+    expect(stamp(set({ made: COPY }))).toEqual([{ file: "stored", path: LOGO }, { file: "other", path: COPY.other }, { file: "white", path: COPY.white }]);
+    expect(job.logos.files).toEqual({ stored: LOGO });
+    expect(job.logos.second).toBeNull();
+    // Only one copy was made.
+    expect(stamp(set({ made: { other: COPY.other, white: null } }))).toEqual([{ file: "stored", path: LOGO }, { file: "other", path: COPY.other }]);
+    expect(stamp(set({ made: { other: null, white: COPY.white } }))).toEqual([{ file: "stored", path: LOGO }, { file: "white", path: COPY.white }]);
+  });
+
+  it("keeps a made copy for last when logos were found on the client's posts and none shows it", () => {
+    const posts = (shown: { stored: number; other: number; white: number }) => ({ read: 12, found: shown.stored + shown.other + shown.white, shown });
+    // Found on three posts: the stored file on one, the white copy on two, the other copy on none.
+    expect(stamp(set({ made: COPY, white: { path: COPY.white }, posts: posts({ stored: 1, other: 0, white: 2 }) }))).toEqual([
+      { file: "stored", path: LOGO }, { file: "other", path: COPY.other, last: true }, { file: "white", path: COPY.white },
+    ]);
+    // Every found post shows the stored file: both copies last.
+    expect(stamp(set({ made: COPY, posts: posts({ stored: 4, other: 0, white: 0 }) }))).toEqual([
+      { file: "stored", path: LOGO }, { file: "other", path: COPY.other, last: true }, { file: "white", path: COPY.white, last: true },
+    ]);
+    // Posts were read and no logo was found on any: they say nothing.
+    expect(stamp(set({ made: COPY, posts: { read: 12, found: 0, shown: { stored: 0, other: 0, white: 0 } } }))).toEqual([
+      { file: "stored", path: LOGO }, { file: "other", path: COPY.other }, { file: "white", path: COPY.white },
+    ]);
+  });
+
+  it("puts the brand's own second file in the second place, never last, with the white copy after it", () => {
+    const site = { path: "c9/design-settings/logo-site-bbbb.png", from: "site", size: [600, 180] };
+    expect(stamp(set({ other: site, site: site.path, made: COPY, posts: { read: 8, found: 3, shown: { stored: 3, other: 0, white: 0 } } }))).toEqual([
+      { file: "stored", path: LOGO }, { file: "other", path: site.path }, { file: "white", path: COPY.white, last: true },
+    ]);
+    const person = { path: "c9/design-settings/logo-other-9.png", of: LOGO, at: when };
+    expect(stamp(set({ other: { path: person.path, from: "person", size: [500, 200] }, person, made: COPY }))).toEqual([
+      { file: "stored", path: LOGO }, { file: "other", path: person.path }, { file: "white", path: COPY.white },
+    ]);
+  });
+
+  it("reads a set of rule 1 the same way", () => {
+    const rule1 = { ...set({ made: COPY, other: { path: COPY.other, from: "made", size: [300, 90] }, canvas: { file: "other", ground: "#0F294C", from: "client_posts" }, posts: { read: 16, found: 5, shown: { stored: 0, other: 5, white: 0 } } }), rule: 1, inks: undefined };
+    expect(stamp(rule1)).toEqual([{ file: "stored", path: LOGO }, { file: "other", path: COPY.other }, { file: "white", path: COPY.white, last: true }]);
   });
 });

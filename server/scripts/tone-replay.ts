@@ -91,20 +91,38 @@
 // before anything else, so a logo stored padded is measured as it will be
 // used.
 //
+// Since 17 Nov 2026 (spec section 13, the model marks the slot) every design
+// also has a slot row: what the worker's new steps give it. The service's
+// slot search runs on the design as a job started from the set would send
+// it (slotPlan), and the row says whether the slot is where the model drew
+// the logo or where the canvas carried it. The paid removal cannot be run
+// here, so the cleaned picture is a stand-in: the design with the slot,
+// widened by a quarter of its width at each side and half its height above
+// and below, painted with the ground around it (the middle pixel of the
+// ring, groundAround). When the entry has the job's real logo-free picture
+// (`cleaned`), that is used instead. The service's cleaned-slot function
+// then reads the ground under the slot and names the file, from the stamp
+// list a job would carry (stampList). Expected, compared exactly:
+//   expect.slots / expect.window_slots: [{ job, design, slot: "drawn" | "canvas", file: <name> | null }]
+// `file` null is a design that is made again because no file shows on its
+// ground. The earlier design rows stay: they are what the locate route
+// still answers a worker from before this change.
+//
 // Run from the repository root:
 //   npx tsx server/scripts/tone-replay.ts <manifest.json> [--out <result.json>]
 
 import { readFile, writeFile } from "node:fs/promises";
 import { PUBLIC_DEFAULTS } from "../../public-env.ts";
 import { resampleRGBA } from "../../supabase/functions/_shared/canva/brief.ts";
-import { locatePlan, locateRefusal } from "../../supabase/functions/_shared/design/logoChoice.ts";
+import { locatePlan, locateRefusal, slotPlan, slotState, stampPlan } from "../../supabase/functions/_shared/design/logoChoice.ts";
 import { LOGO_SCALES, logoFound } from "../../supabase/functions/_shared/design/logoMatch.ts";
 import { chooseLogo, measuredPlacement, postsCarrying, type FoundAt } from "../../supabase/functions/_shared/design/logoPick.ts";
-import { chooseSet, jobLogos, postSearchPlan, restGround, wholeInks, type CompareIn, type JobLogos, type LogoSet, type SetPaths, type TemplateIn } from "../../supabase/functions/_shared/design/logoTone.ts";
+import { chooseSet, groundAround, jobLogos, postSearchPlan, restGround, stampList, wholeInks, type CompareIn, type JobLogos, type LogoSet, type SetPaths, type StampEntry, type TemplateIn } from "../../supabase/functions/_shared/design/logoTone.ts";
 import { logoNormalization, pickBackground, placementFor, weakestContrast, type LogoSpot } from "../../supabase/functions/_shared/lifecycle/designSettings.ts";
 import type { LogoFileName, Placement, PostLogo, Rgb } from "../../supabase/functions/_shared/picture/contract.ts";
 import { decodeRaster, type Raster } from "../src/picture/raster.ts";
 import { locateTemplates, logoSet, postLogo } from "../src/picture/tone.ts";
+import { findSlot, slotFile } from "../src/picture/slot.ts";
 
 const STORAGE = `${PUBLIC_DEFAULTS.VITE_SUPABASE_URL}/storage/v1/object/public/`;
 const SCORE_ROOM = 0.01;
@@ -137,12 +155,15 @@ type Entry = {
     designs: DesignWant[];
     window?: { file: LogoFileName; ground: string; second: { file: LogoFileName; ground: string } | null };
     window_designs?: DesignWant[];
+    slots?: SlotWant[];
+    window_slots?: SlotWant[];
   };
 };
-type DesignIn = { job: string; design: string; design_path: string; local?: string; placement: Placement; background: string };
+type DesignIn = { job: string; design: string; design_path: string; local?: string; cleaned?: string; placement: Placement; background: string };
 type DesignWant = { job: string; design: string; pass: boolean; file?: LogoFileName; lost?: boolean; scores?: [number, number | null] };
+type SlotWant = { job: string; design: string; slot: "drawn" | "canvas"; file: LogoFileName | null };
 
-type RowOut = { client: string; kind: "settings" | "pick" | "set" | "post" | "design" | "window" | "window design"; what: string; expected: unknown; got: unknown; same: boolean; ms?: number };
+type RowOut = { client: string; kind: "settings" | "pick" | "set" | "post" | "design" | "window" | "window design" | "slot" | "window slot"; what: string; expected: unknown; got: unknown; same: boolean; ms?: number };
 
 async function read(bucket: string, path: string, local?: string): Promise<Uint8Array> {
   if (local) return new Uint8Array(await readFile(local));
@@ -352,11 +373,57 @@ async function replayClient(entry: Entry): Promise<{ rows: RowOut[]; set: LogoSe
     };
   }
 
-  // The stored designs, through locate as a job started from this set would send it.
+  // One design through the slot steps, as the worker now runs them: the slot, the cleaned slot (a stand-in, or the job's real logo-free picture), the file.
+  async function slotRow(kind: "slot" | "window slot", d: DesignIn, want: SlotWant | undefined, start: { logo_path: string; background: string; logos: JobLogos | null; stamp?: StampEntry[] }, of: LogoInUse): Promise<RowOut> {
+    // A copy the live set names and the replay has not read yet comes from storage, once.
+    for (const f of start.stamp ?? []) if (!of.read.rasters.has(f.path)) of.read.rasters.set(f.path, await decodeRaster(await read("generated-media", f.path)));
+    const rasterAt = (path: string): Raster => {
+      const r = of.read.rasters.get(path) ?? (path === start.logo_path ? of.raster : undefined);
+      if (!r) throw new Error(`No file at ${path}.`);
+      return r;
+    };
+    const input = { logo_path: start.logo_path, generate: { background: start.background }, logos: start.logos, stamp: start.stamp };
+    const plan = slotPlan(input);
+    const design = await decodeRaster(await read("generated-media", d.design_path, d.local));
+    const t = performance.now();
+    const found = findSlot(design, plan.templates.map((p) => ({ file: p.file, raster: rasterAt(p.path), ground: p.ground })), of.picked ? of.placement : d.placement, LOGO_SCALES);
+    const stamp = stampPlan(input, slotState(plan, found) as unknown as Parameters<typeof stampPlan>[1]);
+    // The cleaned picture: the job's own, or the design with the slot and its surround painted with the ground around it.
+    let cleaned: Raster, standIn: string | null = null;
+    if (d.cleaned) cleaned = await decodeRaster(new Uint8Array(await readFile(d.cleaned)));
+    else {
+      const ring = groundAround(design, found.slot)?.ground ?? [127, 127, 127];
+      standIn = hexOf(ring);
+      cleaned = { width: design.width, height: design.height, data: new Uint8ClampedArray(design.data) };
+      const mx = Math.round(found.slot.width * 0.25), my = Math.round(found.slot.height * 0.5);
+      for (let y = Math.max(0, found.slot.y - my); y < Math.min(design.height, found.slot.y + found.slot.height + my); y++) {
+        for (let x = Math.max(0, found.slot.x - mx); x < Math.min(design.width, found.slot.x + found.slot.width + mx); x++) cleaned.data.set(ring, (y * design.width + x) * 4);
+      }
+    }
+    const picked = slotFile(cleaned, stamp.rect, stamp.frame, stamp.of, stamp.files.map((f) => ({ file: f.file, raster: rasterAt(f.path), last: f.last })), stamp.drawn);
+    const ms = Math.round(performance.now() - t);
+    const got = { slot: found.from, file: picked.file };
+    return {
+      client: entry.client, kind, what: `${d.job} ${d.design}`, expected: want ? { slot: want.slot, file: want.file } : null,
+      got: {
+        ...got, of: found.of, rect: found.slot, canvas: found.canvas, score: round(found.score, 3), scores: found.scores.map((v) => round(v, 3)), matched: found.matched,
+        scale: round(found.drawn.width / found.canvas.width, 2), templates: plan.templates.map((p) => `${p.file} on ${hexOf(p.ground)}`),
+        ground: picked.ground ? hexOf(picked.ground) : null, flat: round(picked.flat, 3), shows: picked.shows, stamp_rect: picked.rect,
+        stamp_list: stamp.files.map((f) => `${f.file}${f.last ? " (last)" : ""}`), cleaned: d.cleaned ? "the job's own logo-free picture" : `stand-in painted ${standIn}`,
+        ...(picked.drawn ? { still_drawn: { score: round(picked.drawn.score, 3), found: picked.drawn.found } } : {}),
+      },
+      same: !!want && want.slot === got.slot && want.file === got.file, ms,
+    };
+  }
+
+  // The stored designs, through locate as a job started from this set would send it, then through the slot steps.
   const job = jobLogos({ logo_path: logo.path, background: logo.background, source: entry.source, logo_set: set });
   for (const d of entry.designs) {
     const want = entry.expect.designs.find((e) => e.job === d.job && e.design === d.design);
-    rows.push(await locateRow("design", d, want, job ? { logo_path: job.logo_path, background: job.background, logos: job.logos } : { logo_path: logo.path, background: logo.picked ? logo.background : d.background, logos: null }, logo));
+    const start = job ? { logo_path: job.logo_path, background: job.background, logos: job.logos } : { logo_path: logo.path, background: logo.picked ? logo.background : d.background, logos: null };
+    rows.push(await locateRow("design", d, want, start, logo));
+    const slot = (entry.expect.slots ?? []).find((e) => e.job === d.job && e.design === d.design);
+    rows.push(await slotRow("slot", d, slot, { ...start, ...(job ? { stamp: stampList(logo.path, set) } : {}) }, logo));
   }
 
   // The window between the release and the lifecycle's look at this client: what a design starts from on the live row as it is (jobs.ts, stillStart).
@@ -384,6 +451,8 @@ async function replayClient(entry: Entry): Promise<{ rows: RowOut[]; set: LogoSe
     for (const d of entry.window_designs ?? []) {
       const want = (entry.expect.window_designs ?? []).find((e) => e.job === d.job && e.design === d.design);
       rows.push(await locateRow("window design", d, want, start, live));
+      const slot = (entry.expect.window_slots ?? []).find((e) => e.job === d.job && e.design === d.design);
+      rows.push(await slotRow("window slot", d, slot, { ...start, ...(fromSet ? { stamp: stampList(entry.logo_path, entry.live.logo_set as Partial<LogoSet>) } : {}) }, live));
     }
   }
   return { rows, set };
@@ -419,6 +488,7 @@ async function main(): Promise<void> {
   const designs = all.filter((r) => r.kind === "design" || r.kind === "window design");
   const posts = all.filter((r) => r.kind === "post");
   const picks = all.filter((r) => r.kind === "pick");
+  const slots = all.filter((r) => r.kind === "slot" || r.kind === "window slot");
   const summary = {
     clients: manifest.length,
     picks_looked_at: picks.filter((r) => "chosen" in (r.got as object)).length,
@@ -430,6 +500,10 @@ async function main(): Promise<void> {
     designs: designs.length,
     designs_pass: designs.filter((r) => (r.got as { pass: boolean }).pass).length,
     designs_lost: designs.filter((r) => (r.got as { lost?: boolean }).lost).length,
+    slots: slots.length,
+    slots_drawn: slots.filter((r) => (r.got as { slot: string }).slot === "drawn").length,
+    slots_canvas: slots.filter((r) => (r.got as { slot: string }).slot === "canvas").length,
+    slots_with_a_file: slots.filter((r) => (r.got as { file: string | null }).file !== null).length,
     rows_that_differ: differ.length,
     slowest_locate_ms: Math.max(0, ...designs.map((r) => r.ms ?? 0)),
     slowest_post_ms: Math.max(0, ...posts.map((r) => r.ms ?? 0)),

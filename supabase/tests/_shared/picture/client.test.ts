@@ -119,6 +119,7 @@ describe("callPicture", () => {
     const { calls, fetchImpl } = fakeFetch([answer(400, { ok: false, reason: "The request is not well formed: rect" })]);
     const e = await failure(callPicture(db().admin, "finish", body, { fetchImpl, sleep: async () => {} }));
     expect(e.message).toBe("The picture service refused the call (400): The request is not well formed: rect.");
+    expect(e.status).toBe(400);
     expect(e.transient).toBe(false);
     expect(calls).toHaveLength(1);
   });
@@ -128,6 +129,8 @@ describe("callPicture", () => {
     const e = await failure(callPicture(db().admin, "finish", body, { fetchImpl, sleep: async () => {} }));
     expect(e.message).toBe("The picture service refused the call (404): Unknown route.");
     expect(e.why).toBe("refused");
+    // The status is kept, so a worker can tell a route the service does not have yet from a call it turned away.
+    expect(e.status).toBe(404);
     expect(calls).toHaveLength(1);
   });
 

@@ -184,6 +184,13 @@ describe("other brands' marks", () => {
     expect(parseMarks('{"marks": false, "where": ""}')).toEqual({ marks: false, where: "" });
     expect(parseMarks("no")).toBeNull();
   });
+  it("asks about every logo on the cleaned picture, the client's own included, and leaves the headline's words alone", () => {
+    const q = marksPrompt("Northwind");
+    expect(q).toContain("it should carry no logo at all");
+    expect(q).toContain("Northwind's own logo, wordmark or symbol");
+    expect(q).toContain("The post's own headline and words are fine, also where they name Northwind.");
+    expect(q).toContain('{"marks": true or false, "where": "each mark and where it is, or empty"}');
+  });
   it("names the marks found in the next removal", () => {
     expect(removePrompt("LegaBot", "three white stripes on the green boot")).toContain("In particular remove this, leaving the surface plain: three white stripes on the green boot.");
     expect(removePrompt("LegaBot")).not.toContain("In particular");

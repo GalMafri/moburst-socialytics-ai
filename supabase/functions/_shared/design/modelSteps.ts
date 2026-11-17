@@ -18,14 +18,15 @@
 
 import { notePicture } from "../picture/client.ts";
 
-/** Designs made for one option before it fails (a design with wrong words, or without the logo in its place, is made again). */
+/** Designs made for one option before it fails (a design with wrong words, a ground no logo file shows on, a mark that cannot be cleaned out or something across the logo is made again). */
 export const MAX_GENERATIONS = 3;
 /** Removals of the model's logo drawing for one design before the job fails. */
 export const MAX_UNLOGO = 4;
 
-/** What a later step found on a design: all of it goes when a new design is made. The five keys after logo_score are what locate kept for a job that carries a logo set (logoChoice.ts). */
+/** What a later step found on a design: all of it goes when a new design is made. The keys after logo_score are what the job keeps about its slot, the ground under it and the file chosen for it (logoChoice.ts); logo_gaps is from before 17 Nov 2026. */
 export const OF_THE_DESIGN = [
   "logo_rect", "logo_frame", "logo_score", "logo_file", "logo_named", "logo_matched", "logo_scores", "logo_gaps", "logo_ground",
+  "logo_slot", "logo_flat", "logo_shows", "logo_clean",
   "nologo_path", "unlogos", "final_path", "read", "band_read", "marks_check", "marks_where", "mark_cleans",
 ];
 

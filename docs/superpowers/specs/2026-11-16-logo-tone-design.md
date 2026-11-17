@@ -902,3 +902,113 @@ A lifecycle row's key gains `|pick:1` at its end (after section 11's `tone:2`), 
 - A gate on guessed pixels: none. The logo's count is the one existing test, post by post. A candidate's count compares scores of the same search on the same post. The candidates and the paint of an SVG are facts of the page's text. The placement numbers draft a starting place and pass or fail nothing.
 - One client as the target: the rule reads a page and posts. No client is named in code, prompts or tests.
 - Manual steps and flags: none.
+
+## 13. The model marks the slot, the app places the file (17 Nov 2026)
+
+Written before any code of this change. Branch `qafix/logo-slot`, from main at `22adbca1`, with main at `04d790d6` (section 12) merged in before the build was finished. The owner's rule, confirmed on 8 Oct and approved again on 17 Nov: the image model never gets the final word on the logo. It only marks where the logo goes; the app cleans that spot and places the real logo file, in the light or dark version chosen from the picture behind it. This section replaces the parts of sections 3 and 11 that send a design back at locate, and the choice of the stamped file by color distance. The files, the canvas, the prompt, the sets and the lifecycle step stay as they are.
+
+### What the real requests of 17 Nov showed
+
+Read from the stored designs, with no model call (`/private/tmp/claude-501/-Users-user-Desktop/9c67f1f0-e01f-4bec-9d3f-be9198793d9a/scratchpad/logo-slot/`, `measure1.mts` and `measure2.mts`). Pictures are 2,176 by 2,720; the canvas rectangle is where the canvas carried the logo.
+
+| Design | What the model drew at the canvas place | Search today | Ground around the canvas place | The files on that ground |
+|---|---|---|---|---|
+| European Wax Center 669ad0d8, design 1 | the wordmark in solid white on plum, heavier letters | 0.235 (0.547 against the white copy) | #620249 | black file 1.62:1, white 12.93:1 |
+| 669ad0d8, design 2 | the wordmark as white outlines on plum | 0.159 | #67034B | black 1.69:1, white 12.42:1 |
+| 3c85cc00, designs 1 and 2 | the wordmark as light outlines on dark red velvet | 0.130, 0.161 | #080102, #150203 | black 1.02 and 1.04:1, white 20:1 |
+| 6058c203, designs 1 and 2 | the wordmark in dark purple on lavender, right place and size | 0.684, 0.643 | #D7C5F7, #D8C7F7 | black 13.2 and 13.4:1, white 1.59 and 1.56:1 |
+| DermaAngel US b135df41, designs 1 to 3 | the wordmark in deep teal on pale blue, 1.09 of the usual width | 0.23 to 0.26 on the headline (white over cyan was the only template); 0.918, 0.928 and 0.868 for the stored file over a light ground | #D4F0F5, #D2F2F7, #D5F2F7 | stored cyan 1.83 to 1.86:1, white 1.17 to 1.19:1, the near-black copy 16:1 |
+
+Nine paid designs of the first client and eight of the second. In every one the model put a logo where the canvas had it, and in none was it a close copy of the file: another tone, another weight, outlines. The gate asked for a pixel match of something the model is not able to give, and the delivered DermaAngel picture carries a white logo on white bedding because the file was named from what the model drew.
+
+### The rule
+
+1. The slot. The search runs once on the design, with the job's templates as today (the canvas file over the canvas color, then the template for the other ground), and it reads a match by the strength of the correlation whatever its sign, so a one-color logo drawn darker than its ground and the same logo drawn lighter than its ground score the same against one template. When the best match is the logo by the existing test (`logoFound`: 0.75 or more at 0.48 to 1.32 of the usual width), the slot is the found rectangle. In every other case the slot is the rectangle the canvas carried, worked out from the placement and the canvas file as the canvas route does. A weaker match is never the slot, wherever it sits, so a stray match on a headline can score what it likes. No design is made again at this step.
+2. Cleaning. The existing removal (one paid edit of the whole picture that takes out every logo and brand mark of the client, wherever it is) runs for every design, so it covers the found drawing and the canvas rectangle alike. Then, on the cleaned picture, with no model: when the drawing was found in step 1, the template that found it is searched for again at the slot (the same search and the same bar of 0.75). If it is still there, the picture is cleaned again through the existing marks path (below), and the design is made again when that path is used up.
+3. The logo elsewhere. The read of the cleaned picture that already looks for other brands' marks (`marks`, one read per removal) now asks about every logo: the cleaned picture should carry none, the client's own included, drawn anywhere as a mark or on an object. What it names is taken out by the next removal, twice at most (`MAX_MARK_CLEANS`), and then the design is made again, exactly as other brands' marks are handled today. After the stamp, the existing read of the area around the logo still fails a design where something touches or crosses the file. So a design ships with one logo, the file.
+4. The file. On the cleaned picture the ground under the slot is one real pixel: of every second pixel on every second row inside the slot, the one in the middle by brightness. The files that may be stamped are, in this order, the client's stored file, the second file (the brand's own when the set has one, else the copy made for the other ground), and the white copy. The set holds the two copies whenever the making rule made them (`logo_set.made`), whether or not a post shows them. The first file in the order whose whole parts all show on the ground (3:1 or more for each, `showsWhole`) is stamped. When none does, the first file with no whole part under 1.5:1 (`hidesPart`). When none does, the design is made again through the existing path. One preference is kept from the client's own posts: a made copy comes after the other files, at both lines, when logos were found on the client's posts and none of them shows that copy. The posts no longer decide whether a copy exists or may be used; they only say which file the brand reaches for first.
+5. The stamp goes at the slot, with the file's own proportions, through the existing finish call.
+6. What a design can still be made again for, each with its reason kept on the job in these words: `words:` the words read back are not the headline's; `ground:` no logo file shows on the picture under the slot; `marks:` a logo or a brand mark could not be cleaned out (another brand's, the client's own drawn elsewhere, or the drawing at the slot still found after cleaning); `logo's place:` something touches or crosses the stamped file. The caps are today's.
+
+### Why two lines, and why the posts still order the files
+
+The intent given for this change names one line for "shows". Measured on the real designs, no single line gives the results the owner expects: the black wordmark has 1.62 and 1.69:1 on the plum, where the white copy must win, and the stored cyan has 1.83 to 1.86:1 on the pale blue, where the brand's own color must win. The code already has both lines, and already uses them in this order for the canvas ground (section 11, second pass): shows whole at 3:1 first, then not hidden at 1.5:1.
+
+With the copies in every set, the two lines alone would put DermaAngel's near-black copy (16:1 on pale blue, 8.8:1 on its own cyan) ahead of the stored cyan and of the white logo its posts and packaging show. Three logos were found on that client's posts and none is the near-black copy, so by the preference in rule 4 it comes last: pale blue gets the stored cyan (1.83:1, second line), its cyan gets the white copy (2.22:1), and the near-black copy is left for a picture nothing else shows on. For a client with no found post (European Wax Center) the posts say nothing, both copies stand with the stored file, and the ground decides: white on plum and on dark red, the black file on lavender.
+
+Each line and each fact is one the product already has: the two contrasts, the files' own whole-part colors, the counts the lifecycle stored for the posts (`logo_set.posts`). No new number is introduced.
+
+### What changes in each step
+
+| Step | Before | Now |
+|---|---|---|
+| generate | canvas, prompt, mask | unchanged |
+| locate | search; made again unless found, and unless a named file shows around the drawing | search read without its sign; the slot is the found rectangle or the canvas rectangle; never made again |
+| unlogo | the removal | unchanged |
+| marks | the read for other brands' marks | first the cleaned slot (no model): the drawing gone, the ground, the file; then the same one read, now about every logo |
+| finish | stamps the file locate named where the drawing was | stamps the file chosen for the ground, at the slot |
+| verify | words, a Story's band, the area around the logo | unchanged |
+
+The step names stay, so a job is always at a step both the old and the new worker know.
+
+### Contract
+
+Two new routes, `slot` and `slot-file`. The `locate` route and every other route are untouched, so a worker from before this change is answered exactly as before.
+
+```ts
+/** Where the logo goes on a design: the search, then the rule. */
+export type SlotRequest = PictureMeta & { design: string; placement: Placement; scales: [number, number]; templates: [LogoTemplate] | [LogoTemplate, LogoTemplate] };
+export type SlotResult = {
+  slot: Rect; from: "drawn" | "canvas"; of: LogoFileName;   // the slot, why, and the file whose shape it has
+  index: number;                                            // the template that gave the best match
+  frame: [number, number]; canvas: Rect;                    // the design's size, and the rectangle the canvas carried
+  drawn: Rect; score: number; matched: LogoFileName; scores: number[];   // the best match, whatever it scored, for review
+};
+/** One file that may be stamped. `last`: a made copy the client's own posts do not show. */
+export type StampFile = { file: LogoFileName; logo: string; last?: boolean };
+/** The cleaned slot: is the drawing gone, what is the ground, which file. */
+export type SlotFileRequest = PictureMeta & {
+  picture: string; rect: Rect; frame: [number, number]; of: LogoFileName;
+  files: StampFile[];                              // one to three, each name once, in stamp order
+  drawn?: { file: LogoFileName; ground: Rgb };     // the template that found the drawing, looked for again at the slot
+};
+export type SlotFileResult = {
+  ground: Rgb | null; flat: number;                // the picture's own color under the slot
+  file: LogoFileName | null; rect: Rect;           // the file to stamp and where; null when none shows
+  shows: Partial<Record<LogoFileName, number>>;    // each file's weakest whole part against the ground
+  drawn?: { score: number; found: boolean };       // the search on the cleaned picture
+};
+```
+
+`PICTURE_ROUTES` gains the two names (ten routes). A still job that carries a set gains `input.stamp`, beside `input.logos`: the ordered list `[{ file, path, last? }]`. A job from before this change has none, and its list is then its `logos.files` in the same order, or its one file. A refusal now carries the service's status on the worker's side (`PictureError.status`), which is how a 404 for a route the service does not have is told from a call it turned away.
+
+Built as written, with these additions found while building: `SlotResult.index`; the job keeps the slot's own rectangle (`state.logo_slot.rect`) beside `logo_rect`, so a file of another shape that is stamped at a fitted rectangle does not move the slot when the picture is cleaned once more; and the search on the cleaned picture looks within 3% of the picture around the slot, at 0.9 to 1.1 of its width.
+
+### Jobs and sets that exist
+
+- A set made by rule 1 or 2 is read as it is. Both hold `made` (the two copies the service stored) and `posts` (the counts), so the stamp list is built when a design starts, from the row. No client's set is made again, nobody does anything, and no model is called. A client with no set starts with its one file, as today.
+- A job in flight keeps its step. At `locate` it gets the slot. At `unlogo` or `marks` its `logo_rect` from the old locate is the found rectangle, which is its slot, and the file is chosen at `marks`. At `finish` or `verify` it was checked by the old rules and finishes with the file it has.
+- Deploy order. The service ships first, with a push to main; the old worker never calls the new routes and its own calls are answered as before. If a new worker ever meets a service without the two routes (the reverse order, or a rollback of the service alone), the service answers 404 for a route it does not know; the worker reads that as the service not being there yet and the job waits without spending a try, as it does for any outage. If an old worker picks up a job the new worker moved (a rollback of the worker alone), the job is at a step it knows, has `logo_rect` and `logo_frame`, and finishes with the file named on it or the canvas file.
+
+### Spend
+
+No new paid call and no new retry. One option before: at most 3 designs (`MAX_GENERATIONS`); each design that passed locate at most 4 removals (`MAX_UNLOGO`; 3 are reachable, the first and one after each of 2 mark cleans), 3 reads for marks and the reads of verify. One option now: the same caps, so at most 3 designs, 12 removals (9 reachable), 9 reads for marks and the reads of verify. What changes is how far a design goes: before, a design that failed locate stopped after the paid design; now every design goes on to one removal and one read at least. Against that, the 9 and 8 designs of the two requests above would each have been one design.
+
+### Checked against the methods the owner rejected
+
+- The model drawing the logo: what ships is always a file, and the model's drawing is always removed. This is the 8 Oct rule itself.
+- Positions in a prompt, moving elements, two blind parties: the prompt is untouched; the slot is where the model drew, or where the canvas it was given carried the logo, never a place worked out afterwards.
+- Pixel-guessing gates: the search no longer fails any design. The measures that decide are exact: a known rectangle, real pixels of the cleaned picture under it, the files' own colors, two contrasts the product already has.
+- More checks and thresholds: one gate is removed (the match), none is added. The search on the cleaned picture uses the existing bar and sends a picture to the existing removal.
+- A brand's file rebuilt in code: nothing new is made. The copies are the ink-only copies of section 3, and by the preference in rule 4 a copy the client's posts never show is the last file tried.
+- One client as the target: no client is named in code; the tables are evidence.
+- Manual steps and flags: none. No screen changes.
+
+### Limits, said plainly
+
+- The paid steps cannot be run here. That the removal takes out a drawing the search did not recognize (outlines, another weight) is proven only by the two existing reads on real requests.
+- The ground is one pixel, the middle one. On a busy picture a part can be weak on some of the slot while the middle shows it.
+- A client whose posts show its logo on one kind of ground only, and whose stored file has between 1.5 and 3:1 on a picture of the other kind, gets the stored file there while a made copy its posts never show would be stronger.
+- The settings card shows a tile only for a copy the client's posts show. A design can now carry a copy with no tile.
+- When a set has the brand's own second file, the made copy for that ground is not also tried.
+- For a logo of one color the two templates are the same search once the sign is not read, so the second one costs time and finds nothing new. It is kept, because a logo of several colors needs it.

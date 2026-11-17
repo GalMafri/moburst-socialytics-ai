@@ -2,7 +2,10 @@
 //
 // Makes the designs that design-request plans, without Canva (Lital, 13 Oct:
 // "drop canva"). The steps are in _shared/design/pipeline.ts: generate,
-// locate, unlogo, finish, verify. Each design is a row in canva_finish_jobs (the table
+// locate, unlogo, marks, finish, verify. The image model only marks where the
+// logo goes (17 Nov 2026): locate finds that slot, the model's drawing is
+// cleaned out, and the client's logo file that shows on the ground under the
+// slot is placed there (_shared/design/logoSlot.ts). Each design is a row in canva_finish_jobs (the table
 // keeps its old name); a video's footage and join stay with video-worker.
 //
 //   POST {action:"tick"}              one pass over the due jobs, then the next posts
@@ -11,9 +14,9 @@
 //   POST {action:"picture_check", count}  the finish call for the newest done designs, answered
 //                                     at once with each call's time (operational secret)
 //   POST {action:"tone_check", client_id, designs?}  the live logo set and one read of posts for
-//                                     one client, or with `designs` the live locate on its newest
-//                                     stored designs; writes nothing to a job or a client
-//                                     (operational secret)
+//                                     one client, or with `designs` the live slot on its newest
+//                                     stored designs and the file for each cleaned picture; writes
+//                                     nothing to a job or a client (operational secret)
 //
 // Every picture is made, read and resized by the picture service on Vercel
 // (_shared/picture/client.ts, 12 Nov 2026); this worker never decodes one.
@@ -33,14 +36,14 @@ import { MAX_PLAN_ATTEMPTS, NO_PROGRESS_MINUTES, REQUEST_MAX_MINUTES } from "../
 import { type GenerateInput, designPrompt } from "../_shared/canva/brief.ts";
 import { outputSize, pictureSize } from "../_shared/canva/finish.ts";
 import { copyMatches, logoCheckPrompt, marksPrompt, parseLogoCheck, parseMarks, parseRead, readPrompt, removePrompt } from "../_shared/design/pipeline.ts";
-import { LOGO_SCALES, logoFound } from "../_shared/design/logoMatch.ts";
+import { LOGO_SCALES } from "../_shared/design/logoMatch.ts";
 import { STORY_SURFACE, storyTextBand } from "../_shared/design/story.ts";
 import { callPicture, notePicture, pictureCheckCount, signedRead, signedWrite } from "../_shared/picture/client.ts";
-import type { LocateRequest, LogoTemplate } from "../_shared/picture/contract.ts";
+import type { LogoTemplate, Placement, SlotFileRequest, SlotRequest } from "../_shared/picture/contract.ts";
 import { heldWork } from "../_shared/canva/hold.ts";
 import { DESIGN_LIMITS, MAX_DESIGN_ATTEMPTS, type StepResult, Stopped, advanceDesignJob } from "../_shared/design/advance.ts";
 import { type GenerateDeps, OF_THE_DESIGN, runGenerate, runUnlogo } from "../_shared/design/modelSteps.ts";
-import { type LocatePlan, checkInput, locatePlan, locateRefusal, logoState, stampFile } from "../_shared/design/logoChoice.ts";
+import { REASONS, type SlotPlan, type StampPlan, checkInput, slotPlan, slotState, stampFile, stampOutcome, stampPlan, waitFor } from "../_shared/design/logoChoice.ts";
 import { jobLogos, postSearchPlan } from "../_shared/design/logoTone.ts";
 import { POSTS_PER_CALL, askLogoSet, askPostLogos, liveIo } from "../_shared/design/logoSetWork.ts";
 import { personOther } from "../_shared/lifecycle/designSettings.ts";
@@ -265,30 +268,17 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
     case "locate": {
       await renewLease(admin, job);
       const g: GenerateInput = job.input.generate;
-      // The service finds the logo on the design, near the client's usual spot for it (usual).
-      // A job with one file sends that file over its background, as always. A job that
-      // carries its client's logo set (input.logos) sends the canvas file first, then the
-      // file for the other ground, and the service also names the file closest in color
-      // to what the model drew (_shared/design/logoChoice.ts).
-      const plan = locatePlan({ logo_path: job.input.logo_path, generate: g, logos: job.input.logos });
-      const { result: found, ms } = await callPicture(admin, "locate", await locateRequest(admin, plan, { job: job.id, step: "locate", designPath: s.design_path, placement: job.input.placement }));
-      notePicture(s, "locate", ms);
-      s.logo_score = Math.round(found.score * 1000) / 1000;
-      // Two reasons a located design is made again (_shared/design/logoChoice.ts, locateRefusal). The test of the
-      // match, whatever the job sent: the better match is the logo at a size the client uses. And, since 17 Nov
-      // 2026, no file that may be stamped shows on the picture's own ground around the logo.
-      const why = locateRefusal(found);
-      if (why) {
-        // Designed again, the way every other check sends a design back, so the reason is
-        // kept and a carousel cover takes its slides with it (slides drawn on a cover sent
-        // back here used to keep following it).
-        console.warn(`[design-worker] job ${job.id}: ${why}; designing again.`);
-        await designAgain(admin, job, why);
-        return "next";
-      }
-      // Where the logo was drawn, and for a job with a set the file finish stamps there.
-      Object.assign(s, logoState(job.input, found));
-      job.step = s.nologo_path ? "finish" : "unlogo";
+      // The slot: where the logo goes on this design (_shared/design/logoSlot.ts). The service searches for the
+      // job's templates near the client's usual spot, in either tone. Where it finds the logo by the test a
+      // design always had, the slot is where the model drew it; anywhere else it is the rectangle the canvas
+      // carried. The model redraws the logo in the tone and weight its picture needs, so a drawing that is no
+      // close match of the file is no reason to make the design again: nothing is sent back here.
+      const plan = slotPlan({ logo_path: job.input.logo_path, generate: g, logos: job.input.logos });
+      const { result: found, ms } = await slotCall(admin, "slot", await slotRequest(admin, plan, { job: job.id, step: "locate", designPath: s.design_path, placement: job.input.placement }));
+      notePicture(s, "slot", ms);
+      Object.assign(s, slotState(plan, found));
+      // A design that already has its logo-free picture goes on to have its slot measured.
+      job.step = s.nologo_path ? "marks" : "unlogo";
       return "next";
     }
     case "unlogo": {
@@ -305,8 +295,29 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       }, job, (work) => hold(admin, job, work));
     }
     case "marks": {
+      // A design from before the locate step is located first.
+      if (!s.logo_rect) { job.step = "locate"; return "next"; }
       await renewLease(admin, job);
-      // No other brand's marks: read on the logo-free picture, at the page size.
+      const g: GenerateInput = job.input.generate;
+      // First the cleaned slot, with no model (_shared/design/logoSlot.ts): the drawing that was found is gone,
+      // the ground under the slot is read from the picture's own pixels, and the first of the client's logo
+      // files whose whole parts all show on it is the file finish stamps.
+      const stamp = stampPlan({ logo_path: job.input.logo_path, generate: g, logos: job.input.logos, stamp: job.input.stamp }, s);
+      const { result: slot, ms: slotMs } = await slotCall(admin, "slot-file", await slotFileRequest(admin, stamp, { job: job.id, step: "marks", picturePath: s.nologo_path }));
+      notePicture(s, "slot-file", slotMs);
+      const outcome = stampOutcome(stamp, slot, g.brand_name);
+      if (outcome.next === "clean") {
+        // The model's logo is still on the picture: taken out the way any other mark is, within the same bounds.
+        console.warn(`[design-worker] job ${job.id}: ${outcome.reason}.`);
+        return cleanAgain(admin, job, outcome.where, outcome.reason);
+      }
+      if (outcome.next === "again") {
+        console.warn(`[design-worker] job ${job.id}: ${outcome.reason}; designing again.`);
+        await designAgain(admin, job, outcome.reason);
+        return "next";
+      }
+      Object.assign(s, outcome.state);
+      // Then no logo left anywhere, the client's own or another brand's: read on the logo-free picture, at the page size.
       const page = pageOf(job);
       const marksPath = `${base}/marks-${s.generations}-${s.unlogos}.jpg`;
       const { ms } = await callPicture(admin, "read", {
@@ -317,32 +328,25 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
         out: { page: await signedWrite(admin, BUCKET, marksPath) },
       });
       notePicture(s, "read", ms);
-      const g: GenerateInput = job.input.generate;
       const image = base64Encode((await download(admin, marksPath)) as unknown as ArrayBuffer);
-      const seen = await readCheck(() => askAbout("image/jpeg", image, marksPrompt(g.brand_name)), parseMarks, "The picture's other brand marks");
+      const seen = await readCheck(() => askAbout("image/jpeg", image, marksPrompt(g.brand_name)), parseMarks, "The picture's logos and brand marks");
       s.marks_check = seen;
       if (!seen.marks) {
         delete s.marks_where;
         job.step = "finish";
         return "next";
       }
-      s.mark_cleans = (s.mark_cleans ?? 0) + 1;
-      if (s.mark_cleans <= MAX_MARK_CLEANS) {
-        console.warn(`[design-worker] job ${job.id}: other brands' marks (${seen.where}); removing them.`);
-        s.marks_where = seen.where || "every brand mark on clothing, shoes, balls and equipment";
-        job.step = "unlogo";
-        return "next";
-      }
-      await designAgain(admin, job, `other brands' marks: ${seen.where}`);
-      return "next";
+      const where = seen.where || "every logo and brand mark, also on clothing, shoes, balls and equipment";
+      console.warn(`[design-worker] job ${job.id}: marks left on the picture (${where}).`);
+      return cleanAgain(admin, job, where, REASONS.marks(where));
     }
     case "finish": {
       // A design from before the locate step is located first.
       if (!s.logo_rect) { job.step = "locate"; return "next"; }
       await renewLease(admin, job);
-      // The logo file exactly where and at the size the model drew it, in the
-      // room the design left for it, then the picture at its delivered size.
-      // The model's own drawing is gone (unlogo).
+      // The logo file in the slot, in the room the design left for it, then
+      // the picture at its delivered size. The model's own drawing is gone
+      // (unlogo), and the file is the one that shows on the ground there (marks).
       const page = pageOf(job);
       const [ow, oh] = outputSize([page.width, page.height]);
       // Each finished file has a name of its own, so a design made again is never shown from a cached copy.
@@ -351,7 +355,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
         job: job.id,
         step: "finish",
         picture: await signedRead(admin, BUCKET, s.nologo_path),
-        // The file locate named for this design, or the job's own logo.
+        // The file chosen for the ground under the slot, or the job's own logo for a job moved on before that choice existed.
         logo: await signedRead(admin, BUCKET, stampFile(job.input, s)),
         rect: s.logo_rect,
         frame: s.logo_frame,
@@ -393,7 +397,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       if (!copyMatches(lines, job.input.copy)) {
         // Wrong words are never fixed by hand: the design is made again.
         console.warn(`[design-worker] job ${job.id}: read ${JSON.stringify(lines)}, wanted ${JSON.stringify(job.input.copy)}`);
-        await designAgain(admin, job, `words read as ${JSON.stringify(lines)}`);
+        await designAgain(admin, job, REASONS.words(lines));
         return "next";
       }
       // A Story's words all sit in Meta's band (_shared/design/story.ts): the band alone is read, and holds the whole copy.
@@ -402,7 +406,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
         s.band_read = await readCheck(() => askAbout("image/jpeg", crop, readPrompt(g.brand_name)), parseRead, "The words in the Story's band");
         if (!copyMatches(s.band_read, job.input.copy)) {
           console.warn(`[design-worker] job ${job.id}: the Story's band read ${JSON.stringify(s.band_read)}, wanted ${JSON.stringify(job.input.copy)}`);
-          await designAgain(admin, job, `words outside the Story's band: ${JSON.stringify(s.band_read)} inside it`);
+          await designAgain(admin, job, REASONS.band(s.band_read));
           return "next";
         }
       }
@@ -413,7 +417,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
         s.logo_check = seen;
         if (!seen.clear) {
           console.warn(`[design-worker] job ${job.id}: the logo is touched by ${seen.touching}; designing again.`);
-          await designAgain(admin, job, `logo touched by ${seen.touching}`);
+          await designAgain(admin, job, REASONS.touched(seen.touching));
           return "next";
         }
       }
@@ -424,8 +428,28 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
 }
 
 /**
+ * A logo or a brand mark is still on the logo-free picture: it is named in
+ * the next removal, MAX_MARK_CLEANS times at most for one design, and then
+ * the design is made again with the reason. One path and one count for
+ * another brand's marks, the client's own logo drawn somewhere else, and
+ * the drawing at the slot still found after cleaning.
+ */
+async function cleanAgain(admin: any, job: Job, where: string, reason: string): Promise<StepResult> {
+  const s = job.state;
+  s.mark_cleans = (s.mark_cleans ?? 0) + 1;
+  if (s.mark_cleans <= MAX_MARK_CLEANS) {
+    s.marks_where = where;
+    job.step = "unlogo";
+    return "next";
+  }
+  await designAgain(admin, job, reason);
+  return "next";
+}
+
+/**
  * Send a design back to be made again. A carousel cover made again takes its
  * other slides with it, so every slide follows the cover the client sees.
+ * The reason says what it is made again for (_shared/design/logoChoice.ts, REASONS).
  */
 async function designAgain(admin: any, job: Job, reason: string): Promise<void> {
   const s = job.state;
@@ -549,10 +573,12 @@ async function pictureCheck(admin: any, count: number): Promise<{ elapsed_ms: nu
  * and one post-logos call for the first four of its posts, with each call's
  * time: the service's speed on these searches.
  *
- * With `designs`: the live locate on the client's newest ended still
+ * With `designs`: the live slot on the client's newest ended still
  * designs, each asked the way a job started from the client's set as it is
- * now would ask (the job's own placement), with the matched file, the named
- * file, each score, the time and whether the one test (logoFound) holds. A
+ * now would ask (the job's own placement): whether the slot is where the
+ * model drew the logo or where the canvas carried it, the matched file,
+ * each score and the time; and for a job that has its logo-free picture,
+ * the ground under the slot and the file that would be stamped there. A
  * client with no current set answers that and calls nothing.
  */
 async function toneCheck(admin: any, clientId: string, designs: number | null): Promise<Record<string, unknown>> {
@@ -592,16 +618,21 @@ async function toneCheck(admin: any, clientId: string, designs: number | null): 
   const results = await Promise.all(jobs.map(async (r: any) => {
     const t = Date.now();
     try {
-      const plan = locatePlan(checkInput(row, r)!);
-      const { result: found, ms } = await callPicture(admin, "locate", await locateRequest(admin, plan, { job: r.id, step: "tone_check", designPath: r.state.design_path, placement: r.input.placement }));
-      return {
+      const input = checkInput(row, r)!;
+      const plan = slotPlan(input);
+      const { result: found, ms } = await callPicture(admin, "slot", await slotRequest(admin, plan, { job: r.id, step: "tone_check", designPath: r.state.design_path, placement: r.input.placement }));
+      const out: Record<string, unknown> = {
         job: r.id as string, status: r.status as string, ms, ok: true,
-        found: logoFound(found, found.usual.width), score: Math.round(found.score * 1000) / 1000,
-        made_again: locateRefusal(found), ground: found.ground ?? null,
-        matched: found.matched ?? null, file: found.file ?? null,
-        scores: (found.scores ?? []).map((v) => Math.round(v * 1000) / 1000),
-        gaps: Object.fromEntries(Object.entries(found.gaps ?? {}).map(([file, gap]) => [file, Math.round((gap as number) * 10) / 10])),
+        slot: found.from, of: found.of, rect: found.slot, score: Math.round(found.score * 1000) / 1000,
+        matched: found.matched, scores: found.scores.map((v) => Math.round(v * 1000) / 1000),
       };
+      // The job's own logo-free picture, when it got that far: the ground under the slot and the file that would be stamped.
+      if (r.state.nologo_path) {
+        const stamp = stampPlan(input, slotState(plan, found) as unknown as Parameters<typeof stampPlan>[1]);
+        const { result: slot, ms: fileMs } = await callPicture(admin, "slot-file", await slotFileRequest(admin, stamp, { job: r.id, step: "tone_check", picturePath: r.state.nologo_path }));
+        Object.assign(out, { file_ms: fileMs, ground: slot.ground, flat: Math.round(slot.flat * 1000) / 1000, file: slot.file, shows: slot.shows, still_drawn: slot.drawn ?? null });
+      }
+      return out;
     } catch (e) {
       return { job: r.id as string, status: r.status as string, ms: Date.now() - t, ok: false, reason: reason(e) };
     }
@@ -609,14 +640,29 @@ async function toneCheck(admin: any, clientId: string, designs: number | null): 
   return { elapsed_ms: Date.now() - started, set: true, results };
 }
 
-/** The locate request for a plan (_shared/design/logoChoice.ts), with every stored path signed for the service to read. */
-async function locateRequest(admin: any, plan: LocatePlan, a: { job: string; step: string; designPath: string; placement: LocateRequest["placement"] }): Promise<LocateRequest> {
-  const common = { job: a.job, step: a.step, design: await signedRead(admin, BUCKET, a.designPath), placement: a.placement, scales: LOGO_SCALES };
-  if (plan.shape === "one") return { ...common, logo: await signedRead(admin, BUCKET, plan.logo), background: plan.background };
+/** A call to one of the slot routes. A service that does not have the route yet is waited for, without spending a try (_shared/design/logoChoice.ts, waitFor). */
+async function slotCall<R extends "slot" | "slot-file">(admin: any, route: R, body: R extends "slot" ? SlotRequest : SlotFileRequest) {
+  try {
+    return await callPicture(admin, route, body as never);
+  } catch (e) {
+    throw waitFor(e);
+  }
+}
+
+/** The slot request for a plan (_shared/design/logoChoice.ts), with every stored path signed for the service to read. */
+async function slotRequest(admin: any, plan: SlotPlan, a: { job: string; step: string; designPath: string; placement: Placement }): Promise<SlotRequest> {
   return {
-    ...common,
-    templates: await Promise.all(plan.templates.map(async (t) => ({ file: t.file, logo: await signedRead(admin, BUCKET, t.path), ground: t.ground, ...(t.fixed ? { fixed: true } : {}), ...(t.names ? { names: t.names } : {}) }))) as [LogoTemplate] | [LogoTemplate, LogoTemplate],
-    compare: await Promise.all(plan.compare.map(async (c) => ({ file: c.file, logo: await signedRead(admin, BUCKET, c.path) }))),
+    job: a.job, step: a.step, design: await signedRead(admin, BUCKET, a.designPath), placement: a.placement, scales: LOGO_SCALES,
+    templates: await Promise.all(plan.templates.map(async (t) => ({ file: t.file, logo: await signedRead(admin, BUCKET, t.path), ground: t.ground }))) as [LogoTemplate] | [LogoTemplate, LogoTemplate],
+  };
+}
+
+/** The cleaned-slot request for a plan, with every stored path signed. */
+async function slotFileRequest(admin: any, plan: StampPlan, a: { job: string; step: string; picturePath: string }): Promise<SlotFileRequest> {
+  return {
+    job: a.job, step: a.step, picture: await signedRead(admin, BUCKET, a.picturePath), rect: plan.rect, frame: plan.frame, of: plan.of,
+    files: await Promise.all(plan.files.map(async (f) => ({ file: f.file, logo: await signedRead(admin, BUCKET, f.path), ...(f.last ? { last: true } : {}) }))),
+    ...(plan.drawn ? { drawn: plan.drawn } : {}),
   };
 }
 

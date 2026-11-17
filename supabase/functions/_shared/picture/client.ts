@@ -49,7 +49,8 @@ export type PictureFailure = "unavailable" | "refused" | "unusable";
 
 /** A picture call that failed, with why. */
 export class PictureError extends Error {
-  constructor(message: string, readonly route: PictureRoute, readonly why: PictureFailure) {
+  /** `status` is the service's own status for a call it refused (400, 401, 404), so a route the service does not have yet can be told from a call it turned away. */
+  constructor(message: string, readonly route: PictureRoute, readonly why: PictureFailure, readonly status?: number) {
     super(message);
     this.name = "PictureError";
   }
@@ -132,7 +133,7 @@ export async function callPicture<R extends PictureRoute>(admin: CallOpener, rou
   if (!tried.ok) {
     // A refusal is the service's own answer: it names its status and the service's reason.
     const reason = serviceReason(answer);
-    throw new PictureError(`The picture service refused the call (${tried.status})${reason ? `: ${reason}` : ""}.`, route, "refused");
+    throw new PictureError(`The picture service refused the call (${tried.status})${reason ? `: ${reason}` : ""}.`, route, "refused", tried.status);
   }
   // A body that was read to its end and is not the service's JSON is an answer the service should not give: no retry.
   if (!answer || typeof answer !== "object") throw new PictureError("The picture service answered something it should not have.", route, "refused");

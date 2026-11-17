@@ -2,8 +2,9 @@
 // The design worker's side of locate: what it sends for a job, what it keeps
 // from the answer, and the file finish stamps.
 import { describe, expect, it } from "vitest";
-import { checkInput, locatePlan, locateRefusal, logoState, stampFile } from "../../../functions/_shared/design/logoChoice";
-import type { LocateResult } from "../../../functions/_shared/picture/contract";
+import { REASONS, checkInput, locatePlan, locateRefusal, logoState, notThereYet, slotPlan, slotState, stampFile, stampOutcome, stampPlan, waitFor } from "../../../functions/_shared/design/logoChoice";
+import { PictureError } from "../../../functions/_shared/picture/client";
+import type { LocateResult, SlotResult } from "../../../functions/_shared/picture/contract";
 import type { JobLogos } from "../../../functions/_shared/design/logoTone";
 
 const STORED = "c1/design-settings/logo-site-aaaa.png";
@@ -146,6 +147,8 @@ describe("a stored design checked against the client's live set", () => {
     expect(input).toEqual({
       logo_path: OTHER, generate: { background: "#0F294C" }, placement,
       logos: { files: { stored: STORED, other: OTHER }, canvas: "other", second: { file: "stored", ground: "#FFFFFF" }, fixed: [], names: { canvas: [], second: [] } },
+      // The files a design started from this set may be stamped with (17 Nov 2026).
+      stamp: [{ file: "stored", path: STORED }, { file: "other", path: OTHER }],
     });
     expect(locatePlan(input)).toEqual({
       shape: "set",
@@ -154,5 +157,99 @@ describe("a stored design checked against the client's live set", () => {
     });
     expect(checkInput({ ...row, logo_set: null }, job)).toBeNull();
     expect(checkInput({ ...row, logo_path: "c1/newer-logo.png" }, job)).toBeNull();
+  });
+});
+
+describe("the slot: what the worker asks and keeps", () => {
+  const STAMP = [{ file: "stored" as const, path: STORED }, { file: "other" as const, path: OTHER, last: true as const }, { file: "white" as const, path: WHITE }];
+  const slot = (over: Partial<SlotResult> = {}): SlotResult => ({
+    slot: { x: 785, y: 154, width: 594, height: 113 }, from: "drawn", of: "stored", index: 0, frame: [2176, 2720], canvas: { x: 816, y: 109, width: 544, height: 103 },
+    drawn: { x: 785, y: 154, width: 594, height: 113 }, score: 0.91834, matched: "stored", scores: [0.91834], ...over,
+  });
+
+  it("asks for the slot with the job's own templates, one for a job with one file", () => {
+    expect(slotPlan({ logo_path: STORED, generate: { background: "#FFCFDA" } })).toEqual({ templates: [{ file: "stored", path: STORED, ground: [255, 207, 218] }] });
+    expect(slotPlan({ logo_path: STORED, generate: { background: "#F7E8E5" }, logos: logos() })).toEqual({
+      templates: [{ file: "stored", path: STORED, ground: [247, 232, 229] }, { file: "other", path: OTHER, ground: [11, 14, 26] }],
+    });
+  });
+
+  it("keeps the slot as the rectangle the file is stamped at, with why and the template that found the drawing", () => {
+    const plan = slotPlan({ logo_path: STORED, generate: { background: "#F7E8E5" }, logos: logos() });
+    expect(slotState(plan, slot({ index: 1, matched: "other", of: "other", scores: [0.31, 0.91834] }))).toEqual({
+      logo_score: 0.918, logo_rect: { x: 785, y: 154, width: 594, height: 113 }, logo_frame: [2176, 2720],
+      logo_slot: { rect: { x: 785, y: 154, width: 594, height: 113 }, from: "drawn", of: "other", template: { file: "other", ground: [11, 14, 26] } }, logo_matched: "other", logo_scores: [0.31, 0.918],
+    });
+    // Nothing found: the canvas rectangle, in the canvas file's shape, and no template to look for again.
+    const weak = slot({ slot: { x: 816, y: 109, width: 544, height: 103 }, from: "canvas", of: "stored", score: 0.2351, scores: [0.2351, 0.19], drawn: { x: 994, y: 192, width: 326, height: 62 } });
+    expect(slotState(plan, weak)).toEqual({
+      logo_score: 0.235, logo_rect: { x: 816, y: 109, width: 544, height: 103 }, logo_frame: [2176, 2720],
+      logo_slot: { rect: { x: 816, y: 109, width: 544, height: 103 }, from: "canvas", of: "stored" }, logo_matched: "stored", logo_scores: [0.235, 0.19],
+    });
+  });
+
+  it("asks about the cleaned slot with the job's stamp list, and looks for the drawing again only when it was found", () => {
+    const state = { logo_rect: { x: 785, y: 154, width: 594, height: 113 }, logo_frame: [2176, 2720] as [number, number], logo_slot: { from: "drawn" as const, of: "stored" as const, template: { file: "stored" as const, ground: [247, 232, 229] as [number, number, number] } } };
+    const input = { logo_path: STORED, generate: { background: "#F7E8E5" }, logos: logos(), stamp: STAMP };
+    expect(stampPlan(input, state)).toEqual({ rect: state.logo_rect, frame: [2176, 2720], of: "stored", files: STAMP, drawn: { file: "stored", ground: [247, 232, 229] } });
+    expect(stampPlan(input, { ...state, logo_slot: { from: "canvas", of: "stored" } })).toEqual({ rect: state.logo_rect, frame: [2176, 2720], of: "stored", files: STAMP });
+    // The slot stays where it was found when a file of another shape was stamped at a fitted rectangle and the picture is cleaned once more.
+    const slot = { x: 785, y: 154, width: 594, height: 113 };
+    expect(stampPlan(input, { ...state, logo_rect: { ...slot, y: 140, height: 141 }, logo_slot: { rect: slot, from: "canvas", of: "stored" } }).rect).toEqual(slot);
+  });
+
+  it("builds the stamp list of a job from before this change from its files, and of a job with one file from its logo", () => {
+    const state = { logo_rect: { x: 466, y: 1218, width: 150, height: 44 }, logo_frame: [1088, 1360] as [number, number] };
+    // A job that was located by the old step: its found rectangle is its slot, and the matched template is looked for again.
+    const old = stampPlan({ logo_path: STORED, generate: { background: "#F7E8E5" }, logos: logos() }, { ...state, logo_matched: "other" });
+    expect(old).toEqual({
+      rect: state.logo_rect, frame: [1088, 1360], of: "other",
+      files: [{ file: "stored", path: STORED }, { file: "other", path: OTHER }, { file: "white", path: WHITE }],
+      drawn: { file: "other", ground: [11, 14, 26] },
+    });
+    expect(stampPlan({ logo_path: STORED, generate: { background: "#FFCFDA" } }, state)).toEqual({
+      rect: state.logo_rect, frame: [1088, 1360], of: "stored", files: [{ file: "stored", path: STORED }], drawn: { file: "stored", ground: [255, 207, 218] },
+    });
+  });
+
+  it("stamps the file chosen for the ground, where the service says", () => {
+    const plan = { files: STAMP };
+    const got = stampOutcome(plan, { ground: [212, 240, 245], flat: 0.97342, file: "stored", rect: { x: 785, y: 154, width: 594, height: 113 }, shows: { stored: 1.83, other: 16.1, white: 1.19 }, drawn: { score: 0.1182, found: false } }, "Brand");
+    expect(got).toEqual({ next: "stamp", state: {
+      logo_file: STORED, logo_named: "stored", logo_rect: { x: 785, y: 154, width: 594, height: 113 },
+      logo_ground: [212, 240, 245], logo_flat: 0.973, logo_shows: { stored: 1.83, other: 16.1, white: 1.19 }, logo_clean: 0.118,
+    } });
+    expect(stampOutcome(plan, { ground: [98, 2, 73], flat: 0.99, file: "white", rect: { x: 816, y: 109, width: 544, height: 143 }, shows: { stored: 1.62, white: 12.93 } }, "Brand")).toMatchObject({ next: "stamp", state: { logo_file: WHITE, logo_named: "white" } });
+  });
+
+  it("sends the picture to be cleaned again when the drawing is still there, and says why if cleaning is used up", () => {
+    const got = stampOutcome({ files: STAMP }, { ground: [20, 20, 20], flat: 0.5, file: "white", rect: { x: 1, y: 1, width: 10, height: 4 }, shows: {}, drawn: { score: 0.9123, found: true } }, "Brand");
+    expect(got).toEqual({ next: "clean", where: "the Brand logo, which is still in the picture", reason: "marks: the logo drawn at its place is still there after cleaning (match 0.912)" });
+  });
+
+  it("makes the design again when no file shows on the ground, and says which ground", () => {
+    const got = stampOutcome({ files: STAMP }, { ground: [244, 244, 244], flat: 0.9, file: null, rect: { x: 1, y: 1, width: 10, height: 4 }, shows: { stored: 1.1, white: 1.09 } }, "Brand");
+    expect(got).toEqual({ next: "again", reason: "ground: no logo file shows on the picture under the logo (#F4F4F4)" });
+  });
+
+  it("says in each reason what the design is made again for", () => {
+    expect(REASONS.words(["Wrong", "words"])).toBe('words: read as ["Wrong","words"]');
+    expect(REASONS.band(["Inside"])).toBe('words: outside the Story\'s band, which reads ["Inside"]');
+    expect(REASONS.marks("three stripes on the boot")).toBe("marks: could not be cleaned out: three stripes on the boot");
+    expect(REASONS.touched("a frame line")).toBe("logo's place: touched by a frame line");
+  });
+
+  it("waits for a service that does not know the new routes yet, and for nothing else", () => {
+    const e = (why: "refused" | "unusable" | "unavailable", status?: number) => new PictureError("x", "slot", why, status);
+    expect(notThereYet(e("refused", 404))).toBe(true);
+    expect(notThereYet(e("refused", 400))).toBe(false);
+    expect(notThereYet(e("refused", 401))).toBe(false);
+    expect(notThereYet(e("unusable"))).toBe(false);
+    expect(notThereYet(new Error("x"))).toBe(false);
+    const waits = waitFor(e("refused", 404));
+    expect(waits).toBeInstanceOf(PictureError);
+    expect((waits as PictureError).transient).toBe(true);
+    const other = e("refused", 400);
+    expect(waitFor(other)).toBe(other);
   });
 });

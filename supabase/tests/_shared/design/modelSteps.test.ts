@@ -122,6 +122,14 @@ describe("generate", () => {
     for (const key of ["logo_file", "logo_named", "logo_matched", "logo_scores", "logo_gaps"]) expect(OF_THE_DESIGN).toContain(key);
   });
 
+  it("clears the slot, its ground and what the cleaned slot showed when a design is made again", async () => {
+    const slot = { logo_slot: { from: "canvas", of: "stored" }, logo_ground: [98, 2, 73], logo_flat: 0.99, logo_shows: { stored: 1.62, white: 12.93 }, logo_clean: 0.12 };
+    const r = jobRow({ step: "generate", state: { generations: 1, logo_score: 0.24, logo_rect: { x: 1 }, logo_frame: [2176, 2720], logo_file: "c1/w.png", ...slot } });
+    const up = generateFakes();
+    await advance(r, (job, hold, save) => runGenerate({ ...up.deps, ...save }, job, hold));
+    expect(r.row.state).toEqual({ generations: 2, design_path: "c1/canva-finish/job-1/design-2.png", picture_ms: { canvas: 240 } });
+  });
+
   it("clears what the checks found on the design before", async () => {
     const r = jobRow({ step: "generate", state: { generations: 1, redesigns: ["words read wrong"], logo_rect: { x: 1 }, nologo_path: "old.png", unlogos: 2, mark_cleans: 1 } });
     const up = generateFakes();

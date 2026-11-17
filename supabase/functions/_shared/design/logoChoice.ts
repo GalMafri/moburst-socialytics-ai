@@ -6,10 +6,19 @@
 // logo set, or a client with no current set) sends exactly the request it
 // always sent and keeps exactly the state it always kept. Free of Deno and
 // network imports, so the worker, the replay script and the tests share it.
+//
+// Since 17 Nov 2026 (spec section 13) the worker asks for the slot in place
+// of locate, and the second half of this file is its side of that: the two
+// requests (slotPlan, stampPlan), what it keeps (slotState, stampOutcome),
+// the words each reason for making a design again starts with (REASONS),
+// and how it waits for a service that does not have the two routes yet
+// (waitFor). The locate half stays for the tone check's history and for a
+// worker from before the change.
 
-import type { LocateResult, LogoFileName, Placement, Rgb } from "../picture/contract.ts";
+import { PictureError } from "../picture/client.ts";
+import type { LocateResult, LogoFileName, Placement, Rect, Rgb, SlotFileResult, SlotResult } from "../picture/contract.ts";
 import { logoFound } from "./logoMatch.ts";
-import { jobLogos, type JobLogos } from "./logoTone.ts";
+import { jobLogos, stampList, type JobLogos, type LogoSet, type StampEntry } from "./logoTone.ts";
 
 function hexRgb(hex: string): Rgb {
   const n = parseInt(String(hex || "#000000").replace("#", "").slice(0, 6), 16);
@@ -22,7 +31,7 @@ export type LocatePlan =
   | { shape: "set"; templates: Array<{ file: LogoFileName; path: string; ground: Rgb; fixed?: true; names?: LogoFileName[] }>; compare: Array<{ file: LogoFileName; path: string }> };
 
 /** The part of a job's input locate reads. */
-export type LocateInput = { logo_path: string; generate: { background: string }; logos?: JobLogos | null };
+export type LocateInput = { logo_path: string; generate: { background: string }; logos?: JobLogos | null; stamp?: StampEntry[] | null };
 
 /**
  * A job with one file: its logo over its background. A job that carries a
@@ -121,8 +130,142 @@ export function stampFile(input: { logo_path: string }, state: { logo_file?: unk
 export function checkInput(
   row: { logo_path: string; background: string; source?: string | null; logo_set?: unknown },
   job: { input: { placement: Placement } },
-): { logo_path: string; generate: { background: string }; logos: JobLogos; placement: Placement } | null {
+): { logo_path: string; generate: { background: string }; logos: JobLogos; stamp: StampEntry[]; placement: Placement } | null {
   const live = jobLogos(row);
   if (!live) return null;
-  return { logo_path: live.logo_path, generate: { background: live.background }, logos: live.logos, placement: job.input.placement };
+  return { logo_path: live.logo_path, generate: { background: live.background }, logos: live.logos, stamp: stampList(row.logo_path, row.logo_set as Partial<LogoSet>), placement: job.input.placement };
+}
+
+// ── The slot (17 Nov 2026) ──────────────────────────────────────────────────
+
+/** What the slot route is asked for a job: one or two templates, by storage path. */
+export type SlotPlan = { templates: Array<{ file: LogoFileName; path: string; ground: Rgb }> };
+
+/**
+ * The search for a design's slot uses the templates locate used: the job's
+ * one file over its background, or for a job that carries a set the canvas
+ * file over the canvas color and then the template for the other ground.
+ * Nothing is compared and no file is named here: the file is chosen for the
+ * ground under the slot once the drawing is cleaned out.
+ */
+export function slotPlan(input: LocateInput): SlotPlan {
+  const plan = locatePlan(input);
+  if (plan.shape === "one") return { templates: [{ file: "stored", path: plan.logo, ground: plan.background }] };
+  return { templates: plan.templates.map((t) => ({ file: t.file, path: t.path, ground: t.ground })) };
+}
+
+/** What a job keeps about its slot: the rectangle, why it is there, the file whose shape it has, and for a found drawing the template that found it. */
+export type SlotKept = { rect?: Rect; from: "drawn" | "canvas"; of: LogoFileName; template?: { file: LogoFileName; ground: Rgb } };
+
+/**
+ * What the job keeps once its slot is known. `logo_rect` and `logo_frame`
+ * are where the file is stamped, as they always were; `logo_slot` keeps the
+ * slot itself (a file of another shape is stamped at a rectangle fitted to
+ * it, and the slot must not move with that) and says whether it is where
+ * the model drew the logo or where the canvas carried it; the score, the
+ * matched file and each template's score are kept for review. No file is named yet. All of it is cleared when a design is made
+ * again (modelSteps.ts, OF_THE_DESIGN).
+ */
+export function slotState(plan: SlotPlan, found: SlotResult): Record<string, unknown> {
+  const template = found.from === "drawn" ? plan.templates[found.index] : undefined;
+  const kept: SlotKept = { rect: found.slot, from: found.from, of: found.of, ...(template ? { template: { file: template.file, ground: template.ground } } : {}) };
+  return {
+    logo_score: places(found.score, 3),
+    logo_rect: found.slot,
+    logo_frame: found.frame,
+    logo_slot: kept,
+    logo_matched: found.matched,
+    logo_scores: found.scores.map((v) => places(v, 3)),
+  };
+}
+
+/** What the cleaned-slot route is asked for a job, with storage paths where the request has links. */
+export type StampPlan = { rect: Rect; frame: [number, number]; of: LogoFileName; files: StampEntry[]; drawn?: { file: LogoFileName; ground: Rgb } };
+
+/**
+ * The cleaned slot of a job. The files are the job's stamp list; a job that
+ * carries a set from before the list existed gives its files in the same
+ * order, and a job with one file its logo. The drawing is looked for again
+ * only when it was found. A job the old locate step moved on has no
+ * `logo_slot`: that step only let a found drawing through, so its rectangle
+ * is a found drawing's, in the shape of the file it kept as matched.
+ */
+export function stampPlan(
+  input: LocateInput,
+  state: { logo_rect: Rect; logo_frame: [number, number]; logo_slot?: SlotKept | null; logo_matched?: unknown },
+): StampPlan {
+  const logos = input.logos;
+  const files: StampEntry[] = Array.isArray(input.stamp) && input.stamp.length
+    ? input.stamp
+    : logos?.files?.stored
+      ? (["stored", "other", "white"] as const).flatMap((file) => (logos.files[file] ? [{ file, path: logos.files[file] as string }] : []))
+      : [{ file: "stored", path: input.logo_path }];
+  const listed = (file: unknown): file is LogoFileName => files.some((f) => f.file === file);
+  const templates = slotPlan(input).templates;
+  const kept = state.logo_slot;
+  const of: LogoFileName = listed(kept?.of) ? kept.of : listed(state.logo_matched) ? state.logo_matched : listed(templates[0].file) ? templates[0].file : files[0].file;
+  const template = kept ? kept.template : templates.find((t) => t.file === of) ?? templates[0];
+  const drawn = template && listed(template.file) && (!kept || kept.from === "drawn") ? { file: template.file, ground: template.ground } : undefined;
+  return { rect: kept?.rect ?? state.logo_rect, frame: state.logo_frame, of, files, ...(drawn ? { drawn } : {}) };
+}
+
+const hexOf = (c: Rgb) => `#${c.map((v) => Math.round(v).toString(16).padStart(2, "0")).join("")}`.toUpperCase();
+
+/**
+ * Why a design is made again, in the words kept on the job. Each starts
+ * with what it is about: the words, the ground, a mark, the logo's place.
+ * For the job's record and the log, never for a screen.
+ */
+export const REASONS = {
+  words: (read: string[]) => `words: read as ${JSON.stringify(read)}`,
+  band: (read: string[]) => `words: outside the Story's band, which reads ${JSON.stringify(read)}`,
+  ground: (ground: Rgb | null) => `ground: no logo file shows on the picture under the logo (${ground ? hexOf(ground) : "no ground read"})`,
+  marks: (where: string) => `marks: could not be cleaned out: ${where}`,
+  stillDrawn: (score: number) => `marks: the logo drawn at its place is still there after cleaning (match ${places(score, 3)})`,
+  touched: (by: string) => `logo's place: touched by ${by}`,
+};
+
+/**
+ * What the cleaned slot's answer means for the job.
+ *   clean:  the drawing that was found is still on the cleaned picture. It
+ *           goes back to the removal through the marks path, with `where`
+ *           naming it; `reason` is kept if that path is used up.
+ *   again:  no file shows on the ground under the slot. The design is made
+ *           again, with the reason.
+ *   stamp:  the file to stamp, where, and what was read, for the job.
+ */
+export function stampOutcome(plan: Pick<StampPlan, "files">, answer: SlotFileResult, brand: string):
+  | { next: "clean"; where: string; reason: string }
+  | { next: "again"; reason: string }
+  | { next: "stamp"; state: Record<string, unknown> } {
+  if (answer.drawn?.found) return { next: "clean", where: `the ${brand} logo, which is still in the picture`, reason: REASONS.stillDrawn(answer.drawn.score) };
+  const path = answer.file ? plan.files.find((f) => f.file === answer.file)?.path : undefined;
+  if (!answer.file || !path) return { next: "again", reason: REASONS.ground(answer.ground) };
+  return {
+    next: "stamp",
+    state: {
+      logo_file: path,
+      logo_named: answer.file,
+      logo_rect: answer.rect,
+      ...(answer.ground ? { logo_ground: answer.ground } : {}),
+      logo_flat: places(answer.flat, 3),
+      logo_shows: answer.shows,
+      ...(answer.drawn ? { logo_clean: places(answer.drawn.score, 3) } : {}),
+    },
+  };
+}
+
+/** True when the service turned a call away because it does not have the route: its own 404, which a service from before 17 Nov 2026 gives for the slot routes. */
+export function notThereYet(e: unknown): boolean {
+  return e instanceof PictureError && e.why === "refused" && e.status === 404;
+}
+
+/**
+ * A call to a slot route that failed, as the job should take it. A service
+ * that does not have the route yet is a service that is not there yet: the
+ * job waits without spending a try (canva/stepError.ts), whatever order the
+ * service and the worker were deployed in. Any other failure is itself.
+ */
+export function waitFor(e: unknown): unknown {
+  return notThereYet(e) ? new PictureError("The picture service does not have this route yet.", (e as PictureError).route, "unavailable") : e;
 }

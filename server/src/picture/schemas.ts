@@ -10,7 +10,10 @@
 // locate body is one of two shapes, never a mix: one logo over one
 // background, or one or two templates and a list of files to compare. A
 // template may list the other files that may be named when it is the match
-// (17 Nov 2026). The shapes follow the contract's request types.
+// (17 Nov 2026). A slot body has one or two templates and nothing to
+// compare; a cleaned-slot body lists one to three files, each name once,
+// and its `of` and its `drawn` name a listed file. The shapes follow the
+// contract's request types.
 
 import { z } from "zod";
 import { inStorage } from "../storage.ts";
@@ -44,7 +47,7 @@ function fileRules(templates: Named[], compare: Named[], key: string, ctx: z.Ref
   });
 }
 
-/** The eight bodies, for a service that reads and writes under `storage`. */
+/** The ten bodies, for a service that reads and writes under `storage`. */
 export function pictureSchemas(storage: string) {
   const stored = z.string().refine((link) => inStorage(link, storage), "The link is not in the product's storage.");
   const template = z.strictObject({ file: fileName, logo: stored, ground: rgb, fixed: z.boolean().optional(), names: z.array(fileName).max(3).optional() });
@@ -91,5 +94,24 @@ export function pictureSchemas(storage: string) {
     .strictObject({ ...meta, posts: z.array(stored).min(1).max(4), placement, scales: z.tuple([z.number(), z.number()]), searches: templates, compare })
     .superRefine((body, ctx) => fileRules(body.searches, body.compare, "searches", ctx));
 
-  return { canvasBody, locateBody, readBody, finishBody, transcodeBody, titleReadBody, logoSetBody, postLogosBody };
+  const slotBody = z
+    .strictObject({ ...meta, design: stored, placement, scales: z.tuple([z.number(), z.number()]), templates })
+    .superRefine((body, ctx) => fileRules(body.templates, [], "templates", ctx));
+
+  const slotFileBody = z
+    .strictObject({
+      ...meta, picture: stored, rect, frame, of: fileName,
+      files: z.array(z.strictObject({ file: fileName, logo: stored, last: z.boolean().optional() })).min(1).max(3),
+      drawn: z.strictObject({ file: fileName, ground: rgb }).optional(),
+    })
+    .superRefine((body, ctx) => {
+      body.files.forEach((f, i) => {
+        if (body.files.findIndex((o) => o.file === f.file) !== i) ctx.addIssue({ code: "custom", path: ["files", i, "file"], message: "A file is listed once." });
+      });
+      const listed = (name: string) => body.files.some((f) => f.file === name);
+      if (!listed(body.of)) ctx.addIssue({ code: "custom", path: ["of"], message: "The slot's shape is a listed file's." });
+      if (body.drawn && !listed(body.drawn.file)) ctx.addIssue({ code: "custom", path: ["drawn", "file"], message: "The drawing's template is a listed file." });
+    });
+
+  return { canvasBody, locateBody, readBody, finishBody, transcodeBody, titleReadBody, logoSetBody, postLogosBody, slotBody, slotFileBody };
 }

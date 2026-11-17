@@ -11,7 +11,7 @@ import { STORY_PAGE, STORY_SURFACE, isStoryPost, storyLogoPlacement } from "../d
 import { videoRouteFor } from "../video/kit.ts";
 import { pngSize } from "../picture/headers.ts";
 import { settleLogo } from "../design/logoFit.ts";
-import { jobLogos, restGround, type JobLogos } from "../design/logoTone.ts";
+import { jobLogos, restGround, stampList, type JobLogos, type LogoSet, type StampEntry } from "../design/logoTone.ts";
 
 export const BUCKET = "generated-media";
 
@@ -113,15 +113,21 @@ async function logoWholeOnce(admin: any, settings: Settings): Promise<{ whole: W
  *           one file on the row's background as it is. Recorded, so a job
  *           that started this way can be told from the others.
  *
+ * A job that carries a set also carries the files it may be stamped with
+ * (`input.stamp`): the stored file, the second file and the white copy,
+ * with the copies the service made whether or not a post shows them.
+ *
  * Nothing of the row is written.
  */
-async function stillStart(admin: any, settings: Settings): Promise<{ logoPath: string; background: string; logos: JobLogos | null; from: "set" | "file" | "row"; bytes?: Uint8Array }> {
+async function stillStart(admin: any, settings: Settings): Promise<{ logoPath: string; background: string; logos: JobLogos | null; stamp?: StampEntry[]; from: "set" | "file" | "row"; bytes?: Uint8Array }> {
+  // The files the design may be stamped with, from the same set the logos are read from (logoTone.ts, stampList).
+  const stamp = () => stampList(settings.logo_path, settings.logo_set as Partial<LogoSet>);
   const set = jobLogos(settings);
-  if (set) return { logoPath: set.logo_path, background: set.background, logos: set.logos, from: "set" };
+  if (set) return { logoPath: set.logo_path, background: set.background, logos: set.logos, stamp: stamp(), from: "set" };
   const { whole, bytes } = await logoWholeOnce(admin, settings);
   if (!whole) return { logoPath: settings.logo_path, background: settings.background, logos: null, from: "row", bytes };
   const read = jobLogos(settings, whole);
-  if (read) return { logoPath: read.logo_path, background: read.background, logos: read.logos, from: "file", ...(read.logo_path === settings.logo_path ? { bytes } : {}) };
+  if (read) return { logoPath: read.logo_path, background: read.background, logos: read.logos, stamp: stamp(), from: "file", ...(read.logo_path === settings.logo_path ? { bytes } : {}) };
   return { logoPath: settings.logo_path, background: restGround(whole.inks, settings.background, whole.own, settings.source === "person").ground, logos: null, from: "file", bytes };
 }
 
@@ -189,6 +195,8 @@ export async function startOption(admin: any, req: DesignRequest, given: Setting
       logo_size: [lw, lh],
       // The files locate may recognize and finish may stamp; absent for a job with one file.
       ...(start.logos ? { logos: start.logos } : {}),
+      // The files finish may stamp, in order: the ground under the slot chooses among them (17 Nov 2026).
+      ...(start.logos && start.stamp ? { stamp: start.stamp } : {}),
       copy: slide.headline,
       placement: story ? storyLogoPlacement(settings.placement, lw, lh) : settings.placement,
       title: `${brandName} ${req.platform ?? ""} option ${optionIndex + 1}${carousel ? ` slide ${i + 1}` : ""}`.replace(/\s+/g, " "),

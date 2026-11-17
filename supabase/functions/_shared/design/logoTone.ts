@@ -386,14 +386,16 @@ export interface Found { index: number; matched: LogoFileName; rect: Rect; score
  * test fails it as before. A second template can therefore never turn a
  * design that passes with the first into one that is made again. Whether
  * the answered match is the logo stays the one test, made by the caller.
+ * `either` reads each match in either tone (logoMatch.ts, findLogo): the
+ * search for a design's slot asks for it, a post's search does not.
  */
-export function searchTemplates(picture: Raster, templates: TemplateIn[], placement: Placement, scales: [number, number]): Found {
+export function searchTemplates(picture: Raster, templates: TemplateIn[], placement: Placement, scales: [number, number], opts: { either?: boolean } = {}): Found {
   let best: Found | null = null;
   let bestPasses = false;
   const scores: number[] = [];
   templates.forEach((t, index) => {
     const usual = canvasLogoRect(placement, t.raster.width, t.raster.height, picture.width, picture.height);
-    const f = findLogo(picture.data, picture.width, picture.height, t.raster.data, t.raster.width, t.raster.height, usual, t.ground, { scales });
+    const f = findLogo(picture.data, picture.width, picture.height, t.raster.data, t.raster.width, t.raster.height, usual, t.ground, { scales, either: opts.either });
     scores.push(f.score);
     const passes = logoFound({ width: f.width, score: f.score }, usual.width);
     if (!best || (passes && !bestPasses) || (passes === bestPasses && f.score > best.score)) {
@@ -641,6 +643,43 @@ export interface JobLogos {
   second: { file: LogoFileName; ground: string } | null;
   fixed: LogoFileName[];
   names?: { canvas: LogoFileName[]; second: LogoFileName[] };
+}
+
+/** One file a design may be stamped with, by storage path. `last`: a made copy the client's own posts do not show. */
+export type StampEntry = { file: LogoFileName; path: string; last?: true };
+
+/**
+ * The files a design may be stamped with, in order, from a settings row's
+ * set (17 Nov 2026): the stored file, the second file, the white copy. A
+ * still job carries the list beside its logos (input.stamp, jobs.ts), for a
+ * set jobLogos reads; a job from before has none, and its list is then its
+ * `files` (logoChoice.ts, stampPlan). It changes no canvas and no template. The
+ * second file is the set's own (a person's, the website's, or the made copy
+ * the client's posts show), else the copy the service made for the other
+ * ground; the white file is the set's own, else the white copy the service
+ * made. Every stored set records what the service made (`made`), so a set
+ * of either rule is read as it is and no set is made again for this.
+ *
+ * The posts no longer decide whether a copy may be used: the ground under
+ * the slot does (logoSlot.ts). They keep one say, on the order. A made copy
+ * is marked `last` when logos were found on the client's posts and none of
+ * them shows that copy: the brand has been seen and does not reach for it,
+ * so it is tried after the files the brand does show. With no found post
+ * the posts say nothing and no copy is marked. A brand's own file is never
+ * marked.
+ */
+export function stampList(logoPath: string, set: Partial<LogoSet>): StampEntry[] {
+  const path = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
+  const posts = set.posts;
+  const found = typeof posts?.found === "number" && posts.found > 0;
+  const unseen = (file: "other" | "white") => found && posts?.shown?.[file] === 0;
+  const list: StampEntry[] = [{ file: "stored", path: logoPath }];
+  const own = set.other && path(set.other.path) ? set.other : null;
+  const other = own ? own.path : path(set.made?.other);
+  if (other) list.push({ file: "other", path: other, ...((!own || own.from === "made") && unseen("other") ? { last: true as const } : {}) });
+  const white = path(set.white?.path) ?? path(set.made?.white);
+  if (white) list.push({ file: "white", path: white, ...(unseen("white") ? { last: true as const } : {}) });
+  return list;
 }
 
 /**

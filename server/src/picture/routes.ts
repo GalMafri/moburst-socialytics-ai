@@ -1,7 +1,8 @@
 // server/src/picture/routes.ts
 //
-// The eight picture routes (canvas, locate, read, finish, transcode,
-// title-read since 12 Nov 2026; logo-set and post-logos since 16 Nov),
+// The ten picture routes (canvas, locate, read, finish, transcode,
+// title-read since 12 Nov 2026; logo-set and post-logos since 16 Nov; slot
+// and slot-file since 17 Nov),
 // mounted at PICTURE_API_BASE behind the door (app.ts). Every call has one
 // shape: check the body, read and decode its pictures from storage, run the
 // operation, encode and store the outputs, answer. A body that is not well formed answers 400 naming its
@@ -26,6 +27,7 @@ import { generationCanvas } from "./canvas.ts";
 import { finishPicture } from "./finish.ts";
 import { locateLogo } from "./locate.ts";
 import { locateTemplates, logoSet, postLogo, UnusableLogo } from "./tone.ts";
+import { findSlot, slotFile, type StampIn } from "./slot.ts";
 import { decodeRaster, encodeJpeg, encodePng, type Raster } from "./raster.ts";
 import { readPictures } from "./read.ts";
 import { pictureSchemas } from "./schemas.ts";
@@ -71,7 +73,7 @@ function metaOf(raw: unknown): { job?: unknown; step?: unknown } {
 
 export function pictureRoutes(deps: PictureRouteDeps): Hono {
   const { fetchImpl, log, now, storageTimeoutMs } = deps;
-  const { canvasBody, finishBody, locateBody, logoSetBody, postLogosBody, readBody, titleReadBody, transcodeBody } = pictureSchemas(deps.storage);
+  const { canvasBody, finishBody, locateBody, logoSetBody, postLogosBody, readBody, slotBody, slotFileBody, titleReadBody, transcodeBody } = pictureSchemas(deps.storage);
   const app = new Hono();
 
   function route<S extends z.ZodType, R extends PictureRoute>(name: R, schema: S, work: (body: z.output<S>, io: Io) => Promise<PictureResults[R]>): void {
@@ -225,6 +227,22 @@ export function pictureRoutes(deps: PictureRouteDeps): Hono {
       posts.push(post ? postLogo(post, searches, compare, body.placement, body.scales) : null);
     }
     return { posts };
+  });
+
+  // Where the logo goes on a design: the found drawing, or the rectangle the canvas carried.
+  route("slot", slotBody, async (body, io) => {
+    const design = await io.input("design", body.design);
+    const templates: TemplateIn[] = [];
+    for (const [i, t] of body.templates.entries()) templates.push({ file: t.file, raster: await io.input(`template${i}`, t.logo), ground: t.ground });
+    return findSlot(design, templates, body.placement, body.scales);
+  });
+
+  // The cleaned slot: the ground under it, the file that shows there, and whether the drawing is gone.
+  route("slot-file", slotFileBody, async (body, io) => {
+    const picture = await io.input("picture", body.picture);
+    const files: StampIn[] = [];
+    for (const f of body.files) files.push({ file: f.file, raster: await io.input(`file.${f.file}`, f.logo), last: f.last });
+    return slotFile(picture, body.rect, body.frame, body.of, files, body.drawn);
   });
 
   return app;
