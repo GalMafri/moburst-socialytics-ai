@@ -40,7 +40,7 @@ import { claimJob, endOverdueRequests, endRequest, renewJobLease, saveJobProgres
 import { MAX_PLAN_ATTEMPTS, NO_PROGRESS_MINUTES, REQUEST_MAX_MINUTES } from "../_shared/design/requestRules.ts";
 import { type GenerateInput, designPrompt } from "../_shared/canva/brief.ts";
 import { deliveredSize, pictureSize } from "../_shared/canva/finish.ts";
-import { logoCheckPrompt, marksPrompt, parseLogoCheck, parseMarks, parseRead, readPrompt, removePrompt, wordsMatch } from "../_shared/design/pipeline.ts";
+import { copyMatches, logoCheckPrompt, marksPrompt, parseLogoCheck, parseMarks, parseRead, readPrompt, removePrompt } from "../_shared/design/pipeline.ts";
 import { LOGO_SCALES } from "../_shared/design/logoMatch.ts";
 import { STORY_SURFACE, storyTextBand } from "../_shared/design/story.ts";
 import { NotEnded, callPicture, notePicture, pictureCheckCount, searchToEnd, signedRead, signedWrite } from "../_shared/picture/client.ts";
@@ -425,10 +425,9 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       const jpeg = base64Encode((await download(admin, `${stem}.jpg`)) as unknown as ArrayBuffer);
       const lines = await readCheck(() => askAbout("image/jpeg", jpeg, readPrompt(g.brand_name)), parseRead, "The words on the design");
       s.read = lines;
-      // The headline's words in order and every label once (a job from before labels has none).
-      if (!wordsMatch(lines, job.input.copy, job.input.labels)) {
+      if (!copyMatches(lines, job.input.copy)) {
         // Wrong words are never fixed by hand: the design is made again.
-        console.warn(`[design-worker] job ${job.id}: read ${JSON.stringify(lines)}, wanted ${JSON.stringify(job.input.copy)}${job.input.labels?.length ? ` with labels ${JSON.stringify(job.input.labels)}` : ""}`);
+        console.warn(`[design-worker] job ${job.id}: read ${JSON.stringify(lines)}, wanted ${JSON.stringify(job.input.copy)}`);
         await designAgain(admin, job, REASONS.words(lines));
         return "next";
       }
@@ -436,8 +435,8 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       if (band) {
         const crop = base64Encode((await download(admin, `${stem}-band.jpg`)) as unknown as ArrayBuffer);
         s.band_read = await readCheck(() => askAbout("image/jpeg", crop, readPrompt(g.brand_name)), parseRead, "The words in the Story's band");
-        if (!wordsMatch(s.band_read, job.input.copy, job.input.labels)) {
-          console.warn(`[design-worker] job ${job.id}: the Story's band read ${JSON.stringify(s.band_read)}, wanted ${JSON.stringify(job.input.copy)}${job.input.labels?.length ? ` with labels ${JSON.stringify(job.input.labels)}` : ""}`);
+        if (!copyMatches(s.band_read, job.input.copy)) {
+          console.warn(`[design-worker] job ${job.id}: the Story's band read ${JSON.stringify(s.band_read)}, wanted ${JSON.stringify(job.input.copy)}`);
           await designAgain(admin, job, REASONS.band(s.band_read));
           return "next";
         }
@@ -506,7 +505,7 @@ function pageOf(job: Job): { width: number; height: number } {
   return job.input?.generate?.size ?? DEFAULT_PAGE;
 }
 
-/** The size a design is delivered at: its platform's upload size when the job carries one, else 1440 wide in the page's shape (canva/finish.ts, deliveredSize). */
+/** The size a design is delivered at: 1440 wide, or its platform's own width when that is larger, in the shape of the platform's row when the job carries one, else of the page (canva/finish.ts, deliveredSize). */
 function deliveredOf(job: Job): [number, number] {
   const page = pageOf(job);
   return deliveredSize([page.width, page.height], job.input?.generate?.deliver);
@@ -554,7 +553,7 @@ function generateDeps(admin: any, job: Job): GenerateDeps {
       if (error || !data) throw new Error(`Could not read the client post ${p}: ${error?.message ?? "missing"}`);
       images.push({ bytes: new Uint8Array(await data.arrayBuffer()), name: `ref${i}${p.slice(p.lastIndexOf("."))}` });
     }
-    return imageEdit(await openaiKey(db()), images, designPrompt(g, job.input.copy, g.refs.length, slide, job.input.labels, job.input.placing), pictureSize([page.width, page.height]), await download(admin, maskPath));
+    return imageEdit(await openaiKey(db()), images, designPrompt(g, job.input.copy, g.refs.length, slide), pictureSize([page.width, page.height]), await download(admin, maskPath));
   };
   return {
     canvas,

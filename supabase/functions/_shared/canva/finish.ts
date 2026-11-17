@@ -178,15 +178,22 @@ export function outputSize(page: [number, number]): [number, number] {
 }
 
 /**
- * The size a design is delivered at. A job that carries its platform's
- * upload size (input.generate.deliver, 17 Nov 2026, _shared/design/platformSize.ts)
- * is delivered at exactly that. A job without one, which is every job made
- * before, is delivered as it always was: OUTPUT_WIDTH wide in the page's
- * proportions.
+ * The size a design is delivered at. Every design keeps the quality width
+ * it always had, OUTPUT_WIDTH. A job that carries its platform's row
+ * (input.generate.deliver, 17 Nov 2026, _shared/design/platformSize.ts)
+ * takes the row's SHAPE: it is delivered in that shape OUTPUT_WIDTH wide,
+ * or at the row's own width when that is larger, so it is never smaller
+ * than the platform's size. 1080x1350 gives 1440x1800 and 1080x1920 gives
+ * 1440x2560, as before the table; 1200x1200 gives 1440x1440 and 1600x900
+ * stays 1600x900. A job without a row, which is every job made before, is
+ * delivered OUTPUT_WIDTH wide in the page's proportions.
  */
-export function deliveredSize(page: [number, number], deliver?: { width?: unknown; height?: unknown } | null): [number, number] {
-  const w = deliver?.width, h = deliver?.height;
-  if (typeof w === "number" && typeof h === "number" && Number.isInteger(w) && Number.isInteger(h) && w > 0 && h > 0) return [w, h];
+export function deliveredSize(page: [number, number], row?: { width?: unknown; height?: unknown } | null): [number, number] {
+  const w = row?.width, h = row?.height;
+  if (typeof w === "number" && typeof h === "number" && Number.isInteger(w) && Number.isInteger(h) && w > 0 && h > 0) {
+    const width = Math.max(OUTPUT_WIDTH, w);
+    return [width, Math.round((width * h) / w)];
+  }
   return outputSize(page);
 }
 

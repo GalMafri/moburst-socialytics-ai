@@ -1,10 +1,13 @@
 // supabase/functions/_shared/design/platformSize.ts
 //
-// A design in the size its platform is uploaded in (17 Nov 2026, spec
+// A design in the shape its platform is uploaded in (17 Nov 2026, spec
 // docs/superpowers/specs/2026-11-17-platform-sizes-design.md). The sizes
 // live in the platform_sizes table, one row per platform and format, and a
-// weekly job keeps them current (platformSizeRefresh.ts). This file holds
-// what decides, in plain arithmetic:
+// weekly job keeps them current (platformSizeRefresh.ts). A row gives the
+// design its shape and the size its delivery never goes below; the
+// delivered picture keeps the quality width every design had before the
+// table (canva/finish.ts, deliveredSize). This file holds what decides, in
+// plain arithmetic:
 //
 //   the key        which row a request reads, from its platform and format;
 //   the checks     whether a size is one the app can make: sane edges, a
@@ -12,6 +15,8 @@
 //                  draws and that is never enlarged on delivery;
 //   the page       the rectangle a size is planned and drawn on, in the
 //                  size's own shape and near today's pixel count;
+//   the delivery   the size the finished picture has (checkSize gives the
+//                  page, the picture the model draws and this, together);
 //   the placement  where the client's logo goes on a page that is not 4:5;
 //   wildly         how far a newly read size may be from the size in use
 //                  before it has to be read twice.
@@ -19,7 +24,7 @@
 // A request with no row, or a row that fails a check, is designed exactly
 // as before this file existed. Free of Deno and network imports.
 
-import { MODEL_MAX_EDGE, pictureSize, type Placement } from "../canva/finish.ts";
+import { MODEL_MAX_EDGE, deliveredSize, pictureSize, type Placement } from "../canva/finish.ts";
 import { formatKind } from "../calendar/reasonText.ts";
 import { FRAME } from "../lifecycle/designSettings.ts";
 import { networkKey } from "../sprout/publishRules.ts";
@@ -108,10 +113,13 @@ export function pageFor(size: Size, format: UploadFormat): Size | null {
   return best ? { width: best.width, height: best.height } : null;
 }
 
-export type SizeCheck = { ok: true; page: Size; picture: Size } | { ok: false; reason: "not_whole" | "edge" | "shape" | "page" | "picture" };
+export type SizeCheck = { ok: true; page: Size; picture: Size; delivered: Size } | { ok: false; reason: "not_whole" | "edge" | "shape" | "page" | "picture" };
 
 /**
- * Whether a size is one the app can make for a format, on exact facts:
+ * What a row's size becomes: the page it is planned on, the picture the
+ * image model draws and the size it is delivered at (deliveredSize: the
+ * row's shape at the quality width, or at the row's own width when that is
+ * larger). And whether it is one the app can make for a format, on exact facts:
  *   not_whole  an edge is not a whole number;
  *   edge       an edge is under MIN_EDGE or over MAX_EDGE;
  *   shape      a still outside STILL_SHAPE, or a Story that is not 9:16;
@@ -119,8 +127,8 @@ export type SizeCheck = { ok: true; page: Size; picture: Size } | { ok: false; r
  *   picture    the picture the image model would draw (pictureSize) is not
  *              in multiples of 16, has an edge over the model's longest,
  *              more pixels than the largest picture the app draws, another
- *              shape than its page, or is smaller than the size on an edge
- *              (delivery would enlarge it).
+ *              shape than its page, or is smaller than the delivered size
+ *              on an edge (delivery would enlarge it).
  */
 export function checkSize(size: { width: unknown; height: unknown }, format: UploadFormat): SizeCheck {
   const { width, height } = size;
@@ -133,20 +141,22 @@ export function checkSize(size: { width: unknown; height: unknown }, format: Upl
   const page = pageFor(s, format);
   if (!page || Math.abs((page.width / page.height) / (width / height) - 1) > SHAPE_TOLERANCE) return { ok: false, reason: "page" };
   const [pw, ph] = pictureSize([page.width, page.height]);
+  const [dw, dh] = deliveredSize([page.width, page.height], s);
   const drawable = pw % 16 === 0 && ph % 16 === 0 && pw >= 16 && ph >= 16
     && pw <= MODEL_MAX_EDGE && ph <= MODEL_MAX_EDGE && pw * ph <= MAX_PICTURE_PIXELS
     && Math.abs((pw / ph) / (page.width / page.height) - 1) <= SHAPE_TOLERANCE
-    && width <= pw && height <= ph;
+    && dw <= pw && dh <= ph;
   if (!drawable) return { ok: false, reason: "picture" };
-  return { ok: true, page, picture: { width: pw, height: ph } };
+  return { ok: true, page, picture: { width: pw, height: ph }, delivered: { width: dw, height: dh } };
 }
 
 /**
- * What a job is given from its request's upload size: the page it is
- * planned and drawn on and the size it is delivered at. Null (the job is
- * made as before) when the request has none, when what it holds is not a
- * size that passes checkSize, or when it is a Story's size on a post that
- * is not a Story or the other way round.
+ * What a job is given from its request's row: the page it is planned and
+ * drawn on, and the row itself (`deliver`), which the worker turns into the
+ * delivered size (deliveredSize) and records the image model's answer
+ * against. Null (the job is made as before) when the request has none, when
+ * what it holds is not a size that passes checkSize, or when it is a
+ * Story's size on a post that is not a Story or the other way round.
  */
 export function jobShape(uploadSize: unknown, story: boolean): { page: Size; deliver: Size & { platform?: string; format: UploadFormat } } | null {
   const u = uploadSize as Partial<UploadSize> | null | undefined;

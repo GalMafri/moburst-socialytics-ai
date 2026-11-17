@@ -14,6 +14,12 @@ Agreed:
 - Nobody maintains it: no setting, no manual step, no flag, no alert.
 - Where a platform accepts several shapes, the one the guide lists first is used.
 
+Added the same day: "make sure the sizes don't mess up the quality we had set up". Every still had been delivered 1440 wide, and the first build delivered Instagram and Facebook at 1080x1350 and Stories at 1080x1920, smaller than before. The rule since:
+
+- The table gives each platform's **shape**, and a size the delivery never goes below.
+- The delivered picture keeps the quality width: the row's shape at 1440 wide (`OUTPUT_WIDTH`), or at the row's own width when that is larger.
+- So Instagram and Facebook images and carousels are delivered 1440x1800 and Stories 1440x2560, as before the table, from the same page and the same picture. LinkedIn's square is delivered 1440x1440 and X 1600x900.
+
 ## Today
 
 Every still is planned on a 1088x1360 page (`DEFAULT_PAGE`, design-worker), drawn by the image model at twice that (`pictureSize`: 2176x2720) and delivered 1440 wide (`outputSize`: 1440x1800). A Story is planned on 1152x2048, drawn at 2160x3840 and delivered at 1440x2560. The platform never changes the shape.
@@ -128,7 +134,7 @@ The cheat sheet wins over the section, and the first listed wins within a part, 
 - **Sane.** Whole numbers, each edge from 600 to 2560.
 - **A shape the app makes.** A still: width over height from 0.5 to 2.0. A Story: exactly 9:16.
 - **A page for it.** `pageFor`: the rectangle in multiples of 16, within 25% of today's pixel count (1088x1360 for a still, 1152x2048 for a Story), whose shape is closest to the size's (then closest in pixel count). The page's shape must be within 0.2% of the size's.
-- **Drawable.** `pictureSize(page)` gives edges in multiples of 16, none over 3840 (`MODEL_MAX_EDGE`), no more pixels than the largest picture the app draws today (the Story's 2160x3840), the page's own shape, and the upload size is no larger than it on either edge, so delivery never enlarges.
+- **Drawable.** `pictureSize(page)` gives edges in multiples of 16, none over 3840 (`MODEL_MAX_EDGE`), no more pixels than the largest picture the app draws today (the Story's 2160x3840), the page's own shape, and the delivered size (section 4) is no larger than it on either edge, so delivery never enlarges.
 
 ### Compare and write
 
@@ -159,16 +165,21 @@ A fetch that fails, a page that is not the guide, a model answer that is not the
 
 ### The page and the delivered size
 
-When a request holds an `upload_size`, `jobShape` gives its page and delivered size and `startOption` puts them on the job: `input.generate.size` (the page) and `input.generate.deliver` (the upload size). The worker draws at `pictureSize(page)` and delivers at `deliver`.
+When a request holds an `upload_size`, `jobShape` gives its page and `startOption` puts it on the job with the row: `input.generate.size` (the page) and `input.generate.deliver` (the row: platform, format, width, height). The worker draws at `pictureSize(page)` and delivers at `deliveredSize(page, row)`.
 
-| upload size | page | image model | delivered |
+One rule, in one function (`deliveredSize`, `canva/finish.ts`): the row's shape at `max(1440, row width)` wide, the height rounded. `checkSize` answers the three sizes of a row together: its page, the picture the image model draws and the delivered size.
+
+| row | page | image model | delivered |
 | --- | --- | --- | --- |
-| 1080x1350 | 1088x1360 | 2176x2720 | 1080x1350 |
-| 1200x1200 | 1216x1216 | 2432x2432 | 1200x1200 |
-| 1600x900 | 1536x864 | 3072x1728 | 1600x900 |
-| 1080x1920 (Story) | 1152x2048 | 2160x3840 | 1080x1920 |
+| instagram image 1080x1350 | 1088x1360 | 2176x2720 | 1440x1800 |
+| instagram carousel 1080x1350 | 1088x1360 | 2176x2720 | 1440x1800 |
+| instagram story 1080x1920 | 1152x2048 | 2160x3840 | 1440x2560 |
+| facebook image 1080x1350 | 1088x1360 | 2176x2720 | 1440x1800 |
+| facebook story 1080x1920 | 1152x2048 | 2160x3840 | 1440x2560 |
+| linkedin image 1200x1200 | 1216x1216 | 2432x2432 | 1440x1440 |
+| x image 1600x900 | 1536x864 | 3072x1728 | 1600x900 |
 
-Instagram and Facebook stills are planned and drawn exactly as today. Only their delivered size changes, from 1440x1800 to 1080x1350.
+Instagram and Facebook stills and every Story are planned, drawn and delivered exactly as before the table: the same page, the same picture, the same logo placement, the same delivered size. The row's own width and height stay on the job as they are in the table, because the refusal fallback and the record of what the image model did with a size are keyed by them (section 6).
 
 All slides of a carousel are rows of one `startOption` call from one request, so they share one size.
 
@@ -199,12 +210,12 @@ The mapped placement is written on the job (`input.placement`), which is the one
 | place | what it assumed | now |
 | --- | --- | --- |
 | `design-worker` `DEFAULT_PAGE`, `pageOf` | 1088x1360 with no `generate.size` | unchanged: the page of a job with no size |
-| `design-worker` finish, verify, `picture_check` | `outputSize(page)`, 1440 wide | `deliveredOf(job)`: `generate.deliver`, else `outputSize(page)` |
-| `canva/finish.ts` `OUTPUT_WIDTH`, `outputSize` | 1440 wide | unchanged: the delivered size of a job with no `deliver` |
+| `design-worker` finish, verify, `picture_check` | `outputSize(page)`, 1440 wide | `deliveredOf(job)`: `deliveredSize(page, generate.deliver)`, the row's shape at the quality width, else `outputSize(page)` |
+| `canva/finish.ts` `OUTPUT_WIDTH`, `outputSize` | 1440 wide | unchanged: the quality width of every design, and the delivered size of a job with no `deliver` |
 | `canva/finish.ts` `pictureSize` | twice the page, multiples of 16, 3840 at most | unchanged, used for every page |
-| `canva/jobs.ts` `startOption` | no size for a still, `STORY_PAGE` for a Story, the stored placement | page, delivered size and mapped placement from the request's `upload_size` |
-| `canva/brief.ts` `designPrompt` | "post (4:5)", "carousel (4:5)" | the page's own shape; a 4:5 page gives the same words as today |
-| `canva/options.ts` planner prompts | no shape | one line more for a still that is not 4:5 |
+| `canva/jobs.ts` `startOption` | no size for a still, `STORY_PAGE` for a Story, the stored placement | page, row and mapped placement from the request's `upload_size` |
+| `canva/brief.ts` `designPrompt` | "post (4:5)", "carousel (4:5)" | the page's own shape; a 4:5 page gives the same words as before, and a Story keeps its own words |
+| `canva/options.ts` planner prompts | no shape | one line more for a still that is neither 4:5 nor a Story: "The design is drawn on a square frame (1:1): plan a layout and a picture that fill that shape." |
 | picture service `canvas` | the page it is sent | unchanged: it is sent the job's page and placement |
 | picture service `slot`, `locate` (the usual width) | `canvasLogoRect(placement, design size)` | unchanged: the job's placement is already the page's |
 | picture service `slot-file`, `finish` | rectangles in `frame` pixels | unchanged |
@@ -218,7 +229,7 @@ The mapped placement is written on the job (`input.placement`), which is the one
 
 ### The reads of a delivered design
 
-The words are read on the page-size JPEG, as before. The area around the logo is cut from the delivered file, so its rectangle is computed from the delivered size (`logoAreaRect(rect, frame, deliveredOf(job))`): on an Instagram design it is now a crop of a 1080-wide file where it was a crop of a 1440-wide one. The logo is 25% smaller in that crop. The check asks whether anything touches or crosses the logo, which does not depend on the scale.
+The words are read on the page-size JPEG, as before. The area around the logo is cut from the delivered file, so its rectangle is computed from the delivered size (`logoAreaRect(rect, frame, deliveredOf(job))`). On an Instagram or Facebook design and on a Story the delivered file is the size it was before the table, so the crop is the same crop.
 
 ## 5. Version skew
 
@@ -228,7 +239,8 @@ Order: the migration, then `design-worker`, `video-worker`, `design-request`, `r
 - A job from before the change has no `generate.deliver` and no mapped placement. Every reader falls back to today's values, so it finishes as today, whichever worker runs it.
 - A request from before the change has no `upload_size`. Its replacement options are started as today.
 - The new worker with the old `design-request`: jobs have no size, as today.
-- The old worker with the new `design-request` (the reverse order): the page and placement are followed, the delivered picture is 1440 wide in the page's shape. Not wrong, not the upload size. The order above avoids it.
+- The old worker with the new `design-request` (the reverse order): the page and placement are followed, the delivered picture is 1440 wide in the page's shape. Not wrong; X would come out 1440 wide where its row asks for 1600. The order above avoids it.
+- A job made on 17 Nov by the first build carries the same `generate.deliver` (the row). The worker with the quality width delivers it 1440 wide in the row's shape, like any new job.
 
 ## 6. A size the image model refuses never fails a design
 
@@ -246,7 +258,7 @@ Built as written. Files:
 
 - `supabase/migrations/20261117150000_platform_sizes.sql`
 - `_shared/design/platformSize.ts` (the key, the checks, the page, the placement, wildly), `shape.ts` (a shape in words), `platformSizeDb.ts` (the read at request time), `platformSizeRead.ts` (the guide's text and parts, the outcome), `platformSizeRefresh.ts` (the job)
-- Small edits: `canva/jobs.ts` (`startOption`), `canva/brief.ts` (the shape in the prompt, `deliver`), `canva/finish.ts` (`deliveredSize`), `canva/options.ts` (`shapeLine`), `design-worker/index.ts` (`deliveredOf`), `design-request/index.ts` (the read, the planner's shape), `run-scheduled-jobs/index.ts` and `scheduled-jobs/types.ts` (the job kind)
+- Small edits: `canva/jobs.ts` (`startOption`), `canva/brief.ts` (the shape in the prompt, `deliver`), `canva/finish.ts` (`deliveredSize`, the quality width), `canva/options.ts` (`shapeLine`), `design-worker/index.ts` (`deliveredOf`), `design-request/index.ts` (the read, the planner's shape), `run-scheduled-jobs/index.ts` and `scheduled-jobs/types.ts` (the job kind)
 - App: `src/lib/naturalRatio.ts`, `src/components/calendar/DesignFrame.tsx`, used by the all-clients week card and the post panel's variant tiles. The calendar card's thumbnail band and the Story card keep their fixed frames: the first fits the whole design inside a band, the second is 9:16 by definition.
 
 `run-scheduled-jobs` also answers `{"mode":"platform_sizes_dry_run"}`: the guide fetched and read now, each row's outcome, nothing written. It makes one model call.
@@ -254,10 +266,10 @@ Built as written. Files:
 ### What the first real runs must show
 
 - `platform_sizes_dry_run`, or the first scheduled run: `ok` true and seven rows `same`. That proves the edge runtime fetches the guide and the model answers in the structure.
-- The first LinkedIn still: `input.generate.size` 1216x1216, a design at 2432x2432, a delivered file of 1200x1200, the logo at its usual corner.
+- The first LinkedIn still: `input.generate.size` 1216x1216, a design at 2432x2432, a delivered file of 1440x1440, the logo at its usual corner.
 - The first X still: page 1536x864, design 3072x1728, delivered 1600x900.
-- The first Instagram or Facebook still: page 1088x1360 as before, delivered 1080x1350.
-- The first Story: delivered 1080x1920.
+- The first Instagram or Facebook still: page 1088x1360 as before, delivered 1440x1800 as before.
+- The first Story: delivered 1440x2560 as before.
 
 ## Limits, said plainly
 

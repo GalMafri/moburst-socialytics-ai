@@ -38,7 +38,8 @@ import { placementFor } from "../../../functions/_shared/lifecycle/designSetting
 import { type DesignRequest, type Settings, BUCKET, pngSize, settleRequest, startOption } from "../../../functions/_shared/canva/jobs";
 import { designPrompt, type GenerateInput } from "../../../functions/_shared/canva/brief";
 import { STORY_PAGE, storyLogoPlacement } from "../../../functions/_shared/design/story";
-import { pagePlacement } from "../../../functions/_shared/design/platformSize";
+import { STILL_PAGE, pagePlacement } from "../../../functions/_shared/design/platformSize";
+import { deliveredSize, pictureSize } from "../../../functions/_shared/canva/finish";
 import { asBeforeInput } from "../../../functions/_shared/design/sizeFallback";
 import type { LogoSet } from "../../../functions/_shared/design/logoTone";
 
@@ -73,6 +74,22 @@ async function started(req: DesignRequest) {
   return db.tables.canva_finish_jobs[0];
 }
 
+/** Every job one option starts, in slide order. */
+async function startedAll(req: DesignRequest) {
+  const db = fakeDb({ canva_finish_jobs: [] });
+  db.uploads.set(`${BUCKET}/${settings.logo_path}`, pngHeader(701, 251));
+  await startOption(db, req, settings, "Pay The Pyper", 0, 0);
+  return db.tables.canva_finish_jobs;
+}
+
+// The page a job is drawn on and the size it is delivered at, as the design worker reads them (pageOf, deliveredOf).
+// deno-lint-ignore no-explicit-any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const pageOf = (job: any): [number, number] => { const p = job.input.generate.size ?? STILL_PAGE; return [p.width, p.height]; };
+// deno-lint-ignore no-explicit-any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const delivered = (job: any): [number, number] => deliveredSize(pageOf(job), job.input.generate.deliver);
+
 describe("startOption", () => {
   it("draws a feed still on the default 4:5 page at the client's own logo spot", async () => {
     const job = await started(request());
@@ -94,8 +111,8 @@ describe("startOption", () => {
     }
   });
 
-  it("draws a still in its platform's upload size: the page, the delivered size and the logo's place on that page", async () => {
-    // LinkedIn, square: planned on 1216x1216, delivered at 1200x1200.
+  it("draws a still in its platform's shape: the page, the row it is delivered by and the logo's place on that page", async () => {
+    // LinkedIn, square: planned on 1216x1216, delivered 1440x1440 (the quality width).
     const square = await started(request({ platform: "LinkedIn", upload_size: { platform: "linkedin", format: "image", width: 1200, height: 1200 } }));
     expect(square.input.generate.size).toEqual({ width: 1216, height: 1216 });
     expect(square.input.generate.deliver).toEqual({ width: 1200, height: 1200, platform: "linkedin", format: "image" });
@@ -106,21 +123,52 @@ describe("startOption", () => {
     expect(square.input.placement).toEqual(pagePlacement(settings.placement, 701, 251, { width: 1216, height: 1216 }));
     expect(square.input.placement).toEqual({ anchor: "center", width: 0.2889, top: 0.0537 });
     expect(designPrompt(square.input.generate as GenerateInput, square.input.copy, 1)).toContain("LinkedIn post (1:1)");
-    // X, wide: planned on 1536x864, delivered at 1600x900.
+    expect(delivered(square)).toEqual([1440, 1440]);
+    // X, wide: planned on 1536x864, delivered at 1600x900 (its own width is the larger).
     const wide = await started(request({ platform: "Twitter/X", upload_size: { platform: "x", format: "image", width: 1600, height: 900 } }));
     expect(wide.input.generate.size).toEqual({ width: 1536, height: 864 });
     expect(wide.input.generate.deliver).toEqual({ width: 1600, height: 900, platform: "x", format: "image" });
     expect(designPrompt(wide.input.generate as GenerateInput, wide.input.copy, 1)).toContain("post (16:9)");
+    expect(delivered(wide)).toEqual([1600, 900]);
   });
 
-  it("draws an Instagram still on today's page at the client's own logo spot, delivered at the upload size", async () => {
+  it("draws an Instagram still on the page it always had at the client's own logo spot, delivered 1440 wide", async () => {
     const job = await started(request({ upload_size: { platform: "instagram", format: "image", width: 1080, height: 1350 } }));
     expect(job.input.generate.size).toEqual({ width: 1088, height: 1360 });
     expect(job.input.generate.deliver).toEqual({ width: 1080, height: 1350, platform: "instagram", format: "image" });
     expect(job.input.placement).toEqual(settings.placement);
+    expect(delivered(job)).toEqual([1440, 1800]);
     // The image model is told what it was always told.
     const before = await started(request());
     expect(designPrompt(job.input.generate as GenerateInput, job.input.copy, 1)).toBe(designPrompt(before.input.generate as GenerateInput, before.input.copy, 1));
+  });
+
+  it("keeps the quality every 4:5 post and Story had before the sizes table: the page, the picture asked of the image model, the logo's place and the delivered size", async () => {
+    const slides = [{ headline: ["A"], picture: "p1" }, { headline: ["B"], picture: "p2" }, { headline: ["C"], picture: "p3" }];
+    const cases: Array<{ post: Partial<DesignRequest>; row: { platform: string; format: string; width: number; height: number }; page: [number, number]; asked: [number, number]; out: [number, number] }> = [
+      { post: { platform: "Instagram" }, row: { platform: "instagram", format: "image", width: 1080, height: 1350 }, page: [1088, 1360], asked: [2176, 2720], out: [1440, 1800] },
+      { post: { platform: "Facebook" }, row: { platform: "facebook", format: "image", width: 1080, height: 1350 }, page: [1088, 1360], asked: [2176, 2720], out: [1440, 1800] },
+      { post: { platform: "Instagram", format: "Carousel", kind: "carousel", briefs: [{ headline: ["A"], picture: "p", slides }] }, row: { platform: "instagram", format: "carousel", width: 1080, height: 1350 }, page: [1088, 1360], asked: [2176, 2720], out: [1440, 1800] },
+      { post: { platform: "Instagram", format: "Story" }, row: { platform: "instagram", format: "story", width: 1080, height: 1920 }, page: [1152, 2048], asked: [2160, 3840], out: [1440, 2560] },
+      { post: { platform: "Facebook", format: "Story" }, row: { platform: "facebook", format: "story", width: 1080, height: 1920 }, page: [1152, 2048], asked: [2160, 3840], out: [1440, 2560] },
+    ];
+    for (const c of cases) {
+      // The same post with no row is the job as it was made before the table.
+      const [before, now] = await Promise.all([startedAll(request(c.post)), startedAll(request({ ...c.post, upload_size: c.row }))]);
+      expect(now).toHaveLength(before.length);
+      for (const [i, job] of now.entries()) {
+        const was = before[i];
+        expect(pageOf(job)).toEqual(pageOf(was));
+        expect(pageOf(job)).toEqual(c.page);
+        expect(pictureSize(pageOf(job))).toEqual(c.asked);
+        expect(pictureSize(pageOf(job))).toEqual(pictureSize(pageOf(was)));
+        expect(job.input.placement).toEqual(was.input.placement);
+        expect(delivered(job)).toEqual(c.out);
+        expect(delivered(job)).toEqual(delivered(was));
+        const slide = now.length > 1 ? { index: i, count: now.length, withCover: i > 0 } : undefined;
+        expect(designPrompt(job.input.generate as GenerateInput, job.input.copy, 1, slide)).toBe(designPrompt(was.input.generate as GenerateInput, was.input.copy, 1, slide));
+      }
+    }
   });
 
   it("gives every slide of a carousel the one size its request read", async () => {
@@ -135,15 +183,17 @@ describe("startOption", () => {
       expect(job.input.placement).toEqual(db.tables.canva_finish_jobs[0].input.placement);
       expect(job.input.as_before).toEqual({ placement: settings.placement });
       expect(designPrompt(job.input.generate as GenerateInput, job.input.copy, 1, { index: job.slide_index, count: 3, withCover: false })).toContain("carousel (1:1)");
+      expect(delivered(job)).toEqual([1440, 1440]);
     }
   });
 
-  it("delivers a Story at its upload size on the same 9:16 page and safe band", async () => {
+  it("delivers a Story 1440 wide on the same 9:16 page and safe band", async () => {
     const job = await started(request({ format: "Story", upload_size: { platform: "instagram", format: "story", width: 1080, height: 1920 } }));
     expect(job.input.generate.size).toEqual(STORY_PAGE);
     expect(job.input.generate.surface).toBe("story");
     expect(job.input.generate.deliver).toEqual({ width: 1080, height: 1920, platform: "instagram", format: "story" });
     expect(job.input.placement).toEqual(storyLogoPlacement(settings.placement, 701, 251));
+    expect(delivered(job)).toEqual([1440, 2560]);
     // As before, a Story keeps its page and its safe band.
     expect(job.input.as_before).toEqual({ placement: storyLogoPlacement(settings.placement, 701, 251), size: STORY_PAGE });
   });

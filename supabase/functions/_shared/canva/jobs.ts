@@ -185,8 +185,8 @@ export async function startOption(admin: any, req: DesignRequest, given: Setting
   const carousel = req.kind === "carousel" && slides.length > 1;
   // A Story is drawn on its own 9:16 page, as a Story, with the client's logo spot moved into Meta's safe band.
   const story = isStoryPost(req);
-  // The size the request read for its platform (17 Nov 2026, _shared/design/platformSize.ts): the page every slide is
-  // drawn on, the size it is delivered at, and the client's logo spot on that page. A request with none is made as before.
+  // The row the request read for its platform (17 Nov 2026, _shared/design/platformSize.ts): the page every slide is
+  // drawn on, the shape it is delivered in, and the client's logo spot on that page. A request with none is made as before.
   const shape = jobShape(req.upload_size, story);
   // What the job would have been without the sizes table: the stored placement, and a Story's page. A job whose size the
   // image model refuses is made from this, so a size never fails a design (_shared/design/sizeFallback.ts).
@@ -207,8 +207,6 @@ export async function startOption(admin: any, req: DesignRequest, given: Setting
       // The files finish may stamp, in order: the ground under the slot chooses among them (17 Nov 2026).
       ...(start.logos && start.stamp ? { stamp: start.stamp } : {}),
       copy: slide.headline,
-      // The lettering beyond the headline, when the planned visual calls for any (options.ts); checked with the headline (pipeline.ts, wordsMatch).
-      ...(slide.labels?.length ? { labels: slide.labels, ...(slide.placing ? { placing: slide.placing } : {}) } : {}),
       placement: story ? storyLogoPlacement(settings.placement, lw, lh) : shape ? pagePlacement(settings.placement, lw, lh, shape.page) : settings.placement,
       ...(asBefore ? { as_before: asBefore } : {}),
       title: `${brandName} ${req.platform ?? ""} option ${optionIndex + 1}${carousel ? ` slide ${i + 1}` : ""}`.replace(/\s+/g, " "),

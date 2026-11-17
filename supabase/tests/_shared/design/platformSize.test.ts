@@ -15,8 +15,9 @@ import { canvasLogoRect } from "../../../functions/_shared/canva/brief";
 import { deliveredSize, outputSize, pictureSize, type Placement } from "../../../functions/_shared/canva/finish";
 import { STORY_PAGE } from "../../../functions/_shared/design/story";
 
-// A design in the size its platform is uploaded in: the row a request reads,
-// the checks a size passes, the page it is drawn on and where the logo goes.
+// A design in the shape its platform is uploaded in: the row a request reads,
+// the checks a size passes, the page it is drawn on, the size it is delivered
+// at and where the logo goes.
 
 describe("the row a post reads", () => {
   it("names the platform as the publish path does", () => {
@@ -92,8 +93,48 @@ describe("the checks a size passes", () => {
       const check = checkSize({ width: w, height: h }, format);
       expect(check.ok).toBe(true);
       if (check.ok) {
-        expect(check.picture.width).toBeGreaterThanOrEqual(w);
-        expect(check.picture.height).toBeGreaterThanOrEqual(h);
+        expect(check.picture.width).toBeGreaterThanOrEqual(check.delivered.width);
+        expect(check.picture.height).toBeGreaterThanOrEqual(check.delivered.height);
+        expect(check.delivered.width).toBeGreaterThanOrEqual(w);
+        expect(check.delivered.height).toBeGreaterThanOrEqual(h);
+      }
+    }
+  });
+
+  it("gives each row the table starts with its page, the picture the image model draws and the delivered size", () => {
+    const rows: Array<[string, "image" | "carousel" | "story", number, number, number[], number[], number[]]> = [
+      // The 4:5 rows and the Stories: every number is the one a design had before the table.
+      ["instagram", "image", 1080, 1350, [1088, 1360], [2176, 2720], [1440, 1800]],
+      ["instagram", "carousel", 1080, 1350, [1088, 1360], [2176, 2720], [1440, 1800]],
+      ["instagram", "story", 1080, 1920, [1152, 2048], [2160, 3840], [1440, 2560]],
+      ["facebook", "image", 1080, 1350, [1088, 1360], [2176, 2720], [1440, 1800]],
+      ["facebook", "story", 1080, 1920, [1152, 2048], [2160, 3840], [1440, 2560]],
+      // Another shape, at the quality width; X's own width is the larger.
+      ["linkedin", "image", 1200, 1200, [1216, 1216], [2432, 2432], [1440, 1440]],
+      ["x", "image", 1600, 900, [1536, 864], [3072, 1728], [1600, 900]],
+    ];
+    for (const [platform, format, width, height, page, picture, delivered] of rows) {
+      const check = checkSize({ width, height }, format);
+      expect(check, `${platform} ${format}`).toEqual({ ok: true, page: { width: page[0], height: page[1] }, picture: { width: picture[0], height: picture[1] }, delivered: { width: delivered[0], height: delivered[1] } });
+      // The worker reads the same delivered size from the job's page and row.
+      expect(deliveredSize(page as [number, number], { platform, format, width, height })).toEqual(delivered);
+    }
+    // Before the table a still was the 4:5 page and a Story its own, each delivered 1440 wide.
+    expect(outputSize([STILL_PAGE.width, STILL_PAGE.height])).toEqual([1440, 1800]);
+    expect(outputSize([STORY_PAGE.width, STORY_PAGE.height])).toEqual([1440, 2560]);
+  });
+
+  it("never delivers under the quality width or under the row's size, in the row's shape, and never enlarges the picture", () => {
+    for (let width = MIN_EDGE; width <= MAX_EDGE; width += 40) {
+      for (let height = MIN_EDGE; height <= MAX_EDGE; height += 40) {
+        const check = checkSize({ width, height }, "image");
+        if (!check.ok) continue;
+        const d = check.delivered;
+        expect(d.width).toBe(Math.max(1440, width));
+        expect(d.height).toBeGreaterThanOrEqual(height);
+        expect(Math.abs(d.height - (d.width * height) / width)).toBeLessThanOrEqual(0.5);
+        expect(d.width).toBeLessThanOrEqual(check.picture.width);
+        expect(d.height).toBeLessThanOrEqual(check.picture.height);
       }
     }
   });
@@ -120,7 +161,7 @@ describe("the checks a size passes", () => {
     expect(checkSize({ width: 1006, height: 1000 }, "image")).toEqual({ ok: false, reason: "page" });
   });
 
-  it("refuses a size larger than the picture the image model draws, so delivery never enlarges", () => {
+  it("refuses a size whose delivery is larger than the picture the image model draws, so delivery never enlarges", () => {
     // A 4:5 page is drawn at 2176x2720.
     expect(checkSize({ width: 2048, height: 2560 }, "image").ok).toBe(true);
     // A wide page is drawn at 3072x1728 at most in this band; 2560x1440 fits, and a Story of 2160x3840 is over the edge bound.
@@ -130,7 +171,7 @@ describe("the checks a size passes", () => {
 });
 
 describe("what a job is given", () => {
-  it("is the page and the delivered size of the request's row", () => {
+  it("is the page of the request's row, and the row itself", () => {
     expect(jobShape({ platform: "linkedin", format: "image", width: 1200, height: 1200 }, false)).toEqual({ page: { width: 1216, height: 1216 }, deliver: { width: 1200, height: 1200, platform: "linkedin", format: "image" } });
     expect(jobShape({ platform: "x", format: "image", width: 1600, height: 900 }, false)).toEqual({ page: { width: 1536, height: 864 }, deliver: { width: 1600, height: 900, platform: "x", format: "image" } });
     expect(jobShape({ platform: "instagram", format: "story", width: 1080, height: 1920 }, true)).toEqual({ page: { ...STORY_PAGE }, deliver: { width: 1080, height: 1920, platform: "instagram", format: "story" } });
@@ -154,28 +195,31 @@ describe("what a job is given", () => {
     }
   });
 
-  it("delivers a job that carries its upload size at exactly that size", () => {
-    expect(deliveredSize([1216, 1216], { width: 1200, height: 1200 })).toEqual([1200, 1200]);
+  it("delivers a job that carries its platform's row in the row's shape at the quality width, or at the row's own width when that is larger", () => {
+    expect(deliveredSize([1216, 1216], { width: 1200, height: 1200 })).toEqual([1440, 1440]);
     expect(deliveredSize([1536, 864], { width: 1600, height: 900 })).toEqual([1600, 900]);
-    expect(deliveredSize([1088, 1360], { width: 1080, height: 1350 })).toEqual([1080, 1350]);
-    expect(deliveredSize([1152, 2048], { width: 1080, height: 1920 })).toEqual([1080, 1920]);
+    expect(deliveredSize([1088, 1360], { width: 1080, height: 1350 })).toEqual([1440, 1800]);
+    expect(deliveredSize([1152, 2048], { width: 1080, height: 1920 })).toEqual([1440, 2560]);
+    // A row at the quality width or over it is delivered as it is.
+    expect(deliveredSize([1088, 1360], { width: 1440, height: 1800 })).toEqual([1440, 1800]);
+    expect(deliveredSize([1088, 1360], { width: 2048, height: 2560 })).toEqual([2048, 2560]);
+    // The shape is the row's, not the page's: 1080x1440 on its 1056x1408 page.
+    expect(deliveredSize([1056, 1408], { width: 1080, height: 1440 })).toEqual([1440, 1920]);
   });
 });
 
 describe("the reads of a delivered design", () => {
   const worker = readFileSync(join(functionsDir, "design-worker", "index.ts"), "utf8");
 
-  it("cuts the area around the logo from the delivered size, not from a 1440-wide file", () => {
+  it("cuts the area around the logo from the delivered size: on a 4:5 design the same crop as before the table", () => {
     // The logo at 65, 68 on a 4:5 design drawn at 2176x2720, 652x218 there.
     const rect = { x: 130, y: 136, width: 652, height: 218 }, frame: [number, number] = [2176, 2720];
     const [ow, oh] = deliveredSize([1088, 1360], { width: 1080, height: 1350 });
+    expect([ow, oh]).toEqual([1440, 1800]);
     const area = logoAreaRect(rect, frame, { width: ow, height: oh });
-    // 1080 / 2176 of the design: the logo is 324x108 at 65, 68 with 65 px around it.
-    expect(area).toEqual({ x: 0, y: 3, width: 453, height: 238 });
-    expect(area.x + area.width).toBeLessThanOrEqual(1080);
-    expect(area.y + area.height).toBeLessThanOrEqual(1350);
-    // The same logo on a job with no upload size, delivered 1440 wide: a larger crop of a larger file.
-    expect(logoAreaRect(rect, frame, { width: 1440, height: 1800 })).toEqual({ x: 0, y: 3, width: 605, height: 318 });
+    expect(area).toEqual({ x: 0, y: 3, width: 605, height: 318 });
+    // The same logo on a job with no row: the same crop of the same file.
+    expect(logoAreaRect(rect, frame, { width: 1440, height: 1800 })).toEqual(area);
     // A wide design: the crop stays inside 1600x900.
     const wide = logoAreaRect({ x: 2800, y: 1500, width: 250, height: 200 }, [3072, 1728], { width: 1600, height: 900 });
     expect(wide.x + wide.width).toBeLessThanOrEqual(1600);

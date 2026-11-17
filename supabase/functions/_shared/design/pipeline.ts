@@ -3,7 +3,7 @@
 // How a design is made, without Canva (Lital, 13 Oct: "drop canva"):
 //   1. generate: the image model designs the whole post, headline included,
 //      on a canvas that carries the client's logo file, with the client's own
-//      posts for their look alone (brief.ts). It is drawn at twice the
+//      posts as its visual language (brief.ts). It is drawn at twice the
 //      page's size so the post stays sharp.
 //   2. locate:   the slot, where the logo goes (logoSlot.ts, 17 Nov 2026):
 //                where the model drew the logo when the search finds it at a
@@ -25,8 +25,7 @@
 //                the design keeps the room it made for the logo, then brought
 //                down to the delivered size.
 //   5. verify:   the words on the finished post are read back and must be the
-//                headline's words exactly, with every label the design
-//                carries (wordsMatch), and nothing may touch or cross the
+//                headline's words exactly, and nothing may touch or cross the
 //                logo (seen at full size around its known place); otherwise
 //                the post is designed again. A carousel whose cover is designed
 //                again has its other slides designed again from the new cover.
@@ -120,52 +119,4 @@ export function readable(s: string): string {
 /** Whether the words on the post are the headline's words, in order, with nothing added or missing. */
 export function copyMatches(read: string[], headline: string[]): boolean {
   return readable(read.join(" ")) === readable(headline.join(" "));
-}
-
-/**
- * The words of a text as a design with labels is checked: runs of letters
- * and digits, lowercased, with an apostrophe inside a word kept the way
- * `readable` writes it. Everything else only separates words: bullets, check
- * marks, arrows, colons, dots, percent and other signs. "&" is the word "and".
- */
-function tokens(text: string): string[] {
-  return readable(text).replace(/&/g, " and ").match(/[\p{L}\p{N}\p{M}]+(?:'[\p{L}\p{N}\p{M}]+)*/gu) ?? [];
-}
-
-/** A list marker opening a line: a bare number or a single letter, then "." or ")". */
-const LIST_MARKER = /^\s*(\d+|\p{L})[.)](?=\s|$)/u;
-
-/**
- * Whether the words on the post are its headline and its labels (17 Nov
- * 2026). A design without labels is held to copyMatches as it is. A design
- * with labels is compared word by word (tokens), because a reader writes a
- * list as it sees it: with its bullets, numbers, arrows and colons, row by
- * row. A list marker opening a line of the read is left out, unless the
- * labels themselves hold that number or letter. Then the words read are the
- * headline's and the labels' words, each as often, with nothing added and
- * nothing missing, and the headline's words come in the headline's order.
- */
-export function wordsMatch(read: string[], headline: string[], labels?: string[] | null): boolean {
-  const labelWords = (Array.isArray(labels) ? labels : []).flatMap((l) => tokens(String(l)));
-  if (!labelWords.length) return copyMatches(read, headline);
-  const head = tokens(headline.join(" "));
-  const inLabels = new Set(labelWords);
-  const seen = read.flatMap((line) => {
-    const text = readable(String(line));
-    const marker = LIST_MARKER.exec(text);
-    return tokens(marker && !inLabels.has(marker[1]) ? text.slice(marker[0].length) : text);
-  });
-  // The same words, each as often.
-  const count = new Map<string, number>();
-  for (const w of [...head, ...labelWords]) count.set(w, (count.get(w) ?? 0) + 1);
-  for (const w of seen) {
-    const left = (count.get(w) ?? 0) - 1;
-    if (left < 0) return false;
-    if (left) count.set(w, left); else count.delete(w);
-  }
-  if (count.size) return false;
-  // The headline's words in the headline's order.
-  let h = 0;
-  for (const w of seen) if (h < head.length && w === head[h]) h++;
-  return h === head.length;
 }
