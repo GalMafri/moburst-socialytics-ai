@@ -1,3 +1,4 @@
+import { ALIGNED } from "../../../functions/_shared/canva/brief";
 import { describe, it, expect } from "vitest";
 import { copyOperations, elementBox, inkBox, logoRect, pickLogoLayers, placementRegion, type Layer } from "../../../functions/_shared/canva/finish";
 
@@ -99,7 +100,7 @@ describe("designPrompt", () => {
       "Take those posts' look and nothing else: their colors, their type treatment and their layout style, which is how type and picture are arranged (where the headline sits, panels, margins), never the picture's own scene. " +
       "The scene is a new one, drawn for this design: do not reproduce a person, a place, the props or the composition those posts show. Moburst's own product, packaging or app may appear as those posts show it, when the picture calls for it. " +
       "The picture shows a glowing crystal brain on a glass pedestal. " +
-      "Headline, spelled exactly: \"AI answers are changing how brands get discovered.\" Add no other text and no other logo. " +
+      "Headline, spelled exactly: \"AI answers are changing how brands get discovered.\" " + ALIGNED + " Add no other text and no other logo. " +
       "Every part of the picture is in sharp focus, with no blurred or out-of-focus objects.",
     );
   });

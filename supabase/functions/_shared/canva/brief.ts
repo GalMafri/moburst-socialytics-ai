@@ -46,6 +46,15 @@ export interface SlideContext {
   withCover: boolean;
 }
 
+/**
+ * The words follow the logo's place. The logo is the client's file at the spot
+ * its posts carry it; a layout built on another axis leaves it looking stuck
+ * on (17 Nov 2026: a list set right of the middle under a centered logo).
+ */
+export const ALIGNED =
+  "Set the words on the logo's own axis: where the logo is centered across the page, every word is centered across the page as well, as one block with equal space on its left and right; " +
+  "where the logo sits at one side, the words start from that side's margin, in line with the logo. Decorations sit around the words and never push them off that axis.";
+
 export function designPrompt(g: Pick<GenerateInput, "brand_name" | "platform" | "concept" | "video_card" | "surface" | "note">, copy: string[], refCount: number, slide?: SlideContext, labels?: string[] | null, placing?: string | null): string {
   // The labels the planned visual calls for beyond the headline (canva/options.ts): each set once, where `placing` says. None for most designs, and then no placing either.
   const has = Array.isArray(labels) && labels.length > 0;
@@ -75,12 +84,12 @@ export function designPrompt(g: Pick<GenerateInput, "brand_name" | "platform" | 
     const pct = (n: number) => `${Math.round(n * 100)}%`;
     return `The first image is the canvas for a new ${g.brand_name} ${g.platform} Story (9:16), seen full screen on a phone. Its logo is final: keep it exactly as it is, where it is. ` +
       `Design the whole Story around it in the look of ${refsWord} ${g.brand_name}'s own posts, the picture filling the tall frame from edge to edge. ${look} The picture shows ${g.concept}. ${noted}` +
-      `${lines} Every word sits inside the band that leaves out the top ${pct(STORY_SAFE.top)}, the bottom ${pct(STORY_SAFE.bottom)} and ${pct(STORY_SAFE.left)} at each side of the frame. Add no other text and no other logo. ${SHARP}`;
+      `${lines} ${ALIGNED} Every word sits inside the band that leaves out the top ${pct(STORY_SAFE.top)}, the bottom ${pct(STORY_SAFE.bottom)} and ${pct(STORY_SAFE.left)} at each side of the frame. Add no other text and no other logo. ${SHARP}`;
   }
   if (!slide) {
     return `The first image is the canvas for a new ${g.brand_name} ${g.platform} post (4:5). Its logo is final: keep it exactly as it is, where it is. ` +
       `Design the whole post around it in the look of ${refsWord} ${g.brand_name}'s own posts. ${look} The picture shows ${g.concept}. ${noted}` +
-      `${lines} Add no other text and no other logo. ${SHARP}`;
+      `${lines} ${ALIGNED} Add no other text and no other logo. ${SHARP}`;
   }
   const which = slide.index === 0 ? `the cover, slide 1 of ${slide.count}` : `slide ${slide.index + 1} of ${slide.count}`;
   const cover = slide.withCover
@@ -92,7 +101,7 @@ export function designPrompt(g: Pick<GenerateInput, "brand_name" | "platform" | 
   return `The first image is the canvas for ${which} of a new ${g.brand_name} ${g.platform} carousel (4:5). Its logo is final: keep it exactly as it is, where it is. ` +
     cover +
     `Design the slide around the logo in the look of ${refs} ${g.brand_name}'s own posts. ${look} The picture shows ${g.concept}. ${noted}` +
-    `${lines} Add no other text, no slide numbers${has ? " other than the labels given" : ""} and no other logo. ${SHARP}`;
+    `${lines} ${ALIGNED} Add no other text, no slide numbers${has ? " other than the labels given" : ""} and no other logo. ${SHARP}`;
 }
 
 /**

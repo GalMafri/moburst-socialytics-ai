@@ -1,3 +1,4 @@
+import { ALIGNED } from "../../../functions/_shared/canva/brief";
 import { describe, expect, it } from "vitest";
 import { carouselPlannerPrompt, plannerPrompt, videoPlannerPrompt } from "../../../functions/_shared/canva/options";
 import { designPrompt } from "../../../functions/_shared/canva/brief";
@@ -133,7 +134,7 @@ describe("the image model and the client's look", () => {
       "Take those posts' look and nothing else: their colors, their type treatment and their layout style, which is how type and picture are arranged (where the headline sits, panels, margins), never the picture's own scene. " +
       "The scene is a new one, drawn for this design: do not reproduce a person, a place, the props or the composition those posts show. Northwind's own product, packaging or app may appear as those posts show it, when the picture calls for it. " +
       "The picture shows a torque wrench on a clean steel bench. " +
-      'Headline, spelled exactly: "Four signs." Second line, spelled exactly: "One shop." Add no other text and no other logo. ' +
+      'Headline, spelled exactly: "Four signs." Second line, spelled exactly: "One shop." ' + ALIGNED + ' Add no other text and no other logo. ' +
       "Every part of the picture is in sharp focus, with no blurred or out-of-focus objects.",
     );
   });

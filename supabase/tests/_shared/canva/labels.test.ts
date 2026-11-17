@@ -1,3 +1,4 @@
+import { ALIGNED } from "../../../functions/_shared/canva/brief";
 import { describe, expect, it } from "vitest";
 import {
   MAX_CANDIDATES, MAX_DESIGN_WORDS, MAX_HEADLINE_WORDS, MAX_LABELS, MAX_LABEL_WORDS, MAX_PLACING_WORDS,
@@ -225,15 +226,15 @@ describe("the image model and a design's labels", () => {
       expect(p, kind).toContain(`Headline, spelled exactly: "Four signs." Second line, spelled exactly: "One shop." ${placed}`);
       expect(p.indexOf("Add no other text"), kind).toBeGreaterThan(p.indexOf(placed));
     }
-    expect(prompts.post).toContain(`${placed} Add no other text and no other logo.`);
+    expect(prompts.post).toContain(`${placed} ${ALIGNED} Add no other text and no other logo.`);
     // A Story's labels sit in the band with its headline.
-    expect(prompts.story).toContain(`${placed} Every word sits inside the band`);
+    expect(prompts.story).toContain(`${placed} ${ALIGNED} Every word sits inside the band`);
     // A slide's labels may be numbers: only other slide numbers are kept out.
-    expect(prompts.slide).toContain(`${placed} Add no other text, no slide numbers other than the labels given and no other logo.`);
+    expect(prompts.slide).toContain(`${placed} ${ALIGNED} Add no other text, no slide numbers other than the labels given and no other logo.`);
   });
 
   it("sets the labels without a placing when the plan gave none", () => {
-    for (const none of [undefined, null, "", "  "]) expect(designPrompt(g, ["Four signs."], 2, undefined, labels, none)).toContain(`${set} Add no other text and no other logo.`);
+    for (const none of [undefined, null, "", "  "]) expect(designPrompt(g, ["Four signs."], 2, undefined, labels, none)).toContain(`${set} ${ALIGNED} Add no other text and no other logo.`);
   });
 
   it("gets today's prompt for a design without labels, and never a placing on its own", () => {
