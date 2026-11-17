@@ -18,6 +18,7 @@
 // Canva (canva-finish), so nothing here has to be relied on for exactness.
 
 import { STORY_SAFE, STORY_SURFACE } from "../design/story.ts";
+import { shapeLabel } from "../design/shape.ts";
 
 export interface GenerateInput {
   brand_name: string;
@@ -28,8 +29,13 @@ export interface GenerateInput {
   background: string;
   /** Paths in the design-references bucket: the client's own posts. */
   refs: string[];
-  /** The canvas size in pixels; 4:5 (1088x1360) when absent. Video cards and Stories are 9:16. */
+  /**
+   * The canvas size in pixels; 4:5 (1088x1360) when absent. Video cards and Stories are 9:16.
+   * Since 17 Nov 2026 a still carries the page of its platform's upload size (_shared/design/platformSize.ts).
+   */
   size?: { width: number; height: number };
+  /** The size the finished design is delivered at: its platform's upload size. Absent on a job from before 17 Nov 2026, delivered 1440 wide. */
+  deliver?: { width: number; height: number; platform?: string; format?: string };
   /** A video's opening or closing card, rather than a post or a carousel slide. */
   video_card?: "cover" | "end";
   /** "story": a Facebook or Instagram Story, seen full screen (_shared/design/story.ts). */
@@ -55,7 +61,9 @@ export const ALIGNED =
   "Set the words on the logo's own axis: where the logo is centered across the page, every word is centered across the page as well, as one block with equal space on its left and right; " +
   "where the logo sits at one side, the words start from that side's margin, in line with the logo. Decorations sit around the words and never push them off that axis.";
 
-export function designPrompt(g: Pick<GenerateInput, "brand_name" | "platform" | "concept" | "video_card" | "surface" | "note">, copy: string[], refCount: number, slide?: SlideContext, labels?: string[] | null, placing?: string | null): string {
+export function designPrompt(g: Pick<GenerateInput, "brand_name" | "platform" | "concept" | "video_card" | "surface" | "note" | "size">, copy: string[], refCount: number, slide?: SlideContext, labels?: string[] | null, placing?: string | null): string {
+  // The shape of the page the still is drawn on: 4:5 unless the job carries another.
+  const shape = g.size ? shapeLabel(g.size) : "4:5";
   // The labels the planned visual calls for beyond the headline (canva/options.ts): each set once, where `placing` says. None for most designs, and then no placing either.
   const has = Array.isArray(labels) && labels.length > 0;
   const place = has ? String(placing ?? "").trim() : "";
@@ -87,7 +95,7 @@ export function designPrompt(g: Pick<GenerateInput, "brand_name" | "platform" | 
       `${lines} ${ALIGNED} Every word sits inside the band that leaves out the top ${pct(STORY_SAFE.top)}, the bottom ${pct(STORY_SAFE.bottom)} and ${pct(STORY_SAFE.left)} at each side of the frame. Add no other text and no other logo. ${SHARP}`;
   }
   if (!slide) {
-    return `The first image is the canvas for a new ${g.brand_name} ${g.platform} post (4:5). Its logo is final: keep it exactly as it is, where it is. ` +
+    return `The first image is the canvas for a new ${g.brand_name} ${g.platform} post (${shape}). Its logo is final: keep it exactly as it is, where it is. ` +
       `Design the whole post around it in the look of ${refsWord} ${g.brand_name}'s own posts. ${look} The picture shows ${g.concept}. ${noted}` +
       `${lines} ${ALIGNED} Add no other text and no other logo. ${SHARP}`;
   }
@@ -98,7 +106,7 @@ export function designPrompt(g: Pick<GenerateInput, "brand_name" | "platform" | 
   const refs = slide.withCover
     ? (refCount === 1 ? "the last image, which is" : `the last ${numberWord(refCount)} images, which are`)
     : refsWord;
-  return `The first image is the canvas for ${which} of a new ${g.brand_name} ${g.platform} carousel (4:5). Its logo is final: keep it exactly as it is, where it is. ` +
+  return `The first image is the canvas for ${which} of a new ${g.brand_name} ${g.platform} carousel (${shape}). Its logo is final: keep it exactly as it is, where it is. ` +
     cover +
     `Design the slide around the logo in the look of ${refs} ${g.brand_name}'s own posts. ${look} The picture shows ${g.concept}. ${noted}` +
     `${lines} ${ALIGNED} Add no other text, no slide numbers${has ? " other than the labels given" : ""} and no other logo. ${SHARP}`;

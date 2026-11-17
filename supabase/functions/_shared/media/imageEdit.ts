@@ -6,9 +6,9 @@
 
 import { decode as base64Decode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { pngSize } from "../canva/jobs.ts";
-import { ModelBusy } from "./modelBusy.ts";
+import { ModelBusy, ModelRefused } from "./modelBusy.ts";
 
-export { ModelBusy };
+export { ModelBusy, ModelRefused };
 
 export const OPENAI_IMAGE_MODEL = "gpt-image-2.5-flare";
 
@@ -32,6 +32,8 @@ export async function imageEdit(apiKey: string, images: { bytes: Uint8Array; nam
   });
   const text = await resp.text();
   if (resp.status === 429 || resp.status >= 500) throw new ModelBusy(`Image model ${resp.status}: ${text.slice(0, 200)}`);
+  // A 4xx that is not the rate limit: the model refused this request as it was asked (media/modelBusy.ts, ModelRefused).
+  if (resp.status >= 400 && resp.status < 500) throw new ModelRefused(resp.status, `Image model ${resp.status}: ${text.slice(0, 300)}`);
   if (!resp.ok) throw new Error(`Image model ${resp.status}: ${text.slice(0, 300)}`);
   const b64 = JSON.parse(text)?.data?.[0]?.b64_json;
   if (!b64) throw new Error("The image model returned no image.");

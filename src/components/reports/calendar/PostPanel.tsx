@@ -32,6 +32,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { CalendarPost } from "@/lib/calendarRevision";
 import { tileAspectFor } from "@/lib/tileAspect";
+import { useNaturalRatio } from "@/lib/naturalRatio";
 import { mediaInUse, tilesFromIterations, type Iteration, type MediaTile } from "@/lib/postMediaTiles";
 import { supabase } from "@/integrations/supabase/client";
 import { postCopyOf } from "@/lib/postCopy";
@@ -576,6 +577,9 @@ function MediaTileCard({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const noun = isVideo ? "video" : "design";
+  // A still's tile takes the design's own shape once it has loaded: a design is drawn in its platform's upload size.
+  const { ratio, onLoad } = useNaturalRatio();
+  const shaped = !isVideo && ratio !== null;
   // The same words as the post's own design: Not right and Delete.
   const submit = async (verdict: "rejected" | "archived", reason?: string, note?: string): Promise<boolean> => {
     if (!tile.iterationId || !onFeedback) return false;
@@ -595,12 +599,13 @@ function MediaTileCard({
       <button
         type="button"
         onClick={onPreview}
-        className={`block w-full bg-black relative group ${tileAspect || (isVideo ? "aspect-[9/16]" : "aspect-square")}`}
+        className={`block w-full bg-black relative group ${shaped ? "" : tileAspect || (isVideo ? "aspect-[9/16]" : "aspect-square")}`}
+        style={shaped ? { aspectRatio: String(ratio) } : undefined}
       >
         {isVideo ? (
           <video src={tile.url} className="w-full h-full object-contain" muted loop preload="metadata" />
         ) : (
-          <img src={tile.url} alt={`Variant ${index + 1}`} className="w-full h-full object-contain" />
+          <img src={tile.url} alt={`Variant ${index + 1}`} className="w-full h-full object-contain" onLoad={onLoad} />
         )}
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
           <Expand className="h-5 w-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />

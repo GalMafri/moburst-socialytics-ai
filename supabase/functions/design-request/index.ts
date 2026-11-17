@@ -39,6 +39,8 @@ import { type DesignRequest, type Settings, endRequest, startOption } from "../_
 import { canFilm, filmingOutcome, postInstant } from "../_shared/design/requestRules.ts";
 import { currentCopyOf, designKind, type PassStart } from "../_shared/design/weekRules.ts";
 import { isStoryPost } from "../_shared/design/story.ts";
+import { plannerShape } from "../_shared/design/platformSize.ts";
+import { readUploadSize } from "../_shared/design/platformSizeDb.ts";
 import { brandColors, brandColorsLine } from "../_shared/design/brandLook.ts";
 import { wakeWorker, wakeVideoWorker } from "../_shared/canva/worker.ts";
 import { DESIGN_ANGLE } from "../_shared/canva/jobs.ts";
@@ -294,9 +296,11 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
   const video = request.kind === "video";
   const common = { brand, platform: request.platform ?? "social", copy: request.post_copy, voice, count: BRIEFS_PLANNED, postCount: library.length, recent, guidance, otherPlatforms, note: request.note ?? null, visual: (request as any).visual_direction ?? null };
   const filmed = video && request.footage_path ? (request.on_camera || "the speaker") : null;
+  // A still whose platform is uploaded in another shape than 4:5 is planned for that shape (the request's own size).
+  const shape = video ? null : plannerShape(request.upload_size, isStoryPost(request));
   // The colors the app holds about the client, so a still's planner tells the look its posts share from a one-off (brandLook.ts).
   const colors = brandColorsLine(brand, brandColors(settings, client?.brand_identity));
-  const instruction = video ? videoPlannerPrompt({ ...common, visual: (request as any).visual_direction ?? null, filmed, style: videoStyle?.profile ?? null, videos: videoStyle?.videos, framesPer: videoStyle?.frames_per_video }) : carousel ? carouselPlannerPrompt({ ...common, colors, slides: CAROUSEL_SLIDES }) : plannerPrompt({ ...common, colors, story: isStoryPost(request) });
+  const instruction = video ? videoPlannerPrompt({ ...common, visual: (request as any).visual_direction ?? null, filmed, style: videoStyle?.profile ?? null, videos: videoStyle?.videos, framesPer: videoStyle?.frames_per_video }) : carousel ? carouselPlannerPrompt({ ...common, colors, shape, slides: CAROUSEL_SLIDES }) : plannerPrompt({ ...common, colors, shape, story: isStoryPost(request) });
   let briefs = [] as ReturnType<typeof stillBriefs>;
   for (let attempt = 0; attempt < 2 && briefs.length < OPTIONS_WANTED; attempt++) {
     const result = await anthropicMessages({
@@ -468,6 +472,9 @@ async function startRequest(admin: any, settings: Settings, p: { clientId: strin
   // unless the week's press handed one in; a still and a filmed clip have none.
   const kind = designKind(p.format, p.platform);
   const approvedCredits = needsClipPrice(kind, p.footagePath, p.approvedCredits) ? await clipPrice(admin) : (kind === "video" && !p.footagePath ? p.approvedCredits ?? null : null);
+  // The size the post's platform is uploaded in, read now and kept on the request (17 Nov 2026,
+  // _shared/design/platformSize.ts). A video has none, and neither has a post with no row: those are made as before.
+  const uploadSize = kind === "video" ? null : await readUploadSize(admin, { platform: p.platform, format: p.format });
 
   const { data: created, error } = await admin.from("design_requests").insert({
     client_id: p.clientId, report_id: p.reportId, calendar_post_key: p.postKey,
@@ -477,7 +484,7 @@ async function startRequest(admin: any, settings: Settings, p: { clientId: strin
     // A LinkedIn document is a deck of slides: it is made like a carousel. A
     // Reel, short or any video post gets a video: footage in the client's own
     // video style with the hook and logo over it.
-    kind, options_wanted: OPTIONS_WANTED,
+    kind, options_wanted: OPTIONS_WANTED, upload_size: uploadSize,
   }).select("*").single();
   if (error) {
     // Two starts at once: the unique index let one through; answer with it.

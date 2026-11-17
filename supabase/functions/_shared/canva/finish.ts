@@ -178,6 +178,19 @@ export function outputSize(page: [number, number]): [number, number] {
 }
 
 /**
+ * The size a design is delivered at. A job that carries its platform's
+ * upload size (input.generate.deliver, 17 Nov 2026, _shared/design/platformSize.ts)
+ * is delivered at exactly that. A job without one, which is every job made
+ * before, is delivered as it always was: OUTPUT_WIDTH wide in the page's
+ * proportions.
+ */
+export function deliveredSize(page: [number, number], deliver?: { width?: unknown; height?: unknown } | null): [number, number] {
+  const w = deliver?.width, h = deliver?.height;
+  if (typeof w === "number" && typeof h === "number" && Number.isInteger(w) && Number.isInteger(h) && w > 0 && h > 0) return [w, h];
+  return outputSize(page);
+}
+
+/**
  * The size the picture is redrawn at: twice the page, or as near as the
  * model's longest edge allows, in multiples of 16. Drawn at 1x the picture
  * came out soft (13 Oct); drawn larger and brought down to the delivered

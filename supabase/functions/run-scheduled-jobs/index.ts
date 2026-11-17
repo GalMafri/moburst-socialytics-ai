@@ -84,6 +84,11 @@
 //                              and cities, a local profile's address, read
 //                              from Sprout's documented endpoints, writing
 //                              nothing; no model, Apify or Firecrawl call.
+// POST {"mode":"platform_sizes_dry_run"}
+//                              what the weekly platform_sizes job would do now
+//                              (_shared/design/platformSizeRefresh.ts): the
+//                              sizes guide fetched and read, each size row's
+//                              outcome, writing nothing. One model call.
 // POST {"mode":"compare_pipeline","run_id":"<id>"}
 //                              a finished shadow run next to the real result
 //                              it shadows (compareResults; for a report, the
@@ -125,6 +130,7 @@ import { anthropicMessages } from "../_shared/anthropic.ts";
 import { runNotesRead } from "../_shared/notes/run.ts";
 import { closeAbandonedAll, closeStalledDecks, runStrategyDeck } from "../_shared/strategy/deckJob.ts";
 import { googleConfig, keepAlive } from "../_shared/google/oauth.ts";
+import { liveSizeDeps, platformSizesDryRun, runPlatformSizes } from "../_shared/design/platformSizeRefresh.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -148,6 +154,7 @@ const JOB_LABELS: Partial<Record<ScheduledJob["kind"], string>> = {
   week_moments: "week's dated moments",
   moment_feedback: "removed seasonal post",
   strategy_deck: "strategy deck",
+  platform_sizes: "platform upload sizes",
 };
 
 Deno.serve(async (req) => {
@@ -244,6 +251,8 @@ Deno.serve(async (req) => {
           case "notes_read": return runNotesRead(db, job, { parsers: () => import("../_shared/notes/parsers.ts").then((m) => m.PARSERS) });
           // The renderer and fonts load only for a deck job.
           case "strategy_deck": return import("../_shared/strategy/deckLive.ts").then((m) => runStrategyDeck(db, job, m.liveDeckDeps(env)));
+          // The weekly read of the image sizes guide into platform_sizes (_shared/design/platformSizeRefresh.ts).
+          case "platform_sizes": return runPlatformSizes(db, job, liveSizeDeps(env));
           default: return Promise.resolve({ status: "failed" as const, reason: `Unknown job kind ${(job as ScheduledJob).kind}` });
         }
       },
@@ -460,6 +469,16 @@ Deno.serve(async (req) => {
       if (!clientId) return json({ error: "client_id is required" }, 400);
       try {
         return json(await onboardingFieldsCheck(db, clientId));
+      } catch (e) {
+        return json({ error: e instanceof Error ? e.message : String(e) }, 422);
+      }
+    }
+
+    // QA, POST {"mode":"platform_sizes_dry_run"}: the sizes guide read now and
+    // what each size row would come to, with nothing written.
+    if (mode === "platform_sizes_dry_run") {
+      try {
+        return json(await platformSizesDryRun(db, liveSizeDeps(env)));
       } catch (e) {
         return json({ error: e instanceof Error ? e.message : String(e) }, 422);
       }

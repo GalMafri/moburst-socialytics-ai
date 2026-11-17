@@ -12,6 +12,7 @@ import { videoRouteFor } from "../video/kit.ts";
 import { pngSize } from "../picture/headers.ts";
 import { settleLogo } from "../design/logoFit.ts";
 import { jobLogos, restGround, stampList, type JobLogos, type LogoSet, type StampEntry } from "../design/logoTone.ts";
+import { jobShape, pagePlacement } from "../design/platformSize.ts";
 
 export const BUCKET = "generated-media";
 
@@ -54,6 +55,8 @@ export interface DesignRequest {
   note?: string | null;
   /** A video's Higgsfield price for its one clip, approved at the press; null when it could not be read, or for a still. */
   approved_credits?: number | null;
+  /** The platform_sizes row the request read when it was made ({platform, format, width, height}); null for a post with no row and for a request from before 17 Nov 2026. */
+  upload_size?: unknown;
 }
 
 export { pngSize } from "../picture/headers.ts";
@@ -182,6 +185,12 @@ export async function startOption(admin: any, req: DesignRequest, given: Setting
   const carousel = req.kind === "carousel" && slides.length > 1;
   // A Story is drawn on its own 9:16 page, as a Story, with the client's logo spot moved into Meta's safe band.
   const story = isStoryPost(req);
+  // The size the request read for its platform (17 Nov 2026, _shared/design/platformSize.ts): the page every slide is
+  // drawn on, the size it is delivered at, and the client's logo spot on that page. A request with none is made as before.
+  const shape = jobShape(req.upload_size, story);
+  // What the job would have been without the sizes table: the stored placement, and a Story's page. A job whose size the
+  // image model refuses is made from this, so a size never fails a design (_shared/design/sizeFallback.ts).
+  const asBefore = shape ? { placement: story ? storyLogoPlacement(settings.placement, lw, lh) : settings.placement, ...(story ? { size: { ...STORY_PAGE } } : {}) } : null;
   const rows = slides.map((slide, i) => ({
     client_id: req.client_id,
     created_by: req.requested_by,
@@ -200,14 +209,16 @@ export async function startOption(admin: any, req: DesignRequest, given: Setting
       copy: slide.headline,
       // The lettering beyond the headline, when the planned visual calls for any (options.ts); checked with the headline (pipeline.ts, wordsMatch).
       ...(slide.labels?.length ? { labels: slide.labels, ...(slide.placing ? { placing: slide.placing } : {}) } : {}),
-      placement: story ? storyLogoPlacement(settings.placement, lw, lh) : settings.placement,
+      placement: story ? storyLogoPlacement(settings.placement, lw, lh) : shape ? pagePlacement(settings.placement, lw, lh, shape.page) : settings.placement,
+      ...(asBefore ? { as_before: asBefore } : {}),
       title: `${brandName} ${req.platform ?? ""} option ${optionIndex + 1}${carousel ? ` slide ${i + 1}` : ""}`.replace(/\s+/g, " "),
       layout: brief.layout ?? null,
       // The posts this design builds on, as the planner chose them for this
       // post; a brief from before that choice existed uses the first three.
       generate: {
         brand_name: brandName, platform: req.platform ?? "social", concept: slide.picture, background, background_from: start.from, refs: brief.refs?.length ? brief.refs : settings.reference_paths.slice(0, 3),
-        ...(story ? { size: { ...STORY_PAGE }, surface: STORY_SURFACE } : {}),
+        ...(story ? { size: { ...(shape?.page ?? STORY_PAGE) }, surface: STORY_SURFACE } : shape ? { size: { ...shape.page } } : {}),
+        ...(shape ? { deliver: { ...shape.deliver } } : {}),
         // The person's note, so the image model sees it and a retry of the job keeps it.
         ...(req.note?.trim() ? { note: req.note.trim() } : {}),
       },

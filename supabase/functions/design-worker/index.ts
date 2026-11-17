@@ -39,7 +39,7 @@ import { openaiKey } from "../_shared/openai/key.ts";
 import { claimJob, endOverdueRequests, endRequest, renewJobLease, saveJobProgress, settleRequest, BUCKET } from "../_shared/canva/jobs.ts";
 import { MAX_PLAN_ATTEMPTS, NO_PROGRESS_MINUTES, REQUEST_MAX_MINUTES } from "../_shared/design/requestRules.ts";
 import { type GenerateInput, designPrompt } from "../_shared/canva/brief.ts";
-import { outputSize, pictureSize } from "../_shared/canva/finish.ts";
+import { deliveredSize, pictureSize } from "../_shared/canva/finish.ts";
 import { logoCheckPrompt, marksPrompt, parseLogoCheck, parseMarks, parseRead, readPrompt, removePrompt, wordsMatch } from "../_shared/design/pipeline.ts";
 import { LOGO_SCALES } from "../_shared/design/logoMatch.ts";
 import { STORY_SURFACE, storyTextBand } from "../_shared/design/story.ts";
@@ -53,6 +53,7 @@ import { jobLogos, postSearchPlan } from "../_shared/design/logoTone.ts";
 import { POSTS_PER_CALL, type Reading, askLogoSet, liveIo, readNextPosts } from "../_shared/design/logoSetWork.ts";
 import { personOther } from "../_shared/lifecycle/designSettings.ts";
 import { logoAreaRect } from "../_shared/picture/geometry.ts";
+import { drawOrFallBack, dropStaleDesign } from "../_shared/design/sizeFallback.ts";
 import { askCleanedSlot, basePicture, composedPath, dropComposed } from "../_shared/design/firstPictureJob.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
@@ -258,6 +259,9 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
   const base = `${job.client_id}/canva-finish/${job.id}`;
   // A job left at a step of the Canva method (before 13 Oct) goes on from the design it has.
   if (!STEPS.has(job.step)) job.step = s.design_path ? "unlogo" : "generate";
+  // A design drawn for another page than the job now has (its option fell back to the 4:5 page while it was
+  // being drawn, _shared/design/sizeFallback.ts) is drawn again, so every slide of an option ends in one size.
+  if (job.step !== "generate" && dropStaleDesign(job.input, s)) job.step = "generate";
 
   switch (job.step) {
     case "generate": {
@@ -374,8 +378,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       // The logo file in the slot, in the room the design left for it, then
       // the picture at its delivered size. The model's own drawing is gone
       // (unlogo), and the file is the one that shows on the ground there (marks).
-      const page = pageOf(job);
-      const [ow, oh] = outputSize([page.width, page.height]);
+      const [ow, oh] = deliveredOf(job);
       // Each finished file has a name of its own, so a design made again is never shown from a cached copy.
       const path = `${base}/final-${Date.now().toString(36)}.png`;
       const { ms } = await callPicture(admin, "finish", {
@@ -401,7 +404,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       // The Story's band (a crop of that page) and the area around the logo (at full size) come from the same call.
       const page = pageOf(job);
       const g: GenerateInput = job.input.generate;
-      const [ow, oh] = outputSize([page.width, page.height]);
+      const [ow, oh] = deliveredOf(job);
       const stem = `${base}/verify-${Date.now().toString(36)}`;
       const band = g.surface === STORY_SURFACE ? storyTextBand(page.width, page.height) : null;
       const area = s.logo_rect && s.logo_frame ? logoAreaRect(s.logo_rect, s.logo_frame, { width: ow, height: oh }) : null;
@@ -503,6 +506,12 @@ function pageOf(job: Job): { width: number; height: number } {
   return job.input?.generate?.size ?? DEFAULT_PAGE;
 }
 
+/** The size a design is delivered at: its platform's upload size when the job carries one, else 1440 wide in the page's shape (canva/finish.ts, deliveredSize). */
+function deliveredOf(job: Job): [number, number] {
+  const page = pageOf(job);
+  return deliveredSize([page.width, page.height], job.input?.generate?.deliver);
+}
+
 /**
  * The generate step's services (_shared/design/modelSteps.ts). The image
  * model designs the post: the client's background color with its logo file
@@ -510,39 +519,62 @@ function pageOf(job: Job): { width: number; height: number } {
  * own posts as references, and the brief (brief.ts), at twice the page's size.
  */
 function generateDeps(admin: any, job: Job): GenerateDeps {
-  const g: GenerateInput = job.input.generate;
-  const page = pageOf(job);
+  // The page, the placement and the brief are read from the job when each is used: a job whose size the image
+  // model refuses is made as before in the middle of this step (_shared/design/sizeFallback.ts).
+  //
+  // The service draws the canvas (the background color with the logo at its
+  // spot) and OpenAI's mask: transparent pixels are redrawn, opaque ones are
+  // kept. Only the logo's own ink is opaque, so no box appears behind it.
+  // Both are at the page's size; the model draws at twice it. (2x canvases
+  // and masks, three designs at once, ran the worker out of memory on 13 Oct.)
+  const canvas = async (canvasPath: string, maskPath: string) => {
+    const g: GenerateInput = job.input.generate;
+    const page = pageOf(job);
+    const { ms } = await callPicture(admin, "canvas", {
+      job: job.id,
+      step: "generate",
+      logo: await signedRead(admin, BUCKET, job.input.logo_path),
+      page: { width: page.width, height: page.height },
+      placement: job.input.placement,
+      background: hexRgb(g.background),
+      out: { canvas: await signedWrite(admin, BUCKET, canvasPath), mask: await signedWrite(admin, BUCKET, maskPath) },
+    });
+    return ms;
+  };
+  const drawOnce = async (canvasPath: string, maskPath: string) => {
+    const g: GenerateInput = job.input.generate;
+    const page = pageOf(job);
+    const slide = job.slide_count && job.slide_count > 1 && job.input?.kind !== "video_card"
+      ? { index: job.slide_index ?? 0, count: job.slide_count, withCover: !!job.state.cover_path }
+      : (job.input?.kind === "video_card" && job.state.cover_path ? { index: 1, count: 2, withCover: true } : undefined);
+    const images: { bytes: Uint8Array; name: string }[] = [{ bytes: await download(admin, canvasPath), name: "canvas.png" }];
+    if (job.state.cover_path) images.push({ bytes: await download(admin, job.state.cover_path), name: "cover.png" });
+    for (const [i, p] of g.refs.entries()) {
+      const { data, error } = await admin.storage.from("design-references").download(p);
+      if (error || !data) throw new Error(`Could not read the client post ${p}: ${error?.message ?? "missing"}`);
+      images.push({ bytes: new Uint8Array(await data.arrayBuffer()), name: `ref${i}${p.slice(p.lastIndexOf("."))}` });
+    }
+    return imageEdit(await openaiKey(db()), images, designPrompt(g, job.input.copy, g.refs.length, slide, job.input.labels, job.input.placing), pictureSize([page.width, page.height]), await download(admin, maskPath));
+  };
   return {
-    // The service draws the canvas (the background color with the logo at its
-    // spot) and OpenAI's mask: transparent pixels are redrawn, opaque ones are
-    // kept. Only the logo's own ink is opaque, so no box appears behind it.
-    // Both are at the page's size; the model draws at twice it. (2x canvases
-    // and masks, three designs at once, ran the worker out of memory on 13 Oct.)
-    canvas: async (canvasPath, maskPath) => {
-      const { ms } = await callPicture(admin, "canvas", {
-        job: job.id,
-        step: "generate",
-        logo: await signedRead(admin, BUCKET, job.input.logo_path),
-        page: { width: page.width, height: page.height },
-        placement: job.input.placement,
-        background: hexRgb(g.background),
-        out: { canvas: await signedWrite(admin, BUCKET, canvasPath), mask: await signedWrite(admin, BUCKET, maskPath) },
-      });
-      return ms;
-    },
-    draw: async (canvasPath, maskPath) => {
-      const slide = job.slide_count && job.slide_count > 1 && job.input?.kind !== "video_card"
-        ? { index: job.slide_index ?? 0, count: job.slide_count, withCover: !!job.state.cover_path }
-        : (job.input?.kind === "video_card" && job.state.cover_path ? { index: 1, count: 2, withCover: true } : undefined);
-      const images: { bytes: Uint8Array; name: string }[] = [{ bytes: await download(admin, canvasPath), name: "canvas.png" }];
-      if (job.state.cover_path) images.push({ bytes: await download(admin, job.state.cover_path), name: "cover.png" });
-      for (const [i, p] of g.refs.entries()) {
-        const { data, error } = await admin.storage.from("design-references").download(p);
-        if (error || !data) throw new Error(`Could not read the client post ${p}: ${error?.message ?? "missing"}`);
-        images.push({ bytes: new Uint8Array(await data.arrayBuffer()), name: `ref${i}${p.slice(p.lastIndexOf("."))}` });
-      }
-      return imageEdit(await openaiKey(db()), images, designPrompt(g, job.input.copy, g.refs.length, slide, job.input.labels, job.input.placing), pictureSize([page.width, page.height]), await download(admin, maskPath));
-    },
+    canvas,
+    // A lead job whose size the image model refuses is made as before, once, and its option with it; what the
+    // model did with the size is kept for the weekly refresh. Neither spends a try.
+    draw: (canvasPath, maskPath) => drawOrFallBack({
+      job,
+      canvas: () => canvas(canvasPath, maskPath),
+      draw: () => drawOnce(canvasPath, maskPath),
+      asked: () => { const page = pageOf(job); return pictureSize([page.width, page.height]).join("x"); },
+      fallBack: async (reason) => {
+        const { error } = await admin.rpc("design_size_refused", { p_job: job.id, p_reason: reason.slice(0, 500) });
+        if (error) throw new Error(`Could not make the design as before: ${error.message}`);
+        console.warn(`[design-worker] job ${job.id}: the image model refused its size (${reason.slice(0, 120)}); made as before.`);
+      },
+      note: async (o) => {
+        const { error } = await admin.rpc("note_platform_size_outcome", { p_platform: o.platform, p_format: o.format, p_width: o.width, p_height: o.height, p_outcome: o.outcome, p_reason: o.reason?.slice(0, 500) ?? null });
+        if (error) console.warn(`[design-worker] job ${job.id}: could not note the size's outcome:`, error.message);
+      },
+    }),
     store: (path, png) => upload(admin, path, png, "image/png"),
     save: () => saveJobProgress(admin, job),
   };
@@ -569,8 +601,7 @@ async function pictureCheck(admin: any, count: number): Promise<{ elapsed_ms: nu
   const settled = await Promise.allSettled(jobs.map(async (r: any, i: number) => {
     const t = Date.now();
     try {
-      const page = pageOf(r as Job);
-      const [ow, oh] = outputSize([page.width, page.height]);
+      const [ow, oh] = deliveredOf(r as Job);
       const { ms } = await callPicture(admin, "finish", {
         job: r.id,
         step: "picture_check",

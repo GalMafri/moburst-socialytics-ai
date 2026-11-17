@@ -38,6 +38,8 @@ import { placementFor } from "../../../functions/_shared/lifecycle/designSetting
 import { type DesignRequest, type Settings, BUCKET, pngSize, settleRequest, startOption } from "../../../functions/_shared/canva/jobs";
 import { designPrompt, type GenerateInput } from "../../../functions/_shared/canva/brief";
 import { STORY_PAGE, storyLogoPlacement } from "../../../functions/_shared/design/story";
+import { pagePlacement } from "../../../functions/_shared/design/platformSize";
+import { asBeforeInput } from "../../../functions/_shared/design/sizeFallback";
 import type { LogoSet } from "../../../functions/_shared/design/logoTone";
 
 // Starting a post's design: the job a request hands the design worker.
@@ -90,6 +92,74 @@ describe("startOption", () => {
       expect(prompt).toContain("Story (9:16)");
       expect(prompt).not.toContain("4:5");
     }
+  });
+
+  it("draws a still in its platform's upload size: the page, the delivered size and the logo's place on that page", async () => {
+    // LinkedIn, square: planned on 1216x1216, delivered at 1200x1200.
+    const square = await started(request({ platform: "LinkedIn", upload_size: { platform: "linkedin", format: "image", width: 1200, height: 1200 } }));
+    expect(square.input.generate.size).toEqual({ width: 1216, height: 1216 });
+    expect(square.input.generate.deliver).toEqual({ width: 1200, height: 1200, platform: "linkedin", format: "image" });
+    // What it would have been without the table goes with it: a size the image model refuses falls back to this.
+    expect(square.input.as_before).toEqual({ placement: settings.placement });
+    expect(asBeforeInput(square.input)).toMatchObject({ placement: settings.placement, size_refused: { platform: "linkedin", format: "image", width: 1200, height: 1200 } });
+    expect(asBeforeInput(square.input)!.generate).toEqual((await started(request({ platform: "LinkedIn" }))).input.generate);
+    expect(square.input.placement).toEqual(pagePlacement(settings.placement, 701, 251, { width: 1216, height: 1216 }));
+    expect(square.input.placement).toEqual({ anchor: "center", width: 0.2889, top: 0.0537 });
+    expect(designPrompt(square.input.generate as GenerateInput, square.input.copy, 1)).toContain("LinkedIn post (1:1)");
+    // X, wide: planned on 1536x864, delivered at 1600x900.
+    const wide = await started(request({ platform: "Twitter/X", upload_size: { platform: "x", format: "image", width: 1600, height: 900 } }));
+    expect(wide.input.generate.size).toEqual({ width: 1536, height: 864 });
+    expect(wide.input.generate.deliver).toEqual({ width: 1600, height: 900, platform: "x", format: "image" });
+    expect(designPrompt(wide.input.generate as GenerateInput, wide.input.copy, 1)).toContain("post (16:9)");
+  });
+
+  it("draws an Instagram still on today's page at the client's own logo spot, delivered at the upload size", async () => {
+    const job = await started(request({ upload_size: { platform: "instagram", format: "image", width: 1080, height: 1350 } }));
+    expect(job.input.generate.size).toEqual({ width: 1088, height: 1360 });
+    expect(job.input.generate.deliver).toEqual({ width: 1080, height: 1350, platform: "instagram", format: "image" });
+    expect(job.input.placement).toEqual(settings.placement);
+    // The image model is told what it was always told.
+    const before = await started(request());
+    expect(designPrompt(job.input.generate as GenerateInput, job.input.copy, 1)).toBe(designPrompt(before.input.generate as GenerateInput, before.input.copy, 1));
+  });
+
+  it("gives every slide of a carousel the one size its request read", async () => {
+    const carousel = request({ platform: "LinkedIn", format: "Carousel", kind: "carousel", upload_size: { platform: "linkedin", format: "image", width: 1200, height: 1200 }, briefs: [{ headline: ["A"], picture: "p", slides: [{ headline: ["A"], picture: "p1" }, { headline: ["B"], picture: "p2" }, { headline: ["C"], picture: "p3" }] }] });
+    const db = fakeDb({ canva_finish_jobs: [] });
+    db.uploads.set(`${BUCKET}/${settings.logo_path}`, pngHeader(701, 251));
+    await startOption(db, carousel, settings, "Acme", 0, 0);
+    expect(db.tables.canva_finish_jobs).toHaveLength(3);
+    for (const job of db.tables.canva_finish_jobs) {
+      expect(job.input.generate.size).toEqual({ width: 1216, height: 1216 });
+      expect(job.input.generate.deliver).toEqual({ width: 1200, height: 1200, platform: "linkedin", format: "image" });
+      expect(job.input.placement).toEqual(db.tables.canva_finish_jobs[0].input.placement);
+      expect(job.input.as_before).toEqual({ placement: settings.placement });
+      expect(designPrompt(job.input.generate as GenerateInput, job.input.copy, 1, { index: job.slide_index, count: 3, withCover: false })).toContain("carousel (1:1)");
+    }
+  });
+
+  it("delivers a Story at its upload size on the same 9:16 page and safe band", async () => {
+    const job = await started(request({ format: "Story", upload_size: { platform: "instagram", format: "story", width: 1080, height: 1920 } }));
+    expect(job.input.generate.size).toEqual(STORY_PAGE);
+    expect(job.input.generate.surface).toBe("story");
+    expect(job.input.generate.deliver).toEqual({ width: 1080, height: 1920, platform: "instagram", format: "story" });
+    expect(job.input.placement).toEqual(storyLogoPlacement(settings.placement, 701, 251));
+    // As before, a Story keeps its page and its safe band.
+    expect(job.input.as_before).toEqual({ placement: storyLogoPlacement(settings.placement, 701, 251), size: STORY_PAGE });
+  });
+
+  it("makes a request with no size, or a size that fails a check, exactly as before", async () => {
+    for (const upload_size of [null, undefined, { format: "image", width: 320, height: 320 }, { format: "story", width: 1080, height: 1920 }, "1200x1200"]) {
+      const job = await started(request({ platform: "LinkedIn", upload_size }));
+      expect(job.input.generate.size).toBeUndefined();
+      expect(job.input.generate.deliver).toBeUndefined();
+      expect(job.input.as_before).toBeUndefined();
+      expect(job.input.placement).toEqual(settings.placement);
+    }
+    // A Story whose request holds a still's size keeps today's Story.
+    const story = await started(request({ format: "Story", upload_size: { format: "image", width: 1080, height: 1350 } }));
+    expect(story.input.generate.size).toEqual(STORY_PAGE);
+    expect(story.input.generate.deliver).toBeUndefined();
   });
 
   it("hands the note a design was asked with to the job, so the image model sees it and a retry keeps it", async () => {

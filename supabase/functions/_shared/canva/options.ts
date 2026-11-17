@@ -482,8 +482,20 @@ const CHOOSE_POSTS = (brand: string) =>
   `- posts: the numbers of one or two of ${brand}'s posts whose layout suits what this post says (a quote suits a quote layout, a comparison or list a comparison or list layout, a product or feature a product layout, a statement a statement layout). When the recent designs were built on a post and another suits the content as well, choose the other.\n` +
   `- layout: a few words naming the layout of the posts you chose.`;
 
+
+/**
+ * The shape of the page, for a still whose platform is uploaded in another
+ * shape than 4:5 (17 Nov 2026, _shared/design/platformSize.ts, plannerShape:
+ * "square frame (1:1)", "wide frame (16:9)"). Empty for 4:5, so a plan for
+ * that shape reads as it always did.
+ */
+function shapeLine(shape: string | null | undefined): string {
+  const s = String(shape ?? "").trim();
+  return s ? `The design is drawn on a ${s}: plan a layout and a picture that fill that shape.` : "";
+}
+
 /** The planner's instruction for carousels: every option is a set of slides read in order. */
-export function carouselPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; slides: number; postCount: number; recent: string; guidance?: string; otherPlatforms?: boolean; note?: string | null; visual?: string | null; colors?: string }): string {
+export function carouselPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; slides: number; postCount: number; recent: string; guidance?: string; otherPlatforms?: boolean; note?: string | null; shape?: string | null; visual?: string | null; colors?: string }): string {
   return [
     `The images are ${args.brand}'s own published posts, numbered Post 1 to Post ${args.postCount}.`,
     sharedLookRule(args.brand),
@@ -495,6 +507,7 @@ export function carouselPlannerPrompt(args: { brand: string; platform: string; c
     `"""${args.copy}"""`,
     plannedVisualLine(args.brand, args.visual),
     args.voice ? `${args.brand}'s voice: ${args.voice}` : "",
+    shapeLine(args.shape),
     noteLine(args.note),
     `Each option has exactly ${args.slides} slides, read in order. Slide 1 carries the hook. The middle slides each carry one point from the copy, in the copy's order. The last slide closes with the copy's call to action or takeaway.${String(args.visual ?? "").trim() ? " Where the planned visual says what each slide shows or says, the slides follow it in that order." : ""}`,
     "For each option give:",
@@ -810,7 +823,7 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
  * client (design/brandLook.ts, brandColorsLine), "" when it holds none. A Story (story: true) gets one line more; its headline limits are
  * a feed post's.
  */
-export function plannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; postCount: number; recent: string; guidance?: string; story?: boolean; otherPlatforms?: boolean; note?: string | null; visual?: string | null; colors?: string }): string {
+export function plannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; postCount: number; recent: string; guidance?: string; story?: boolean; otherPlatforms?: boolean; note?: string | null; shape?: string | null; visual?: string | null; colors?: string }): string {
   return [
     `The images are ${args.brand}'s own published posts, numbered Post 1 to Post ${args.postCount}.`,
     sharedLookRule(args.brand),
@@ -822,6 +835,7 @@ export function plannerPrompt(args: { brand: string; platform: string; copy: str
     `"""${args.copy}"""`,
     plannedVisualLine(args.brand, args.visual),
     args.voice ? `${args.brand}'s voice: ${args.voice}` : "",
+    shapeLine(args.shape),
     args.story ? "This post is a Story: its frame is seen full screen for a few seconds, so the headline carries the message, and a second line may carry the call to action." : "",
     noteLine(args.note),
     "For each option give:",

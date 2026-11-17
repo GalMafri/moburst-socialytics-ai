@@ -1,7 +1,7 @@
 // Shapes shared by the scheduled-jobs worker, its store and its tests.
 
 export type JobKind = "feed_refresh" | "dispatch" | "week_plan" | "week_revise" | "voice_profile" | "lifecycle" | "lifecycle_step" | "report_text" | "trend_refresh" | "sprout_onboarding" | "notes_read"
-  | "moments_list" | "week_moments" | "moment_feedback" | "strategy_deck";
+  | "moments_list" | "week_moments" | "moment_feedback" | "strategy_deck" | "platform_sizes";
 export type JobStatus = "queued" | "running" | "waiting" | "blocked" | "done" | "skipped" | "failed";
 
 /** One step of an in-app report pipeline (_shared/pipelines/runner.ts), run in its own lane of the worker. */
@@ -15,9 +15,10 @@ export interface ScheduledJob {
   id: string;
   kind: JobKind | PipelineJobKind | InsightsJobKind;
   /**
-   * Every kind but two belongs to a client and is typed as such. A
-   * sprout_onboarding job and a country's moments_list belong to none (null;
-   * scheduled_jobs_client_required) and never read it.
+   * Every kind but three belongs to a client and is typed as such. A
+   * sprout_onboarding job, a country's moments_list and the weekly
+   * platform_sizes job belong to none (null; scheduled_jobs_client_required)
+   * and never read it.
    */
   client_id: string;
   schedule_id: string | null;

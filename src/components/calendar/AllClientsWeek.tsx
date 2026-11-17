@@ -17,6 +17,7 @@ import { PlatformBadge } from "@/lib/platform-config";
 import { readAll } from "@/lib/readAll";
 import { byPostingTime, postingTimeText } from "@/lib/calendarDate";
 import { DAYS, addDays, shortDate, storiesAfterTheirPosts, type CalendarPostRow } from "@/lib/calendarPosts";
+import { DesignFrame } from "./DesignFrame";
 
 export type ClientPost = CalendarPostRow & { client_name: string; /** The client's timezone, shown beside a post's time. */ client_timezone: string | null };
 
@@ -92,12 +93,14 @@ export function AllClientsWeek({ posts, week }: { posts: ClientPost[]; week: str
                 aria-label={`Open ${p.client_name}'s ${platformName(p.platform)} ${story ? "Story" : "post"}`}
               >
                 {designs[p.post_key] ? (
-                  <div className={`${story ? "aspect-[9/16] w-2/3 mx-auto" : "aspect-[4/5]"} rounded-[8px] overflow-hidden bg-black/60`}>
-                    {/* The whole design, fitted inside the card (smaller when its shape differs), never cropped. */}
-                    {isVideoMedia(designs[p.post_key])
-                      ? <video src={designs[p.post_key]} muted playsInline preload="metadata" className="w-full h-full object-contain" />
-                      : <img src={designs[p.post_key]} alt="" className="w-full h-full object-contain" loading="lazy" />}
-                  </div>
+                  isVideoMedia(designs[p.post_key]) ? (
+                    <div className={`${story ? "aspect-[9/16] w-2/3 mx-auto" : "aspect-[4/5]"} rounded-[8px] overflow-hidden bg-black/60`}>
+                      <video src={designs[p.post_key]} muted playsInline preload="metadata" className="w-full h-full object-contain" />
+                    </div>
+                  ) : (
+                    // The whole design in a frame of its own shape (its platform's upload size), never cropped.
+                    <DesignFrame src={designs[p.post_key]} lazy fallback={story ? "aspect-[9/16]" : "aspect-[4/5]"} className={`${story ? "w-2/3 mx-auto " : ""}rounded-[8px] overflow-hidden bg-black/60`} />
+                  )
                 ) : isTextOnlyFormat(p.format) ? (
                   <p className="t-label">Text post</p>
                 ) : filmed.has(p.post_key) ? (
