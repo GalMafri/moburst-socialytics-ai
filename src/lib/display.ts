@@ -445,15 +445,43 @@ export function compactNumber(v: number): string {
 
 // ── Schedules ──────────────────────────────────────────────────────────────
 
+/** A schedule's next run as a screen reads it (src/lib/nextRun.ts): its date, and whether it waits for tracking. */
+export interface NextRun {
+  at: string | null;
+  /** The confirmed competitors are not tracked yet, so the date is not when the analysis runs. */
+  awaitsTracking: boolean;
+}
+
+/**
+ * True while a competitive schedule's own note says its confirmed competitors
+ * are not tracked (report_schedules.last_result, written by the dispatch and
+ * kept true between runs by the scheduled-jobs worker; selectionTracking.ts
+ * NEEDS_TRACKING). The note itself is never shown.
+ */
+export function scheduleAwaitsTracking(lastResult: string | null | undefined): boolean {
+  return String(lastResult ?? "").startsWith("needs tracking");
+}
+
+/** When an analysis that waits for tracking runs: the end of a sentence, with no date in it. */
+const ONCE_TRACKED = "runs once tracking of the competitors has started";
+
 /**
  * When the first report of a kind runs, as a fact: "The first competitive
  * analysis runs on Nov 7, 2026." Empty when nothing is scheduled, so a
  * screen shows nothing rather than asking anyone to set something up.
+ *
+ * A competitive analysis runs only when the confirmed competitors are
+ * tracked. While they are not, the sentence promises no date: "The first
+ * competitive analysis runs once tracking of the competitors has started."
+ * Clients read this sentence, so it names no vendor.
  */
-export function firstRunSentence(kind: "monthly" | "competitive", nextRunAt: string | null | undefined, timeZone?: string, opts: { first?: boolean } = {}): string {
-  const when = formatDate(nextRunAt, { timeZone });
+export function firstRunSentence(kind: "monthly" | "competitive", next: string | NextRun | null | undefined, timeZone?: string, opts: { first?: boolean } = {}): string {
+  const run: NextRun = typeof next === "string" ? { at: next, awaitsTracking: false } : next ?? { at: null, awaitsTracking: false };
+  const which = opts.first === false ? "next" : "first";
+  const when = formatDate(run.at, { timeZone });
   if (!when) return "";
-  return `The ${opts.first === false ? "next" : "first"} ${kind === "competitive" ? "competitive analysis" : "monthly report"} runs on ${when}.`;
+  if (kind === "competitive" && run.awaitsTracking) return `The ${which} competitive analysis ${ONCE_TRACKED}.`;
+  return `The ${which} ${kind === "competitive" ? "competitive analysis" : "monthly report"} runs on ${when}.`;
 }
 
 /** A report's period: "Sep 2026" for a whole calendar month, else its dates. */
@@ -478,6 +506,8 @@ export function scheduleLines(args: {
   nextRunAt?: string | null;
   latest?: { start?: string | null; end?: string | null; ranAt?: string | null } | null;
   timeZone?: string;
+  /** A competitive schedule whose confirmed competitors are not tracked yet (scheduleAwaitsTracking): no date is promised. */
+  awaitsTracking?: boolean;
 }): string[] {
   const out: string[] = [];
   const noun = args.kind === "competitive" ? "analysis" : "report";
@@ -487,9 +517,54 @@ export function scheduleLines(args: {
   if (!args.active) out.push("Paused.");
   else {
     const next = formatDate(args.nextRunAt, { timeZone: args.timeZone });
-    if (next) out.push(`The ${out.length ? "next" : "first"} one runs on ${next}.`);
+    if (next && args.kind === "competitive" && args.awaitsTracking) out.push(`The ${out.length ? "next" : "first"} one ${ONCE_TRACKED}.`);
+    else if (next) out.push(`The ${out.length ? "next" : "first"} one runs on ${next}.`);
   }
   return out;
+}
+
+// ── Tracking of a client's competitors ─────────────────────────────────────
+
+const andList = (names: string[]) => (names.length <= 1 ? names[0] ?? "" : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`);
+
+/**
+ * Why tracking of the confirmed competitors has not started, as one plain
+ * fact for staff: what the lifecycle's tracking step waits for
+ * (client_lifecycle_steps, result.waiting_for). Empty when the step gives no
+ * reason. Nothing here asks anyone to act, and no vendor is named.
+ */
+export function trackingWaitSentence(waitingFor: string | null | undefined, result?: Record<string, unknown> | null): string {
+  switch (String(waitingFor ?? "")) {
+    case "client_website": return "Tracking starts once the client's website is found.";
+    case "own_site": return "The client's website is a page on another client's site, so tracking starts once the client has a site of its own.";
+    case "rivaliq_full": return "The tracking plan is full. Tracking starts when a place opens.";
+    case "site_refused": {
+      const names = (Array.isArray(result?.refused) ? result!.refused : []).map((n) => String(n ?? "").trim()).filter(Boolean);
+      if (names.length === 1) return `The website of ${names[0]} does not allow tracking. Tracking starts once a different competitor is chosen.`;
+      if (names.length > 1) return `The websites of ${andList(names)} do not allow tracking. Tracking starts once different competitors are chosen.`;
+      return "A chosen competitor's website does not allow tracking. Tracking starts once a different competitor is chosen.";
+    }
+    case "selection": return "Tracking starts once three competitors with websites of their own are chosen.";
+    case "competitor_set": return "Tracking starts once the competitors are chosen.";
+    case "analysis_running": return "Tracking starts once the analysis running now is ready.";
+    case "in_progress": return "The competitors are being added to tracking.";
+    default: return "";
+  }
+}
+
+/**
+ * What staff read when the tracked companies do not cover the confirmed
+ * selection (the set's record, selectionTracking.ts recordedTracking): which
+ * company is not among them, that the current tracking stays as it is, and
+ * that the analysis waits. Nothing here is removed or set up by the check
+ * that found it, and the sentence asks nobody to act.
+ */
+export function trackingNotCoveredSentence(uncovered: { client?: boolean; competitors?: string[] } | null | undefined): string {
+  const names = (uncovered?.competitors ?? []).map((n) => String(n ?? "").trim()).filter(Boolean);
+  const what = uncovered?.client ? "The tracked companies do not include the client as one company."
+    : names.length ? `The tracked companies do not include ${andList(names)}.`
+    : "The tracked companies do not match the confirmed competitors.";
+  return `${what} The current tracking stays in place, and the analysis waits until the tracked companies match the selection.`;
 }
 
 // ── Where the product's own values came from ───────────────────────────────
@@ -646,7 +721,9 @@ export function onboardingFacts(client: Record<string, unknown> | null | undefin
   const trackingWait = waitingFor("tracking");
   const tracking = trackingWait === "client_website" ? "RivalIQ follows companies by their website, so tracking starts once the client's website is found."
     : trackingWait === "rivaliq_full" ? "The RivalIQ plan is full. Tracking starts when a place opens."
-    : trackingWait === "own_site" ? "RivalIQ follows companies by their website, and the client's website is a page on another client's site, so tracking starts once the client has a site of its own." : "";
+    : trackingWait === "own_site" ? "RivalIQ follows companies by their website, and the client's website is a page on another client's site, so tracking starts once the client has a site of its own."
+    // A chosen competitor whose website does not allow tracking, or a selection that cannot be tracked as it is.
+    : trackingWait === "site_refused" || trackingWait === "selection" ? trackingWaitSentence(trackingWait, result("tracking")) : "";
 
   return { website, logo, timezone, regions, languages, brief, competitors: { tracking } };
 }

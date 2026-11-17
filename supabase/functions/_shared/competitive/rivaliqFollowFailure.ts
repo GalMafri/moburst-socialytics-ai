@@ -23,6 +23,24 @@ const asMessage = (error: unknown): string | null => {
 };
 const list = (names: string[]) => (names.length <= 1 ? names[0] ?? "" : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`);
 
+/** The per-URL status of a follow that did not go through (pendingOperations: 1 pending, 2 followed, 3 not followed). */
+const NOT_FOLLOWED = 3;
+/**
+ * RivalIQ's own words when the company's website answered its visit with
+ * HTTP 403, as found live: "ProblemFetchingUrlError: HTTPError: Response code
+ * 403 ()", whole or as a code and a message. Any other text with "403" in it
+ * (a company id, a different error) is not a refusal.
+ */
+const REFUSED_VISIT = /^ProblemFetchingUrlError: HTTPError: Response code 403\b/;
+
+/**
+ * A website that refused RivalIQ's visit: the URL was not followed, RivalIQ
+ * says so in the words above, and it is not the plan's allowance. Tracking
+ * waits on the selection for these alone (lifecycle/steps.ts, tracking).
+ */
+export const refusedVisit = (f: { result: FollowUrlResult }): boolean =>
+  f.result.status === NOT_FOLLOWED && !asCredits(f.result.error) && REFUSED_VISIT.test(asMessage(f.result.error) ?? "");
+
 /** names: the company name for each failed URL, in order. */
 export function describeFollowFailure(failures: Array<{ name: string; result: FollowUrlResult }>): string {
   const capped = failures.filter((f) => asCredits(f.result.error));
@@ -49,14 +67,20 @@ export function describeFollowFailure(failures: Array<{ name: string; result: Fo
  * The follow's failure as an error the server's tracking step can read:
  * planFull when RivalIQ answered that the plan's company allowance is used
  * up, so tracking waits for a free place as a plain fact instead of failing.
+ * refused names each company whose website refused RivalIQ's visit
+ * (refusedVisit), and others counts the websites not followed for any other
+ * reason: tracking waits on the selection only when every one of them
+ * refused, and a fault among them keeps its usual retry.
  */
 export class FollowFailure extends Error {
-  constructor(message: string, public planFull: boolean) {
+  constructor(message: string, public planFull: boolean, public refused: string[] = [], public others = 0) {
     super(message);
     this.name = "FollowFailure";
   }
 }
 
 export function followFailure(failures: Array<{ name: string; result: FollowUrlResult }>): FollowFailure {
-  return new FollowFailure(describeFollowFailure(failures), failures.some((f) => !!asCredits(f.result.error)));
+  const full = failures.filter((f) => !!asCredits(f.result.error));
+  const refused = failures.filter(refusedVisit);
+  return new FollowFailure(describeFollowFailure(failures), full.length > 0, refused.map((f) => f.name), failures.length - full.length - refused.length);
 }

@@ -17,7 +17,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CompetitiveSteps } from "@/components/competitive/CompetitiveSteps";
-import { describeSelection, describeTracking, pickRunSelection, stateLine, type SetRow } from "@/lib/competitiveFlow";
+import { describeAnalysis, describeSelection, describeTracking, pickRunSelection, stateLine, type SetRow } from "@/lib/competitiveFlow";
+import { useTrackingStep } from "@/hooks/useTrackingStep";
 import { invokeResendable, sendQuietly, writeResendable } from "@/lib/quietSend";
 
 import { classifyProfileUrl, isProfileUrlInput } from "@/lib/profileUrl";
@@ -221,7 +222,9 @@ export default function CompetitorReview() {
   const selectionState = describeSelection((sets || []) as SetRow[]);
   // The steps say what a report would use: the confirmed selection, which is
   // not the set on screen while a newer draft waits for review.
-  const trackingState = describeTracking(runnableSet ?? currentSet);
+  const trackingStep = useTrackingStep(clientId);
+  const trackingState = describeTracking(runnableSet ?? currentSet, trackingStep.data);
+  const analysisState = describeAnalysis(selectionState, trackingState);
   const viewingDraftBesideRun = !!runnableSet && currentSet?.status === "draft";
 
 
@@ -733,14 +736,13 @@ export default function CompetitorReview() {
           current={selectionState.ready ? 1 : 0}
           steps={[
             { title: "Competitors", ...selectionState },
-            // Connected by the lifecycle on its own; says when, or nothing while it is being connected.
+            // Connected by the lifecycle on its own; says since when, or that it has not started and what it waits for.
             { title: "Tracking", ...trackingState },
             {
               title: "Analysis",
-              // A run waits for tracking on its own while the lifecycle connects it.
-              headline: selectionState.ready ? "Ready to run" : "",
-              ready: false,
-              href: selectionState.ready ? `/clients/${clientId}/competitive/run` : undefined,
+              // An analysis runs only when the selection is tracked; until then the step says so and links nowhere.
+              ...analysisState,
+              href: selectionState.ready && trackingState.ready ? `/clients/${clientId}/competitive/run` : undefined,
               linkLabel: "Open the run page",
             },
             {
@@ -770,7 +772,7 @@ export default function CompetitorReview() {
               {viewingDraftBesideRun ? (
                 <p>
                   <span className="font-medium text-white">RivalIQ tracking:</span> Reports use the confirmed selection
-                  {trackingState.headline ? ` (${trackingState.headline.toLowerCase()})` : ""}.
+                  {trackingState.ready ? ` (${trackingState.headline.toLowerCase()})` : ""}.
                   {" "}This draft is tracked once it is confirmed.
                 </p>
               ) : trackingState.headline && (

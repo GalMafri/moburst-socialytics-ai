@@ -13,6 +13,8 @@ import { STUCK_AFTER_MINUTES } from "@/lib/reportRun";
  * scheduled path (run-scheduled-jobs/dispatch.ts), retries included. So the
  * page shows the run as running from the request until the report exists,
  * says when a run that did not finish runs again, and never shows a failure.
+ * A competitive request whose competitors are not tracked yet shows as
+ * waiting for tracking, with no time promised.
  * A report a schedule is running counts as running too, so nobody starts a
  * second one beside it.
  */
@@ -24,6 +26,12 @@ export type ReportRunView =
   | { state: "idle" }
   /** Asked for; the report does not exist yet. */
   | { state: "starting"; requestedAt: string; range: Range | null }
+  /**
+   * Asked for, and not started: a competitive analysis runs only when the
+   * confirmed competitors are tracked, and until then its request waits. It
+   * starts on its own, so no time is promised.
+   */
+  | { state: "waiting"; requestedAt: string; range: Range | null }
   /** A report is being made. */
   | { state: "running"; reportId: string; startedAt: string; range: Range | null }
   /** It did not finish, or (competitive) did not pass its checks: it runs again on its own at nextAt. */
@@ -52,11 +60,13 @@ const SEND_WAITS_MS = [1_000, 3_000, 9_000, 27_000, 60_000];
 const rangeOf = (start: string | null | undefined, end: string | null | undefined): Range | null => (start && end ? { start: String(start).slice(0, 10), end: String(end).slice(0, 10) } : null);
 
 /** The page's view from the newest manual request and the report running now. */
-export function runView(request: RequestRow | null, running: RunningRow | null, watched: boolean): ReportRunView {
+export function runView(request: RequestRow | null, running: RunningRow | null, watched: boolean, kind: ReportRunKind = "social"): ReportRunView {
   if (running) return { state: "running", reportId: running.id, startedAt: running.created_at, range: rangeOf(running.date_range_start, running.date_range_end) };
   if (request?.open) {
     const range = rangeOf(request.range_start, request.range_end);
     if (request.report_id) return { state: "running", reportId: request.report_id, startedAt: request.requested_at, range };
+    // A competitive request parked with no report: the dispatch waits for tracking (dispatch.ts), whatever it tried before.
+    if (kind === "competitive" && (request.status === "waiting" || request.status === "blocked")) return { state: "waiting", requestedAt: request.requested_at, range };
     if ((request.runs ?? 0) > 0 && request.next_at && Date.parse(request.next_at) > Date.now()) return { state: "again", nextAt: request.next_at, range };
     return { state: "starting", requestedAt: request.requested_at, range };
   }
@@ -96,9 +106,9 @@ export function useReportRun(clientId: string | undefined, kind: ReportRunKind) 
 
   const view = sending
     ? ({ state: "starting", requestedAt: new Date().toISOString(), range: null } as ReportRunView)
-    : runView(query.data?.request ?? null, query.data?.running ?? null, watched.current);
+    : runView(query.data?.request ?? null, query.data?.running ?? null, watched.current, kind);
   useEffect(() => {
-    if (view.state === "starting" || view.state === "running" || view.state === "again") watched.current = true;
+    if (view.state === "starting" || view.state === "running" || view.state === "again" || view.state === "waiting") watched.current = true;
   }, [view.state]);
 
   /** Ask for a run. Resolves true once the server has it. */

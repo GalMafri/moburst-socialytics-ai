@@ -23,6 +23,8 @@
 
 import { mergeOwnedCompetitivePosts } from "../../competitive/ownedMerge.ts";
 import { normalizedCompetitiveMetrics } from "../../competitive/reportMetrics.ts";
+import { selectionTracking } from "../../competitive/selectionTracking.ts";
+import { SelectionFact } from "../types.ts";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -78,49 +80,34 @@ export function audienceDayOf(cfg: Pick<RunConfig, "started_at">): string {
   return isoDay(Date.parse(cfg.started_at) - DAY);
 }
 
-/** Resolve Landscape: the RivalIQ landscape that tracks the client and the confirmed competitors, each exactly once. */
+/**
+ * Resolve Landscape: the RivalIQ landscape that tracks the client and the
+ * confirmed competitors, each exactly once. The decision is the shared one
+ * (competitive/selectionTracking.ts), the same the dispatch makes before it
+ * starts a run.
+ *
+ * A selection that is not tracked is a fact, not a fault: the step throws
+ * SelectionFact, so the run stops at once with no further tries. That holds
+ * only for an answer that can carry a fact: RivalIQ's own `landscapes` list,
+ * readable as selectionTracking.ts defines it. An empty answer, one without
+ * that key, or one that does not list the companies the decision rests on is
+ * a fault like any other: an ordinary error, tried again as before. The
+ * check before the run saw landscapes moments ago, so "no landscapes" here is
+ * never a fact.
+ */
 export function resolveLandscape(cfg: RunConfig, body: Any, resp: Any) {
   const list = resp.landscapes || resp.data || resp.items || (Array.isArray(resp) ? resp : []);
-  if (!Array.isArray(list) || list.length === 0) {
-    throw new Error("NO_LANDSCAPES on this RivalIQ account");
-  }
-  const host = (value: unknown) => {
-    const raw = String(value || "").trim();
-    if (!raw || /\s/.test(raw)) return "";
-    const hostname = raw.replace(/^[a-z]+:\/\//i, "").split(/[/?#]/)[0].toLowerCase().replace(/^www\./, "").replace(/\.$/, "");
-    return hostname.includes(".") && /^[a-z0-9.-]+$/.test(hostname) ? hostname : "";
-  };
-  const normalizedName = (value: unknown) => String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().replace(/(?:\s+(?:inc|incorporated|ltd|limited|llc|llp|plc|corp|corporation))+$/, "").trim();
-  const clientHost = host(body?.website_url) || host(cfg.client_name);
-  const clientMatchesIn = (l: Any) => (l.companies || []).filter((c: Any) => clientHost ? host(c.url) === clientHost : !!normalizedName(cfg.client_name) && normalizedName(c.name) === normalizedName(cfg.client_name));
   let selected: Any[] = [];
   try { selected = JSON.parse(cfg.competitors_json || "[]"); } catch { selected = []; }
-  const selectedMatchesIn = (l: Any) => selected.map((s) => (l.companies || []).filter((c: Any) => {
-    if (clientMatchesIn(l).some((client: Any) => String(client.id) === String(c.id))) return false;
-    const website = host(s.website_url);
-    // A saved provider id does not override a conflicting reviewed website.
-    if (s.rivaliq_company_id != null && String(c.id) !== String(s.rivaliq_company_id)) return false;
-    return website ? host(c.url) === website : normalizedName(c.name) === normalizedName(s.name);
-  }));
-  const selectionFits = (l: Any) => {
-    const matches = selectedMatchesIn(l);
-    return matches.every((a: Any[]) => a.length === 1) && new Set(matches.flat().map((c: Any) => String(c.id))).size === selected.length;
-  };
-  let match: Any;
-  let matchedBy: string;
-  if (cfg.landscape_hint) {
-    match = list.find((l: Any) => String(l.id) === String(cfg.landscape_hint));
-    matchedBy = "explicit id";
-  } else {
-    const candidates = list.filter((l: Any) => clientMatchesIn(l).length === 1 && selectionFits(l));
-    candidates.sort((a: Any, b: Any) => Number(String(clientMatchesIn(b)[0].id) === String(b.focusCompanyId)) - Number(String(clientMatchesIn(a)[0].id) === String(a.focusCompanyId)));
-    match = candidates[0];
-    matchedBy = "verified client and selected companies";
+  const found = selectionTracking(list, { name: cfg.client_name, website_url: body?.website_url }, Array.isArray(selected) ? selected : [], cfg.landscape_hint);
+  if (found.tracked === false) {
+    if ("unreadable" in found) throw new Error(found.message);
+    // The same words either way; a fact only from the list under RivalIQ's documented key.
+    if (!Array.isArray(resp?.landscapes)) throw new Error(found.message);
+    throw new SelectionFact(found.code, found.message);
   }
-  if (!match) throw new Error("LANDSCAPE_NOT_FOUND: no RivalIQ landscape tracks the client and the confirmed competitors. Connect tracking for this selection.");
-  const clientMatches = clientMatchesIn(match);
-  if (clientMatches.length !== 1) throw new Error("CLIENT_IDENTITY_UNVERIFIED: the selected landscape does not uniquely track the client website.");
-  if (!selectionFits(match)) throw new Error("TRACKING_SELECTION_MISMATCH: the selected landscape must track every confirmed competitor with the reviewed website exactly once.");
+  const match = found.landscape;
+  const matchedBy = found.matched_by;
   const companies = (match.companies || []).map((c: Any) => ({
     id: c.id,
     name: c.name,
@@ -135,7 +122,7 @@ export function resolveLandscape(cfg: RunConfig, body: Any, resp: Any) {
       linkedin: c.linkedin ? c.linkedin.handle : null,
     },
   }));
-  return { landscape_id: match.id, landscape_name: match.name, matched_by: matchedBy, focus_company_id: match.focusCompanyId, client_company_id: clientMatches[0].id, selected_company_ids: selectedMatchesIn(match).flat().map((c: Any) => c.id), companies };
+  return { landscape_id: match.id, landscape_name: match.name, matched_by: matchedBy, focus_company_id: match.focusCompanyId, client_company_id: found.client_company.id, selected_company_ids: found.selected_companies.map((c: Any) => c.id), companies };
 }
 
 /** How many times the readiness is checked (once a minute) before a still-collecting landscape fails the try. */

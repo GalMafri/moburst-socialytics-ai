@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
-  countOf, NO_DATA, clientOriginLine, cleanText, declinedBrandLine, competitiveRunStatus, countryNames, eventName, firstRunSentence, formatDate, formatDateTime, formatRange, sproutDraftLine,
+  countOf, NO_DATA, clientOriginLine, cleanText, declinedBrandLine, competitiveRunStatus, countryNames, eventName, firstRunSentence, scheduleAwaitsTracking, scheduleLines, trackingNotCoveredSentence, trackingWaitSentence, formatDate, formatDateTime, formatRange, sproutDraftLine,
   isRawProfileId, languageNames, locationOrigin, notePointKindName, noteReadLine, noteStateLine, onboardingFacts, platformKey, platformName, profileName, roleName, timelineDetail, timelineKindName, usageStateName,
 } from "@/lib/display";
 import { isActiveClient } from "@/lib/activeClients";
@@ -121,6 +121,62 @@ describe("schedules and active clients", () => {
     expect(firstRunSentence("competitive", "2026-11-07T07:00:00Z", "America/New_York")).toBe("The first competitive analysis runs on Nov 7, 2026.");
     expect(firstRunSentence("monthly", "2026-11-07T07:00:00Z", "UTC", { first: false })).toBe("The next monthly report runs on Nov 7, 2026.");
     expect(firstRunSentence("monthly", null)).toBe("");
+  });
+  it("promises a date for a competitive analysis only while its competitors are tracked", () => {
+    const at = "2026-12-07T07:15:00Z";
+    // Tracked: the date, as before, from the date alone or from the schedule as a screen reads it.
+    expect(firstRunSentence("competitive", { at, awaitsTracking: false }, "UTC")).toBe("The first competitive analysis runs on Dec 7, 2026.");
+    expect(firstRunSentence("competitive", { at, awaitsTracking: false }, "UTC", { first: false })).toBe("The next competitive analysis runs on Dec 7, 2026.");
+    // Untracked or waiting for tracking: no date. Clients read this sentence.
+    const waiting = firstRunSentence("competitive", { at, awaitsTracking: true }, "UTC");
+    expect(waiting).toBe("The first competitive analysis runs once tracking of the competitors has started.");
+    expect(firstRunSentence("competitive", { at, awaitsTracking: true }, "UTC", { first: false })).toBe("The next competitive analysis runs once tracking of the competitors has started.");
+    for (const text of [waiting]) {
+      expect(text).not.toMatch(/Dec|2026|\d/);
+      expect(text).not.toMatch(/RivalIQ|landscape|needs tracking|rivaliq|Sprout|n8n/i);
+    }
+    // Nothing scheduled says nothing, tracked or not; and a monthly report waits for no tracking.
+    expect(firstRunSentence("competitive", { at: null, awaitsTracking: true })).toBe("");
+    expect(firstRunSentence("competitive", null)).toBe("");
+    expect(firstRunSentence("monthly", { at, awaitsTracking: true }, "UTC")).toBe("The first monthly report runs on Dec 7, 2026.");
+  });
+  it("reads whether a schedule waits for tracking from its note, and never shows the note", () => {
+    expect(scheduleAwaitsTracking("needs tracking: Tracking for the confirmed competitors has not started.")).toBe(true);
+    expect(scheduleAwaitsTracking("needs tracking: No RivalIQ landscape tracks Northwind Bikes and every confirmed competitor yet.")).toBe(true);
+    for (const note of [null, undefined, "", "The report ran.", "The report is running.", "error: needs tracking", "Waiting for a confirmed competitor set."]) expect(scheduleAwaitsTracking(note)).toBe(false);
+  });
+  it("a schedule's own lines promise no date while it waits for tracking", () => {
+    const base = { kind: "competitive" as const, active: true, nextRunAt: "2026-12-07T07:15:00Z", timeZone: "UTC" };
+    expect(scheduleLines({ ...base, latest: null })).toEqual(["The first one runs on Dec 7, 2026."]);
+    expect(scheduleLines({ ...base, latest: null, awaitsTracking: false })).toEqual(["The first one runs on Dec 7, 2026."]);
+    expect(scheduleLines({ ...base, latest: null, awaitsTracking: true })).toEqual(["The first one runs once tracking of the competitors has started."]);
+    expect(scheduleLines({ ...base, latest: { start: "2026-10-01", end: "2026-10-31", ranAt: "2026-11-07T07:20:00Z" }, awaitsTracking: true }))
+      .toEqual(["Last analysis: Oct 2026, ran Nov 7, 2026.", "The next one runs once tracking of the competitors has started."]);
+    // Paused says so and nothing more; a monthly schedule waits for no tracking.
+    expect(scheduleLines({ ...base, active: false, latest: null, awaitsTracking: true })).toEqual(["Paused."]);
+    expect(scheduleLines({ ...base, kind: "monthly", latest: null, awaitsTracking: true })).toEqual(["The first one runs on Dec 7, 2026."]);
+  });
+  it("says plainly when the tracked companies do not cover the confirmed selection, and that nothing is removed", () => {
+    expect(trackingNotCoveredSentence({ client: false, competitors: ["Contoso Rides"] }))
+      .toBe("The tracked companies do not include Contoso Rides. The current tracking stays in place, and the analysis waits until the tracked companies match the selection.");
+    expect(trackingNotCoveredSentence({ client: true, competitors: ["Contoso Rides"] }))
+      .toBe("The tracked companies do not include the client as one company. The current tracking stays in place, and the analysis waits until the tracked companies match the selection.");
+    for (const none of [null, undefined, {}, { client: false, competitors: [] }, { competitors: ["  "] }]) {
+      expect(trackingNotCoveredSentence(none)).toBe("The tracked companies do not match the confirmed competitors. The current tracking stays in place, and the analysis waits until the tracked companies match the selection.");
+    }
+    expect(trackingNotCoveredSentence({ competitors: ["Tailspin Cycles", "Fabrikam Wheels", "Contoso Rides"] })).toContain("do not include Tailspin Cycles, Fabrikam Wheels and Contoso Rides.");
+  });
+  it("says why tracking waits in plain words, with no vendor and no step name", () => {
+    expect(trackingWaitSentence("rivaliq_full")).toBe("The tracking plan is full. Tracking starts when a place opens.");
+    expect(trackingWaitSentence("site_refused", { refused: ["Tailspin Cycles"] })).toBe("The website of Tailspin Cycles does not allow tracking. Tracking starts once a different competitor is chosen.");
+    expect(trackingWaitSentence("competitor_set")).toBe("Tracking starts once the competitors are chosen.");
+    for (const none of ["", null, undefined, "something_new"]) expect(trackingWaitSentence(none)).toBe("");
+    for (const state of ["client_website", "own_site", "rivaliq_full", "site_refused", "selection", "competitor_set", "analysis_running", "in_progress"]) {
+      const text = trackingWaitSentence(state, { refused: ["Tailspin Cycles", "Fabrikam Wheels"] });
+      expect(text).not.toBe("");
+      expect(text).not.toMatch(/RivalIQ|rivaliq|landscape|waiting_for|_|undefined|null|\u2014|\u2013| - /);
+      expect(text).not.toMatch(/fail|could not|unable/i);
+    }
   });
   it("defines an active client as one that is not archived", () => {
     expect(isActiveClient({ archived_at: null })).toBe(true);
@@ -245,6 +301,15 @@ describe("what the product read from a client's social profiles (onboarding from
       .toBe("The RivalIQ plan is full. Tracking starts when a place opens.");
     expect(onboardingFacts(olo({ website_url: "https://www.moburst.com/services/organic/podcast-booking/" }), [chosen, { step: "tracking", status: "waiting", result: { waiting_for: "own_site" } }]).competitors.tracking)
       .toBe("RivalIQ follows companies by their website, and the client's website is a page on another client's site, so tracking starts once the client has a site of its own.");
+    // A chosen competitor whose website does not allow tracking: the wait is on the selection, and the page says which one.
+    const site = { website_url: "https://northwindbikes.example" };
+    expect(onboardingFacts(olo(site), [chosen, { step: "tracking", status: "waiting", result: { waiting_for: "site_refused", set_id: "s1", refused: ["Tailspin Cycles"] } }]).competitors.tracking)
+      .toBe("The website of Tailspin Cycles does not allow tracking. Tracking starts once a different competitor is chosen.");
+    expect(onboardingFacts(olo(site), [chosen, { step: "tracking", status: "waiting", result: { waiting_for: "selection" } }]).competitors.tracking)
+      .toBe("Tracking starts once three competitors with websites of their own are chosen.");
+    // Tracked, or tracking under way: the line says nothing.
+    expect(onboardingFacts(olo(site), [chosen, { step: "tracking", status: "done", result: { landscape_id: "777" } }]).competitors.tracking).toBe("");
+    expect(onboardingFacts(olo(site), [chosen, { step: "tracking", status: "waiting", result: { waiting_for: "in_progress" } }]).competitors.tracking).toBe("");
   });
   it("writes every line in plain words, with no step names, statuses or dashes", () => {
     const f = onboardingFacts(olo({ geo: "US,GB", language: "en,es", logo_url: "x", field_sources: { geo: { by: "lifecycle", from: "followers" }, language: { by: "lifecycle", from: "posts" }, logo_url: { by: "lifecycle", at: NOW, from: "profile_picture:instagram" } } }),

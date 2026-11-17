@@ -1,9 +1,19 @@
 // One scheduled report dispatch: one schedule occurrence, until its report exists.
 //
-// The rules: competitive needs a set in an accepted status and a RivalIQ
-// landscape that tracks the client (the same check run-report makes, from
-// _shared/competitive/landscapeCheck.ts), and creates no report and sends
-// nothing until both hold. Social waits for a paired competitive analysis
+// The rules: a competitive analysis runs only when the confirmed set is
+// tracked: its own linked landscape, or one landscape holding the client and
+// every confirmed competitor (_shared/competitive/selectionTracking.ts, the
+// one decision the pipeline's landscape step makes too). Until then the
+// dispatch waits for tracking: it creates no report, sends nothing, and looks
+// again once a day, so the analysis starts on its own when tracking arrives.
+// A run that still stops on that fact (the selection changed after the check,
+// or the run started under the earlier code) is not made again: the dispatch
+// puts the occurrence in the same wait. A set whose linked landscape is there
+// but does not hold the confirmed selection waits the same way, and keeps its
+// link: nothing here, and nothing that reads what the check recorded, removes
+// it. Waiting for tracking is not a report that is late: the runs that ended
+// in the wait, and any before it, count neither toward the day after which
+// the alert goes out nor toward the wait between later runs. Social waits for a paired competitive analysis
 // only while that analysis is about to start or is running, and then takes
 // its range from that report. A competitive analysis that was never created,
 // or that did not finish, never holds the social report: it goes out with the
@@ -87,7 +97,8 @@
 import { nextRun, rangeForSchedule, type ReportRange } from "../_shared/reports/schedule.ts";
 import { madeReportText, reportsLink, stuckReportText } from "../_shared/alerts/slack.ts";
 import { STUCK_AFTER_MINUTES } from "../_shared/reports/payloads.ts";
-import { isTrackingProblem, LANDSCAPE_MISSING, type LandscapeCheck } from "../_shared/competitive/landscapeCheck.ts";
+import { CLIENT_NOT_TRACKED, isTrackingProblem, LANDSCAPE_MISSING, SELECTION_NOT_COVERED, type LandscapeCheck } from "../_shared/competitive/landscapeCheck.ts";
+import { NEEDS_TRACKING, selectionFactIn } from "../_shared/competitive/selectionTracking.ts";
 import { HELD_REDO_MINUTES, HELD_REDOS, type HeldRedo } from "../_shared/competitive/reportEvidence.ts";
 // The wait before a held competitive analysis is made again is the one the screens read from (reportEvidence.ts).
 export { HELD_REDO_MINUTES };
@@ -97,12 +108,10 @@ import type { Engine, PipelineDefinition } from "../_shared/pipelines/types.ts";
 import type { ReportPipelineStart } from "../_shared/pipelines/shadow.ts";
 import type { AppRunView } from "../_shared/pipelines/store.ts";
 
-/**
- * How a competitive schedule records that RivalIQ does not track the client
- * (or no longer does). It is the schedule's last_result, shown on the client
- * setup page, so the prefix is the contract the page reads.
- */
-export const NEEDS_TRACKING = "needs tracking";
+// How a competitive schedule records that its confirmed selection is not
+// tracked (or no longer is): the schedule's last_result begins with it, and
+// the screens read that prefix (selectionTracking.ts).
+export { NEEDS_TRACKING };
 
 /** The wait before the second run of an occurrence; each later wait doubles. */
 export const RETRY_FIRST_MINUTES = 30;
@@ -121,7 +130,9 @@ export const ALERT_AFTER_MINUTES = 24 * 60;
  */
 export type RunEnd =
   | "app_stopped" | "app_gone" | "app_stopped_answering" | "app_ended_without_report" | "app_not_queued"
-  | "no_pipeline" | "engine_unreadable" | "report_removed" | "interrupted" | "n8n" | "held" | "still_running" | "error";
+  | "no_pipeline" | "engine_unreadable" | "report_removed" | "interrupted" | "n8n" | "held" | "still_running" | "error"
+  /** The run stopped on a fact about the selection: its competitors are not tracked yet. The occurrence waits; it is not made again. */
+  | "needs_tracking";
 
 /** Each code in the plain words the Slack alert uses; never raw error text. */
 export const PLAIN_REASONS: Readonly<Record<RunEnd, string>> = {
@@ -138,6 +149,7 @@ export const PLAIN_REASONS: Readonly<Record<RunEnd, string>> = {
   held: "the analysis did not pass its checks",
   still_running: "it is still running",
   error: "the run ended without a recorded reason",
+  needs_tracking: "tracking for the confirmed competitors has not started",
 };
 
 /** The plain words for a code; a run with none on record (kept before codes existed) reads as an error. */
@@ -263,7 +275,7 @@ export interface DispatchDeps {
   post(url: string, body: unknown): Promise<{ ok: boolean; status: number }>;
   buildSocialPayload(args: { client: ClientRow; reportId: string; range: ReportRange; scheduled: boolean; staggerSeconds: number; competitiveReportId?: string }): Promise<Record<string, unknown>>;
   buildCompetitivePayload(args: { client: ClientRow; reportId: string; set: CompetitorSetRow; range: ReportRange; attemptStartedAt: string; scheduled: boolean; staggerSeconds: number }): Promise<Record<string, unknown>>;
-  /** The shared RivalIQ landscape check (landscapeCheck.ts), bound to the project's key. One provider read. */
+  /** Is the confirmed selection tracked (landscapeCheck.ts checkSelectionLandscape, the shared decision), bound to the project's key. One provider read. */
   checkLandscape(client: ClientRow, set: CompetitorSetRow): Promise<LandscapeCheck>;
   /** Persist the job's phase before the step that depends on it. */
   saveJob(patch: Partial<Pick<ScheduledJob, "phase" | "report_id" | "result">>): Promise<void>;
@@ -318,6 +330,8 @@ export interface DispatchMemory {
   alert_due_at?: string;
   /** The next run's time, while the job is queued earlier for the alert; that lease only checks the alert. */
   retry_at?: string;
+  /** When the job last began waiting for tracking. Runs up to then count neither toward the alert's day nor toward the wait between runs. */
+  tracking_wait_at?: string;
   [key: string]: unknown;
 }
 
@@ -340,6 +354,16 @@ export function makePoster(secret: string, fetchImpl: (url: string, init: Reques
     return { ok: r.ok, status: r.status };
   };
 }
+
+/**
+ * True for a run that stopped because the selection was not tracked. It also
+ * reads the runs the earlier code made again daily for that reason: their
+ * note keeps the pipeline's message. Such a run says nothing about how the
+ * report runs once tracking is there, so it counts neither toward the wait
+ * between the runs that follow nor toward the day after which a report is
+ * late.
+ */
+export const endedForTracking = (run: DispatchRun): boolean => run.end === "needs_tracking" || (run.outcome === "stopped" && selectionFactIn(run.note) !== null);
 
 /** The wait after the given number of runs that did not finish: 30 minutes, doubling, at most a day. */
 export function retryWaitMinutes(runsMade: number): number {
@@ -413,7 +437,29 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
     range: memory.range, runs,
     ...(memory.alerted_at ? { alerted_at: memory.alerted_at } : {}),
     ...(memory.alert_due_at ? { alert_due_at: memory.alert_due_at } : {}),
+    ...(memory.tracking_wait_at ? { tracking_wait_at: memory.tracking_wait_at } : {}),
   });
+  /**
+   * What the job keeps while it waits for tracking. A schedule's occurrence
+   * drops the period an earlier run was made for: tracking can take weeks, and
+   * the analysis that then runs covers the schedule's period as of that day.
+   * A manual run keeps the period the person asked for. The wait is not
+   * lateness: the alert's time goes, and the wait's own time is kept so the
+   * runs before it are not counted once the report can be made (lateRuns).
+   */
+  const whileWaiting = (kept: DispatchMemory, code: string, setId: string | undefined): DispatchMemory => {
+    const { range: _range, retry_at: _retry, alert_due_at: _due, ...rest } = kept;
+    return { ...rest, ...(manual ? { range: manual.range } : {}), code, ...(setId ? { set_id: setId } : {}), tracking_wait_at: now.toISOString() };
+  };
+  /**
+   * The runs that count toward "late" and toward the wait between runs: those
+   * of the stretch in which the report could be made. Not a run that ended
+   * waiting for tracking, and not one from before the job last waited for it.
+   */
+  const lateRuns = (): DispatchRun[] => {
+    const waited = Date.parse(memory.tracking_wait_at ?? "");
+    return runs.filter((r) => !endedForTracking(r) && !(Number.isFinite(waited) && Date.parse(r.started_at) <= waited));
+  };
   /** The report's period, as this occurrence makes it. */
   const period = (): ReportRange => memory.range ?? (manual ? manual.range : rangeForSchedule(schedule!.range_mode, now));
   /** One Slack message; true when it was posted. Nothing here ever changes what the dispatch does. */
@@ -426,20 +472,24 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
       return false;
     }
   };
-  /** A run of the report starts. The occurrence's first run sets when its alert is due. */
+  /** A run of the report starts. The occurrence's first run that counts (lateRuns) sets when its alert is due. */
   const startRun = (reportId: string, startedAt: string) => {
-    if (!runs.length && d.alert) memory.alert_due_at = new Date(Date.parse(startedAt) + ALERT_AFTER_MINUTES * MINUTE).toISOString();
+    if (!lateRuns().length && d.alert) memory.alert_due_at = new Date(Date.parse(startedAt) + ALERT_AFTER_MINUTES * MINUTE).toISOString();
     runs.push({ report_id: reportId, started_at: startedAt });
   };
   /**
    * The occurrence's one alert, a day or more after its first run started.
    * True when it was tried now. Tried once at its time: alert_due_at goes
-   * either way, and alerted_at is recorded only when it was posted.
+   * either way, and alerted_at is recorded only when it was posted. A report
+   * that waited for tracking is late only from the first run made after the
+   * wait: the runs that ended in it, and those before it, are not counted.
    */
   const alertIfLate = async (end: RunEnd | undefined): Promise<boolean> => {
     if (memory.alerted_at || !d.alert || d.dryRun) return false;
-    const first = Math.min(...runs.map((r) => Date.parse(r.started_at)).filter(Number.isFinite));
-    if (!Number.isFinite(first) || now.getTime() - first < ALERT_AFTER_MINUTES * MINUTE) return false;
+    const first = Math.min(...lateRuns().map((r) => Date.parse(r.started_at)).filter(Number.isFinite));
+    // No run counts (each one ended waiting for tracking): no alert is due, so the job is not leased for one either.
+    if (!Number.isFinite(first)) { delete memory.alert_due_at; return false; }
+    if (now.getTime() - first < ALERT_AFTER_MINUTES * MINUTE) return false;
     delete memory.alert_due_at;
     const text = stuckReportText({ client: client.name, kind, range: period(), reason: plainReason(end), link: reportsLink(kind, client.id) });
     if (await tell(text)) memory.alerted_at = now.toISOString();
@@ -461,7 +511,7 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
     const open = reportId ? runs.find((r) => r.report_id === reportId && !r.ended_at) : undefined;
     if (open) Object.assign(open, { ended_at: now.toISOString(), outcome: "stopped" as const, end, note: (run?.error ? `${why}: ${run.error}` : why).slice(0, 300) });
     if (d.dryRun) return { status: "waiting", reason: `dry run: would run again (${why})`, result: keep() };
-    const next = nextRunOfOccurrence(runs.length, now, deadline);
+    const next = nextRunOfOccurrence(lateRuns().length, now, deadline);
     // The occurrence closes: a redo it queued for a held run is not made.
     if (!next) await noRedoComes(runs, d);
     if (reportId) {
@@ -482,6 +532,33 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
     await note(null);
     // The lease that found this does not count against the job.
     return { status: "queued", reason: `Runs again: ${why}.`, available_at: availableAt!, deferred: true, result: kept };
+  };
+
+  /**
+   * The run with this report stopped on a fact about the selection: its
+   * competitors are not tracked. Making the report again reads the same fact,
+   * so the occurrence waits for tracking instead, exactly as a run the check
+   * stops before it starts: the row is taken away, nothing is retried or
+   * alerted, and the daily look starts the analysis once tracking is there.
+   */
+  const awaitTracking = async (reportId: string, fact: string): Promise<JobOutcome> => {
+    const reason = `${NEEDS_TRACKING}: The run stopped because the confirmed competitors are not tracked yet (${fact}). The analysis runs once tracking has started.`;
+    const open = runs.find((r) => r.report_id === reportId && !r.ended_at);
+    if (open) Object.assign(open, { ended_at: now.toISOString(), outcome: "stopped" as const, end: "needs_tracking" as const, note: fact });
+    const setId = memory.set_id;
+    // With no link nothing tracks the selection; with one, the landscape is there and does not hold it.
+    const code = fact === "LANDSCAPE_NOT_FOUND" ? CLIENT_NOT_TRACKED : SELECTION_NOT_COVERED;
+    const waiting = (): DispatchMemory => whileWaiting(keep(), code, setId);
+    if (d.dryRun) return { status: "waiting", reason: `dry run: ${reason}`, result: waiting() };
+    await d.store.dropReport(table, reportId);
+    if (setId) await d.store.releaseSet(setId);
+    // A competitive analysis that is not coming never holds the social report.
+    await d.store.releaseHeldSocial(client.id);
+    await noRedoComes(runs, d);
+    const kept = waiting();
+    await d.saveJob({ phase: null, report_id: null, result: kept });
+    await note(reason);
+    return { status: "waiting", reason, result: kept };
   };
 
   /** The report is still running: the job waits, and at the day the one alert says so. */
@@ -539,6 +616,9 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
       const seen = Date.parse(app?.heartbeat_at ?? "");
       const alive = app?.status === "running" && Number.isFinite(seen) && now.getTime() - seen < STUCK_AFTER_MINUTES * MINUTE;
       if (run && inProgress(run.status) && alive) return stillRunning();
+      // Stopped because the selection is not tracked: the occurrence waits for tracking, and is not made again.
+      const fact = competitive && app?.status === "stopped" ? selectionFactIn(app.outcome) : null;
+      if (fact) return awaitTracking(reportId, fact);
       const [why, end]: [string, RunEnd] = !run ? ["the report was removed", "report_removed"]
         : !app ? ["the in-app pipeline run is gone", "app_gone"]
         : app.status === "stopped" ? [`the in-app pipeline stopped (${app.outcome ?? "no reason recorded"})`, "app_stopped"]
@@ -550,6 +630,9 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
     const stale = !Number.isFinite(started) || now.getTime() - started >= STUCK_AFTER_MINUTES * MINUTE;
     if (run && inProgress(run.status) && !stale) return stillRunning();
     if (!run) return runAgain(reportId, "the report was removed", "report_removed", run);
+    // The workflow stopped because the selection is not tracked: the same wait as above.
+    const fact = competitive && !inProgress(run.status) ? selectionFactIn(run.error) : null;
+    if (fact) return awaitTracking(reportId, fact);
     return runAgain(reportId, inProgress(run.status) ? "the workflow stopped answering" : "the workflow did not finish the report", "n8n", run);
   };
 
@@ -723,19 +806,24 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
         return { status: "waiting", reason };
       }
       if (!reportId) {
-        // Before any report row exists or anything is sent: does RivalIQ
-        // track this client? A resumed job already passed this check.
+        // Before any report row exists or anything is sent: is the confirmed
+        // selection tracked (selectionTracking.ts)? A resumed job already
+        // passed this check. A job that was making the report again each day
+        // because its selection was never tracked comes here on its next
+        // lease and settles into the same wait.
         const tracking = await d.checkLandscape(client, set);
         if (isTrackingProblem(tracking)) {
-          // Not set up: wait, rechecked daily, so the report runs once
-          // tracking is connected. A linked landscape that disappeared:
-          // blocked, which the daily status check alerts on.
+          // Not tracked yet, or a linked landscape that does not hold the
+          // confirmed selection: wait, looked at again daily, so the report
+          // runs once tracking covers the selection. The link is kept either
+          // way. A linked landscape that is gone from the account: blocked,
+          // and the lifecycle starts tracking again, as before.
           const reason = `${NEEDS_TRACKING}: ${tracking.message}`;
           if (!d.dryRun) {
             await note(reason);
             await d.store.releaseHeldSocial(client.id);
           }
-          return { status: tracking.code === LANDSCAPE_MISSING ? "blocked" : "waiting", reason, result: { ...memory, code: tracking.code, set_id: set.id } };
+          return { status: tracking.code === LANDSCAPE_MISSING ? "blocked" : "waiting", reason, result: whileWaiting({ ...memory, runs }, tracking.code, set.id) };
         }
         if (!tracking.ok) {
           // RivalIQ could not be asked. Try again shortly; once the attempts

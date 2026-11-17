@@ -1,5 +1,6 @@
-import { formatDate } from "@/lib/display";
+import { formatDate, trackingNotCoveredSentence, trackingWaitSentence, type OnboardingStep } from "@/lib/display";
 import { heldRedo, redoCanStillCome } from "../../supabase/functions/_shared/competitive/reportEvidence";
+import { recordedTracking } from "../../supabase/functions/_shared/competitive/selectionTracking";
 
 /**
  * Plain language for the competitive flow.
@@ -67,6 +68,9 @@ export type FlowState = {
   ready: boolean;
 };
 
+/** Tracking as a step, with which of its states it is in (selectionTracking.ts recordedTracking; "none" before a selection is confirmed). */
+export type TrackingState = FlowState & { state: "none" | "tracked" | "not_started" | "starting" | "not_covered" | "gone" | "not_tracked" };
+
 /** What the lifecycle writes on a set it confirmed as the system (steps.ts, competitors). */
 export const CHOSEN_AUTOMATICALLY = "Chosen automatically: the three closest competitors with a website.";
 
@@ -93,17 +97,43 @@ export function currentTrackingCheck(set: SetRow | null): { code: string; messag
  *
  * The client lifecycle connects RivalIQ tracking on its own once a set is
  * confirmed, and sets it up again when a landscape disappears (Lital's
- * decision 1, 19 Oct 2026). So this says when the set has been tracked, or
- * nothing while tracking is being connected. It never asks anyone to act.
+ * decision 1, 19 Oct 2026). A competitive analysis runs only when the
+ * confirmed set is tracked, so this says which it is: since when the set has
+ * been tracked, or that tracking has not started and what it waits for
+ * (`step`, the lifecycle's tracking step, where the screen has read it).
+ * Whether a set is tracked is the one rule every screen and the run request
+ * read (selectionTracking.ts trackedOnRecord). It never asks anyone to act.
  * Tracking a company from now on does not give RivalIQ its past posts, so
  * this never promises history.
  */
-export function describeTracking(set: SetRow | null): FlowState {
-  if (!set || !RUNNABLE_SET_STATUSES.includes(set.status) || !set.rivaliq_landscape_id) return { headline: "", ready: false };
-  const check = currentTrackingCheck(set);
-  if (check && check.code !== "ok") return { headline: "", ready: false };
-  const since = formatDate(set.tracked_since);
-  return { headline: since ? `Tracked since ${since}` : "Tracked in RivalIQ", ready: true };
+export function describeTracking(set: SetRow | null, step?: OnboardingStep | null): TrackingState {
+  if (!set || !RUNNABLE_SET_STATUSES.includes(set.status)) return { headline: "", ready: false, state: "none" };
+  const recorded = recordedTracking(set);
+  if (recorded.state === "tracked") {
+    const since = formatDate(set.tracked_since);
+    return { headline: since ? `Tracked since ${since}` : "Tracked in RivalIQ", ready: true, state: "tracked" };
+  }
+  // The linked landscape is there, but does not hold the confirmed selection. The link is kept, and the analysis waits.
+  if (recorded.state === "not_covered") return { headline: "Does not cover this selection", detail: trackingNotCoveredSentence(recorded.uncovered), ready: false, state: "not_covered" };
+  // The linked landscape is gone from the account: the lifecycle starts tracking again for the selection.
+  if (recorded.state === "gone") return { headline: "Not tracked right now", detail: "Tracking is starting again.", ready: false, state: "gone" };
+  if (recorded.state === "not_tracked") return { headline: "Not tracked right now", ready: false, state: "not_tracked" };
+  const waitingFor = step?.status === "waiting" ? String(step.result?.waiting_for ?? "") : "";
+  const why = trackingWaitSentence(waitingFor, step?.result);
+  const starting = waitingFor === "in_progress";
+  const headline = starting ? "Starting" : "Not started yet";
+  return { headline, ...(why ? { detail: why } : {}), ready: false, state: starting ? "starting" : "not_started" };
+}
+
+/**
+ * Step 3, as a fact: whether an analysis can run. It runs only when the
+ * confirmed selection is tracked; until then it waits for tracking, and the
+ * step links nowhere, since a run started now would only wait.
+ */
+export function describeAnalysis(selection: FlowState, tracking: TrackingState): FlowState {
+  if (!selection.ready) return { headline: "", ready: false };
+  if (tracking.ready) return { headline: "Ready to run", ready: false };
+  return { headline: tracking.state === "not_covered" ? "Runs once tracking covers this selection" : "Runs once tracking has started", ready: false };
 }
 
 /** A state as one line of prose: the headline as a sentence, then the detail. */

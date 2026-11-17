@@ -2,6 +2,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   checkClientLandscape,
+  checkFeedLandscape,
+  checkSelectionLandscape,
   CLIENT_NOT_TRACKED,
   isAppCreatedLandscape,
   landscapeClient,
@@ -10,6 +12,8 @@ import {
   recordTrackingCheck,
   trackingCheckRecord,
   resolveClientLandscape,
+  resolveSelectionLandscape,
+  SELECTION_NOT_COVERED,
   RIVALIQ_BUSY,
   RIVALIQ_UNAVAILABLE,
 } from "../../../supabase/functions/_shared/competitive/landscapeCheck";
@@ -123,9 +127,76 @@ describe("checkClientLandscape", () => {
     }
   });
 
-  it("flags not tracked and missing as tracking problems", async () => {
-    expect(isTrackingProblem(await checkClientLandscape("key", client, null, respond({ landscapes: [] })))).toBe(true);
-    expect(isTrackingProblem(await checkClientLandscape("key", client, "10", respond({ landscapes: [] })))).toBe(true);
+  it("flags not tracked and missing as tracking problems, from a list of the account's landscapes", async () => {
+    expect(await checkClientLandscape("key", client, null, respond({ landscapes: [someoneElse] }))).toMatchObject({ ok: false, code: CLIENT_NOT_TRACKED });
+    expect(await checkClientLandscape("key", client, "10", respond({ landscapes: [someoneElse] }))).toMatchObject({ ok: false, code: LANDSCAPE_MISSING });
+  });
+
+  it("an empty or unrecognized 200 is a provider that could not be asked: no tracking problem, nothing to record, no landscape called gone", async () => {
+    const now = new Date("2026-11-17T08:00:00Z");
+    const bodies: unknown[] = [{ landscapes: [] }, {}, { data: [own] }, { landscapes: null }, { landscapes: "none" }, { landscapes: { 10: own } }, [], [own], "null", { landscapes: [own, { name: "no id" }] }, { landscapes: [own, null] }, { error: "try later" }];
+    for (const body of bodies) {
+      for (const linked of ["10", null]) {
+        for (const check of [
+          await checkClientLandscape("key", client, linked, respond(body)),
+          await checkSelectionLandscape("key", client, [], linked, respond(body)),
+          ...Object.values(await checkFeedLandscape("key", client, [], linked, respond(body))),
+        ]) {
+          expect(check, JSON.stringify(body)).toMatchObject({ ok: false, code: RIVALIQ_UNAVAILABLE, status: 200 });
+          expect(isTrackingProblem(check)).toBe(false);
+          expect(trackingCheckRecord(check, linked, now)).toBeNull();
+        }
+      }
+    }
+  });
+});
+
+describe("one record: the selection decision, whoever asked", () => {
+  const respond = (body: unknown) => vi.fn(async () => new Response(JSON.stringify(body), { status: 200 }));
+  const now = new Date("2026-11-17T08:00:00Z");
+  // Invented brands: the client, tracked with two of its three confirmed competitors.
+  const brand = { name: "Northwind Bikes", website_url: "https://northwindbikes.example" };
+  const selection = [
+    { name: "Tailspin Cycles", website_url: "https://tailspincycles.example" },
+    { name: "Fabrikam Wheels", website_url: "https://fabrikamwheels.example" },
+    { name: "Contoso Rides", website_url: "https://contosorides.example" },
+  ];
+  const co = (id: number, name: string, url: string) => ({ id, name, url });
+  const linkedLandscape = { id: 700, name: "TIER 1", focusCompanyId: 1, companies: [co(1, "Northwind Bikes", brand.website_url), co(2, "Tailspin Cycles", selection[0].website_url), co(3, "Fabrikam Wheels", selection[1].website_url)] };
+  const other = { id: 12, name: "TIER 3", focusCompanyId: 30, companies: [co(30, "Wide World", "https://wideworld.example")] };
+
+  it("the feed reads posts from a landscape that tracks the client, and records the selection decision, never its own answer", async () => {
+    const fetch = respond({ landscapes: [linkedLandscape, other] });
+    const both = await checkFeedLandscape("key", brand, selection, "700", fetch);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    // The feed can go on: its landscape tracks the client.
+    expect(both.feed).toMatchObject({ ok: true, linked: true, summary: { id: "700", client_company_id: "1" } });
+    // The one record says what the dispatch would say: the linked landscape does not hold the whole selection.
+    expect(both.selection).toMatchObject({ ok: false, code: SELECTION_NOT_COVERED, landscapeId: "700", uncovered: { client: false, competitors: ["Contoso Rides"] } });
+    expect(trackingCheckRecord(both.selection, "700", now)).toEqual({
+      code: SELECTION_NOT_COVERED, landscape_id: "700", checked_at: now.toISOString(), uncovered: { client: false, competitors: ["Contoso Rides"] },
+      message: "The RivalIQ landscape linked to Northwind Bikes's competitor set (700) does not hold the confirmed selection: it does not track Contoso Rides exactly once. The analysis waits until it does, and the link is kept as it is.",
+    });
+    // The feed's own answer writes nothing, so it can never overwrite the decision with "ok".
+    expect(trackingCheckRecord(both.feed, "700", now)).toBeNull();
+    expect(both.selection).toEqual(await checkSelectionLandscape("key", brand, selection, "700", respond({ landscapes: [linkedLandscape, other] })));
+  });
+
+  it("a refresh of a set with no link keeps the landscape the decision found", async () => {
+    const whole = { ...linkedLandscape, companies: [...linkedLandscape.companies, co(4, "Contoso Rides", selection[2].website_url)] };
+    const both = await checkFeedLandscape("key", brand, selection, null, respond({ landscapes: [whole, other] }));
+    expect(trackingCheckRecord(both.selection, null, now)).toEqual({ code: "ok", landscape_id: null, message: null, checked_at: now.toISOString(), found_landscape_id: "700" });
+    expect(trackingCheckRecord(both.feed, null, now)).toBeNull();
+  });
+
+  it("only a linked landscape that is not in the list is called gone", async () => {
+    const gone = await checkFeedLandscape("key", brand, selection, "999", respond({ landscapes: [linkedLandscape, other] }));
+    expect(trackingCheckRecord(gone.selection, "999", now)).toMatchObject({ code: LANDSCAPE_MISSING, landscape_id: "999", gone: true });
+    // There, but not holding the client as one company: not covered, never gone.
+    const twice = { ...linkedLandscape, companies: [...linkedLandscape.companies, co(8, "Northwind Bikes", brand.website_url)] };
+    const record = trackingCheckRecord((await checkFeedLandscape("key", brand, selection, "700", respond({ landscapes: [twice] }))).selection, "700", now);
+    expect(record).toMatchObject({ code: SELECTION_NOT_COVERED, uncovered: { client: true } });
+    expect(record).not.toHaveProperty("gone");
   });
 });
 
@@ -153,12 +224,18 @@ describe("isAppCreatedLandscape", () => {
 describe("tracking check record", () => {
   const now = new Date("2026-10-14T08:00:00Z");
 
-  it("keeps what the check found, for the set it was made for", () => {
-    expect(trackingCheckRecord(resolveClientLandscape([own], client, "10"), "10", now)).toEqual({ code: "ok", landscape_id: "10", message: null, checked_at: now.toISOString() });
-    const missing = trackingCheckRecord(resolveClientLandscape([], client, 99), 99, now);
-    expect(missing).toMatchObject({ code: LANDSCAPE_MISSING, landscape_id: "99" });
+  it("keeps what the selection decision found, for the set it was made for", () => {
+    expect(trackingCheckRecord(resolveSelectionLandscape([own], client, [], "10"), "10", now)).toEqual({ code: "ok", landscape_id: "10", message: null, checked_at: now.toISOString() });
+    const missing = trackingCheckRecord(resolveSelectionLandscape([own], client, [], 99), 99, now);
+    expect(missing).toMatchObject({ code: LANDSCAPE_MISSING, landscape_id: "99", gone: true });
     expect(missing?.message).toMatch(/no longer exists/);
-    expect(trackingCheckRecord(resolveClientLandscape([], client, null), null, now)).toMatchObject({ code: CLIENT_NOT_TRACKED, landscape_id: null });
+    expect(trackingCheckRecord(resolveSelectionLandscape([someoneElse], client, [], null), null, now)).toMatchObject({ code: CLIENT_NOT_TRACKED, landscape_id: null });
+  });
+
+  it("records nothing from the feed's own answer, whatever it is", () => {
+    expect(trackingCheckRecord(resolveClientLandscape([own], client, "10"), "10", now)).toBeNull();
+    expect(trackingCheckRecord(resolveClientLandscape([own], client, 99), 99, now)).toBeNull();
+    expect(trackingCheckRecord(resolveClientLandscape([someoneElse], client, null), null, now)).toBeNull();
   });
 
   it("records nothing when RivalIQ could not be asked", () => {
@@ -169,16 +246,18 @@ describe("tracking check record", () => {
   it("writes to the set, and never lets a failed write stop the caller", async () => {
     const writes: Array<{ table: string; patch: any; id: string }> = [];
     const db = { from: (table: string) => ({ update: (patch: any) => ({ eq: async (_k: string, id: string) => { writes.push({ table, patch, id }); return { error: null }; } }) }) };
-    await recordTrackingCheck(db, "set-1", "10", resolveClientLandscape([own], client, "10"));
+    await recordTrackingCheck(db, "set-1", "10", resolveSelectionLandscape([own], client, [], "10"));
     expect(writes).toEqual([{ table: "competitor_sets", id: "set-1", patch: { tracking_check: expect.objectContaining({ code: "ok", landscape_id: "10" }) } }]);
     const missingColumn = { from: () => ({ update: () => ({ eq: async () => ({ error: { message: 'column "tracking_check" does not exist' } }) }) }) };
     const thrown = { from: () => { throw new Error("db down"); } };
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    await expect(recordTrackingCheck(missingColumn, "set-1", "10", resolveClientLandscape([own], client, "10"))).resolves.toBeUndefined();
-    await expect(recordTrackingCheck(thrown, "set-1", "10", resolveClientLandscape([own], client, "10"))).resolves.toBeUndefined();
+    await expect(recordTrackingCheck(missingColumn, "set-1", "10", resolveSelectionLandscape([own], client, [], "10"))).resolves.toBeUndefined();
+    await expect(recordTrackingCheck(thrown, "set-1", "10", resolveSelectionLandscape([own], client, [], "10"))).resolves.toBeUndefined();
     warn.mockRestore();
     // No set, nothing to record.
-    await recordTrackingCheck(db, null, null, resolveClientLandscape([], client, null));
+    await recordTrackingCheck(db, null, null, resolveSelectionLandscape([someoneElse], client, [], null));
+    // The feed's own answer, nothing to record either.
+    await recordTrackingCheck(db, "set-1", "10", resolveClientLandscape([own], client, "10"));
     expect(writes).toHaveLength(1);
   });
 });

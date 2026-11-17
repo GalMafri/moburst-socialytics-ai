@@ -124,6 +124,8 @@ export function aggregateCompetitive(i: AggregateInputs): Any {
     const name = String(c.name || c.company_name || "").toLowerCase().trim();
     return (!!clientHost && host(c.url) === clientHost) || (!!name && !!clientNeedle && (name.includes(clientNeedle) || clientNeedle.includes(name)));
   });
+  // An ordinary error, tried again and then made again as before, never a selection fact: the landscape step has
+  // already found the client in the landscapes answer, so this fires only when the companies answer contradicts it.
   if (clientMatches.length !== 1) throw new Error("CLIENT_IDENTITY_UNVERIFIED: the RivalIQ landscape must track exactly one company matching " + cfg.client_name + ". A focus company is not automatically the client.");
   const verifiedClientId = String(clientMatches[0].id ?? clientMatches[0].company_id);
   // deno-lint-ignore no-control-regex

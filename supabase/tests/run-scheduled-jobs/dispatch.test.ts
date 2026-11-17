@@ -1154,6 +1154,7 @@ describe("one Slack alert for a report still not made after a day", () => {
       held: "the analysis did not pass its checks",
       still_running: "it is still running",
       error: "the run ended without a recorded reason",
+      needs_tracking: "tracking for the confirmed competitors has not started",
     });
     expect(plainReason(undefined)).toBe("the run ended without a recorded reason");
     for (const text of Object.values(PLAIN_REASONS)) expect(text).not.toMatch(/[—–]| - /);

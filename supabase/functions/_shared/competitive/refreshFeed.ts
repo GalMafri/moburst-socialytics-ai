@@ -10,7 +10,8 @@
 // Moved out of refresh-competitor-feed on 2026-10-06; the behaviour is unchanged.
 
 import {collectOwnedCompetitive,mergeOwnedCompetitivePosts} from './ownedSource.ts';
-import { checkClientLandscape, isTrackingProblem, landscapeClient, recordTrackingCheck } from "./landscapeCheck.ts";
+import { checkFeedLandscape, isTrackingProblem, landscapeClient, recordTrackingCheck } from "./landscapeCheck.ts";
+import { readSelection } from "./selectionTracking.ts";
 import { selectedFeedSources, collectLinkedInSource } from "./linkedinSource.ts";
 import { rivalIqFetch } from "./rivaliqFetch.ts";
 import { harvestedPaths, type HarvestedRef } from "../design-prompts/designRefs.ts";
@@ -394,9 +395,15 @@ export async function refreshCompetitorFeed(admin: any, clientId: string, env: F
     .maybeSingle();
   // An explicit ID is a selection, not proof of client identity. Validate
   // before fetching posts, saving snapshots, generating alerts or harvesting.
-  // The same check run-report and the scheduled dispatch use.
-  const check = await checkClientLandscape(key, await landscapeClient(admin, client), set?.rivaliq_landscape_id);
-  await recordTrackingCheck(admin, set?.id, set?.rivaliq_landscape_id, check);
+  // One read, two answers (landscapeCheck.ts checkFeedLandscape): whether the
+  // feed can read posts, which is all the feed needs and is never written on
+  // the set; and the selection decision the dispatch makes, which is the one
+  // record. So a refresh never overwrites what the dispatch decided with its
+  // own narrower answer, and never drops the landscape that decision found.
+  const selection = set?.id ? await readSelection(admin, set.id).catch(() => null) : null;
+  const { feed: check, selection: decided } = await checkFeedLandscape(key, await landscapeClient(admin, client), selection ?? [], set?.rivaliq_landscape_id);
+  // Without the confirmed competitors there is no selection decision to write.
+  if (selection) await recordTrackingCheck(admin, set?.id, set?.rivaliq_landscape_id, decided);
   if (isTrackingProblem(check)) {
     // Not set up (RIVALIQ_CLIENT_NOT_TRACKED) and a linked landscape that
     // vanished or stopped matching (RIVALIQ_LANDSCAPE_MISSING) are different

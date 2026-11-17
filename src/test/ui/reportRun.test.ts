@@ -33,6 +33,22 @@ describe("a manual run, from the request until its report exists", () => {
     const later = new Date(Date.now() + 30 * 60000).toISOString();
     expect(runView(request({ runs: 1, next_at: later }), null, true)).toMatchObject({ state: "again", nextAt: later });
   });
+  it("a competitive request parked with no report is waiting for tracking, with no time promised, whatever it tried before", () => {
+    for (const status of ["waiting", "blocked"]) {
+      expect(runView(request({ status }), null, true, "competitive")).toEqual({ state: "waiting", requestedAt: at(1), range: { start: "2026-09-01", end: "2026-09-30" } });
+    }
+    // The job that was making the report again each day, settled: eleven runs behind it, and a stale time on the row.
+    const later = new Date(Date.now() + 30 * 60000).toISOString();
+    expect(runView(request({ status: "waiting", runs: 11, next_at: later }), null, true, "competitive").state).toBe("waiting");
+    expect(runView(request({ status: "waiting", runs: 11, next_at: at(600) }), null, true, "competitive").state).toBe("waiting");
+    // Tracked and going: the same request reads as before.
+    expect(runView(request({ status: "queued" }), null, true, "competitive").state).toBe("starting");
+    expect(runView(request({ status: "queued", runs: 1, next_at: later }), null, true, "competitive").state).toBe("again");
+    expect(runView(request({ status: "waiting", report_id: "r" }), null, true, "competitive")).toMatchObject({ state: "running", reportId: "r" });
+    // A monthly report waits for no tracking.
+    expect(runView(request({ status: "waiting" }), null, true, "social").state).toBe("starting");
+    expect(runView(request({ status: "waiting" }), null, true).state).toBe("starting");
+  });
   it("is ready only for the run this page watched", () => {
     expect(runView(request({ status: "done", open: false, report_id: "r" }), null, true)).toMatchObject({ state: "ready", reportId: "r" });
     expect(runView(request({ status: "done", open: false, report_id: "r" }), null, false).state).toBe("idle");

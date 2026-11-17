@@ -151,6 +151,22 @@ export class StepStop extends Error {
   }
 }
 
+/**
+ * Thrown by a step for a fact about what the run was asked to work on, not a
+ * fault in the work: the confirmed competitors are not tracked yet
+ * (competitive/selectionTracking.ts), for one. Trying again reads the same
+ * fact, so the runner spends no further tries: the run stops at once with the
+ * message, which leads with the code, as its outcome. Whoever owns the run
+ * reads the fact back from there and waits for it to change, instead of
+ * making the report again.
+ */
+export class SelectionFact extends StepStop {
+  constructor(public code: string, message: string) {
+    super(message);
+    this.name = "SelectionFact";
+  }
+}
+
 /** What a step came to. A step that cannot go on throws; the runner retries it quietly. */
 export type StepResult<S extends Record<string, unknown> = Record<string, unknown>> =
   | { type: "next"; step: string; state?: S; detail?: Record<string, unknown> }

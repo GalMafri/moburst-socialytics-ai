@@ -16,14 +16,16 @@
 // for a real report the dispatch that owns it makes the report again. A
 // step waiting for an account (a refused or missing token) spends no try,
 // but only until the pipeline's waitHorizon; then the run stops with that
-// reason. A step that throws StepStop ends the run at once.
+// reason. A step that throws StepStop ends the run at once, and so does one
+// that throws SelectionFact: a fact about the selection the run was asked
+// for (its competitors are not tracked yet), which no further try changes.
 //
 // Each step writes a log row (step, started, finished, outcome, a small
 // detail): the run history n8n's executions list gave.
 
 import type { JobOutcome, ScheduledJob } from "../scheduled-jobs/types.ts";
 import type { Registry } from "./registry.ts";
-import { StepRestart, StepStop, type OutputWriter, type PayloadStore, type PipelineDefinition, type PipelineJobPayload, type PipelineRun, type PollState, type StepContext, type StepResult } from "./types.ts";
+import { SelectionFact, StepRestart, StepStop, type OutputWriter, type PayloadStore, type PipelineDefinition, type PipelineJobPayload, type PipelineRun, type PollState, type StepContext, type StepResult } from "./types.ts";
 
 /** One step's time, inside the 120 s every step must stay under. */
 export const STEP_BUDGET_MS = 110_000;
@@ -225,6 +227,14 @@ export async function runPipelineJob(job: ScheduledJob, d: RunnerDeps): Promise<
     work.catch(() => {});
     result = await Promise.race([work, timeUp]);
   } catch (e) {
+    // A fact about what the run was asked for (the confirmed competitors are
+    // not tracked yet): no further tries. The run stops with the fact as its
+    // outcome, and the dispatch that owns the report waits for it to change.
+    if (e instanceof SelectionFact) {
+      await logEnd("stopped", { fact: e.code, error: e.message.slice(0, 500) });
+      const stopped = await stop(e.message);
+      return { ...stopped, result: { ...(stopped.result ?? {}), fact: e.code } };
+    }
     // A step that knows another try cannot help ends the run now.
     if (e instanceof StepStop) {
       await logEnd("stopped", { error: e.message.slice(0, 500) });

@@ -511,8 +511,32 @@ describe("tracking", () => {
     expect(again.status).toBe("done");
     expect(syncs).toBe(1);
   });
+  it("keeps the link of a set whose landscape is there but does not hold the selection: no reset, no setup, and its handles are read as before", async () => {
+    // Only a landscape recorded as gone, by the selection decision and for this very link, is ever reset.
+    const kept: Array<[string, Record<string, unknown>]> = [
+      ["the selection is not covered", { code: "RIVALIQ_SELECTION_NOT_COVERED", landscape_id: "L1", uncovered: { client: false, competitors: ["Contoso Rides"] } }],
+      ["the client is not there as one company", { code: "RIVALIQ_SELECTION_NOT_COVERED", landscape_id: "L1", uncovered: { client: true, competitors: [] } }],
+      ["a record of a missing landscape that does not say it is gone", { code: "RIVALIQ_LANDSCAPE_MISSING", landscape_id: "L1" }],
+      ["gone, but about another landscape", { code: "RIVALIQ_LANDSCAPE_MISSING", landscape_id: "L0", gone: true }],
+      ["gone as a word, not the mark the decision writes", { code: "RIVALIQ_LANDSCAPE_MISSING", landscape_id: "L1", gone: "true" }],
+      ["not set up, recorded before the link", { code: "RIVALIQ_CLIENT_NOT_TRACKED", landscape_id: null }],
+      ["no record", null as never],
+    ];
+    deps.rivaliqKey = () => "rk";
+    deps.rivalIqApi = (() => async () => ({})) as never;
+    deps.resetTracking = fail("the reset") as never;
+    deps.advanceSetupOnServer = fail("the setup") as never;
+    for (const [what, tracking_check] of kept) {
+      const db = dbWith({ competitor_sets: [set({ rivaliq_landscape_id: "L1", tracking_check })] });
+      const synced: unknown[] = [];
+      deps.syncTrackedHandles = (async (_d: unknown, id: string, l: string) => { synced.push([id, l]); return { client: null, competitors: 2, handles: 0 }; }) as never;
+      expect(await STEPS.tracking.run(db, client(), ctx()), what).toMatchObject({ status: "done", result: { set_id: "s1", landscape_id: "L1" } });
+      expect(synced, what).toEqual([["s1", "L1"]]);
+      expect(db.tables.competitor_sets[0].rivaliq_landscape_id, what).toBe("L1");
+    }
+  });
   it("sets tracking up again when the linked landscape is gone, and waits quietly while RivalIQ adds the companies", async () => {
-    const db = dbWith({ competitor_sets: [set({ rivaliq_landscape_id: "L1", tracking_check: { code: "RIVALIQ_LANDSCAPE_MISSING", landscape_id: "L1" } })] });
+    const db = dbWith({ competitor_sets: [set({ rivaliq_landscape_id: "L1", tracking_check: { code: "RIVALIQ_LANDSCAPE_MISSING", landscape_id: "L1", gone: true } })] });
     const resets: unknown[] = [];
     deps.rivaliqKey = () => "rk";
     deps.rivalIqApi = (() => async () => ({})) as never;
@@ -2438,6 +2462,43 @@ describe("a client with profiles and no website (onboarding from social profiles
     deps.rivalIqApi = (() => async () => ({})) as never;
     deps.advanceSetupOnServer = async () => { throw new FollowFailure("RivalIQ's plan tracks 40 distinct companies and 40 are in use, so Olo could not be added.", true); };
     expect(await STEPS.tracking.run(dbWith({ competitor_sets: [set] }), olo({ website_url: "https://olo.com" }), ctx())).toEqual({ status: "waiting", reason: "rivaliq_full", recheckDays: 1, result: { set_id: "s1" } });
+  });
+
+  it("waits on the selection when a chosen competitor's website refuses the visit: no failure, a different competitor starts it at once, and it is asked again weekly", async () => {
+    const { followFailure } = await import("../../../functions/_shared/competitive/rivaliqFollowFailure");
+    const { decide, rowAfter } = await import("../../../functions/_shared/lifecycle/policy");
+    const { SITE_REFUSED_RECHECK_DAYS } = await import("../../../functions/_shared/lifecycle/steps");
+    const set = { id: "s1", client_id: "c1", status: "confirmed", confirmed_at: T, created_at: T, rivaliq_landscape_id: null, tracking_check: null };
+    const brand = client({ name: "Northwind Bikes", website_url: "https://northwindbikes.example" });
+    deps.rivaliqKey = () => "rk";
+    deps.rivalIqApi = (() => async () => ({})) as never;
+    // What RivalIQ answers for a website that refused its visit: the URL not followed, in these words.
+    const REFUSED = { status: 3, error: { message: "ProblemFetchingUrlError: HTTPError: Response code 403 ()" } };
+    let asked = 0;
+    deps.advanceSetupOnServer = async () => { asked++; throw followFailure([{ name: "Tailspin Cycles", result: REFUSED }]); };
+    const outcome = await STEPS.tracking.run(dbWith({ competitor_sets: [set] }), brand, ctx());
+    expect(SITE_REFUSED_RECHECK_DAYS).toBe(7);
+    expect(outcome).toEqual({ status: "waiting", reason: "site_refused", recheckDays: 7, result: { set_id: "s1", refused: ["Tailspin Cycles"] } });
+    expect(asked).toBe(1);
+
+    // Stored as a wait, not a failure: nothing for a week, then one more ask, so a refusal that passed does not hold tracking for good.
+    const now = new Date(T);
+    const stored = rowAfter(null, { client_id: "c1", step: "tracking", inputs_key: "s1|none||abc|northwindbikes.example" }, outcome as never, now);
+    expect(stored).toMatchObject({ status: "waiting", attempts: 0, error: null, next_attempt_at: new Date(now.getTime() + 7 * 86_400_000).toISOString(), result: { waiting_for: "site_refused", refused: ["Tailspin Cycles"] } });
+    for (const days of [0, 1, 6.9]) expect(decide(stored, stored.inputs_key, STEPS.tracking.policy, new Date(now.getTime() + days * 86_400_000))).toMatchObject({ due: false });
+    expect(decide(stored, stored.inputs_key, STEPS.tracking.policy, new Date(now.getTime() + 7 * 86_400_000))).toMatchObject({ due: true, why: "recheck" });
+    // A different competitor is part of the step's inputs: tracking starts for it at once.
+    expect(decide(stored, "s1|none||other-selection|northwindbikes.example", STEPS.tracking.policy, now)).toMatchObject({ due: true, why: "inputs_changed" });
+
+    // A full plan still waits for a place and is looked at daily.
+    deps.advanceSetupOnServer = async () => { throw followFailure([{ name: "Tailspin Cycles", result: { status: 3, error: { data: { credits: { plan: 40, distinct: 40 } } } } }, { name: "Fabrikam Wheels", result: REFUSED }]); };
+    expect(await STEPS.tracking.run(dbWith({ competitor_sets: [set] }), brand, ctx())).toMatchObject({ status: "waiting", reason: "rivaliq_full", recheckDays: 1 });
+    // Only the refused websites count. Another website not followed for another reason is a fault with its usual retry,
+    // and so is an answer that only mentions 403 without being RivalIQ's refusal.
+    for (const other of [{ status: 3, error: "Unknown company" }, { status: 3, error: "Response code 403" }, { status: 3, error: "Forbidden" }, { status: 3, error: "Company 14030 could not be read" }, { status: 2, error: REFUSED.error }]) {
+      deps.advanceSetupOnServer = async () => { throw followFailure([{ name: "Tailspin Cycles", result: REFUSED }, { name: "Fabrikam Wheels", result: other }]); };
+      await expect(STEPS.tracking.run(dbWith({ competitor_sets: [set] }), brand, ctx())).rejects.toThrow(/Tailspin Cycles/);
+    }
   });
 
   it("takes the website's values once it is found only where the site ranks higher, and keeps a person's", async () => {

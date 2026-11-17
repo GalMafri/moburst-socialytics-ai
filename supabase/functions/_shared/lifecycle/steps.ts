@@ -63,7 +63,7 @@ import { liveStrategyIO, readPending, savePending, saveStrategy, startStrategy, 
 import { advancePublicRead, POLL_MINUTES } from "../strategy/publicRead.ts";
 import { desiredProfiles, profileInputs, profilesKey, syncProfiles } from "../strategy/profiles.ts";
 import { apifyClient, APIFY_TOKEN_ENV } from "../apify/client.ts";
-import type { StepOutcome, StepPolicy, StepRow } from "./policy.ts";
+import { LONG_RETRY_MINUTES, type StepOutcome, type StepPolicy, type StepRow } from "./policy.ts";
 import { NotInStorage, PictureError } from "../picture/client.ts";
 import type { LogoSetResult, PostLogo } from "../picture/contract.ts";
 import { chooseSet, postSearchPlan, TONE_RULE, type SetPaths } from "../design/logoTone.ts";
@@ -936,6 +936,9 @@ async function pickLogo(db: Db, client: ClientRow, ctx: StepContext, base: Recor
   return { status: "waiting", reason: "in_progress", recheckMinutes: 1, result };
 }
 
+/** How often tracking is asked again for a selection with a website that refused the visit (the weekly wait of policy.ts LONG_RETRY_MINUTES). */
+export const SITE_REFUSED_RECHECK_DAYS = LONG_RETRY_MINUTES / (24 * 60);
+
 export const STEPS: Record<string, StepDef> = {
   // A website for a client that has none and that nobody set (spec:
   // docs/superpowers/specs/2026-11-02-sprout-auto-onboarding-design.md,
@@ -1643,7 +1646,9 @@ export const STEPS: Record<string, StepDef> = {
   // Without a client website RivalIQ cannot follow the client, and with its
   // plan full it cannot follow anyone new (Lital, 3 Nov 2026: 40 of 40,
   // pinned): tracking waits, as a plain fact on the setup page, and starts
-  // when a website is found or a place opens. A client whose website is a
+  // when a website is found or a place opens. A chosen competitor whose
+  // website refuses the visit is the same kind of fact: tracking waits until
+  // a different competitor is chosen, and is asked again once a week. A client whose website is a
   // page on another client's site (parentPage.ts) waits for a site of its
   // own: RivalIQ would take that client's company as this one's.
   tracking: {
@@ -1669,8 +1674,12 @@ export const STEPS: Record<string, StepDef> = {
       if (!key) return { status: "failed", error: "The RivalIQ connection is not configured." };
       const api = deps.rivalIqApi(key);
       let landscape: string | null = str(set.rivaliq_landscape_id) || null;
-      const check = set.tracking_check as { code?: string; landscape_id?: string | null } | null;
-      if (landscape && check?.code === LANDSCAPE_MISSING && String(check.landscape_id ?? "") === landscape) {
+      const check = set.tracking_check as { code?: string; landscape_id?: string | null; gone?: unknown } | null;
+      // The only place a set loses its link. A link is hard to win back (the plan can be full), so it goes only when
+      // the selection decision recorded that this very landscape is gone: not in a readable, non-empty list of the
+      // account's landscapes (landscapeCheck.ts). A landscape that is there but does not cover the selection
+      // (SELECTION_NOT_COVERED), a record from another kind of check, and one about another landscape all keep it.
+      if (landscape && check?.code === LANDSCAPE_MISSING && check.gone === true && String(check.landscape_id ?? "") === landscape) {
         await deps.resetTracking(db, set.id, landscape);
         landscape = null;
       }
@@ -1690,6 +1699,13 @@ export const STEPS: Record<string, StepDef> = {
           if (e instanceof SetupError && e.code === "changed") return { status: "failed", error: e.message, soonMinutes: 5 };
           // The plan is full: tracking waits for a free place, looked at again daily.
           if (e instanceof FollowFailure && e.planFull) return { status: "waiting", reason: "rivaliq_full", recheckDays: 1, result: { set_id: set.id } };
+          // A chosen website refused the visit: tracking waits on the selection instead of failing every two hours.
+          // A different competitor starts it again at once (the selection is part of this step's inputs), and it is
+          // asked again once a week, so a refusal that was only passing does not hold tracking for good. Only when
+          // every website that was not followed refused: any other reason is a fault with its usual retry.
+          if (e instanceof FollowFailure && e.refused.length && !e.others) {
+            return { status: "waiting", reason: "site_refused", recheckDays: SITE_REFUSED_RECHECK_DAYS, result: { set_id: set.id, refused: e.refused } };
+          }
           throw e;
         }
       }

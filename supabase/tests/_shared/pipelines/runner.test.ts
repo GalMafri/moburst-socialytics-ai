@@ -9,7 +9,7 @@ import {
   MAX_POLL_MINUTES, MAX_RUN_HOURS, MAX_STEP_ATTEMPTS, POLL_MAX_SECONDS, POLL_MIN_SECONDS, runPipelineJob, retryWaitMinutes, smallDetail,
   STATE_MAX_BYTES, type RunnerDeps, type StepOutcome,
 } from "../../../functions/_shared/pipelines/runner";
-import { StepRestart, StepStop, type PipelineDefinition, type PipelineRun } from "../../../functions/_shared/pipelines/types";
+import { SelectionFact, StepRestart, StepStop, type PipelineDefinition, type PipelineRun } from "../../../functions/_shared/pipelines/types";
 
 const T0 = new Date("2026-11-07T07:20:00Z");
 const at = (minutes: number) => new Date(T0.getTime() + minutes * 60_000);
@@ -337,6 +337,33 @@ describe("runPipelineJob: limits", () => {
     expect(h.run.status).toBe("stopped");
     expect(h.run.outcome).toContain("Every watched platform failed.");
     expect(h.log.map((l) => l.outcome)).toEqual(["stopped"]);
+  });
+
+  it("a selection fact ends the run on its first try, with no retry, and keeps the fact as the run's outcome", async () => {
+    let called = 0;
+    const message = "LANDSCAPE_NOT_FOUND: no RivalIQ landscape tracks the client and the confirmed competitors. Connect tracking for this selection.";
+    const h = harness(def(async () => { called += 1; throw new SelectionFact("LANDSCAPE_NOT_FOUND", message); }));
+    const r = await h.lease();
+    // Not queued for another try: the same fact would be read again.
+    expect(r.status).toBe("failed");
+    expect(r.available_at).toBeUndefined();
+    expect(called).toBe(1);
+    expect(r.result).toMatchObject({ run_id: "run-1", fact: "LANDSCAPE_NOT_FOUND" });
+    expect(h.run.status).toBe("stopped");
+    // The message leads with the code, so the dispatch that owns the report reads the fact back from the run.
+    expect(h.run.outcome).toBe(message);
+    expect(h.log).toHaveLength(1);
+    expect(h.log[0]).toMatchObject({ attempt: 1, outcome: "stopped", detail: { fact: "LANDSCAPE_NOT_FOUND" } });
+  });
+
+  it("still tries an ordinary fault again: only a selection fact is exempt", async () => {
+    let called = 0;
+    const h = harness(def(async () => { called += 1; throw new Error("RivalIQ answered 502"); }));
+    const r = await h.lease();
+    expect(r.status).toBe("queued");
+    expect(h.run.status).toBe("running");
+    expect(h.log.map((l) => l.outcome)).toEqual(["retry"]);
+    expect(called).toBe(1);
   });
 
   it("stops a run that has gone on longer than MAX_RUN_HOURS", async () => {

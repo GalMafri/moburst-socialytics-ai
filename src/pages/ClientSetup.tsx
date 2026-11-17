@@ -31,7 +31,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loading } from "@/components/ui/loading";
 import { PlatformIcon } from "@/lib/platform-config";
-import { clientOriginLine, countryNames, declinedBrandLine, formatDate, languageNames, locationOrigin, onboardingFacts, platformName, scheduleLines, timeZoneName, type OnboardingStep } from "@/lib/display";
+import { clientOriginLine, countryNames, declinedBrandLine, formatDate, languageNames, locationOrigin, onboardingFacts, platformName, scheduleAwaitsTracking, scheduleLines, timeZoneName, type OnboardingStep } from "@/lib/display";
 import { changedColumns, EMPTY_FORM, formFromClient, keywordPhrases, rebaseForm, setByOf, type SetupForm } from "@/lib/clientSetupForm";
 import { invokeResendable, sendQuietly, writeResendable } from "@/lib/quietSend";
 import { useLifecycleStep } from "@/hooks/useLifecycleStep";
@@ -869,6 +869,8 @@ function ReportScheduleManager({ clientId, timeZone }: { clientId: string; timeZ
             kind: noun, active, nextRunAt: row?.next_run_at,
             latest: latest ? { start: latest.date_range_start, end: latest.date_range_end, ranAt: latest.created_at } : null,
             timeZone,
+            // No date is promised while the confirmed competitors are not tracked.
+            awaitsTracking: scheduleAwaitsTracking(row?.last_result),
           });
           return (
             <div key={kind} className="flex items-start gap-4 glass-inner p-inner">

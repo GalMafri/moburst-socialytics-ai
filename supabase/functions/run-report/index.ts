@@ -12,12 +12,20 @@ import { competitiveRangeError, dayInZone, socialRangeError } from "../_shared/r
 // sent twice, or a page that is reloaded, never starts a second run: an open
 // request or a running report for the client answers it.
 //
+// A competitive analysis runs only when the confirmed set is tracked
+// (_shared/competitive/selectionTracking.ts). Asked for before that, the run
+// is a waiting run: the dispatch checks tracking before it makes anything,
+// waits while it has not started, and starts the analysis on its own once it
+// has. The answer says so (waiting_for: "tracking"), read here from what the
+// last check left on the set; it is never made again and again in between.
+//
 // A report id (an older screen's "Run now" on a run that did not finish)
 // asks for that report's kind and period again, the same way.
 
 import { createClient } from "../_shared/supabase.ts";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { type ReportRange, STUCK_AFTER_MINUTES } from "../_shared/reports/payloads.ts";
+import { trackedOnRecord } from "../_shared/competitive/selectionTracking.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -36,6 +44,8 @@ Deno.serve(async (req) => {
     let kind: Kind = body.kind === "competitive" ? "competitive" : "social";
     let clientId: string | undefined = body.client_id || undefined;
     let range: ReportRange = { start: body.date_range_start || "", end: body.date_range_end || "" };
+    /** What the run waits for before it can start, when the stored state already says so. */
+    let waitingFor: "tracking" | undefined;
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
@@ -76,15 +86,18 @@ Deno.serve(async (req) => {
       const rangeError = competitiveRangeError(range);
       if (rangeError) return json({ error: rangeError }, 400);
       // The run reads the client's confirmed selection; tracking for it is
-      // the lifecycle's, and the dispatch waits for it when it is still starting.
-      const { data: set } = await admin.from("competitor_sets").select("id").eq("client_id", clientId).in("status", RUNNABLE_SETS)
+      // the lifecycle's. While the selection is not tracked the request is
+      // taken as a waiting run: the dispatch makes nothing until it is.
+      const { data: set } = await admin.from("competitor_sets").select("id, rivaliq_landscape_id, tracking_check").eq("client_id", clientId).in("status", RUNNABLE_SETS)
         .order("confirmed_at", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
       if (!set) return json({ error: `${client.name} has no confirmed competitors yet.` }, 422);
+      if (!trackedOnRecord(set)) waitingFor = "tracking";
     }
 
     // An open request, or a report running now, answers this one.
+    const waits = waitingFor ? { waiting_for: waitingFor } : {};
     const existing = await openRequest(admin, clientId, kind);
-    if (existing) return json(existing);
+    if (existing) return json({ ...existing, ...waits });
     const table = kind === "competitive" ? "competitive_reports" : "reports";
     const { data: active } = await admin.from(table).select("id, created_at, date_range_start, date_range_end")
       .eq("client_id", clientId).eq("status", "running").gt("created_at", new Date(Date.now() - STUCK_AFTER_MINUTES * 60000).toISOString())
@@ -106,12 +119,12 @@ Deno.serve(async (req) => {
     if (jobError) {
       // Two requests at once: the one-open-run index lets one in, and that one answers both.
       const raced = jobError.code === "23505" ? await openRequest(admin, clientId, kind) : null;
-      if (raced) return json(raced);
+      if (raced) return json({ ...raced, ...waits });
       throw new Error(jobError.message);
     }
 
     kickWorker();
-    return json({ job_id: job.id, kind, range, requested_at: job.created_at, queued: true });
+    return json({ job_id: job.id, kind, range, requested_at: job.created_at, queued: true, ...waits });
   } catch (err) {
     if (err instanceof AuthzError) return json({ error: err.message }, err.status);
     const msg = err instanceof Error ? err.message : String(err);

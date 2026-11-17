@@ -99,7 +99,9 @@ import { createClient } from "../_shared/supabase.ts";
 import { secretEquals } from "../_shared/auth/secretEquals.ts";
 import { buildCompetitivePayload, buildSocialPayload } from "../_shared/reports/payloads.ts";
 import { closeAbandonedRuns } from "../_shared/reports/schedule.ts";
-import { checkClientLandscape, landscapeClient, recordTrackingCheck, RIVALIQ_UNAVAILABLE, type LandscapeCheck } from "../_shared/competitive/landscapeCheck.ts";
+import { checkSelectionLandscape, landscapeClient, recordTrackingCheck, RIVALIQ_UNAVAILABLE, type LandscapeCheck } from "../_shared/competitive/landscapeCheck.ts";
+import { readSelection } from "../_shared/competitive/selectionTracking.ts";
+import { noteSchedulesTracking } from "../_shared/lifecycle/trackingNote.ts";
 import { makePoster, runDispatch, type DispatchDeps } from "./dispatch.ts";
 import { alertTest, ISSUES_WEBHOOK_ENV, postIssue } from "../_shared/alerts/slack.ts";
 import { bindRefreshFeed, runFeedJob } from "./feed.ts";
@@ -181,13 +183,16 @@ Deno.serve(async (req) => {
       post,
       // deno-lint-ignore no-explicit-any
       buildSocialPayload: (a) => buildSocialPayload({ supabase: db, ...a } as any),
+      // The request names the client as the check below does (landscapeClient),
+      // so the pipeline's landscape step decides on the same client, competitors and link.
       // deno-lint-ignore no-explicit-any
-      buildCompetitivePayload: (a) => buildCompetitivePayload({ supabase: db, ...a } as any),
-      // The check run-report makes before a manual run; a dry run reads RivalIQ
-      // too, but only a real run records the outcome on the set.
+      buildCompetitivePayload: async (a) => buildCompetitivePayload({ supabase: db, ...a, client: { ...a.client, website_url: (await landscapeClient(db, a.client)).website_url } } as any),
+      // Is the confirmed selection tracked (selectionTracking.ts, the decision
+      // the pipeline's landscape step makes too)? A dry run reads RivalIQ too,
+      // but only a real run records the outcome on the set.
       checkLandscape: async (client, set) => {
         if (!rivaliqKey) return { ok: false, code: RIVALIQ_UNAVAILABLE, status: null, message: "RIVALIQ_API_KEY is not configured." } satisfies LandscapeCheck;
-        const check = await checkClientLandscape(rivaliqKey, await landscapeClient(db, client), set.rivaliq_landscape_id);
+        const check = await checkSelectionLandscape(rivaliqKey, await landscapeClient(db, client), await readSelection(db, set.id), set.rivaliq_landscape_id);
         if (!dryRun) await recordTrackingCheck(db, set.id, set.rivaliq_landscape_id, check);
         return check;
       },
@@ -211,7 +216,13 @@ Deno.serve(async (req) => {
     const refreshFeed = bindRefreshFeed(db, { rivaliqKey, anthropicKey: Deno.env.get("ANTHROPIC_API_KEY"), secret });
 
     // One worker pass: lease and run due jobs (the per-minute tick, and the sweep's repair).
-    const tick = (): Promise<TickResult> => workerTick({
+    // First, each competitive schedule's note about tracking is brought in line with its client's set
+    // (trackingNote.ts): two small reads, never an error, and the one tracking fact a client's screens read.
+    const tick = async (): Promise<TickResult> => {
+      await noteSchedulesTracking(db);
+      return runQueue();
+    };
+    const runQueue = (): Promise<TickResult> => workerTick({
       now: () => new Date(),
       lease: () => jobs.lease(LEASE_SECONDS),
       run: (job) => {

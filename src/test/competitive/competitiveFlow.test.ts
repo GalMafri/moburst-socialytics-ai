@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CHOSEN_AUTOMATICALLY, describeReport, describeSelection, describeTracking, pickRunSelection, competitiveRecovery, stateLine, type SetRow } from "@/lib/competitiveFlow";
+import { CHOSEN_AUTOMATICALLY, describeAnalysis, describeReport, describeSelection, describeTracking, pickRunSelection, competitiveRecovery, stateLine, type SetRow } from "@/lib/competitiveFlow";
 
 const set = (o: Partial<SetRow> & { id: string; status: string; created_at: string }): SetRow => o as SetRow;
 
@@ -45,28 +45,107 @@ describe("pickRunSelection", () => {
 });
 
 describe("describeTracking", () => {
-  it("states tracking as a fact: since when, or nothing while the lifecycle connects it", () => {
-    expect(describeTracking(set({ id: "a", status: "confirmed", created_at: "2026-09-01" }))).toEqual({ headline: "", ready: false });
+  const untracked = set({ id: "a", status: "confirmed", created_at: "2026-09-01" });
+  const waiting = (waiting_for: string, extra: Record<string, unknown> = {}) => ({ step: "tracking", status: "waiting", result: { waiting_for, ...extra } });
+  const NOT_STARTED = { headline: "Not started yet", ready: false, state: "not_started" };
+
+  it("tracked: says since when", () => {
     const since = describeTracking(set({ id: "a", status: "confirmed", created_at: "2026-09-01", rivaliq_landscape_id: "612909", tracked_since: "2026-09-23T12:44:47Z" }));
-    expect(since).toEqual({ headline: "Tracked since Sep 23, 2026", ready: true });
+    expect(since).toEqual({ headline: "Tracked since Sep 23, 2026", ready: true, state: "tracked" });
     expect(describeTracking(set({ id: "a", status: "complete", created_at: "2026-09-01", rivaliq_landscape_id: "612909" })).headline).toBe("Tracked in RivalIQ");
+    // A set with no link of its own, once the shared decision found one landscape holding the whole selection.
+    const found = describeTracking(set({ id: "a", status: "confirmed", created_at: "2026-09-01",
+      tracking_check: { code: "ok", landscape_id: null, message: null, checked_at: "2026-11-17T07:00:00Z", found_landscape_id: "640" } }));
+    expect(found.ready).toBe(true);
   });
 
-  it("says nothing about a landscape that has gone; the lifecycle sets it up again", () => {
+  it("untracked: says tracking has not started, never a blank, whatever the screen could read", () => {
+    expect(describeTracking(untracked)).toEqual(NOT_STARTED);
+    expect(describeTracking(untracked, null)).toEqual(NOT_STARTED);
+    // A step that is running, was not finished, or waits for something this screen has no words for.
+    for (const step of [{ step: "tracking", status: "running", result: null }, { step: "tracking", status: "failed", result: { waiting_for: "rivaliq_full" } }, waiting("something_new")]) {
+      expect(describeTracking(untracked, step)).toEqual(NOT_STARTED);
+    }
+    // What the earlier check left on a set with no link ("ok" for a landscape tracking the client alone) is not tracking.
+    const lax = set({ id: "a", status: "confirmed", created_at: "2026-09-01", tracking_check: { code: "ok", landscape_id: null, message: null, checked_at: "2026-11-16T07:00:00Z" } });
+    expect(describeTracking(lax)).toEqual(NOT_STARTED);
+  });
+
+  it("waiting: says what tracking waits for, in each state the lifecycle can be in", () => {
+    const line = (waiting_for: string, extra: Record<string, unknown> = {}) => stateLine(describeTracking(untracked, waiting(waiting_for, extra)));
+    expect(line("rivaliq_full")).toBe("Not started yet. The tracking plan is full. Tracking starts when a place opens.");
+    expect(line("client_website")).toBe("Not started yet. Tracking starts once the client's website is found.");
+    expect(line("own_site")).toBe("Not started yet. The client's website is a page on another client's site, so tracking starts once the client has a site of its own.");
+    expect(line("site_refused", { refused: ["Tailspin Cycles"] })).toBe("Not started yet. The website of Tailspin Cycles does not allow tracking. Tracking starts once a different competitor is chosen.");
+    expect(line("site_refused", { refused: ["Tailspin Cycles", "Fabrikam Wheels"] })).toBe("Not started yet. The websites of Tailspin Cycles and Fabrikam Wheels do not allow tracking. Tracking starts once different competitors are chosen.");
+    expect(line("site_refused")).toBe("Not started yet. A chosen competitor's website does not allow tracking. Tracking starts once a different competitor is chosen.");
+    expect(line("selection")).toBe("Not started yet. Tracking starts once three competitors with websites of their own are chosen.");
+    expect(line("analysis_running")).toBe("Not started yet. Tracking starts once the analysis running now is ready.");
+    expect(line("in_progress")).toBe("Starting. The competitors are being added to tracking.");
+    expect(describeTracking(untracked, waiting("in_progress")).state).toBe("starting");
+    for (const state of ["rivaliq_full", "client_website", "own_site", "site_refused", "selection", "analysis_running", "in_progress"]) {
+      expect(describeTracking(untracked, waiting(state)).ready).toBe(false);
+      expect(line(state)).not.toMatch(/RivalIQ|waiting_for|rivaliq_full|site_refused|landscape|undefined|null/);
+    }
+  });
+
+  it("selection not covered: tracking is there, but not for this selection; says which company, that tracking stays, and that the analysis waits", () => {
+    const linked = (uncovered?: unknown) => set({ id: "a", status: "complete", created_at: "2026-09-01", rivaliq_landscape_id: "501", tracked_since: "2026-09-23T12:44:47Z",
+      tracking_check: { code: "RIVALIQ_SELECTION_NOT_COVERED", landscape_id: "501", message: "for the team", checked_at: "2026-11-17T07:00:00Z", ...(uncovered ? { uncovered } : {}) } });
+    const one = describeTracking(linked({ client: false, competitors: ["Contoso Rides"] }));
+    expect(one).toEqual({
+      headline: "Does not cover this selection", ready: false, state: "not_covered",
+      detail: "The tracked companies do not include Contoso Rides. The current tracking stays in place, and the analysis waits until the tracked companies match the selection.",
+    });
+    expect(describeTracking(linked({ client: false, competitors: ["Fabrikam Wheels", "Contoso Rides"] })).detail)
+      .toBe("The tracked companies do not include Fabrikam Wheels and Contoso Rides. The current tracking stays in place, and the analysis waits until the tracked companies match the selection.");
+    expect(describeTracking(linked({ client: true, competitors: [] })).detail)
+      .toBe("The tracked companies do not include the client as one company. The current tracking stays in place, and the analysis waits until the tracked companies match the selection.");
+    expect(describeTracking(linked()).detail)
+      .toBe("The tracked companies do not match the confirmed competitors. The current tracking stays in place, and the analysis waits until the tracked companies match the selection.");
+    // The lifecycle's own step is done for a linked set, so it adds nothing here; and nothing asks anyone to act or names a vendor.
+    expect(describeTracking(linked({ client: false, competitors: ["Contoso Rides"] }), { step: "tracking", status: "done", result: {} })).toEqual(one);
+    expect(stateLine(one)).not.toMatch(/RivalIQ|landscape|reset|set up|connect|fail|could not|undefined/i);
+    expect(describeAnalysis({ headline: "Three competitors confirmed", ready: true }, one)).toEqual({ headline: "Runs once tracking covers this selection", ready: false });
+  });
+
+  it("a landscape that has gone is not tracking; the lifecycle starts it again, and only then is that said", () => {
     const gone = describeTracking(set({ id: "a", status: "complete", created_at: "2026-09-01", rivaliq_landscape_id: "612909",
+      tracking_check: { code: "RIVALIQ_LANDSCAPE_MISSING", landscape_id: "612909", message: "gone", checked_at: "2026-10-01T07:00:00Z", gone: true } }));
+    expect(gone).toEqual({ headline: "Not tracked right now", detail: "Tracking is starting again.", ready: false, state: "gone" });
+    expect(describeAnalysis({ headline: "Three competitors confirmed", ready: true }, gone)).toEqual({ headline: "Runs once tracking has started", ready: false });
+    // An older record that names no cause: not tracked, and no promise that anything is starting again.
+    const old = describeTracking(set({ id: "a", status: "complete", created_at: "2026-09-01", rivaliq_landscape_id: "612909",
       tracking_check: { code: "RIVALIQ_LANDSCAPE_MISSING", landscape_id: "612909", message: "gone", checked_at: "2026-10-01T07:00:00Z" } }));
-    expect(gone).toEqual({ headline: "", ready: false });
+    expect(old).toEqual({ headline: "Not tracked right now", ready: false, state: "not_tracked" });
     // A check about an earlier landscape says nothing about this one.
     const stale = describeTracking(set({ id: "a", status: "confirmed", created_at: "2026-09-01", rivaliq_landscape_id: "612909",
-      tracking_check: { code: "RIVALIQ_LANDSCAPE_MISSING", landscape_id: "500", message: null, checked_at: "2026-10-01T07:00:00Z" } }));
+      tracking_check: { code: "RIVALIQ_LANDSCAPE_MISSING", landscape_id: "500", message: null, checked_at: "2026-10-01T07:00:00Z", gone: true } }));
     expect(stale.ready).toBe(true);
   });
 
   it("never asks anyone to connect or confirm anything", () => {
-    const states = [describeTracking(null), describeTracking(set({ id: "d", status: "draft", created_at: "2026-09-01" })),
+    const states = [describeTracking(null), describeTracking(set({ id: "d", status: "draft", created_at: "2026-09-01" })), describeTracking(untracked),
       describeSelection([]), describeSelection([set({ id: "d", status: "draft", created_at: "2026-09-01" })])];
     for (const st of states) expect(stateLine(st)).not.toMatch(/connect|confirm a|set up|first/i);
-    expect(describeTracking(null).ready).toBe(false);
+    expect(describeTracking(null)).toEqual({ headline: "", ready: false, state: "none" });
+    expect(describeTracking(set({ id: "d", status: "draft", created_at: "2026-09-01" }))).toEqual({ headline: "", ready: false, state: "none" });
+  });
+});
+
+describe("describeAnalysis", () => {
+  const chosen = describeSelection([set({ id: "a", status: "confirmed", created_at: "2026-09-01", confirmed_at: "2026-09-02" })]);
+  it("tracked: an analysis is ready to run", () => {
+    const tracked = describeTracking(set({ id: "a", status: "confirmed", created_at: "2026-09-01", rivaliq_landscape_id: "612909" }));
+    expect(describeAnalysis(chosen, tracked)).toEqual({ headline: "Ready to run", ready: false });
+  });
+  it("untracked or waiting: it runs once tracking has started, and is never offered as ready", () => {
+    const untracked = set({ id: "a", status: "confirmed", created_at: "2026-09-01" });
+    expect(describeAnalysis(chosen, describeTracking(untracked))).toEqual({ headline: "Runs once tracking has started", ready: false });
+    expect(describeAnalysis(chosen, describeTracking(untracked, { step: "tracking", status: "waiting", result: { waiting_for: "rivaliq_full" } }))).toEqual({ headline: "Runs once tracking has started", ready: false });
+  });
+  it("says nothing before competitors are chosen", () => {
+    expect(describeAnalysis(describeSelection([]), describeTracking(null))).toEqual({ headline: "", ready: false });
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { describeFollowFailure, FollowFailure, followFailure } from '../../../supabase/functions/_shared/competitive/rivaliqFollowFailure';
+import { describeFollowFailure, FollowFailure, followFailure, refusedVisit } from '../../../supabase/functions/_shared/competitive/rivaliqFollowFailure';
 
 describe('describeFollowFailure', () => {
   it('turns the credits snapshot into the plan sentence, names blocked websites, and keeps other errors short', () => {
@@ -23,5 +23,39 @@ describe('followFailure', () => {
     expect(full.planFull).toBe(true);
     expect(full.message).toMatch(/plan tracks 40 distinct companies/);
     expect(followFailure([{ name: 'Calm', result: { status: 3, error: 'Response code 403' } }]).planFull).toBe(false);
+  });
+
+  it('names each company whose website refused the visit, by the status and RivalIQ\'s own words, and counts every other reason apart', () => {
+    const REFUSED = 'ProblemFetchingUrlError: HTTPError: Response code 403 ()';
+    const failure = followFailure([
+      { name: 'Tailspin Cycles', result: { status: 3, error: { message: REFUSED } } },
+      { name: 'Fabrikam Wheels', result: { status: 3, error: REFUSED } },
+      { name: 'Proseware Gear', result: { status: 3, error: { code: 'ProblemFetchingUrlError', message: 'HTTPError: Response code 403 ()' } } },
+      { name: 'Contoso Rides', result: { status: 3, error: 'Unknown company' } },
+    ]);
+    expect(failure.refused).toEqual(['Tailspin Cycles', 'Fabrikam Wheels', 'Proseware Gear']);
+    expect(failure.others).toBe(1);
+    expect(failure.planFull).toBe(false);
+    expect(failure.message).toContain("the website refused RivalIQ's visit.");
+    // Every website refused: nothing else is counted.
+    expect(followFailure([{ name: 'Tailspin Cycles', result: { status: 3, error: { message: REFUSED } } }])).toMatchObject({ refused: ['Tailspin Cycles'], others: 0 });
+  });
+
+  it('does not take any text with 403 in it for a refusal', () => {
+    const not = (result: { status?: number; error?: unknown }) => expect(refusedVisit({ result }), JSON.stringify(result)).toBe(false);
+    not({ status: 3, error: 'Response code 403' });
+    not({ status: 3, error: 'Forbidden' });
+    not({ status: 3, error: 'Company 14030 could not be read' });
+    not({ status: 3, error: { message: 'ProblemFetchingUrlError: HTTPError: Response code 4031' } });
+    not({ status: 3, error: { message: 'ProblemFetchingUrlError: HTTPError: Response code 503 ()' } });
+    not({ status: 3, error: { message: 'Earlier: ProblemFetchingUrlError: HTTPError: Response code 403 ()' } });
+    // The words, but for a URL that was followed, is still pending, or has no status: not a refusal either.
+    for (const status of [1, 2, undefined]) not({ status, error: { message: 'ProblemFetchingUrlError: HTTPError: Response code 403 ()' } });
+    // The plan's allowance is a place to wait for, never a refusal.
+    not({ status: 3, error: { data: { credits: { plan: 40, distinct: 40 } }, message: 'ProblemFetchingUrlError: HTTPError: Response code 403 ()' } });
+    expect(refusedVisit({ result: { status: 3, error: { message: 'ProblemFetchingUrlError: HTTPError: Response code 403 ()' } } })).toBe(true);
+    expect(followFailure([{ name: 'Tailspin Cycles', result: { status: 3, error: { data: { credits: { plan: 40, distinct: 40 } } } } }])).toMatchObject({ planFull: true, refused: [], others: 0 });
+    expect(followFailure([{ name: 'Contoso Rides', result: { status: 3, error: 'Unknown company' } }])).toMatchObject({ refused: [], others: 1 });
+    expect(new FollowFailure('x', false)).toMatchObject({ refused: [], others: 0 });
   });
 });

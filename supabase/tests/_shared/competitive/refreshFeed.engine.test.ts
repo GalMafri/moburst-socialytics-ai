@@ -18,7 +18,11 @@ const collect = vi.fn(async () => LINKEDIN_ANSWER);
 
 vi.mock("../../../functions/_shared/competitive/landscapeCheck", async (original) => ({
   ...(await original<typeof import("../../../functions/_shared/competitive/landscapeCheck")>()),
-  checkClientLandscape: vi.fn(async () => ({ ok: true, linked: true, summary: { id: "ls-1", client_company_id: "1", companies: [{ id: 1, name: "Moburst" }, { id: 2, name: "Peer" }] } })),
+  // One read, two answers: the feed's own gate, and the selection decision that is the one record.
+  checkFeedLandscape: vi.fn(async () => ({
+    feed: { ok: true, linked: true, summary: { id: "ls-1", client_company_id: "1", companies: [{ id: 1, name: "Moburst" }, { id: 2, name: "Peer" }] } },
+    selection: { ok: true, linked: true, selection: true, summary: { id: "ls-1", client_company_id: "1", companies: [] } },
+  })),
   recordTrackingCheck: vi.fn(async () => {}),
 }));
 vi.mock("../../../functions/_shared/competitive/rivaliqFetch", () => ({
@@ -35,7 +39,7 @@ vi.mock("../../../functions/_shared/competitive/ownedSource", () => ({
 }));
 
 const { refreshCompetitorFeed, refreshCompetitorFeedOnDemand } = await import("../../../functions/_shared/competitive/refreshFeed");
-const { checkClientLandscape } = await import("../../../functions/_shared/competitive/landscapeCheck");
+const { checkFeedLandscape, recordTrackingCheck } = await import("../../../functions/_shared/competitive/landscapeCheck");
 const { bindRefreshFeed, runFeedJob, FEED_RETRY_MINUTES, LINKEDIN_NOT_COLLECTED, TOPICS_NOT_DETECTED } = await import("../../../functions/run-scheduled-jobs/feed");
 import type { ScheduledJob } from "../../../functions/_shared/scheduled-jobs/types";
 
@@ -312,16 +316,35 @@ describe("refreshCompetitorFeed and the LinkedIn source switch", () => {
   });
 
   it("asks the landscape check by name only for a client whose website is a page on another client's site", async () => {
-    const check = vi.mocked(checkClientLandscape);
+    const check = vi.mocked(checkFeedLandscape);
     check.mockClear();
     const db = admin(DEFAULTS);
     db.tables.clients.push({ id: "kit", name: "Kitcaster by Moburst", website_url: "https://www.moburst.com/services/organic/podcast-booking/", archived_at: null, demo_job_id: null });
-    check.mockImplementationOnce(async () => ({ ok: false, code: "RIVALIQ_CLIENT_NOT_TRACKED", landscapeId: null, message: "No RivalIQ landscape tracks Kitcaster by Moburst." }) as never);
+    const untracked = { ok: false, code: "RIVALIQ_CLIENT_NOT_TRACKED", landscapeId: null, message: "No RivalIQ landscape tracks Kitcaster by Moburst." };
+    check.mockImplementationOnce(async () => ({ feed: untracked, selection: { ...untracked, selection: true } }) as never);
     await expect(refreshCompetitorFeed(db, "kit", ENV)).rejects.toMatchObject({ status: 422 });
     expect(check.mock.calls[0].slice(0, 2)).toEqual(["rq", { name: "Kitcaster by Moburst", website_url: null }]);
     // A plain-domain client is asked with its website, as before.
     await refreshCompetitorFeed(db, MOBURST, ENV);
     expect(check.mock.calls[1].slice(0, 2)).toEqual(["rq", { name: "Moburst", website_url: "https://moburst.com" }]);
+  });
+
+  it("goes on reading the feed from a landscape that does not hold the whole selection, keeps the link, and records the selection decision", async () => {
+    const check = vi.mocked(checkFeedLandscape);
+    const record = vi.mocked(recordTrackingCheck);
+    record.mockClear();
+    // The linked landscape tracks the client, so the feed can be read; it lacks one confirmed competitor, so an analysis waits.
+    const notCovered = { ok: false, code: "RIVALIQ_SELECTION_NOT_COVERED", landscapeId: "ls-1", selection: true, uncovered: { client: false, competitors: ["Peer Two"] }, message: "does not hold the confirmed selection" };
+    check.mockImplementationOnce(async () => ({
+      feed: { ok: true, linked: true, summary: { id: "ls-1", client_company_id: "1", companies: [{ id: 1, name: "Moburst" }, { id: 2, name: "Peer" }] } },
+      selection: notCovered,
+    }) as never);
+    const db = admin(DEFAULTS);
+    await refreshCompetitorFeed(db, MOBURST, ENV);
+    expect(db.tables.rivaliq_snapshots).toHaveLength(1);
+    expect(db.tables.competitor_sets[0].rivaliq_landscape_id).toBe("ls-1");
+    // The one record is the selection decision, for the set and its link: the feed's own "ok" is written nowhere.
+    expect(record.mock.calls).toEqual([[db, "set-1", "ls-1", notCovered]]);
   });
 
   it("queues nothing for another client while Moburst is on shadow", async () => {

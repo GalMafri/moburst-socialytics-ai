@@ -1,5 +1,6 @@
 import { competitiveRangeError } from "../../supabase/functions/_shared/reports/competitiveRange";
 import { useReportRun } from "@/hooks/useReportRun";
+import { useTrackingStep } from "@/hooks/useTrackingStep";
 import { ReportRunStatus } from "@/components/reports/ReportRunStatus";
 import { RUN_ESTIMATE } from "@/lib/reportRun";
 import { formatDate, formatDateTime, listedRuns } from "@/lib/display";
@@ -9,6 +10,11 @@ import { formatDate, formatDateTime, listedRuns } from "@/lib/display";
 // finish or its figures do not pass the checks. So this page shows it running
 // from the request until the report exists (useReportRun), and never a
 // failure.
+//
+// An analysis runs only when the confirmed competitors are tracked. While
+// they are not, the page says so and offers no run: one asked for now would
+// only wait. A request already waiting shows as waiting for tracking, and
+// starts on its own.
 
 import { useEffect, useRef, useState } from "react";
 import { describeTracking, pickRunSelection, stateLine, type SetRow } from "@/lib/competitiveFlow";
@@ -72,7 +78,8 @@ export default function CompetitiveRun() {
     enabled: !!id,
   });
   const { runnable: confirmedSet, newerDraft } = pickRunSelection((sets || []) as SetRow[]);
-  const trackingState = describeTracking(confirmedSet);
+  const trackingStep = useTrackingStep(id, !!confirmedSet);
+  const trackingState = describeTracking(confirmedSet, trackingStep.data);
 
   const { data: selectedCompetitors } = useQuery({
     queryKey: ["confirmed-competitors", confirmedSet?.id],
@@ -120,7 +127,7 @@ export default function CompetitiveRun() {
   }, [readyId, id]);
 
   const runAnalysis = async () => {
-    if (active || run.sending || !rangeOk || !confirmedSet) return;
+    if (active || run.sending || !rangeOk || !confirmedSet || !trackingState.ready) return;
     runStartedAt.current = performance.now();
     track("competitive_analysis_started", { client_id: id, entity_id: confirmedSet?.id });
     await run.start({ date_range_start: range.start, date_range_end: range.end });
@@ -244,7 +251,15 @@ export default function CompetitiveRun() {
             </div>
           )}
           <div className="border-t border-[rgba(255,255,255,0.06)] pt-4 space-y-4">
-            {run.view.state === "idle" && (
+            {run.view.state === "idle" && !trackingState.ready && (
+              <p className="t-secondary" role="status">
+                {trackingState.state === "not_covered"
+                  ? trackingState.detail
+                  : <>The analysis runs once tracking of these competitors has started.{trackingState.detail ? ` ${trackingState.detail}` : ""}</>}
+              </p>
+            )}
+
+            {run.view.state === "idle" && trackingState.ready && (
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                 <Button onClick={runAnalysis} disabled={!rangeOk || run.isLoading || run.sending}>
                   <Play /> Run competitive analysis
@@ -257,7 +272,7 @@ export default function CompetitiveRun() {
               </div>
             )}
 
-            <ReportRunStatus view={run.view} kind="competitive" />
+            <ReportRunStatus view={run.view} kind="competitive" tracked={trackingState.ready} notCovered={trackingState.state === "not_covered"} />
 
             {run.view.state === "ready" && (
               <div className="flex flex-wrap items-center gap-3">
