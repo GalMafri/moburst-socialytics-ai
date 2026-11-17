@@ -31,6 +31,8 @@ export interface SourceFault {
   status: number | null;
   /** The source's own words, for operators only: never shown on a screen. */
   message: string;
+  /** Set when the source's kept words could not be read for this record: the kind is then not known, and is given as transient. */
+  unread?: true;
 }
 
 const CREDENTIAL_STATUSES: ReadonlySet<number> = new Set([401, 402, 403]);

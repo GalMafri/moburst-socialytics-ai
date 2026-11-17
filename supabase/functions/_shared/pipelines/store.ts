@@ -139,9 +139,54 @@ export function makeStepLog(db: Db): StepLog {
 
 const KEY = /^[a-z0-9][a-z0-9_.-]{0,119}$/i;
 
+/**
+ * A payload the index says is kept and that could not be read: its download
+ * failed, came back with nothing, or is not the JSON that was stored. It is
+ * never answered as null, because null means "no such key" and every caller
+ * reads that as "nothing was kept" (an empty list, a step not done yet). A
+ * step that meets it fails its try, and the runner tries the step again
+ * after its growing wait, up to its limit of tries (runner.ts failedTry).
+ */
+export class PayloadUnread extends Error {
+  key: string;
+  /** The HTTP status storage answered with, when it answered. */
+  status: number | null;
+  constructor(key: string, why: string, status: number | null = null) {
+    super(`The payload ${key} is kept but could not be read: ${why}`);
+    this.name = "PayloadUnread";
+    this.key = key;
+    this.status = status;
+  }
+}
+
+/** Tries of one payload download before the read is given up as unread. */
+export const PAYLOAD_READ_TRIES = 3;
+/** The waits between those tries: short, so a read costs a step under a second at worst. */
+export const PAYLOAD_READ_WAITS_MS: readonly number[] = [150, 450];
+
+/**
+ * The HTTP status in a storage error, or null when storage did not answer.
+ * supabase-js's storage client answers { data: null, error } with a
+ * StorageApiError carrying `status` (and `statusCode` as text) when storage
+ * answered, and a StorageUnknownError with neither when the request itself
+ * failed (storage-js lib/common/errors.ts and fetch.ts).
+ */
+function storageStatus(error: unknown): number | null {
+  const e = (error ?? {}) as { status?: unknown; statusCode?: unknown };
+  for (const v of [e.status, e.statusCode]) {
+    const n = typeof v === "number" ? v : typeof v === "string" && /^\d{3}$/.test(v) ? Number(v) : NaN;
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+/** A download worth another try at once: storage did not answer, or answered that it is busy or broken. An answer about the request itself (not found, not allowed) is final. */
+const downloadRetryable = (status: number | null): boolean => status === null || status === 408 || status === 425 || status === 429 || status >= 500;
+
 /** Large in-between data for one run, in the private pipeline-payloads bucket, indexed for expiry. */
-export function makePayloadStore(db: Db, runId: string, opts: { now?: () => Date; ttlDays?: number } = {}): PayloadStore {
+export function makePayloadStore(db: Db, runId: string, opts: { now?: () => Date; ttlDays?: number; sleep?: (ms: number) => Promise<void> } = {}): PayloadStore {
   const now = opts.now ?? (() => new Date());
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const path = (key: string) => `runs/${runId}/${key}.json`;
   const check = (key: string) => { if (!KEY.test(key)) throw new Error(`Payload key ${JSON.stringify(key)} is not a plain name.`); };
   return {
@@ -158,13 +203,31 @@ export function makePayloadStore(db: Db, runId: string, opts: { now?: () => Date
       }, { onConflict: "run_id,key" }));
       return { key, bytes: bytes.byteLength };
     },
+    /**
+     * The value kept under the key. Null only when the index has no such key
+     * (a failed read of the index throws). A key that is there and cannot be
+     * read is tried PAYLOAD_READ_TRIES times when the failure is one that
+     * passes, then thrown as PayloadUnread: never null, never empty.
+     */
     async get<T>(key: string) {
       check(key);
       const row = (await must(db.from("pipeline_payloads").select("storage_path").eq("run_id", runId).eq("key", key).maybeSingle())) as { storage_path: string } | null;
       if (!row) return null;
-      const { data, error } = await db.storage.from(PAYLOAD_BUCKET).download(row.storage_path);
-      if (error || !data) return null;
-      return JSON.parse(new TextDecoder().decode(await data.arrayBuffer())) as T;
+      for (let attempt = 1; ; attempt++) {
+        let why: string;
+        let status: number | null = null;
+        try {
+          const { data, error } = await db.storage.from(PAYLOAD_BUCKET).download(row.storage_path);
+          if (!error && data) return JSON.parse(new TextDecoder().decode(await data.arrayBuffer())) as T;
+          status = error ? storageStatus(error) : null;
+          why = error ? String((error as { message?: unknown }).message ?? "the download failed") : "the download came back with nothing";
+        } catch (e) {
+          // The request did not get through, or what came back is not the JSON that was stored (a download cut short).
+          why = e instanceof Error ? e.message : String(e);
+        }
+        if (attempt >= PAYLOAD_READ_TRIES || !downloadRetryable(status)) throw new PayloadUnread(key, `${why}${status ? ` (${status})` : ""}`.slice(0, 300), status);
+        await sleep(PAYLOAD_READ_WAITS_MS[attempt - 1] ?? PAYLOAD_READ_WAITS_MS[PAYLOAD_READ_WAITS_MS.length - 1]);
+      }
     },
   };
 }

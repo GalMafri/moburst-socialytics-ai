@@ -58,6 +58,7 @@ import {
 } from "../social/nodes.ts";
 import { gammaClient, GAMMA_POLL_SECONDS, sproutReader, sproutRequests, SPROUT_READS, type GammaClient, type SproutReader } from "../social/providers.ts";
 import { KEEP, KEPT, keptAnswer, replayOf } from "../social/replay.ts";
+import { PayloadUnread } from "../store.ts";
 import { runInsights } from "../social/runInsights.ts";
 import { readStoredTrends, type IndustryTrends } from "../social/storedTrends.ts";
 import { FALLBACK_SPROUT_CUSTOMER_ID } from "../../sprout/customer.ts";
@@ -194,8 +195,9 @@ export function socialPipeline(deps: SocialDeps = {}): PipelineDefinition {
         try {
           return await briefBatch(ctx);
         } catch (e) {
-          // As n8n's agent continues on its error: the raw brief, and a warning.
-          if (ctx.attempt < BRIEF_TRIES) throw e;
+          // As n8n's agent continues on its error: the raw brief, and a warning. A payload that could not be read is not
+          // the agent's error: the step is tried again, never passed over.
+          if (e instanceof PayloadUnread || ctx.attempt < BRIEF_TRIES) throw e;
           return { type: "next", step: "combine", detail: { brief: "not analyzed", error: (e instanceof Error ? e.message : String(e)).slice(0, 300) } };
         }
       },
@@ -337,8 +339,9 @@ export function socialPipeline(deps: SocialDeps = {}): PipelineDefinition {
           await ctx.payloads.put(KEPT.insights, got.row, KEEP);
           return go(got.row, { insights: got.from, source: got.row.source, facts: got.row.facts.length });
         } catch (e) {
-          // The first try's error is the step's: tried again, with the answer already kept.
-          if (ctx.attempt < INSIGHTS_TRIES) throw e;
+          // The first try's error is the step's: tried again, with the answer already kept. So is a payload that could
+          // not be read, on any try: the report never goes on without insights because of it.
+          if (e instanceof PayloadUnread || ctx.attempt < INSIGHTS_TRIES) throw e;
           // As a report whose insights are not worded yet: the deck says what the analysis says, and the report goes on.
           return go(null, { insights: "not had", error: (e instanceof Error ? e.message : String(e)).slice(0, 300) });
         }

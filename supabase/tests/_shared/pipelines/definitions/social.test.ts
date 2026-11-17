@@ -457,6 +457,37 @@ describe("social_v1 on stored trends (Trends plan, Task 16)", () => {
     expect(steps[1].detail).toMatchObject({ insights: "not had", next: "deck" });
   });
 
+  it("a payload that cannot be read is never taken for insights that can't be had: the step is tried again until it reads, and the report has its insights", async () => {
+    const { clock, db } = setup({ reportStatus: "running", tables: TREND_TABLES() });
+    const insights: Any[] = [];
+    const base = socialPipeline(deps({ insights, synthesis: WITH_TRENDS }));
+    // From the insights step's first try on, storage fails six downloads of a payload the step reads: its first two tries, three reads each.
+    let failing = 0;
+    let failed = 0;
+    const storage = db.storage;
+    db.storage = {
+      from: (bucket: string) => {
+        const real = storage.from(bucket);
+        return { ...real, download: async (at: string) => (failing > 0 && at.endsWith("/normalized.json") ? (failing--, failed++, { data: null, error: { message: "upstream request timeout", status: 504 } }) : real.download(at)) };
+      },
+    };
+    let armed = false;
+    const pipeline = { ...base, steps: { ...base.steps, insights: (ctx: Any) => { if (!armed) { armed = true; failing = 6; } return base.steps.insights(ctx); } } };
+    const { run_id } = await startReportPipeline(db, { mode: "app", kind: "social", pipeline, clientId: CLIENT, reportId: REPORT.id, range: PERIOD, request: todaysRequest() });
+    const driven = await drivePipeline(db, makeRegistry([pipeline], () => true), run_id, { clock, env: ENV });
+    expect(driven.outcome.status).toBe("done");
+    expect(failed).toBe(6);
+    const steps = (db.tables.report_pipeline_steps ?? []).filter((s: Any) => s.step === "insights");
+    // Two tries failed on the read, the same number at which a model that cannot answer is given up on: this is not that.
+    expect(steps.map((s: Any) => s.outcome)).toEqual(["retry", "retry", "next"]);
+    expect(String(steps[1].detail.error)).toContain("The payload normalized is kept but could not be read");
+    expect(steps[2].detail).toMatchObject({ insights: "model" });
+    // The model was asked once, when the step could read, and the report has its insights.
+    expect(insights).toHaveLength(1);
+    expect(db.tables.report_insights).toHaveLength(1);
+    expect(await makePayloadStore(db, run_id).get(KEPT.insights)).not.toBeNull();
+  });
+
   it("a write refused once is tried again with the answer it kept: no second call, and the answer is kept with the run's only once stored", async () => {
     const insights: Any[] = [];
     const { db, driven, store, deck } = await run({ mode: "app", reportStatus: "running", request: todaysRequest(), tables: TREND_TABLES(), refuseInsights: 1, deps: deps({ insights, synthesis: WITH_TRENDS }) });

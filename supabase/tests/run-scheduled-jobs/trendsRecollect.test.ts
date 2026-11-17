@@ -11,7 +11,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApifyError, type ApifyClient } from "../../functions/_shared/apify/client";
 import { addCost, nextFault, recollectOf, TRENDS_PIPELINE, trendsPipeline, type TrendsDeps } from "../../functions/_shared/pipelines/definitions/trends";
 import { makeRegistry } from "../../functions/_shared/pipelines/registry";
@@ -21,7 +21,7 @@ import { TREND_SOURCES } from "../../functions/_shared/trends/sources";
 import { themeKey, themesRequest, withoutDismissed } from "../../functions/_shared/trends/themes";
 import { TREND_PLATFORMS, type TrendPlatform } from "../../functions/_shared/trends/types";
 import {
-  queueSourceRecollects, RECOLLECTS_PER_WEEK, RECOLLECT_SWEEP_MINUTES, recollectDecision, recollectSweepDue, recollectWaitMs, REFUSALS_BEFORE_STOP, refusedSources, runTrendJob, startTrendWeek, weekStartOf,
+  EARLIER_ANSWER_UNREAD, queueSourceRecollects, RECOLLECTS_PER_WEEK, RECOLLECT_SWEEP_MINUTES, recollectDecision, recollectSweepDue, recollectWaitMs, REFUSALS_BEFORE_STOP, refusedSources, runTrendJob, startTrendWeek, weekStartOf,
   type TrendRunRow, type TrendWeekRow,
 } from "../../functions/run-scheduled-jobs/trends";
 import type { ScheduledJob } from "../../functions/_shared/scheduled-jobs/types";
@@ -439,8 +439,11 @@ describe("what a rebuild reads from the run the week was saved from", () => {
     return { runId, driven };
   }
   const keysOf = (w: ReturnType<typeof world>, runId: string) => w.db.tables.pipeline_payloads.filter((r) => r.run_id === runId).map((r) => String(r.key));
-  /** Storage that fails to hand over one kept answer, a given number of times. */
+  afterEach(() => { vi.restoreAllMocks(); });
+  /** Storage that fails to hand over one kept answer, a given number of times. The store's short waits between its tries of a read are not waited out here. */
   function failingRead(w: ReturnType<typeof world>, path: string, times: number) {
+    const wait = globalThis.setTimeout;
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(((fn: () => void, ms?: number, ...rest: unknown[]) => wait(fn, ms && ms <= 450 ? 0 : ms, ...rest)) as typeof setTimeout);
     const storage = w.db.storage;
     const left = { n: times, failed: 0 };
     w.db.storage = {
@@ -549,17 +552,19 @@ describe("what a rebuild reads from the run the week was saved from", () => {
     const { w, first } = await weekWithAFailedSearch();
     const facebookBefore = w.posts().filter((p) => p.platform === "facebook").length;
     expect(facebookBefore).toBeGreaterThan(0);
-    const reads = failingRead(w, `runs/${first}/source.facebook.1.json`, 2);
+    // Four downloads fail: the store's three tries of the first read, and the first try of the next.
+    const reads = failingRead(w, `runs/${first}/source.facebook.1.json`, 4);
     w.sources.refuse = {};
     w.sources.refuseSearch = undefined;
     w.sources.calls.length = 0;
     const { runId, driven } = await nextTry(w);
-    expect(reads.failed).toBe(2);
-    // The step was tried again, twice, and no source had been asked by then.
-    const retried = driven.calls.filter((c) => c.step === "scrape_facebook" && String(c.outcome.reason ?? "").includes("could not be read just now"));
-    expect(retried.map((c) => c.attempt)).toEqual([1, 2]);
+    expect(reads.failed).toBe(4);
+    // The step's first try failed on the read and was tried again by the runner; no source had been asked by then.
+    const retried = driven.calls.filter((c) => c.step === "scrape_facebook" && String(c.outcome.reason ?? "").includes("is kept but could not be read"));
+    expect(retried.map((c) => c.attempt)).toEqual([1]);
+    expect(retried[0].outcome.status).toBe("queued");
     const firstPaid = driven.calls.findIndex((c) => c.step === "scrape_tiktok");
-    expect(driven.calls.findIndex((c) => c === retried[1])).toBeLessThan(firstPaid);
+    expect(driven.calls.findIndex((c) => c === retried[0])).toBeLessThan(firstPaid);
     // Then it was read: the week healed, with every Facebook post it had, and TikTok asked once.
     expect(w.run(runId).status).toBe("done");
     expect(w.sources.calls).toEqual(["tiktok"]);
@@ -571,14 +576,15 @@ describe("what a rebuild reads from the run the week was saved from", () => {
   it("stops without having paid for anything when a kept answer cannot be read at all, and the next try starts clean", async () => {
     const { w, first } = await weekWithAFailedSearch();
     const before = { posts: w.posts(), themes: w.themes(), status: w.week().status };
-    const reads = failingRead(w, `runs/${first}/source.facebook.1.json`, 5);
+    // Every download fails through the runner's five tries of the step, three reads each.
+    const reads = failingRead(w, `runs/${first}/source.facebook.1.json`, 15);
     w.sources.refuse = {};
     w.sources.refuseSearch = undefined;
     w.sources.calls.length = 0;
     w.requests.length = 0;
     const one = await nextTry(w);
-    expect(reads.failed).toBe(5);
-    expect(w.run(one.runId)).toMatchObject({ status: "stopped", outcome: expect.stringMatching(/scrape_facebook did not finish in 5 tries: The answer the earlier run kept for facebook search 2 of 2 could not be read just now/) });
+    expect(reads.failed).toBe(15);
+    expect(w.run(one.runId)).toMatchObject({ status: "stopped", outcome: expect.stringMatching(/scrape_facebook did not finish in 5 tries: The payload source\.facebook\.1 is kept but could not be read: upstream request timeout/) });
     expect(w.sources.calls).toEqual([]);
     expect(w.requests).toEqual([]);
     expect(untouched(w.posts(), before.posts)).toBe(true);
@@ -589,6 +595,60 @@ describe("what a rebuild reads from the run the week was saved from", () => {
     expect(w.run(two.runId).status).toBe("done");
     expect(w.week()).toMatchObject({ status: "done" });
     expect(w.sources.calls).toEqual(["tiktok"]);
+  });
+
+  it("never takes a list it could not read back for an empty one: the weekly save is tried again and writes the week whole", async () => {
+    // Each list, and the step that reads it back first.
+    for (const [lost, step] of [["kept", "themes"], ["themes", "save"], ["candidates", "filter"], ["rule_dropped", "save"], ["claude_dropped", "save"], ["posts.instagram", "rules"]]) {
+      const w = world();
+      // The first collection of a week: a list the run made cannot be read back on a step's first try.
+      const reads = failingRead(w, `/${lost}.json`, 3);
+      const first = await w.collectWeek();
+      expect(reads.failed, lost).toBe(3);
+      const retried = w.db.tables.report_pipeline_steps.filter((x) => x.run_id === first && x.outcome === "retry");
+      expect(retried.map((x) => x.step), lost).toEqual([step]);
+      expect(String(retried[0].detail.error), lost).toContain(`The payload ${lost} is kept but could not be read`);
+      // No step gave up, and none went on with an empty list.
+      expect(w.db.tables.report_pipeline_steps.some((x) => x.run_id === first && x.detail?.gave_up), lost).toBe(false);
+      // The week was written once, whole: every source's posts, kept posts and themes.
+      expect(w.week(), lost).toMatchObject({ status: "done" });
+      expect(w.themes(), lost).toHaveLength(3);
+      expect(w.posts().filter((p) => p.kept).length, lost).toBeGreaterThan(10);
+      expect(w.posts().some((p) => p.platform === "facebook" && p.kept), lost).toBe(true);
+      expect(w.posts().some((p) => p.platform === "instagram"), lost).toBe(true);
+      expect(w.posts().some((p) => !p.kept), lost).toBe(true);
+    }
+  });
+
+  it("writes nothing when its own lists cannot be read at all: the run stops and the week is not saved empty", async () => {
+    const w = world();
+    failingRead(w, "/kept.json", 1000);
+    const out = await runTrendJob(w.db, weeklyJob(), w.clock.now());
+    const driven = await w.drive(String(out.result!.run_id));
+    expect(driven.outcome.status).toBe("failed");
+    const run = w.run(String(out.result!.run_id));
+    // The themes step, which reads the kept posts first, never gave up into a save; the runner's tries ended the run.
+    expect(run).toMatchObject({ status: "stopped", step: "themes", outcome: expect.stringMatching(/themes did not finish in 5 tries: The payload kept is kept but could not be read/) });
+    expect(w.week()).toMatchObject({ status: "running" });
+    expect(w.posts()).toEqual([]);
+    expect(w.themes()).toEqual([]);
+  });
+
+  it("does not mark a source failed, or lose its earlier searches, when the posts it has so far cannot be read", async () => {
+    const w = world();
+    // YouTube takes one search a run: before its second search is added, the posts of the first are read back.
+    const reads = failingRead(w, "/posts.youtube.json", 3);
+    const first = await w.collectWeek();
+    expect(reads.failed).toBe(3);
+    const steps = w.db.tables.report_pipeline_steps.filter((x) => x.run_id === first && x.step === "scrape_youtube");
+    expect(steps.some((x) => x.outcome === "retry" && String(x.detail.error).includes("The payload posts.youtube is kept but could not be read"))).toBe(true);
+    expect(w.week().platforms.youtube).toMatchObject({ status: "ok", searched: 2 });
+    expect(w.week().platforms.youtube.fault).toBeUndefined();
+    // Both searches' posts are the week's: the count the source's two answers hold.
+    const store = makePayloadStore(w.db, first);
+    const rows = [...(await store.get<Any[]>("source.youtube.0"))!, ...(await store.get<Any[]>("source.youtube.1"))!];
+    expect((await store.get<Any[]>("posts.youtube"))!.length).toBe(rows.map((r, i) => TREND_SOURCES.youtube.normalize(r, "", i + 1)).filter(Boolean).length);
+    expect(w.week()).toMatchObject({ status: "done" });
   });
 
   it("gives a plain replay the same reading list, and stops it at start when a search has nothing kept", async () => {
@@ -780,6 +840,50 @@ describe("what a failed source answered, for operators", () => {
     w.clock.set(new Date(Date.parse(w.week().finished_at) + 10 * MIN));
     const { outcomes } = await w.sweepAndRun();
     expect(outcomes[0].result!.sources).toEqual([{ platform: "tiktok", kind: "credentials", status: 401, message: expect.stringContaining("authentication token") }]);
+  });
+
+  it("goes on collecting when the earlier answer cannot be read for the record, and says so in the job's result", async () => {
+    const w = world();
+    w.sources.refuse.tiktok = REFUSED_INPUT;
+    const first = await w.collectWeek();
+    // The failed source's kept words are in the index, and storage does not hand them over (every try of the read).
+    const storage = w.db.storage;
+    let failed = 0;
+    w.db.storage = {
+      from: (bucket: string) => {
+        const real = storage.from(bucket);
+        return { ...real, download: async (at: string) => (at.endsWith(`runs/${first}/source.tiktok.0.failed.json`) ? (failed++, { data: null, error: { message: "Object not found", status: 404 } }) : real.download(at)) };
+      },
+    };
+    w.clock.set(new Date(Date.parse(w.week().finished_at) + 10 * MIN));
+    w.sources.refuse = {};
+    w.sources.calls.length = 0;
+    const { queued, outcomes } = await w.sweepAndRun();
+    expect(queued).toHaveLength(1);
+    expect(failed).toBeGreaterThan(0);
+    // The job did its work: the run started, and the record says in plain words what it could not read.
+    expect(outcomes[0]).toMatchObject({ status: "done", reason: "TikTok is collected again for the week (try 1 of 6).", result: { started: true, recollect: { try: 1, platforms: ["tiktok"] } } });
+    expect(outcomes[0].result!.sources).toEqual([{ platform: "tiktok", kind: "transient", status: null, message: EARLIER_ANSWER_UNREAD, unread: true }]);
+    expect(EARLIER_ANSWER_UNREAD).toBe("The earlier answer could not be read.");
+    // TikTok is asked for real, so its unreadable old mark is never needed: the week heals.
+    await w.drive(String(outcomes[0].result!.run_id));
+    expect(w.sources.calls).toEqual(["tiktok"]);
+    expect(w.week()).toMatchObject({ status: "done" });
+    expect(w.week().platforms.tiktok.status).toBe("ok");
+  });
+
+  it("still fails the job, to be tried again, when what the week's run kept cannot be listed at all", async () => {
+    const w = world();
+    w.sources.refuse.tiktok = REFUSED_INPUT;
+    await w.collectWeek();
+    w.clock.set(new Date(Date.parse(w.week().finished_at) + 10 * MIN));
+    await queueSourceRecollects(w.db, w.clock.now());
+    const job = w.db.tables.scheduled_jobs.find((j) => j.kind === "trend_refresh" && j.payload?.recollect) as ScheduledJob;
+    // Any other error than an unread payload is not passed over: here the index itself does not answer.
+    const from = w.db.from.bind(w.db);
+    w.db.from = (table: string) => (table === "pipeline_payloads" ? { select: () => ({ eq: async () => ({ data: null, error: { message: "connection reset" } }) }) } : from(table));
+    await expect(runTrendJob(w.db, job, w.clock.now())).rejects.toThrow("Could not read what the week's run kept: connection reset");
+    expect(w.db.tables.report_pipeline_runs).toHaveLength(1);
   });
 
   it("records a source that only failed in passing as transient", async () => {

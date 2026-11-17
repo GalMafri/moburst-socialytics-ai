@@ -18,7 +18,7 @@
 // and asking again sends the same thing. Each job's result says what every
 // failed source last answered and what kind of fault that is.
 
-import { makePayloadStore, startPipelineRun } from "../_shared/pipelines/store.ts";
+import { makePayloadStore, PayloadUnread, startPipelineRun } from "../_shared/pipelines/store.ts";
 import { TRENDS_PIPELINE, trendsPipeline, type Recollect } from "../_shared/pipelines/definitions/trends.ts";
 import { REGISTRY } from "../_shared/pipelines/registry.ts";
 import type { PayloadStore } from "../_shared/pipelines/types.ts";
@@ -334,11 +334,18 @@ export async function queueSourceRecollects(db: Db, now: Date): Promise<string[]
   return queued;
 }
 
+/** What the job's record says for a failed source whose kept words could not be read. */
+export const EARLIER_ANSWER_UNREAD = "The earlier answer could not be read.";
+
 /**
  * What each failed source last answered, from the message the week's newest
  * finished run kept for it (source.<platform>.<n>.failed), with the kind of
  * fault it is. A source whose message is gone is transient with no message.
+ * This read is only for the job's record, so it never holds back the work: a
+ * message that is kept and could not be read (PayloadUnread, and only that)
+ * is recorded as such, and the source is collected again all the same.
  */
+
 async function sourceFaults(db: Db, runs: TrendRunRow[], platforms: TrendPlatform[]): Promise<SourceFault[]> {
   const from = lastDone(runs);
   if (!from) return platforms.map((p) => sourceFault(p, ""));
@@ -351,7 +358,14 @@ async function sourceFaults(db: Db, runs: TrendRunRow[], platforms: TrendPlatfor
     const prefix = `source.${p}.`;
     const failed = keys.filter((k) => k.startsWith(prefix) && k.endsWith(".failed"))
       .sort((a, b) => Number(b.slice(prefix.length).split(".")[0]) - Number(a.slice(prefix.length).split(".")[0]));
-    const kept = failed.length ? await store.get<{ message?: unknown }>(failed[0]).catch(() => null) : null;
+    let kept: { message?: unknown } | null = null;
+    try {
+      kept = failed.length ? await store.get<{ message?: unknown }>(failed[0]) : null;
+    } catch (e) {
+      if (!(e instanceof PayloadUnread)) throw e;
+      out.push({ ...sourceFault(p, EARLIER_ANSWER_UNREAD), unread: true });
+      continue;
+    }
     out.push(sourceFault(p, typeof kept?.message === "string" ? kept.message : ""));
   }
   return out;

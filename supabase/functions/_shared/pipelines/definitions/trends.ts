@@ -58,8 +58,14 @@
 // that, so the source's other searches and the week's other posts are kept),
 // or has nothing kept at all, and then the run stops at start, before any
 // paid call. The scrape steps read by that decision and never make their own.
-// A kept answer that could not be read just now (a download that failed) is
-// neither missing nor empty: the step is tried again, and nothing was paid.
+//
+// A payload that is kept and could not be read (a download that failed) is
+// neither missing nor empty: the payload store throws PayloadUnread for it
+// (store.ts), and no step here turns that into anything else. It never marks
+// a source failed, never makes a model step give up into a saved week, and
+// never stands for an empty list: the step is tried again by the runner. A
+// list a step reads with a default (`?? []`) is one that may truly not have
+// been kept; one the run's own state says was kept must be there.
 //
 // A theme a person dismissed is a recorded decision. Whenever a week is
 // written again (a replay, a source collected again), the themes step is told
@@ -70,7 +76,7 @@ import { runActorStep, type ApifyFactory } from "../apifyStep.ts";
 import { claudeBatchStep } from "../claude.ts";
 import { ANTHROPIC_API_KEY, APIFY_API_TOKEN } from "../secrets.ts";
 import { keptAnswer, replayOf } from "../social/replay.ts";
-import { SOURCE_KEEP_DAYS } from "../store.ts";
+import { PayloadUnread, SOURCE_KEEP_DAYS } from "../store.ts";
 import { StepRestart, StepStop, type PipelineDefinition, type PipelineRun, type Step, type StepContext, type StepResult } from "../types.ts";
 import { competitorSet } from "../../calendar/runWeek.ts";
 import { coverageShort, finishedWeeks, lastKept, parseRewrite, removedFor, removedSearches, rewriteRequest, TREND_REWRITE_MODEL, weeksAfter, withoutRemoved, type RewriteProfile } from "../../trends/coverage.ts";
@@ -141,18 +147,6 @@ interface Plan {
 
 /** What an earlier run holds for one search of one source: its answer, or the fact that the search failed there (with what it said). */
 export type KeptSearch = { state: "answered" } | { state: "failed"; message: string };
-
-/**
- * A kept answer that is there and could not be read just now (the download
- * failed). It is not a missing answer and not an empty one: the step is tried
- * again by the runner, and never marks the source failed.
- */
-export class KeptAnswerUnread extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "KeptAnswerUnread";
-  }
-}
 
 interface TrendState {
   [key: string]: unknown;
@@ -413,15 +407,16 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
         if (!held) throw new StepStop(`The run has no record of what the earlier run kept for ${platform} search ${prog.i + 1} of ${runs.length}, so the week is not written again.`);
         if (held.state === "failed") {
           // The search failed in the earlier run: it is read as what it was, a search that brought nothing.
-          const marker = await keptAnswer<{ message?: unknown }>(ctx, `${key}.failed`).catch(() => null);
+          const marker = await keptAnswer<{ message?: unknown }>(ctx, `${key}.failed`);
           const message = (typeof marker?.message === "string" && marker.message ? marker.message : held.message).slice(0, 300);
           await ctx.payloads.put(`${key}.failed`, { message }, KEEP);
           fault = sourceFaultKind(message);
           detail = { ...detail, replayed: true, failed: message };
         } else {
-          // The answer is kept. One that does not come back was not read just now: neither missing nor empty.
+          // The answer is kept. A read that fails throws (PayloadUnread) and the step is tried again; only an answer
+          // that is gone since start decided (the earlier run's payloads were removed) comes back as nothing.
           const kept = await keptAnswer<unknown[]>(ctx, key);
-          if (!Array.isArray(kept)) throw new KeptAnswerUnread(`The answer the earlier run kept for ${platform} search ${prog.i + 1} of ${runs.length} could not be read just now.`);
+          if (!Array.isArray(kept)) throw new StepStop(`The answer the earlier run kept for ${platform} search ${prog.i + 1} of ${runs.length} is no longer kept, so the week is not written again.`);
           rows = kept;
           await ctx.payloads.put(key, rows, KEEP);
           detail = { ...detail, replayed: true };
@@ -447,8 +442,8 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
         prog.failed += 1;
       }
     } catch (e) {
-      // A stop, and a kept answer that was not read, are not this source failing: the first ends the run, the second is tried again.
-      if (e instanceof StepStop || e instanceof KeptAnswerUnread || ctx.attempt < SCRAPE_TRIES) throw e;
+      // A stop, and a payload that could not be read, are not this source failing: the first ends the run, the second is tried again.
+      if (e instanceof StepStop || e instanceof PayloadUnread || ctx.attempt < SCRAPE_TRIES) throw e;
       const message = (e instanceof Error ? e.message : String(e)).slice(0, 300);
       // The failed search is a fact a replay reads: here, and in this step's log (detail.failed with the search's number), which keptSearches falls back on.
       await ctx.payloads.put(`${key}.failed`, { message }, KEEP).catch(() => undefined);
@@ -516,7 +511,8 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
     try {
       return await inner(ctx);
     } catch (e) {
-      if (ctx.attempt < CLAUDE_TRIES) throw e;
+      // A payload that could not be read is no answer the model failed to give: the step is tried again, never given up on.
+      if (e instanceof PayloadUnread || ctx.attempt < CLAUDE_TRIES) throw e;
       return giveUp(ctx, (e instanceof Error ? e.message : String(e)).slice(0, 300));
     }
   };
@@ -711,7 +707,10 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
         }
         const plan = await need<Plan>(ctx, "plan");
         const all: TrendPost[] = [];
-        for (const p of TREND_PLATFORMS) all.push(...((await ctx.payloads.get<TrendPost[]>(`posts.${p}`)) ?? []));
+        // A source that brought posts kept them; one that was not searched, or whose every search failed, kept none.
+        for (const p of TREND_PLATFORMS) {
+          all.push(...(stateOf(ctx).platforms?.[p]?.status === "ok" ? await need<TrendPost[]>(ctx, `posts.${p}`) : (await ctx.payloads.get<TrendPost[]>(`posts.${p}`)) ?? []));
+        }
         const weekStart = plan.weekStart ?? String(ctx.run.input?.week_start ?? plan.window.end.slice(0, 10));
         const { candidates, dropped } = ruleFilter(all, {
           windowStart: plan.window.start, windowEnd: plan.window.end, languages: plan.client.languages,
@@ -786,11 +785,13 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
           throw new StepStop("The week's posts could not be judged again after a source answered, so the week stays as it was saved.");
         }
         const plan = await need<Plan>(ctx, "plan");
-        const ruleDropped = (await ctx.payloads.get<Array<{ post: TrendPost; reason: RuleDrop }>>("rule_dropped")) ?? [];
-        const candidates = (await ctx.payloads.get<TrendPost[]>("candidates")) ?? [];
-        const kept = (await ctx.payloads.get<KeptPost[]>("kept")) ?? [];
-        const judged = (await ctx.payloads.get<Judged[]>("claude_dropped")) ?? [];
-        const themes = (await ctx.payloads.get<Theme[]>("themes")) ?? [];
+        // The rules step always keeps its two lists. The filter's and the themes' are kept only when those steps ran:
+        // a default stands for a step that was skipped, never for a list the run made and could not read back.
+        const ruleDropped = await need<Array<{ post: TrendPost; reason: RuleDrop }>>(ctx, "rule_dropped");
+        const candidates = await need<TrendPost[]>(ctx, "candidates");
+        const kept = st.filter === "ok" || st.filter === "failed" ? await need<KeptPost[]>(ctx, "kept") : (await ctx.payloads.get<KeptPost[]>("kept")) ?? [];
+        const judged = st.filter === "ok" || st.filter === "failed" ? await need<Judged[]>(ctx, "claude_dropped") : (await ctx.payloads.get<Judged[]>("claude_dropped")) ?? [];
+        const themes = st.themes === "ok" || st.themes === "failed" ? await need<Theme[]>(ctx, "themes") : (await ctx.payloads.get<Theme[]>("themes")) ?? [];
 
         // One row per post: a post found twice is the same post, so a duplicate is not stored again.
         const rows: Any[] = [];

@@ -11,9 +11,10 @@ import { runPipelineJob } from "../../../functions/_shared/pipelines/runner";
 import { shadowLinkedInSource, startReportPipeline } from "../../../functions/_shared/pipelines/shadow";
 import {
   appRunView, expirePayloads, loadShadowPair, makeAppOutput, makePayloadStore, makeRunStore, makeShadowOutput, makeStepLog, makeStepServices,
-  PAYLOAD_BUCKET, PAYLOAD_TTL_DAYS, PipelineWriteRefused, readOnlyDb, SHADOW_WRITABLE_TABLES, startPipelineRun,
+  PAYLOAD_BUCKET, PAYLOAD_READ_TRIES, PAYLOAD_READ_WAITS_MS, PAYLOAD_TTL_DAYS, PayloadUnread, PipelineWriteRefused, readOnlyDb, SHADOW_WRITABLE_TABLES, startPipelineRun,
 } from "../../../functions/_shared/pipelines/store";
-import type { PipelineRun } from "../../../functions/_shared/pipelines/types";
+import { keptAnswer } from "../../../functions/_shared/pipelines/social/replay";
+import type { PipelineRun, StepContext } from "../../../functions/_shared/pipelines/types";
 
 const NOW = new Date("2026-11-07T07:20:00Z");
 const run = (over: Partial<PipelineRun> = {}): PipelineRun => ({
@@ -89,6 +90,106 @@ describe("payload store", () => {
     await store.put("apify.tiktok", [1]);
     expect(d.tables.pipeline_payloads).toHaveLength(1);
     expect(await store.get("apify.tiktok")).toEqual([1]);
+  });
+
+  describe("reading a key back", () => {
+    /** Storage whose downloads answer from a list first, then as they really are. */
+    function answering(d: ReturnType<typeof db>, answers: Array<{ data: unknown; error: unknown } | Error>) {
+      const storage = d.storage;
+      const calls: string[] = [];
+      d.storage = {
+        from: (bucket: string) => {
+          const real = storage.from(bucket);
+          return {
+            ...real,
+            download: async (path: string) => {
+              calls.push(path);
+              const next = answers.shift();
+              if (next instanceof Error) throw next;
+              return next ?? real.download(path);
+            },
+          };
+        },
+      };
+      return calls;
+    }
+    const busy = { data: null, error: { name: "StorageApiError", message: "upstream request timeout", status: 504, statusCode: "504" } };
+    const dropped = { data: null, error: { name: "StorageUnknownError", message: "error sending request" } };
+    const slept: number[] = [];
+    const sleep = async (ms: number) => { slept.push(ms); };
+    const kept = async () => {
+      const d = db();
+      slept.length = 0;
+      const store = makePayloadStore(d, "run-1", { now: () => NOW, sleep });
+      await store.put("kept", [{ url: "https://example.test/a" }]);
+      return { d, store };
+    };
+
+    it("answers null only when the index has no such key", async () => {
+      const { d, store } = await kept();
+      const calls = answering(d, []);
+      expect(await store.get("themes")).toBeNull();
+      // Nothing was asked of storage for a key that was never kept.
+      expect(calls).toEqual([]);
+      // A read of the index that fails is an error too, never "no such key".
+      const from = d.from.bind(d);
+      d.from = (table: string) => (table === "pipeline_payloads" ? { select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: { message: "connection reset" } }) }) }) }) } : from(table));
+      await expect(store.get("kept")).rejects.toThrow("connection reset");
+    });
+
+    it("tries a download that failed in passing again, and answers the value", async () => {
+      for (const failure of [busy, dropped, { data: null, error: null }, { data: null, error: { message: "Too many requests", status: 429 } }, new TypeError("fetch failed")]) {
+        const { d, store } = await kept();
+        const calls = answering(d, [failure, failure]);
+        expect(await store.get("kept")).toEqual([{ url: "https://example.test/a" }]);
+        expect(calls).toHaveLength(3);
+        expect(slept).toEqual([...PAYLOAD_READ_WAITS_MS]);
+      }
+    });
+
+    it("throws for a key that is kept and cannot be read, after its three tries: never null, never empty", async () => {
+      const { d, store } = await kept();
+      const calls = answering(d, [busy, busy, busy, busy]);
+      const error = await store.get("kept").then(() => null, (e) => e);
+      expect(error).toBeInstanceOf(PayloadUnread);
+      expect(error).toMatchObject({ name: "PayloadUnread", key: "kept", status: 504, message: "The payload kept is kept but could not be read: upstream request timeout (504)" });
+      expect(calls).toHaveLength(PAYLOAD_READ_TRIES);
+      expect(PAYLOAD_READ_TRIES).toBe(3);
+      // The waits are short: under a second in all.
+      expect(slept.reduce((a, b) => a + b, 0)).toBeLessThan(1000);
+    });
+
+    it("does not try again an answer about the request itself: a kept key whose file is gone or refused throws at once", async () => {
+      for (const status of [400, 403, 404]) {
+        const { d, store } = await kept();
+        const calls = answering(d, [{ data: null, error: { message: "Object not found", status, statusCode: String(status) } }]);
+        await expect(store.get("kept")).rejects.toMatchObject({ name: "PayloadUnread", status });
+        expect(calls).toHaveLength(1);
+        expect(slept).toEqual([]);
+      }
+      // The status given only as text, as storage also sends it.
+      const { d, store } = await kept();
+      answering(d, [{ data: null, error: { message: "Object not found", statusCode: "404" } }]);
+      await expect(store.get("kept")).rejects.toMatchObject({ status: 404 });
+    });
+
+    it("takes a download that is not the JSON that was stored as unread, not as a value", async () => {
+      const { d, store } = await kept();
+      const cut = { data: { arrayBuffer: async () => new TextEncoder().encode('[{"url":"https://exam').buffer }, error: null };
+      answering(d, [cut, cut, cut]);
+      await expect(store.get("kept")).rejects.toBeInstanceOf(PayloadUnread);
+      // Read whole, it is the value again.
+      expect(await store.get("kept")).toEqual([{ url: "https://example.test/a" }]);
+    });
+
+    it("gives a step that reads another run's answers the same error", async () => {
+      const { d } = await kept();
+      answering(d, [busy, busy, busy]);
+      const ctx = { run: { input: { replay: { from_run: "run-1" } } }, db: readOnlyDb(d) } as unknown as StepContext;
+      await expect(keptAnswer(ctx, "kept")).rejects.toBeInstanceOf(PayloadUnread);
+      expect(await keptAnswer(ctx, "kept")).toEqual([{ url: "https://example.test/a" }]);
+      expect(await keptAnswer(ctx, "never-kept")).toBeNull();
+    });
   });
 
   it("refuses a key that is not a plain name", async () => {
