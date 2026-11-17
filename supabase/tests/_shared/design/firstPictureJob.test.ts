@@ -87,6 +87,32 @@ describe("askCleanedSlot", () => {
     await askCleanedSlot(s, BASE, async () => ({ result: answer({ ...made, removed: 0.35 }), ms: 4 }));
     expect(s.composed).toEqual({ of: `${BASE}/nologo-1-2.png`, path: `${BASE}/composed-1-2.png`, share: 0.0137, join: 3.13, removed: 0.35, box: made.box });
     expect(basePicture(s)).toBe(`${BASE}/composed-1-2.png`);
+    expect(s.composed).not.toHaveProperty("measured");
+  });
+
+  it("keeps what the service read against the pair of pictures itself, for review, and decides nothing by it", async () => {
+    // A small logo the service recognized against the pair's own floor, with a ring it read against the rings elsewhere: composed.
+    const measured = { floor: 0.0399, ring: { cells: 2096, apart: 10, touching: 3 }, rings: { cells: 2096, apart: 21, rings: 156555 } };
+    const s = state({ logo_slot: { from: "canvas" } });
+    await askCleanedSlot(s, BASE, async () => ({ result: answer({ ...made, removed: 0.1199, measured }), ms: 4 }));
+    expect(s.composed).toEqual({ of: `${BASE}/nologo-1-2.png`, path: `${BASE}/composed-1-2.png`, share: 0.0137, join: 3.13, removed: 0.1199, measured, box: made.box });
+    expect(basePicture(s)).toBe(`${BASE}/composed-1-2.png`);
+    expect(composeRedesign(s)).toBeNull();
+    // A slot that did not stand above its floor, or whose join then failed: "removal", and the design goes on from its cleaned
+    // picture with no design made again, on any design, exactly as such a slot always did.
+    for (const read of [{ floor: 0.0653 }, { floor: 0.0273, join: 3.4, ring: { cells: 816, apart: 61, touching: 0 }, rings: { cells: 816, apart: 12, rings: 6800 } }]) {
+      for (let n = 1; n <= MAX_GENERATIONS; n++) {
+        const t = state({ generations: n, logo_slot: { from: "canvas" } });
+        await askCleanedSlot(t, BASE, async () => ({ result: answer({ made: false, why: "removal", share: 0, join: 0, removed: 0.0527, measured: read }), ms: 4 }));
+        expect(t.composed).toEqual({ of: `${BASE}/nologo-1-2.png`, path: null, why: "removal", share: 0, join: 0, removed: 0.0527, measured: read });
+        expect(basePicture(t)).toBe(`${BASE}/nologo-1-2.png`);
+        expect(composeRedesign(t)).toBeNull();
+      }
+    }
+    // A refused join where the rule's own numbers made the place still makes the design again, with or without those numbers.
+    const j = state({ generations: 1 });
+    await askCleanedSlot(j, BASE, async () => ({ result: answer({ made: false, why: "join", share: 0, join: 4.39, removed: 0.7433, measured: { ring: { cells: 768, apart: 20, touching: 20 } } }), ms: 4 }));
+    expect(composeRedesign(j)).toBe("logo's place: the first picture could not take the cleaned logo's place (join, join 4.39)");
   });
 
   it("asks a service from before the rule again without the two fields, so the design goes on as before", async () => {

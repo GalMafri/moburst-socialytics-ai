@@ -229,6 +229,7 @@ describe("POST /api/picture/slot-file with the first picture", () => {
     const expected = composeFirst(firstPicture(), cleanedPicture(), rect, false);
     expect(expected.facts.made).toBe(true);
     expect(expected.facts.removed).toBeGreaterThanOrEqual(0.2);
+    expect(expected.facts.measured).toBeUndefined();
     expect(result(got.json)).toEqual({ ...slotFile(expected.picture!, rect, [W, H], "stored", stamps), composed: expected.facts });
     expect(result(got.json)).not.toHaveProperty("drawn");
     expect(Buffer.from((await decodeRaster(new Uint8Array(shown.puts["composed.png"]))).data).equals(Buffer.from(expected.picture!.data))).toBe(true);
@@ -240,8 +241,28 @@ describe("POST /api/picture/slot-file with the first picture", () => {
     const none = await store({ first: elsewhere, cleaned: cleanedPicture() });
     const refused = await none.call({ ...base, first: ask.first, out: ask.out });
     expect(refused.status).toBe(200);
-    expect(result(refused.json)).toEqual({ ...slotFile(cleanedPicture(), rect, [W, H], "stored", stamps), composed: { made: false, why: "removal", share: 0, join: 0, removed: 0 } });
+    // Read against the pair too: the place the two pictures differ most is where that drawing was, and the slot holds nothing.
+    const floor = result(refused.json).composed!.measured!.floor!;
+    expect(floor).toBeGreaterThan(0.2);
+    expect(result(refused.json)).toEqual({ ...slotFile(cleanedPicture(), rect, [W, H], "stored", stamps), composed: { made: false, why: "removal", share: 0, join: 0, removed: 0, measured: { floor } } });
     expect(Object.keys(none.puts)).toEqual([]);
+
+    // A thin logo at the slot, under one fifth of its cells, and nothing else the two pictures differ in: composed, which a fixed
+    // share did not, and what it was read against is answered with it.
+    const thin = () => {
+      const r = flat(W, H, GROUND);
+      box(r, 220, 100, W, 200, [20, 24, 30]);
+      for (let k = 0; k < 3; k++) box(r, rect.x + 8 + k * 16, rect.y + 6, rect.x + 11 + k * 16, rect.y + 18, [255, 255, 255]);
+      return r;
+    };
+    const small = await store({ first: thin(), cleaned: cleanedPicture() });
+    const took = await small.call({ ...base, first: ask.first, out: ask.out });
+    const want = composeFirst(thin(), cleanedPicture(), rect, false);
+    expect(want.facts).toMatchObject({ made: true, measured: { floor: 0 } });
+    expect(want.facts.removed).toBeLessThan(0.2);
+    expect(want.facts.removed).toBeGreaterThan(0);
+    expect(result(took.json)).toEqual({ ...slotFile(want.picture!, rect, [W, H], "stored", stamps), composed: want.facts });
+    expect(Buffer.from((await decodeRaster(new Uint8Array(small.puts["composed.png"]))).data).equals(Buffer.from(want.picture!.data))).toBe(true);
   });
 });
 

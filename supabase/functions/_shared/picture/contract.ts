@@ -209,9 +209,35 @@ export type FirstPictureAsk = { first?: string; out?: string };
  * levels after the correction, `removed` the share of the slot's cells on
  * which the two pictures are far apart (absent when it was not measured),
  * and `box` the patch's bounds in the picture's pixels: outside it the
- * composed picture is the first picture exactly.
+ * composed picture is the first picture exactly. `measured` is what was
+ * read against the pair of pictures itself, when anything was (absent from
+ * a service before 17 Nov 2026, evening, and when the rule's own numbers
+ * decided alone).
  */
-export type FirstPictureFacts = { made: boolean; why?: "first" | "size" | "slot" | "removal" | "join" | "store"; share: number; join: number; removed?: number; box?: Rect };
+export type FirstPictureFacts = { made: boolean; why?: "first" | "size" | "slot" | "removal" | "join" | "store"; share: number; join: number; removed?: number; measured?: FirstPictureMeasure; box?: Rect };
+/**
+ * What a cleaned-slot call read against the pair of pictures itself
+ * (_shared/design/firstPicture.ts). `floor`: the largest share of cells far
+ * apart that any place of the slot's size holds elsewhere on the picture,
+ * read for a slot at the canvas rectangle with under one fifth of its cells
+ * far apart; the logo was removed there when `removed` is above it. `ring`
+ * and `rings`: read when the patch's ring held more cells far apart than
+ * the rule allows. `ring` is the patch's own ring: its cells, those far
+ * apart, and those of them that touch another. `rings` is read only when no
+ * more than the rule's few touch: the count of cells far apart on the ring
+ * in the middle of all rings of that size and shape laid elsewhere on the
+ * picture, the cells of one such ring and how many were read (absent when
+ * none has a place). The join is clean when the ring holds no larger share
+ * of cells far apart than `rings`. `join`: the ring's mean difference for a
+ * slot only `floor` made a place, when its join failed: such a slot is
+ * answered "removal" with a `join` of 0, as before.
+ */
+export type FirstPictureMeasure = {
+  floor?: number;
+  join?: number;
+  ring?: { cells: number; apart: number; touching: number };
+  rings?: { cells: number; apart: number; rings: number };
+};
 export type ReadRequest = PictureMeta & { picture: string; page: Size; band?: Rect; area?: Rect; out: { page: string; band?: string; area?: string } };
 export type ReadResult = { picture: Size; page: Size; band?: Size; area?: Size };
 export type FinishRequest = PictureMeta & { picture: string; logo: string; rect: Rect; frame: [number, number]; output: Size; out: string };

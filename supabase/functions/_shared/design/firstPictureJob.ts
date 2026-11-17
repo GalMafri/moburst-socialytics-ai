@@ -57,7 +57,7 @@
 // Free of Deno and network imports: the worker and the tests share it.
 
 import { PictureError } from "../picture/client.ts";
-import type { FirstPictureFacts, Rect } from "../picture/contract.ts";
+import type { FirstPictureFacts, FirstPictureMeasure, Rect } from "../picture/contract.ts";
 import { REASONS } from "./logoChoice.ts";
 import { MAX_GENERATIONS } from "./modelSteps.ts";
 
@@ -69,9 +69,10 @@ import { MAX_GENERATIONS } from "./modelSteps.ts";
  * "removal", "join", "store"),
  * "service" for a service from before the rule, or "check: ..." with the
  * check the composed picture failed. The numbers are the service's, for
- * review.
+ * review; `measured` is what it read against the pair of pictures itself,
+ * when it read anything (picture/contract.ts, FirstPictureMeasure).
  */
-export type ComposedKept = { of: string; path: string | null; why?: string; share?: number; join?: number; removed?: number; box?: Rect };
+export type ComposedKept = { of: string; path: string | null; why?: string; share?: number; join?: number; removed?: number; measured?: FirstPictureMeasure; box?: Rect };
 
 /** The part of a job's state this reads and writes. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -106,7 +107,9 @@ export function lastDesign(s: State): boolean {
  * there. A new drawing can come out differently. Every other reason leaves
  * the design on its cleaned picture: the slot is no place the logo was
  * removed from ("removal": nothing to compose, as for every such slot
- * before the rule), or the reason is about a file or the service.
+ * before the rule; the service answers it too for a canvas rectangle that
+ * only its reading against the pair of pictures made a place, when the
+ * join there fails), or the reason is about a file or the service.
  */
 const NO_JOIN: NonNullable<FirstPictureFacts["why"]> = "join";
 
@@ -168,6 +171,11 @@ export function afterMark(s: State, where: string): { next: "again" | "cleaned" 
   return { next: "cleaned", reason: REASONS.marks(where) };
 }
 
+/** What the service read against the pair of pictures itself, kept as it is; no key at all when it answered none (a service from before those readings, or a call the rule's own numbers decided). */
+function measuredOf(facts: FirstPictureFacts): { measured?: FirstPictureMeasure } {
+  return facts.measured ? { measured: facts.measured } : {};
+}
+
 /** True for the refusal a service from before the rule gives a request that carries the two fields: its own 400, before it reads anything. */
 export function beforeTheRule(e: unknown): boolean {
   return e instanceof PictureError && e.why === "refused" && e.status === 400;
@@ -208,8 +216,8 @@ export async function askCleanedSlot<T extends { composed?: FirstPictureFacts }>
   if (!answer.result) return answer;
   const facts = answer.result.composed;
   if (!facts) s.composed = { of, path: null, why: "service" };
-  else if (facts.made) s.composed = { of, path: composedPath(base, s), share: facts.share, join: facts.join, removed: facts.removed, box: facts.box };
-  else s.composed = { of, path: null, why: facts.why, share: facts.share, join: facts.join, removed: facts.removed };
+  else if (facts.made) s.composed = { of, path: composedPath(base, s), share: facts.share, join: facts.join, removed: facts.removed, ...measuredOf(facts), box: facts.box };
+  else s.composed = { of, path: null, why: facts.why, share: facts.share, join: facts.join, removed: facts.removed, ...measuredOf(facts) };
   return answer;
 }
 
