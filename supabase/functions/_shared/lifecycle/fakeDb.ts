@@ -72,9 +72,52 @@ export function hashtagsRefreshedRpc(args: Row, db: FakeDb): null {
   return null;
 }
 
+let weekWriteRows = 0;
+
+/**
+ * trend_week_write as 20261117160000_trend_week_write.sql has it: the whole
+ * week in one step. A post still in the week keeps its row, a new one is
+ * added, one no longer in the week goes; a dismissed theme stays as it is
+ * and a new theme with its title is left out; every other theme is replaced.
+ * (supabase/tests/_shared/trends/weekWrite.migration.test.ts holds the SQL
+ * itself to the same outcomes.)
+ */
+export function weekWriteRpc(args: Row, db: FakeDb): Row {
+  const week = (db.tables.trend_weeks ?? []).find((w) => same(w.id, args.p_week) && same(w.client_id, args.p_client));
+  if (!week) throw new Error("The week to write does not exist.");
+  if (args.p_status !== "done" && args.p_status !== "partial") throw new Error("A written week is done or partial.");
+  const posts = (db.tables.trend_posts ??= []);
+  const incoming = new Map<string, Row>();
+  for (const p of (args.p_posts ?? []) as Row[]) if (p.url != null && !incoming.has(p.url)) incoming.set(p.url, p);
+  db.tables.trend_posts = posts.filter((p) => !same(p.week_id, args.p_week) || incoming.has(p.url));
+  for (const [url, p] of incoming) {
+    const row = db.tables.trend_posts.find((x) => same(x.week_id, args.p_week) && x.url === url);
+    if (row) Object.assign(row, p);
+    else db.tables.trend_posts.push({ id: `trend_posts-w${++weekWriteRows}`, created_at: new Date().toISOString(), week_id: args.p_week, client_id: args.p_client, ...p });
+  }
+  const stored = new Map(db.tables.trend_posts.filter((p) => same(p.week_id, args.p_week)).map((p) => [p.url as string, p.id as string]));
+  const storedIds = new Set(stored.values());
+  const themes = (db.tables.trend_themes ??= []);
+  const dismissed = themes.filter((t) => same(t.week_id, args.p_week) && t.dismissed_at != null);
+  for (const t of dismissed) t.post_ids = ((t.post_ids ?? []) as string[]).filter((id) => storedIds.has(id));
+  const dismissedTitles = new Set(dismissed.map((t) => String(t.title).toLowerCase()));
+  db.tables.trend_themes = themes.filter((t) => !same(t.week_id, args.p_week) || t.dismissed_at != null);
+  ((args.p_themes ?? []) as Row[]).forEach((t, position) => {
+    if (!String(t.title ?? "").trim() || dismissedTitles.has(String(t.title).toLowerCase())) return;
+    db.tables.trend_themes.push({
+      id: `trend_themes-w${++weekWriteRows}`, created_at: new Date().toISOString(), week_id: args.p_week, client_id: args.p_client, position, title: t.title,
+      happening: t.happening ?? "", why_it_matters: t.why_it_matters ?? "", angle: t.angle ?? "", platforms: t.platforms ?? [],
+      post_ids: ((t.post_urls ?? []) as string[]).map((u) => stored.get(u)).filter(Boolean), dismissed_at: null, dismissed_by: null,
+    });
+  });
+  Object.assign(week, { status: args.p_status, platforms: args.p_platforms ?? {}, filter_status: args.p_filter_status ?? null, cost: args.p_cost ?? {}, finished_at: args.p_finished_at ?? new Date().toISOString() });
+  const now = db.tables.trend_themes.filter((t) => same(t.week_id, args.p_week));
+  return { posts: stored.size, themes: now.filter((t) => t.dismissed_at == null).length, dismissed_kept: now.filter((t) => t.dismissed_at != null).length };
+}
+
 export function fakeDb(tables: Record<string, Row[]> = {}, given: Record<string, (args: Row, db: FakeDb) => unknown> = {}): FakeDb {
   const rpcs: Record<string, (args: Row, db: FakeDb) => unknown> = {
-    lifecycle_enqueue: lookRpc, trend_search_override_put: overridePutRpc, trend_hashtags_refreshed: hashtagsRefreshedRpc, ...given,
+    lifecycle_enqueue: lookRpc, trend_search_override_put: overridePutRpc, trend_hashtags_refreshed: hashtagsRefreshedRpc, trend_week_write: weekWriteRpc, ...given,
   };
   const db: FakeDb = {
     tables,

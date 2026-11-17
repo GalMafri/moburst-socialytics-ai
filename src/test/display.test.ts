@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   countOf, NO_DATA, clientOriginLine, cleanText, declinedBrandLine, competitiveRunStatus, countryNames, eventName, firstRunSentence, scheduleAwaitsTracking, scheduleLines, trackingNotCoveredSentence, trackingWaitSentence, formatDate, formatDateTime, formatRange, sproutDraftLine,
   isRawProfileId, languageNames, locationOrigin, notePointKindName, noteReadLine, noteStateLine, onboardingFacts, platformKey, platformName, profileName, roleName, timelineDetail, timelineKindName, usageStateName,
+  trendsThisWeekLine, trendWeekOf,
 } from "@/lib/display";
 import { isActiveClient } from "@/lib/activeClients";
 
@@ -334,5 +335,61 @@ describe("the empty-value word and counts", () => {
     expect(countOf(3, "competitor")).toBe("3 competitors");
     expect(countOf(2, "company", "companies")).toBe("2 companies");
     expect(countOf(1, "company", "companies")).toBe("1 company");
+  });
+});
+
+describe("the Trends list, when this week has no themes yet", () => {
+  // Tuesday 17 Nov 2026: the week of Nov 16.
+  const now = new Date("2026-11-17T09:00:00Z");
+
+  it("names a week by its Monday in Israel time, as the weekly collection does", () => {
+    // The same answers as the collection's own weekStartOf: supabase/tests/run-scheduled-jobs/trendsRecollect.test.ts holds the two together.
+    expect(trendWeekOf(now)).toBe("2026-11-16");
+    // Sunday 22:00 UTC is already Monday in Israel.
+    expect(trendWeekOf(new Date("2026-11-15T22:00:00Z"))).toBe("2026-11-16");
+    expect(trendWeekOf(new Date("2026-11-15T21:59:00Z"))).toBe("2026-11-09");
+  });
+
+  it("says this week's trends are not in yet, and which week the newest are from", () => {
+    expect(trendsThisWeekLine({ weekStarts: ["2026-11-09", "2026-11-02", "2026-11-09"], to: "2026-11-17", now }))
+      .toBe("This week's trends are not in yet. The newest are from the week of Nov 9, 2026.");
+    // A week that brought nothing back leaves an older week as the newest.
+    expect(trendsThisWeekLine({ weekStarts: ["2026-11-02"], to: "2026-11-17", now }))
+      .toBe("This week's trends are not in yet. The newest are from the week of Nov 2, 2026.");
+    // No earlier week in the dates looked at.
+    expect(trendsThisWeekLine({ weekStarts: [], to: "2026-11-17", now })).toBe("This week's trends are not in yet.");
+    expect(trendsThisWeekLine({ weekStarts: [null, undefined, "not a date"], to: "2026-11-17", now })).toBe("This week's trends are not in yet.");
+  });
+
+  it("says no trends stood out when the week was collected and has none to show", () => {
+    expect(trendsThisWeekLine({ weekStarts: ["2026-11-09"], to: "2026-11-17", collected: true, now }))
+      .toBe("No trends stood out this week. The newest are from the week of Nov 9, 2026.");
+    expect(trendsThisWeekLine({ weekStarts: [], to: "2026-11-17", collected: true, now })).toBe("No trends stood out this week.");
+    // Not collected, or not known: not in yet.
+    expect(trendsThisWeekLine({ weekStarts: [], to: "2026-11-17", collected: false, now })).toBe("This week's trends are not in yet.");
+    // With this week's themes in the list there is nothing to say, collected or not.
+    expect(trendsThisWeekLine({ weekStarts: ["2026-11-16"], to: "2026-11-17", collected: true, now })).toBe("");
+    expect(trendsThisWeekLine({ weekStarts: ["2026-11-09"], to: "2026-11-15", collected: true, now })).toBe("");
+  });
+
+  it("says nothing once this week's themes are in, or for dates that end before this week", () => {
+    expect(trendsThisWeekLine({ weekStarts: ["2026-11-16", "2026-11-09"], to: "2026-11-17", now })).toBe("");
+    // Yesterday, Monday, is this week; Sunday is not.
+    expect(trendsThisWeekLine({ weekStarts: ["2026-11-09"], to: "2026-11-16", now })).not.toBe("");
+    expect(trendsThisWeekLine({ weekStarts: ["2026-11-09"], to: "2026-11-15", now })).toBe("");
+    expect(trendsThisWeekLine({ weekStarts: ["2026-11-09"], to: "2026-10-31", now })).toBe("");
+    expect(trendsThisWeekLine({ weekStarts: ["2026-11-09"], to: null, now })).toBe("");
+    expect(trendsThisWeekLine({ weekStarts: ["2026-11-09"], to: "", now })).toBe("");
+  });
+
+  it("is plain words: no name of a provider, no word from the code", () => {
+    for (const line of [
+      trendsThisWeekLine({ weekStarts: ["2026-11-09"], to: "2026-11-17", now }), trendsThisWeekLine({ weekStarts: [], to: "2026-11-17", now }),
+      trendsThisWeekLine({ weekStarts: ["2026-11-09"], to: "2026-11-17", collected: true, now }), trendsThisWeekLine({ weekStarts: [], to: "2026-11-17", collected: true, now }),
+    ]) {
+      expect(line).not.toBe("");
+      expect(line).not.toMatch(/apify|actor|scrap|source|partial|failed|retry|pipeline|token|error|status/i);
+      expect(line).not.toMatch(/[\u2013\u2014]/);
+    }
   });
 });

@@ -10,7 +10,7 @@ import { TrendInsightsSection } from "@/components/analytics/TrendInsightsSectio
 // read them with measured figures and no way to dismiss; staff see the score
 // and can dismiss a theme, which comes off the list at once.
 
-const f = vi.hoisted(() => ({ staff: false, themes: [] as any[], collected: true, rpcs: [] as any[], loadFails: false, dismissFails: false }));
+const f = vi.hoisted(() => ({ staff: false, themes: [] as any[], collected: true, thisWeek: false as boolean | undefined, rpcs: [] as any[], loadFails: false, dismissFails: false }));
 vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ isMoburstStaff: f.staff }) }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }));
@@ -21,7 +21,7 @@ vi.mock("@/integrations/supabase/client", () => ({
       if (name === "trend_themes_in_range") {
         return f.loadFails
           ? { data: null, error: { message: 'permission denied for function trend_themes_in_range', code: "42501" } }
-          : { data: { collected: f.collected, themes: f.themes }, error: null };
+          : { data: { collected: f.collected, ...(f.thisWeek === undefined ? {} : { this_week_collected: f.thisWeek }), themes: f.themes }, error: null };
       }
       if (name === "trend_theme_dismiss") {
         if (f.dismissFails) return { data: null, error: { message: "Only Moburst staff can dismiss a trend.", code: "42501" } };
@@ -65,16 +65,16 @@ const themes = () => [
 ];
 
 let qc: QueryClient;
-function mount() {
+function mount(from = "2026-10-01", to = "2026-10-31") {
   qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <TrendInsightsSection clientId="c1" from="2026-10-01" to="2026-10-31" />
+      <TrendInsightsSection clientId="c1" from={from} to={to} />
     </QueryClientProvider>,
   );
 }
 beforeEach(() => {
-  f.staff = false; f.themes = themes(); f.collected = true; f.rpcs = []; f.loadFails = false; f.dismissFails = false;
+  f.staff = false; f.themes = themes(); f.collected = true; f.thisWeek = false; f.rpcs = []; f.loadFails = false; f.dismissFails = false;
   vi.mocked(toast.success).mockClear(); vi.mocked(toast.error).mockClear();
 });
 afterEach(() => { cleanup(); qc?.clear(); });
@@ -220,6 +220,80 @@ describe("TrendInsightsSection", () => {
     expect(await screen.findByText("No trends in this period.")).toBeInTheDocument();
     expect(screen.queryByText(/first weekly collection/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "All" })).not.toBeInTheDocument();
+  });
+
+  describe("when this week has no themes yet", () => {
+    // Wednesday 4 Nov 2026: the week of Nov 2. The newest themes read are from the week of Oct 26.
+    beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-11-04T09:00:00Z")); });
+    afterEach(() => { vi.useRealTimers(); });
+    const LINE = "This week's trends are not in yet. The newest are from the week of Oct 26, 2026.";
+
+    it("says so above the earlier weeks, in plain words, to a client and to staff", async () => {
+      const { container } = mount("2026-10-05", "2026-11-04");
+      expect(await screen.findByText(LINE)).toBeInTheDocument();
+      expect(screen.getAllByRole("heading", { name: /^Week of / }).map((h) => h.textContent)).toEqual(["Week of Oct 26, 2026", "Week of Oct 19, 2026"]);
+      // Nothing of how trends are collected reaches the screen.
+      expect(container.textContent).not.toMatch(/apify|actor|scrap|source|partial|failed|retry|pipeline|token|error/i);
+      // A line about now is not part of an exported record.
+      expect(screen.getByText(LINE)).toHaveAttribute("data-print", "hide");
+      cleanup();
+      f.staff = true;
+      mount("2026-10-05", "2026-11-04");
+      expect(await screen.findByText(LINE)).toBeInTheDocument();
+    });
+
+    it("says no trends stood out when this week was collected and has none to show, never that they are still to come", async () => {
+      f.thisWeek = true;
+      const { container } = mount("2026-10-05", "2026-11-04");
+      expect(await screen.findByText("No trends stood out this week. The newest are from the week of Oct 26, 2026.")).toBeInTheDocument();
+      expect(screen.queryByText(/not in yet/)).not.toBeInTheDocument();
+      expect(container.textContent).not.toMatch(/apify|actor|scrap|source|partial|failed|retry|pipeline|token|error/i);
+      cleanup();
+      f.themes = [];
+      mount("2026-10-29", "2026-11-04");
+      expect(await screen.findByText("No trends in this period.")).toBeInTheDocument();
+      expect(screen.getByText("No trends stood out this week.")).toBeInTheDocument();
+      expect(screen.queryByText(/not in yet/)).not.toBeInTheDocument();
+    });
+
+    it("reads an answer without the week's state as not in yet", async () => {
+      f.thisWeek = undefined;
+      mount("2026-10-05", "2026-11-04");
+      expect(await screen.findByText(LINE)).toBeInTheDocument();
+    });
+
+    it("says nothing once this week's themes are in", async () => {
+      f.thisWeek = true;
+      f.themes = [{ ...themes()[0], id: "t9", week_start: "2026-11-02", title: "This week's theme" }, ...themes()];
+      mount("2026-10-05", "2026-11-04");
+      expect(await screen.findByText("This week's theme")).toBeInTheDocument();
+      expect(screen.queryByText(/not in yet/)).not.toBeInTheDocument();
+    });
+
+    it("keeps saying so when the list is narrowed to one network", async () => {
+      mount("2026-10-05", "2026-11-04");
+      await screen.findByText("Captain POV skits");
+      fireEvent.click(screen.getByRole("button", { name: "Instagram" }));
+      expect(screen.getByText(LINE)).toBeInTheDocument();
+    });
+
+    it("says nothing about now for dates that end before this week", async () => {
+      mount();
+      await screen.findByText("Captain POV skits");
+      expect(screen.queryByText(/not in yet/)).not.toBeInTheDocument();
+    });
+
+    it("adds it to the empty list, and leaves a client with no collection yet its own line", async () => {
+      f.themes = [];
+      mount("2026-10-29", "2026-11-04");
+      expect(await screen.findByText("No trends in this period.")).toBeInTheDocument();
+      expect(screen.getByText("This week's trends are not in yet.")).toBeInTheDocument();
+      cleanup();
+      f.collected = false;
+      mount("2026-10-29", "2026-11-04");
+      expect(await screen.findByText("Trends show here after the first weekly collection.")).toBeInTheDocument();
+      expect(screen.queryByText(/not in yet/)).not.toBeInTheDocument();
+    });
   });
 
   it("keeps loading quietly when the themes do not load, and fills in when a try answers", async () => {

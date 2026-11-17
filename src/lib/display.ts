@@ -443,6 +443,45 @@ export function compactNumber(v: number): string {
   return v.toLocaleString("en-US", { maximumFractionDigits: Math.abs(v) < 100 ? 1 : 0 });
 }
 
+// ── Trends ─────────────────────────────────────────────────────────────────
+
+/**
+ * The Monday (yyyy-mm-dd) of the week a moment falls in, in Israel time: how
+ * the weekly trends name a week (run-scheduled-jobs/trends.ts weekStartOf).
+ */
+export function trendWeekOf(now: Date = new Date()): string {
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jerusalem", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+  const t = Date.parse(`${today}T00:00:00Z`);
+  const isoDow = ((new Date(t).getUTCDay() + 6) % 7) + 1;
+  return new Date(t - (isoDow - 1) * 86_400_000).toISOString().slice(0, 10);
+}
+
+/**
+ * What the Trends list says when this week has no themes in it, so a list
+ * that ends at an earlier week reads as what it is. Two facts, two sentences:
+ *   not collected yet (before the client's collection day, or while it is
+ *   going): "This week's trends are not in yet."
+ *   collected, with no theme to show (too few posts were worth keeping, or
+ *   the team dismissed what there was): "No trends stood out this week."
+ * followed, when the list shows an earlier week, by "The newest are from the
+ * week of Nov 9, 2026." Empty when this week's themes are in the list, and
+ * when the dates looked at end before this week: a past period says nothing
+ * about now.
+ * `weekStarts`: the Monday of each theme in the list. `to`: the last day
+ * looked at. `collected`: whether this week was collected and brought
+ * something back (trend_themes_in_range's this_week_collected).
+ */
+export function trendsThisWeekLine(args: { weekStarts: Array<string | null | undefined>; to: string | null | undefined; collected?: boolean; now?: Date }): string {
+  const thisWeek = trendWeekOf(args.now);
+  const to = String(args.to ?? "").slice(0, 10);
+  if (!DATE_ONLY.test(to) || to < thisWeek) return "";
+  const weeks = args.weekStarts.map((w) => String(w ?? "").slice(0, 10)).filter((w) => DATE_ONLY.test(w)).sort();
+  const newest = weeks[weeks.length - 1] ?? "";
+  if (newest >= thisWeek) return "";
+  const fact = args.collected ? "No trends stood out this week." : "This week's trends are not in yet.";
+  return newest ? `${fact} The newest are from the week of ${formatDate(newest)}.` : fact;
+}
+
 // ── Schedules ──────────────────────────────────────────────────────────────
 
 /** A schedule's next run as a screen reads it (src/lib/nextRun.ts): its date, and whether it waits for tracking. */

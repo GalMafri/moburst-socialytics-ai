@@ -36,6 +36,11 @@ export interface TrendTheme {
 export interface TrendThemesAnswer {
   /** True when at least one week was collected on any date, so "no themes" means none in this window. */
   collected: boolean;
+  /**
+   * True when this week (the week of today) was collected and brought something back: with no theme of
+   * this week in the list, the week has none to show. False before the week's collection and while it is going.
+   */
+  thisWeekCollected: boolean;
   themes: TrendTheme[];
 }
 
@@ -73,9 +78,12 @@ export function useTrendThemes(clientId: string, from: string, to: string, opts:
     queryFn: async () => {
       const { data, error } = await supabase.rpc("trend_themes_in_range", { p_client: clientId, p_from: from, p_to: to });
       if (error) throw error;
-      // The function returns one jsonb object, { collected, themes }; its themes have the shape TrendTheme describes.
+      // The function returns one jsonb object, { collected, this_week_collected, themes }; its themes have the shape TrendTheme describes.
       const answer = data && typeof data === "object" && !Array.isArray(data) ? data : null;
-      return { collected: answer?.collected === true, themes: Array.isArray(answer?.themes) ? (answer.themes as unknown as TrendTheme[]) : [] } satisfies TrendThemesAnswer;
+      return {
+        collected: answer?.collected === true, thisWeekCollected: answer?.this_week_collected === true,
+        themes: Array.isArray(answer?.themes) ? (answer.themes as unknown as TrendTheme[]) : [],
+      } satisfies TrendThemesAnswer;
     },
   });
 }

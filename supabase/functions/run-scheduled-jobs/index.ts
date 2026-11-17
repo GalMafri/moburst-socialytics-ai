@@ -65,6 +65,19 @@
 //                              code before this release saved partial with nothing back
 //                              (every watched platform failed, no kept post, no theme);
 //                              paid, never scheduled; remove after 16 Nov 2026.
+//
+// A trend week saved without a source (partial) has that source collected
+// again by the tick itself (trends.ts queueSourceRecollects, every 5 minutes):
+// no mode starts it and nothing switches it on. Up to 6 tries a week, spaced
+// 10 minutes, an hour, six hours, then a day apart; never for a week that is
+// done or over, and never a third time for a source that refused the request
+// or the account twice running. Each try is a trend_refresh job whose result
+// names the failed sources, what each last answered and the kind of fault
+// (request, credentials or transient). A source that used every try or was
+// refused twice, and a week whose run waits for the collecting account, end
+// their job failed, so the daily sweep (mode status) lists them. No message
+// is posted anywhere.
+//
 // POST {"mode":"replay_trends","run_id":"<id>"}
 //                              a trends run's week again from its kept source
 //                              answers (no Apify call; Claude is asked again).
@@ -121,7 +134,7 @@ import { compareResults, formatComparison } from "../_shared/pipelines/compare.t
 import { appRunView, expirePayloads, loadShadowPair, makePayloadStore, makeRunStore, makeStepLog, makeStepServices } from "../_shared/pipelines/store.ts";
 import { directKey, runClaudeDirect } from "../_shared/pipelines/claudeDirect.ts";
 import { makeDispatchStore, makeJobStore } from "./store.ts";
-import { filterCheckRequest, recollectEmptyWeeks, runTrendJob, startTrendReplay, startTrendWeek } from "./trends.ts";
+import { filterCheckRequest, queueSourceRecollects, recollectEmptyWeeks, recollectSweepDue, runTrendJob, startTrendReplay, startTrendWeek } from "./trends.ts";
 import { liveOnboardingDeps, runSproutOnboardingJob, sproutOnboarding } from "./sproutOnboarding.ts";
 import { onboardingFieldsCheck } from "./fieldsCheck.ts";
 import type { ScheduledJob } from "../_shared/scheduled-jobs/types.ts";
@@ -256,6 +269,7 @@ Deno.serve(async (req) => {
           case "lifecycle": return runLifecycle(db, job as unknown as LifecycleJob);
           case "lifecycle_step": return runLifecycleStep(db, job as unknown as LifecycleJob);
           case "report_pipeline": return runPipelineJob(job, pipelineDeps);
+          // The week's collection, or a failed source of it collected again (payload.recollect).
           case "trend_refresh": return runTrendJob(db, job);
           case "sprout_onboarding": return runSproutOnboardingJob(db, job, liveOnboardingDeps());
           // The file parsers load only for a notes job that needs them, so the worker boots without them.
@@ -274,6 +288,8 @@ Deno.serve(async (req) => {
         decks: () => closeStalledDecks(db, new Date()),
       }),
       releaseReady: () => jobs.releaseReady(),
+      // Trend weeks short of a source: a job for each whose next try has come.
+      recollectTrends: () => (recollectSweepDue(new Date()) ? queueSourceRecollects(db, new Date()) : Promise.resolve([])),
       pipelines: {
         lease: () => jobs.leasePipelines(LEASE_SECONDS, PIPELINE_CONCURRENCY),
         run: (job) => runPipelineJob(job, pipelineDeps),

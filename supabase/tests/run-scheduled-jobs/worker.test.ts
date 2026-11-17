@@ -134,6 +134,37 @@ describe("workerTick", () => {
     expect(r.results).toHaveLength(1);
     expect(warned.mock.calls.map((c) => c.join(" "))).toEqual([expect.stringContaining("sweep failed"), expect.stringContaining("release failed")]);
   });
+
+  it("looks for trend weeks short of a source before it leases, and works the queue when that look fails", async () => {
+    const order: string[] = [];
+    const queue = [job("a")];
+    const r = await workerTick({
+      now: clock(10),
+      lease: async () => { order.push("lease"); return queue.shift() ?? null; },
+      run: async () => ({ status: "done" }),
+      finish: async () => {},
+      closeAbandoned: async () => [],
+      releaseReady: async () => 0,
+      recollectTrends: async () => { order.push("recollect"); return ["trend_recollect:w1:1:2026-10-07"]; },
+    });
+    // The job the look queued is there for this tick's first lease.
+    expect(order.slice(0, 2)).toEqual(["recollect", "lease"]);
+    expect(r.results).toHaveLength(1);
+
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const again = [job("b")];
+    const failed = await workerTick({
+      now: clock(10),
+      lease: async () => again.shift() ?? null,
+      run: async () => ({ status: "done" }),
+      finish: async () => {},
+      closeAbandoned: async () => [],
+      releaseReady: async () => 0,
+      recollectTrends: async () => { throw new Error("weeks not read"); },
+    });
+    expect(failed.results.map((x) => x.id)).toEqual(["b"]);
+    expect(warned.mock.calls.map((c) => c.join(" "))).toEqual([expect.stringContaining("weeks not read")]);
+  });
 });
 
 describe("summarize and repairsFor (the daily sweep)", () => {

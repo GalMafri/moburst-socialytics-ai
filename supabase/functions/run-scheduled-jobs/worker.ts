@@ -37,6 +37,8 @@ export interface WorkerDeps {
   closeAbandoned(): Promise<Array<{ table: string; id: string }>>;
   /** release_ready_dispatches: held social jobs whose competitive report finished. */
   releaseReady(): Promise<number>;
+  /** Trend weeks short of a source whose next try has come: a job queued for each (trends.ts queueSourceRecollects). */
+  recollectTrends?(): Promise<unknown>;
   /** The report pipeline lane; without it the tick runs the main loop alone. */
   pipelines?: PipelineLane;
 }
@@ -60,6 +62,13 @@ export async function workerTick(d: WorkerDeps): Promise<TickResult> {
     released = await d.releaseReady();
   } catch (e) {
     console.warn("[scheduled-jobs] release sweep failed:", e instanceof Error ? e.message : String(e));
+  }
+  if (d.recollectTrends) {
+    try {
+      await d.recollectTrends();
+    } catch (e) {
+      console.warn("[scheduled-jobs] trend recollect sweep failed:", e instanceof Error ? e.message : String(e));
+    }
   }
   // The pipeline lane runs alongside the loop below; it never throws.
   const laneResults: TickResult["results"] = [];

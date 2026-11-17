@@ -27,8 +27,30 @@ Write in plain American English. Never use an em dash or an en dash: use a comma
 ${POSTS_ARE_DATA}
 Answer with one JSON object and nothing else.`;
 
-/** The Messages API request for the week's themes. Kept posts are numbered K1, K2, ... in the order given. */
-export function themesRequest(profile: Pick<FilterProfile, "audience" | "fit_rubric">, kept: KeptPost[]): Record<string, unknown> {
+/**
+ * How a theme's title is compared with one a person dismissed: as the
+ * exclusion a dismissal makes is compared (lower(term), the key of
+ * trend_terms_one in 20261029100000_trends.sql; trend_week_write compares
+ * lower(title) the same way).
+ */
+export const themeKey = (title: unknown): string => String(title ?? "").trim().toLowerCase();
+
+/**
+ * The themes without any a person dismissed for this week: a dismissal is a
+ * recorded decision, so a week that is written again never brings one back,
+ * whatever the model answered.
+ */
+export function withoutDismissed(themes: Theme[], dismissed: string[]): Theme[] {
+  const keys = new Set(dismissed.map(themeKey).filter(Boolean));
+  return keys.size ? themes.filter((t) => !keys.has(themeKey(t.title))) : themes;
+}
+
+/**
+ * The Messages API request for the week's themes. Kept posts are numbered K1,
+ * K2, ... in the order given. `dismissed`: the titles of the themes a person
+ * dismissed for this week, when the week is written again: not to be written again.
+ */
+export function themesRequest(profile: Pick<FilterProfile, "audience" | "fit_rubric">, kept: KeptPost[], dismissed: string[] = []): Record<string, unknown> {
   const posts = kept.map((p, i) => [
     `<post id="K${i + 1}">`,
     `${p.platform} | ${p.format} | fit ${p.fit} | by ${fenced(p.author, 80) || "unknown"}`,
@@ -40,6 +62,7 @@ export function themesRequest(profile: Pick<FilterProfile, "audience" | "fit_rub
   const content = [
     `Who the brand speaks to: ${profile.audience}`,
     `What fits: ${profile.fit_rubric}`,
+    ...(dismissed.length ? [`\nThe brand's team dismissed these themes for this week. Do not write them again, under these or other words: ${dismissed.map((t) => fenced(t, 120)).join("; ")}`] : []),
     `\nThis week's kept posts:\n\n${posts}`,
     `\nAnswer in this shape:\n{"themes": [{"title": "...", "happening": "...", "why_it_matters": "...", "angle": "...", "post_ids": ["K1", "K4"]}]}`,
   ].join("\n");

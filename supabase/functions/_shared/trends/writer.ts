@@ -1,6 +1,15 @@
-// The writers of trends_v1. week: what the save step hands over goes into
-// trend_posts, trend_themes and the week's trend_weeks row; a run that is
-// written again (a retried step) replaces the week's posts and themes.
+// The writers of trends_v1.
+// week: what the save step hands over goes into trend_posts, trend_themes and
+// the week's trend_weeks row, in one transaction in the database
+// (trend_week_write, 20261117160000_trend_week_write.sql). A week is written
+// more than once (a retried step, a replay, a failed source collected again
+// after people have looked at the week), so a reader sees the week as it was
+// or as it is now, never in between, and a write that fails leaves it as it
+// was. A post is matched by its link, so none is stored twice. A theme a
+// person dismissed stays as it is, and a new theme with its title is left out.
+// sources: what a run that collected failed sources again learned without
+// writing the week again: a source that answered with no posts, the fault a
+// source failed with again, and what the try cost.
 // searches: the coverage rewrite of one platform's searches, kept in the
 // client's trend profile for the weeks to come.
 
@@ -10,8 +19,6 @@ import type { PipelineRun } from "../pipelines/types.ts";
 type Db = any;
 // deno-lint-ignore no-explicit-any
 type Any = any;
-
-const CHUNK = 200;
 
 async function must<T>(p: PromiseLike<{ data: T; error: { message: string } | null }>, what: string): Promise<T> {
   const { data, error } = await p;
@@ -25,28 +32,43 @@ export const TREND_WRITERS: Record<string, (db: Db, run: PipelineRun, data: Reco
   async week(db, run, data) {
     const weekId = run.real_id;
     if (!weekId) throw new Error("A trends run must point at its week.");
-    const posts = (data.posts ?? []) as Any[];
-    const themes = (data.themes ?? []) as Any[];
-    await must(db.from("trend_themes").delete().eq("week_id", weekId), "Could not clear the week's themes");
-    await must(db.from("trend_posts").delete().eq("week_id", weekId), "Could not clear the week's posts");
-    const idByUrl = new Map<string, string>();
-    for (let i = 0; i < posts.length; i += CHUNK) {
-      const chunk = posts.slice(i, i + CHUNK).map((p) => ({
-        week_id: weekId, client_id: run.client_id,
-        ...Object.fromEntries(POST_COLUMNS.map((c) => [c, p[c] ?? (c === "kept" || c === "tripwire" ? false : null)])),
-      }));
-      const inserted = await must(db.from("trend_posts").insert(chunk).select("id, url"), "Could not save the week's posts") as Array<{ id: string; url: string }>;
-      for (const r of inserted ?? []) idByUrl.set(r.url, r.id);
-    }
-    if (themes.length) {
-      await must(db.from("trend_themes").insert(themes.map((t, position) => ({
-        week_id: weekId, client_id: run.client_id, position, title: t.title, happening: t.happening, why_it_matters: t.why_it_matters,
-        angle: t.angle, platforms: t.platforms ?? [], post_ids: (t.post_urls ?? []).map((u: string) => idByUrl.get(u)).filter(Boolean),
-      }))), "Could not save the week's themes");
+    const posts = ((data.posts ?? []) as Any[]).map((p) => Object.fromEntries(POST_COLUMNS.map((c) => [c, p[c] ?? (c === "kept" || c === "tripwire" ? false : null)])));
+    const themes = ((data.themes ?? []) as Any[]).map((t) => ({
+      title: t.title, happening: t.happening, why_it_matters: t.why_it_matters, angle: t.angle, platforms: t.platforms ?? [], post_urls: t.post_urls ?? [],
+    }));
+    await must(db.rpc("trend_week_write", {
+      p_week: weekId, p_client: run.client_id, p_posts: posts, p_themes: themes, p_status: data.status, p_platforms: data.platforms ?? {},
+      p_filter_status: data.filter_status ?? null, p_cost: data.cost ?? {}, p_finished_at: data.finished_at ?? new Date().toISOString(),
+    }), "Could not save the week");
+  },
+
+  /**
+   * What a run that collected failed sources again learned without writing
+   * the week again. Each platform's entry is merged into what the week holds
+   * for it (a null value takes a key away): a source that answered with no
+   * posts is recorded as answered, a source that failed again keeps its
+   * state with the fault it failed with. `status`, when given, is the
+   * week's status now (the run works it out); `cost` is what the week has
+   * cost with this try in it; `finished_at` moves only when a source
+   * answered. The week's posts and themes are not touched. Only a partial
+   * week is changed.
+   */
+  async sources(db, run, data) {
+    const weekId = run.real_id;
+    if (!weekId) throw new Error("A trends run must point at its week.");
+    if (data.status !== undefined && data.status !== "done" && data.status !== "partial") throw new Error("The week's status must be done or partial.");
+    const week = await must(db.from("trend_weeks").select("status, platforms").eq("id", weekId).maybeSingle(), "Could not read the week") as
+      { status: string; platforms: Record<string, Any> | null } | null;
+    if (!week || week.status !== "partial") return;
+    const platforms: Record<string, Any> = { ...(week.platforms ?? {}) };
+    for (const [platform, state] of Object.entries((data.platforms ?? {}) as Record<string, Record<string, unknown>>)) {
+      const merged: Record<string, unknown> = { ...(platforms[platform] ?? {}), ...state };
+      for (const key of Object.keys(merged)) if (merged[key] === null) delete merged[key];
+      platforms[platform] = merged;
     }
     await must(db.from("trend_weeks").update({
-      status: data.status, platforms: data.platforms ?? {}, filter_status: data.filter_status ?? null, cost: data.cost ?? {}, finished_at: data.finished_at ?? new Date().toISOString(),
-    }).eq("id", weekId), "Could not finish the week");
+      platforms, ...(data.status ? { status: data.status } : {}), ...(data.cost ? { cost: data.cost } : {}), ...(data.finished_at ? { finished_at: data.finished_at } : {}),
+    }).eq("id", weekId).eq("status", "partial"), "Could not record what the try learned");
   },
 
   /**

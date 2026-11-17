@@ -25,6 +25,37 @@
 //                  the run stops and the week is collected again)
 //                  every post looked at, kept or dropped with its reason, the
 //                  themes, each platform's status and the measured cost
+//
+// A failed source collected again. A week is complete only when every source
+// it needs has answered; a week saved with a failed source is partial, and
+// run-scheduled-jobs/trends.ts starts a run for it again (a bounded number of
+// times, spaced out, never after the week is over). That run names the run
+// the week was last saved from (input.replay.from_run) and the sources to ask
+// (input.recollect.platforms), and differs from any other run in four steps:
+//   start     the earlier run's plan, with the window's end moved to now so
+//             the late source's newest posts count, and the exclusions as
+//             they are now, so a theme a person dismissed since stays out.
+//             Every other source's kept answer must still be there: a missing
+//             answer is not an empty one, so the run stops before it pays for
+//             anything and the week stays as it was saved
+//   scrape_*  a named source: the real source (paid). Any other: the answer
+//             the earlier run kept, so nothing that answered is paid for twice
+//   rules     no named source brought posts: the run ends here, before any
+//             model call, and the week's posts and themes stay. A source that
+//             answered with nothing is recorded as answered (output "sources")
+//   save      the week written again from every source (a post is matched by
+//             its link, so none is stored twice; themes made again once). A
+//             week whose posts could not be judged again is not written: it
+//             stays as it was saved
+// Every try adds what it cost to the week's cost, once, however it ends, and
+// records for each source that failed again the kind of fault and how many
+// tries in a row it has been (platforms.<p>.fault): a request or an account
+// the source refuses twice running is not asked again that week.
+//
+// A theme a person dismissed is a recorded decision. Whenever a week is
+// written again (a replay, a source collected again), the themes step is told
+// the week's dismissed titles, a theme the model writes under one of them
+// anyway is left out, and the dismissed rows themselves stay (the writer).
 
 import { runActorStep, type ApifyFactory } from "../apifyStep.ts";
 import { claudeBatchStep } from "../claude.ts";
@@ -34,11 +65,12 @@ import { SOURCE_KEEP_DAYS } from "../store.ts";
 import { StepRestart, StepStop, type PipelineDefinition, type PipelineRun, type Step, type StepContext, type StepResult } from "../types.ts";
 import { competitorSet } from "../../calendar/runWeek.ts";
 import { coverageShort, finishedWeeks, lastKept, parseRewrite, removedFor, removedSearches, rewriteRequest, TREND_REWRITE_MODEL, weeksAfter, withoutRemoved, type RewriteProfile } from "../../trends/coverage.ts";
+import { failedSources, sourceFaultKind, type SourceFaultKind } from "../../trends/faults.ts";
 import { activeTerms } from "../../trends/profile.ts";
 import { fillAfter, MAX_SEARCHES, personSearches, searchesFor, TREND_SOURCES } from "../../trends/sources.ts";
 import { ruleFilter, tripwire } from "../../trends/rules.ts";
 import { filterRequest, parseFilter, pickKept, TREND_FILTER_MODEL, type FilterProfile } from "../../trends/filter.ts";
-import { parseThemes, themesRequest, themesWanted, TREND_THEMES_MODEL } from "../../trends/themes.ts";
+import { parseThemes, themesRequest, themesWanted, THEMES_MIN_KEPT, TREND_THEMES_MODEL, withoutDismissed } from "../../trends/themes.ts";
 import { TREND_PLATFORMS, UNCOUNTED_PLATFORMS, type DropReason, type KeptPost, type RuleDrop, type Term, type Theme, type TrendPlatform, type TrendPost } from "../../trends/types.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -102,6 +134,8 @@ interface TrendState {
   platforms?: Partial<Record<TrendPlatform, { status: PlatformStatus; searched: number; rows: number }>>;
   apifyUsd?: number;
   claude?: Record<string, { input_tokens: number; output_tokens: number }>;
+  /** What kind of fault each source that failed in this run failed with (its last failed answer). */
+  faults?: Partial<Record<TrendPlatform, { kind: SourceFaultKind; status: number | null }>>;
   filterTries?: number;
   themesTries?: number;
   /** The platforms whose searches are still to be rewritten, the one being asked about first. */
@@ -182,6 +216,86 @@ export function trendWeekEnd(weekStart: string): Date | null {
   return new Date(nextMonday - (local - nextMonday));
 }
 
+/** What a run that collects failed sources again carries in its input (input.recollect), beside the run it reads the rest from (input.replay). */
+export interface Recollect {
+  /** The sources asked again; every other source is read from the run in input.replay. */
+  platforms: TrendPlatform[];
+  /** Which try of the week this is, from 1. */
+  try: number;
+}
+
+/** The run's recollect, or null for any other run. */
+export function recollectOf(run: Pick<PipelineRun, "input">): Recollect | null {
+  const r = ((run.input ?? {}) as { recollect?: { platforms?: unknown; try?: unknown } | null }).recollect;
+  if (!r || !Array.isArray(r.platforms)) return null;
+  const platforms = TREND_PLATFORMS.filter((p) => (r.platforms as unknown[]).includes(p));
+  return platforms.length ? { platforms, try: Number(r.try) || 1 } : null;
+}
+
+/** What a week cost (trend_weeks.cost). */
+interface WeekCost { apify_usd?: number; claude?: Record<string, { input_tokens?: number; output_tokens?: number }>; [key: string]: unknown }
+
+/** What the week cost so far and what a run that collected a source again cost, as one: the scraping in dollars, the model's tokens per model. */
+export function addCost(before: WeekCost | null | undefined, run: WeekCost | null | undefined, runId: string): WeekCost {
+  const was = before ?? {};
+  // The run's cost is already in: a save tried again must not add it twice.
+  if (was.recollected_by === runId) return was;
+  const now = run ?? {};
+  const claude: Record<string, { input_tokens: number; output_tokens: number }> = {};
+  for (const tokens of [was.claude ?? {}, now.claude ?? {}]) {
+    for (const [model, t] of Object.entries(tokens)) {
+      const sum = claude[model] ?? { input_tokens: 0, output_tokens: 0 };
+      claude[model] = { input_tokens: sum.input_tokens + (Number(t?.input_tokens) || 0), output_tokens: sum.output_tokens + (Number(t?.output_tokens) || 0) };
+    }
+  }
+  const { replayed_from: _replayed, ...rest } = was;
+  return { ...rest, apify_usd: Math.round(((Number(was.apify_usd) || 0) + (Number(now.apify_usd) || 0)) * 10000) / 10000, claude, recollected_by: runId };
+}
+
+/**
+ * The fault a week's row keeps for a source that failed (platforms.<p>.fault):
+ * its kind, the HTTP status when there was one, and how many tries in a row
+ * (runs that collected the source again) ended with that same kind. The
+ * weekly collection itself counts none. Never the source's own words.
+ */
+export interface SourceFaultMark { kind: SourceFaultKind; status: number | null; tries: number; by: string }
+
+/** The mark after this run: one more try of the same kind, the first of another, or none for a run that is no try. A step tried again keeps the mark it made. */
+export function nextFault(before: Partial<SourceFaultMark> | null | undefined, now: { kind: SourceFaultKind; status: number | null } | undefined, isTry: boolean, runId: string): SourceFaultMark {
+  if (before?.by === runId && before.kind) return before as SourceFaultMark;
+  const fault = now ?? { kind: "transient" as const, status: null };
+  const tries = isTry ? (before?.kind === fault.kind ? (Number(before.tries) || 0) + 1 : 1) : 0;
+  return { kind: fault.kind, status: fault.status, tries, by: runId };
+}
+
+/** Each run a platform's source makes for the plan: one for every search, or one a search (sources.ts). None for a platform the plan does not watch. */
+function sourceRuns(plan: Plan, platform: TrendPlatform) {
+  if (!plan.platforms.includes(platform)) return [];
+  return TREND_SOURCES[platform].inputs(plan.searches[platform] ?? [], {
+    region: plan.client.region, language: plan.client.language, windowStart: plan.window.start.slice(0, 10), windowEnd: plan.window.end.slice(0, 10),
+  });
+}
+
+/**
+ * The week's status once the given sources no longer count as failed, its
+ * posts and themes unchanged: done when no source is left failed and nothing
+ * else kept the week partial (its filter answered, and it has themes or too
+ * few kept posts to make any); else partial.
+ */
+async function statusWithout(ctx: StepContext, answered: TrendPlatform[]): Promise<"done" | "partial"> {
+  const weekId = ctx.run.real_id;
+  const { data: week, error } = await ctx.db.from("trend_weeks").select("platforms, filter_status").eq("id", weekId).maybeSingle();
+  if (error || !week) throw new Error(`Could not read the week: ${error?.message ?? "not found"}`);
+  const stillFailed = failedSources(week.platforms).filter((p) => !answered.includes(p));
+  if (stillFailed.length || week.filter_status === "failed") return "partial";
+  const { data: kept, error: keptError } = await ctx.db.from("trend_posts").select("id").eq("week_id", weekId).eq("kept", true).limit(THEMES_MIN_KEPT);
+  if (keptError) throw new Error(`Could not read the week's kept posts: ${keptError.message}`);
+  if ((kept ?? []).length < THEMES_MIN_KEPT) return "done";
+  const { data: themes, error: themesError } = await ctx.db.from("trend_themes").select("id").eq("week_id", weekId).limit(1);
+  if (themesError) throw new Error(`Could not read the week's themes: ${themesError.message}`);
+  return (themes ?? []).length ? "done" : "partial";
+}
+
 /** A trends run is for its week: a wait for an account cannot pass the week's end. */
 const trendRunHorizon = (run: Pick<PipelineRun, "input">): Date | null => trendWeekEnd(String((run.input as { week_start?: unknown } | null)?.week_start ?? ""));
 
@@ -189,10 +303,7 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
   const scrapeStep = (platform: TrendPlatform, next: string) => async (ctx: StepContext): Promise<StepResult> => {
     const plan = await need<Plan>(ctx, "plan");
     const st = stateOf(ctx);
-    const searches = plan.searches[platform] ?? [];
-    const runs = plan.platforms.includes(platform)
-      ? TREND_SOURCES[platform].inputs(searches, { region: plan.client.region, language: plan.client.language, windowStart: plan.window.start.slice(0, 10), windowEnd: plan.window.end.slice(0, 10) })
-      : [];
+    const runs = sourceRuns(plan, platform);
     if (!runs.length) {
       const status: PlatformStatus = plan.platforms.includes(platform) ? "no_searches" : "not_watched";
       return { type: "next", step: next, state: { ...st, platforms: { ...(st.platforms ?? {}), [platform]: { status, searched: 0, rows: 0 } } }, detail: { platform, status } };
@@ -201,16 +312,25 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
     const run = runs[prog.i];
     const key = `source.${platform}.${prog.i}`;
     let usd = 0;
+    let fault: { kind: SourceFaultKind; status: number | null } | null = null;
     let detail: Record<string, unknown> = { platform, run: prog.i + 1, of: runs.length };
     // Everything that reads this run's answer is inside the try: whatever goes
     // wrong with one source marks that source failed, and the week goes on.
     try {
       let rows: unknown[] | null = null;
-      if (replayOf(ctx)) {
-        const failed = await keptAnswer(ctx, `${key}.failed`);
-        if (failed) await ctx.payloads.put(`${key}.failed`, failed, KEEP);
-        else {
-          rows = (await keptAnswer<unknown[]>(ctx, key)) ?? [];
+      // A replay reads every answer the earlier run kept. A run that collects failed sources again
+      // reads them too, except for the sources it names: those are asked for real.
+      if (replayOf(ctx) && !recollectOf(ctx.run)?.platforms.includes(platform)) {
+        const failed = await keptAnswer<{ message?: unknown }>(ctx, `${key}.failed`);
+        if (failed) {
+          await ctx.payloads.put(`${key}.failed`, failed, KEEP);
+          fault = sourceFaultKind(String(failed.message ?? ""));
+        } else {
+          // A missing answer is not an empty one: read as empty it would mark the source answered and
+          // write the week again without that source's posts. The run stops and the week stays as saved.
+          const kept = await keptAnswer<unknown[]>(ctx, key);
+          if (!Array.isArray(kept)) throw new StepStop(`The answer ${platform} gave (run ${prog.i + 1} of ${runs.length}) is no longer kept, so the week is not written again.`);
+          rows = kept;
           await ctx.payloads.put(key, rows, KEEP);
         }
         detail = { ...detail, replayed: true };
@@ -235,20 +355,57 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
         prog.failed += 1;
       }
     } catch (e) {
-      if (ctx.attempt < SCRAPE_TRIES) throw e;
+      if (e instanceof StepStop || ctx.attempt < SCRAPE_TRIES) throw e;
       const message = (e instanceof Error ? e.message : String(e)).slice(0, 300);
       await ctx.payloads.put(`${key}.failed`, { message }, KEEP).catch(() => undefined);
       prog.failed += 1;
+      fault = sourceFaultKind(message);
       detail = { ...detail, failed: message };
     }
     prog.i += 1;
-    const moved: TrendState = { ...st, apifyUsd: (st.apifyUsd ?? 0) + usd, scrape: { ...(st.scrape ?? {}), [platform]: prog } };
+    const moved: TrendState = {
+      ...st, apifyUsd: (st.apifyUsd ?? 0) + usd, scrape: { ...(st.scrape ?? {}), [platform]: prog },
+      ...(fault ? { faults: { ...(st.faults ?? {}), [platform]: fault } } : {}),
+    };
     if (prog.i < runs.length) return { type: "next", step: ctx.step, state: moved, detail };
     const status: PlatformStatus = prog.ok === 0 ? "failed" : prog.rows === 0 ? "empty" : "ok";
     return { type: "next", step: next, state: { ...moved, platforms: { ...(moved.platforms ?? {}), [platform]: { status, searched: runs.length, rows: prog.rows } } }, detail: { ...detail, status } };
   };
 
   const candidatesOf = (ctx: StepContext) => need<TrendPost[]>(ctx, "candidates");
+
+  /** The titles of the themes a person dismissed for the run's week: none on a week's first write. */
+  const dismissedTitles = async (ctx: StepContext): Promise<string[]> => {
+    const { data, error } = await ctx.db.from("trend_themes").select("title").eq("week_id", ctx.run.real_id).not("dismissed_at", "is", null);
+    if (error) throw new Error(`Could not read the week's dismissed themes: ${error.message}`);
+    return ((data ?? []) as Array<{ title: unknown }>).map((t) => String(t.title ?? "")).filter(Boolean);
+  };
+
+  /** What this run cost so far: the scraping in dollars and the model's tokens per model. */
+  const runCost = (st: TrendState): WeekCost => ({ apify_usd: Math.round((st.apifyUsd ?? 0) * 10000) / 10000, claude: st.claude ?? {} });
+
+  /**
+   * What a run that collected failed sources again records when it ends
+   * without writing the week: what the week has cost with this try in it, and
+   * for each named source that failed again, the fault and how many tries in
+   * a row it has been. `answered`: the named sources that answered with no posts.
+   */
+  const recordTry = async (ctx: StepContext, recollect: Recollect, answered: TrendPlatform[] = []): Promise<void> => {
+    const st = stateOf(ctx);
+    const { data: week, error } = await ctx.db.from("trend_weeks").select("cost, platforms").eq("id", ctx.run.real_id).maybeSingle();
+    if (error || !week) throw new Error(`Could not read the week: ${error?.message ?? "not found"}`);
+    const stored = (week.platforms ?? {}) as Record<string, { fault?: Partial<SourceFaultMark> } | undefined>;
+    const platforms: Record<string, Record<string, unknown>> = {};
+    for (const p of recollect.platforms) {
+      const now = st.platforms?.[p];
+      if (answered.includes(p)) platforms[p] = { status: now?.status, searched: now?.searched ?? 0, rows: now?.rows ?? 0, candidates: 0, kept: 0, fault: null };
+      else if ((now?.status ?? "failed") === "failed") platforms[p] = { fault: nextFault(stored[p]?.fault, st.faults?.[p], true, ctx.run.id) };
+    }
+    await ctx.output.write("sources", {
+      platforms, cost: addCost(week.cost as WeekCost, runCost(st), ctx.run.id),
+      ...(answered.length ? { status: await statusWithout(ctx, answered), finished_at: ctx.now().toISOString() } : {}),
+    });
+  };
   const apiKey = (ctx: StepContext) => String(ctx.env(ANTHROPIC_API_KEY) ?? "");
 
   /** The second ask carries the first answer and its problems, so Claude fixes what was wrong. */
@@ -290,8 +447,8 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
 
   const themesStep = (saveAs: string, again: boolean) => orGiveUp(claudeBatchStep({
     async build(ctx) {
-      const [plan, kept] = await Promise.all([need<Plan>(ctx, "plan"), need<KeptPost[]>(ctx, "kept")]);
-      const body = themesRequest(plan.profile, kept);
+      const [plan, kept, dismissed] = await Promise.all([need<Plan>(ctx, "plan"), need<KeptPost[]>(ctx, "kept"), dismissedTitles(ctx)]);
+      const body = themesRequest(plan.profile, kept, dismissed);
       return { apiKey: apiKey(ctx), body: again ? await repaired(ctx, body, "answer.themes") : body };
     },
     saveAs, keepDays: KEEP.keepDays, next: "read_themes", fetchImpl: deps.claudeFetch,
@@ -337,12 +494,31 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
     first: "start",
     steps: {
       async start(ctx) {
+        const recollect = recollectOf(ctx.run);
+        // Without the earlier run a whole new week would be planned, and every source paid for.
+        if (recollect && !replayOf(ctx)) throw new StepStop("A run that collects a failed source again must name the run the week was saved from.");
         // A replay reads the week again as it was: the same window, searches and profile.
         if (replayOf(ctx)) {
           const kept = await keptAnswer<Plan>(ctx, "plan");
           if (!kept) throw new Error("The replayed run kept no plan.");
-          await ctx.payloads.put("plan", kept, KEEP);
-          return { type: "next", step: order[0], state: {}, detail: { replayed: true, platforms: kept.platforms } };
+          if (!recollect) {
+            await ctx.payloads.put("plan", kept, KEEP);
+            return { type: "next", step: order[0], state: {}, detail: { replayed: true, platforms: kept.platforms } };
+          }
+          // Every source the run does not ask must still have its kept answer: a missing answer is not an
+          // empty one, so the run stops here, before any source is paid for, and the week stays as saved.
+          const replay = replayOf(ctx)!;
+          const { data: keys, error: keysError } = await ctx.db.from("pipeline_payloads").select("key").eq("run_id", replay.from_run);
+          if (keysError) throw new Error(`Could not read what the earlier run kept: ${keysError.message}`);
+          const keptKeys = new Set(((keys ?? []) as Array<{ key: unknown }>).map((k) => String(k.key)));
+          const missing = TREND_PLATFORMS.filter((p) => !recollect.platforms.includes(p)
+            && sourceRuns(kept, p).some((_, i) => !keptKeys.has(`source.${p}.${i}`) && !keptKeys.has(`source.${p}.${i}.failed`)));
+          if (missing.length) throw new StepStop(`The answers ${missing.join(", ")} gave when the week was saved are no longer kept, so the week is not written again.`);
+          // A failed source collected again: the window ends now, so its newest posts count, and what
+          // people excluded since the week was saved (a dismissed theme becomes an exclusion) is read again.
+          const { exclusions } = await activeTerms(ctx.db, ctx.run.client_id);
+          await ctx.payloads.put("plan", { ...kept, exclusions, window: { ...kept.window, end: ctx.now().toISOString() } }, KEEP);
+          return { type: "next", step: order[0], state: {}, detail: { recollect: recollect.platforms, try: recollect.try, platforms: kept.platforms } };
         }
         const clientId = ctx.run.client_id;
         const { data: client, error } = await ctx.db.from("clients").select("id, name, geo, language").eq("id", clientId).maybeSingle();
@@ -430,6 +606,20 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
       ...scrapeSteps,
 
       async rules(ctx) {
+        const recollect = recollectOf(ctx.run);
+        // A run that collected failed sources again goes on only when one of them brought posts:
+        // then the week is judged again and its themes are made again, once.
+        if (recollect) {
+          const tally = stateOf(ctx).platforms ?? {};
+          const statusOf = (p: TrendPlatform): PlatformStatus => tally[p]?.status ?? "failed";
+          if (!recollect.platforms.some((p) => statusOf(p) === "ok")) {
+            // No new post, so no model is asked and the week's posts and themes stay. A source that answered with nothing
+            // is no longer a gap; one that failed again keeps its fault; and what the try cost is added to the week's.
+            const answered = recollect.platforms.filter((p) => FINE.includes(statusOf(p)));
+            await recordTry(ctx, recollect, answered);
+            return { type: "done", detail: { recollect: answered.length ? "answered with no posts" : "no answer", try: recollect.try, platforms: Object.fromEntries(recollect.platforms.map((p) => [p, statusOf(p)])) } };
+          }
+        }
         const plan = await need<Plan>(ctx, "plan");
         const all: TrendPost[] = [];
         for (const p of TREND_PLATFORMS) all.push(...((await ctx.payloads.get<TrendPost[]>(`posts.${p}`)) ?? []));
@@ -490,12 +680,22 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
           await ctx.payloads.put("themes", []);
           return { type: "next", step: "save", state: { ...counted, themes: "failed" }, detail: { problems: got.error.slice(0, 300) } };
         }
-        await ctx.payloads.put("themes", got.value);
-        return { type: "next", step: "save", state: { ...counted, themes: "ok" }, detail: { themes: got.value.length } };
+        // A theme the model wrote under a title a person dismissed for this week is left out.
+        const themes = withoutDismissed(got.value, await dismissedTitles(ctx));
+        await ctx.payloads.put("themes", themes);
+        return { type: "next", step: "save", state: { ...counted, themes: "ok" }, detail: { themes: themes.length, ...(themes.length < got.value.length ? { dismissed_left_out: got.value.length - themes.length } : {}) } };
       },
 
       async save(ctx) {
         const st = stateOf(ctx);
+        const recollect = recollectOf(ctx.run);
+        // A source answered late, but the week's posts could not be judged again: the week on
+        // screen is worth more than one written again with nothing in it, so it stays as saved.
+        if (recollect && (st.filter === "failed" || st.themes === "failed")) {
+          // What the try cost is recorded all the same.
+          await recordTry(ctx, recollect);
+          throw new StepStop("The week's posts could not be judged again after a source answered, so the week stays as it was saved.");
+        }
         const plan = await need<Plan>(ctx, "plan");
         const ruleDropped = (await ctx.payloads.get<Array<{ post: TrendPost; reason: RuleDrop }>>("rule_dropped")) ?? [];
         const candidates = (await ctx.payloads.get<TrendPost[]>("candidates")) ?? [];
@@ -516,13 +716,27 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
         if (st.filter === "failed") for (const p of candidates) add(p, { kept: false, drop_reason: null });
         for (const d of ruleDropped) if (d.reason !== "duplicate") add(d.post, { kept: false, drop_reason: d.reason });
 
+        // What the week has stored so far: read only by a run that collected failed sources again (its cost, and each source's fault).
+        let before: { cost?: WeekCost; platforms?: Record<string, { fault?: Partial<SourceFaultMark> } | undefined> } | null = null;
+        if (recollect) {
+          const { data: week, error } = await ctx.db.from("trend_weeks").select("cost, platforms").eq("id", ctx.run.real_id).maybeSingle();
+          if (error) throw new Error(`Could not read what the week holds so far: ${error.message}`);
+          before = week;
+        }
         const platforms: Record<string, Record<string, unknown>> = {};
         for (const p of TREND_PLATFORMS) {
           const s = st.platforms?.[p] ?? { status: "not_watched", searched: 0, rows: 0 };
+          // A source that failed: the kind of fault, and how many tries in a row it has been. Only a run that asked the
+          // source again is a try (none yet on the weekly collection); a source this run read from kept answers keeps
+          // the mark the week has for it.
+          const marked = before?.platforms?.[p]?.fault;
+          const asked = !!recollect?.platforms.includes(p);
+          const fault = recollect && !asked && marked ? marked : nextFault(marked, st.faults?.[p], asked, ctx.run.id);
           platforms[p] = {
             ...s, candidates: candidates.filter((c) => c.platform === p).length, kept: kept.filter((k) => k.platform === p).length,
             // The week ran on searches the coverage rewrite gave it: the next week waits for a second week on them.
             ...(plan.rewritten?.[p] ? { rewritten: true } : {}),
+            ...(s.status === "failed" ? { fault } : {}),
           };
         }
         // A week in which every watched platform failed brought nothing back. It
@@ -536,15 +750,17 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
         const status = watchedOk && st.filter !== "failed" && st.themes !== "failed" ? "done" : "partial";
         // A replay scraped nothing: the week keeps the scraping cost of the run it replays.
         let apifyUsd = st.apifyUsd ?? 0;
-        const replay = replayOf(ctx);
+        const replay = recollect ? null : replayOf(ctx);
         if (replay) {
           const { data: source } = await ctx.db.from("report_pipeline_runs").select("real_id").eq("id", replay.from_run).maybeSingle();
           const { data: sourceWeek } = source?.real_id ? await ctx.db.from("trend_weeks").select("cost").eq("id", source.real_id).maybeSingle() : { data: null };
           apifyUsd = Number(sourceWeek?.cost?.apify_usd) || 0;
         }
+        let cost: WeekCost = { apify_usd: Math.round(apifyUsd * 10000) / 10000, claude: st.claude ?? {}, ...(replay ? { replayed_from: replay.from_run } : {}) };
+        // A failed source collected again: what this run cost is added to what the week had cost.
+        if (recollect) cost = addCost(before?.cost, cost, ctx.run.id);
         await ctx.output.write("week", {
-          posts: rows, themes, status, platforms, filter_status: st.filter ?? "skipped",
-          cost: { apify_usd: Math.round(apifyUsd * 10000) / 10000, claude: st.claude ?? {}, ...(replay ? { replayed_from: replay.from_run } : {}) },
+          posts: rows, themes, status, platforms, filter_status: st.filter ?? "skipped", cost,
           finished_at: ctx.now().toISOString(),
         });
         return { type: "done", detail: { status, kept: kept.length, themes: themes.length, posts: rows.length } };
