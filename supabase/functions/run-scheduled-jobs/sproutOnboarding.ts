@@ -9,8 +9,8 @@
 // name rule), named as people know it from its profiles' names (the client
 // goes by that name; its origin keeps the group's label), leaves a brand a
 // person chose not to add (sprout_brand_declines, data like a profile's
-// removal) alone for good, leaves a group with a profile in two groups alone, and leaves every brand that already is a
-// client to that client: an active one's accounts step adds new profiles
+// removal) alone for good, leaves a group with a profile in two groups alone (and a brand with two profiles named alike on one network), and leaves every brand that already is a
+// client to that client (and a second brand found in a client's own Sprout group is never made a client by the job): an active one's accounts step adds new profiles
 // within a day; an archived client's brand, a profile a person removed, and a
 // brand matching two clients are left alone for good. An unmatched brand
 // becomes a client when it has a brand account, a post in the last 90 days,
@@ -25,7 +25,7 @@
 // nothing. Nothing here alerts anyone or makes a model call.
 
 import type { SproutProfile } from "../_shared/lifecycle/accounts.ts";
-import { blockedFromCreation, clientWithSite, declineFor, declineReason, groupBrands, groupConflict, isBrandAccount, joinBrands, matchBrand, matchOutcome, type Brand, type BrandDecline, type ClientIndex, type KnownClient, type MatchDecision } from "../_shared/sprout/brands.ts";
+import { blockedFromCreation, clientWithSite, declineFor, declineReason, groupBrands, groupConflict, isBrandAccount, joinBrands, matchBrand, matchOutcome, networkConflict, type Brand, type BrandDecline, type ClientIndex, type KnownClient, type MatchDecision } from "../_shared/sprout/brands.ts";
 import { listBrandPosts, POSTS_WINDOW_DAYS, type SproutPost } from "../_shared/sprout/posts.ts";
 import { listCustomerGroups, listCustomerProfiles, type CustomerGroup } from "../_shared/sprout/profiles.ts";
 import { searchWebsite, webReader, websiteJoins, type SiteFact, type SiteReader, type WebsiteSearch } from "../_shared/sprout/website.ts";
@@ -68,7 +68,7 @@ export function liveOnboardingDeps(): OnboardingDeps {
 
 export type Decision =
   | MatchDecision
-  | "declined" | "group_conflict" | "person" | "no_posts" | "client_website"
+  | "declined" | "group_conflict" | "group_client" | "group_split" | "person" | "no_posts" | "client_website"
   | "created" | "would_create" | "taken" | "not_read" | "later" | "no_name";
 
 export interface BrandResult {
@@ -203,15 +203,33 @@ export async function sproutOnboarding(db: Db, deps: OnboardingDeps, o: { dryRun
   const matched = new Map<string, BrandResult>();
   const pending: Brand[] = [];
 
+  // Every brand is matched first, so a brand of this run that its website ties to a client's brand is that client's,
+  // and so a Sprout group that already is a client is known before any of its parts is looked at.
+  // An assigned or removed profile decides first, then a person's decline, then a name or a homepage link.
+  const declineOf = new Map<string, BrandDecline | null>();
   for (const brand of brands) {
-    // Every brand is matched, so a brand of this run that its website ties to a client's brand is that client's.
-    // An assigned or removed profile decides first, then a person's decline, then a name or a homepage link.
     const m = matchBrand(brand, index);
     const decline = m && (m.by === "assigned" || m.by === "removed") ? null : declineFor(brand, declines);
-    const r = m && !decline ? { ...base(brand), ...matchOutcome(m) } : null;
-    if (r) matched.set(brand.key, r);
+    declineOf.set(brand.key, decline);
+    if (m && !decline) matched.set(brand.key, { ...base(brand), ...matchOutcome(m) });
+  }
+  // The clients each Sprout group already is. A group that holds two brands is split in parts (brands.ts), and a part
+  // is never made a client by this job: the split is how the job tells two brands apart, not a reason to create one.
+  // A part whose profiles a client holds is that client's, as ever; any other part is left for a person.
+  const groupClients = new Map<string, string[]>();
+  for (const brand of brands) {
+    const r = matched.get(brand.key);
+    if (brand.group && r?.client_ids?.length) groupClients.set(String(brand.group.id), [...new Set([...(groupClients.get(String(brand.group.id)) ?? []), ...r.client_ids])]);
+  }
+  const clientName = (id: string) => index.clients.find((c) => c.id === id)?.name ?? "a client";
+
+  for (const brand of brands) {
+    const r = matched.get(brand.key) ?? null;
+    const decline = declineOf.get(brand.key) ?? null;
     if (only && !only.has(brand.key)) continue;
-    const conflict = r || decline ? null : groupConflict(brand, groups);
+    // A profile in two groups, or two profiles on one network named alike: which brand is unclear, so it is left alone.
+    const conflict = r || decline ? null : groupConflict(brand, groups) ?? networkConflict(brand);
+    const owners = brand.split && brand.group ? groupClients.get(String(brand.group.id)) ?? [] : [];
     if (r) {
       results.push(r);
     } else if (decline) {
@@ -219,6 +237,13 @@ export async function sproutOnboarding(db: Db, deps: OnboardingDeps, o: { dryRun
         decline: { id: decline.id, brand: decline.brand, declined_at: decline.declined_at, note: decline.note ?? null } });
     } else if (conflict) {
       results.push({ ...base(brand), decision: "group_conflict", reason: conflict });
+    } else if (owners.length) {
+      results.push({ ...base(brand), decision: "group_client", client_ids: owners,
+        reason: `Left alone: its Sprout group already is ${owners.map(clientName).join(" and ")}, and this is another brand in that group. A person adds it as a client of its own if it is one.` });
+    } else if (brand.split) {
+      const siblings = brands.filter((b) => b.split && b.group && brand.group && String(b.group.id) === String(brand.group.id)).map((b) => `"${b.name}"`);
+      results.push({ ...base(brand), decision: "group_split",
+        reason: `Left alone: its Sprout group holds more than one brand (${siblings.join(", ")}), so a person decides which of them become clients.` });
     } else if (!brand.name) {
       results.push({ ...base(brand), decision: "no_name", reason: "Left alone: Sprout gives its profiles no name." });
     } else if (!isBrandAccount(brand)) {

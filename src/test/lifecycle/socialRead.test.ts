@@ -161,6 +161,17 @@ describe("the evidence version", () => {
     expect(versionMove(snap(), snap({ picture: "p2" }), [], NOW)).toBe("picture");
     expect(versionMove(snap(), snap({ look: "2026-10-20" }), [], NOW)).toBe("look");
   });
+  // Copy sources, 17 Nov 2026: one of the client's own accounts was parked, so what the evidence is read from changed.
+  it("moves with \"profiles\" when an own account was parked after the version was set, and not before it or without one", () => {
+    expect(versionMove(snap(), snap({ at: NOW.toISOString() }), [], NOW, ago(1))).toBe("profiles");
+    expect(versionMove(snap(), snap({ at: NOW.toISOString() }), [], NOW, ago(8))).toBeNull();
+    expect(versionMove(snap(), snap({ at: NOW.toISOString() }), [], NOW, null)).toBeNull();
+    expect(versionMove(snap(), snap({ at: NOW.toISOString() }), [], NOW)).toBeNull();
+    // The first read is still the first, and a date that cannot be read moves nothing.
+    expect(versionMove(null, snap(), [], NOW, ago(1))).toBe("first");
+    expect(versionMove(snap(), snap({ at: NOW.toISOString() }), [], NOW, "not a date")).toBeNull();
+  });
+
   it("moves after 28 days with 5 or more new posts, a monthly floor", () => {
     const newPosts = [1, 2, 3, 4, 5].map((d) => ({ publishedAt: ago(d), boosted: false })) as SocialPost[];
     expect(versionMove(snap({ at: ago(29) }), snap(), newPosts, NOW)).toBe("monthly");
@@ -229,6 +240,24 @@ describe("runSocialRead", () => {
     const moved = await runSocialRead(db, c, { rows }, changed.fake);
     expect(changed.calls.instagram).toBe(1);
     expect(moved).toMatchObject({ result: { moved: "picture", version: 2 } });
+  });
+
+  it("moves its version once when the accounts step parked an own account since the last read, and stays after that", async () => {
+    const c = oloClient();
+    const db = world(c);
+    const out = await runSocialRead(db, c, { rows: new Map() }, io().fake);
+    const first = (out as { result: Record<string, unknown> }).result;
+    const accounts = (at: string | null): StepRow => ({ ...stepRow({ own_dropped_at: at }), step: "accounts" });
+    const later = new Date(NOW.getTime() + 60 * 60_000);
+    const parked = new Date(NOW.getTime() + 10 * 60_000).toISOString();
+    const moved = await runSocialRead(db, c, { rows: new Map([["social_read", stepRow(first)], ["accounts", accounts(parked)]]) }, io({ now: () => later }).fake);
+    expect(moved).toMatchObject({ status: "done", result: { moved: "profiles", version: 2 } });
+    // The next read is after the parking: nothing moves again.
+    const next = await runSocialRead(db, c, { rows: new Map([["social_read", stepRow((moved as { result: Record<string, unknown> }).result)], ["accounts", accounts(parked)]]) }, io({ now: () => new Date(later.getTime() + DAY) }).fake);
+    expect(next).toMatchObject({ result: { moved: null, version: 2 } });
+    // No date, no move.
+    const none = await runSocialRead(db, c, { rows: new Map([["social_read", stepRow(first)], ["accounts", accounts(null)]]) }, io().fake);
+    expect(none).toMatchObject({ result: { moved: null, version: 1 } });
   });
 
   it("never writes over a person's value, never replaces the website's logo, and makes no model call when nothing it fills is open", async () => {

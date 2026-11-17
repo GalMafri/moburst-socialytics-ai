@@ -7,9 +7,10 @@
 // (src/test/copyWritersUseVoice.test.ts checks this).
 
 import { anthropicMessages } from "../anthropic.ts";
-import { consolidatePrompt, mergePrompt, parseConsolidation, parseMergeOps, parseOverallVoice, parseVoiceProfile, voicePlatforms, voiceProfilePrompt, voiceSample, type ClientVoice, type LearnedChange, type MemorySignal, type Preference, type SocialVoice } from "./voice.ts";
+import { consolidatePrompt, mergePrompt, parseConsolidation, parseMergeOps, parseOverallVoice, parseVoiceProfile, voicePlatforms, voiceProfilePrompt, voiceSample, VOICE_RULE, type ClientVoice, type LearnedChange, type MemorySignal, type Preference, type SocialVoice } from "./voice.ts";
 import { bestExamples, rhythmFromPosts, scoreOwnPosts, type OwnPost } from "../calendar/evidence.ts";
 import { pointsInUse, readNoteRows, standingNotes, todayIn } from "../notes/notes.ts";
+import type { ListedName } from "../text/displayName.ts";
 
 /** The model every piece of client copy is written with. */
 export const COPY_MODEL = "claude-opus-5-5";
@@ -207,9 +208,13 @@ export async function consolidateMemory(admin: Db, clientId: string): Promise<{ 
  * last 90 days: a voice for each platform with 5 posts, and in the same call
  * the brand's overall voice from all its platforms, for the platforms with
  * fewer (recorded as thin, with their own posts as examples). Its best posts
- * are kept as examples.
+ * are kept as examples. `opts.names` are the decorated display names the
+ * client's Sprout account lists: what is stored of the voice has them written
+ * plainly (the posts arrive that way already, runWeek.ts ownPosts), and the
+ * profile carries the rule it was built under.
  */
-export async function buildVoiceProfile(admin: Db, clientId: string, posts: OwnPost[], now = new Date()): Promise<SocialVoice> {
+export async function buildVoiceProfile(admin: Db, clientId: string, posts: OwnPost[], now = new Date(), opts: { names?: ListedName[] } = {}): Promise<SocialVoice> {
+  const names = opts.names ?? [];
   const { data: client } = await admin.from("clients").select("name, timezone").eq("id", clientId).maybeSingle();
   const sample = voiceSample(posts);
   const { own, thin } = voicePlatforms(sample);
@@ -218,8 +223,8 @@ export async function buildVoiceProfile(admin: Db, clientId: string, posts: OwnP
   if (Object.keys(sample).length) {
     const byPlatform = Object.fromEntries(Object.entries(sample).map(([p, xs]) => [p, xs.map(({ text, date, format }) => ({ text, date, format }))]));
     const result = await anthropicMessages({ apiKey: apiKey(), body: { model: COPY_MODEL, max_tokens: 6000, messages: [{ role: "user", content: voiceProfilePrompt(String(client?.name ?? "the client"), byPlatform, own) }] } });
-    profile = parseVoiceProfile(result.text, own);
-    overall = parseOverallVoice(result.text);
+    profile = parseVoiceProfile(result.text, own, names);
+    overall = parseOverallVoice(result.text, names);
     if (!overall || (own.length && !Object.keys(profile).length)) throw new Error("The voice profile reply could not be read.");
   }
   const examples = bestExamples(scoreOwnPosts(posts, now, { top: 30 }).top);
@@ -235,6 +240,7 @@ export async function buildVoiceProfile(admin: Db, clientId: string, posts: OwnP
     rhythm: rhythmFromPosts(posts, now, String(client?.timezone || "UTC")).map(({ platform, perWeek, average }) => ({ platform, perWeek, average })),
     ...(overall ? { overall } : {}),
     ...(Object.keys(thin).length ? { thin } : {}),
+    rule: VOICE_RULE,
   };
   const { error } = await admin.from("clients").update({ social_voice: voice }).eq("id", clientId);
   if (error) throw new Error(`Could not save the voice profile: ${error.message}`);

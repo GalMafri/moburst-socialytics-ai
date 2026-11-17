@@ -12,8 +12,9 @@
 //   website         a website for a client with none, confirmed from its own posts (a client added from Sprout)
 //   brand_read      the website: brand identity, logo, location and timezone, country, language (a page on another client's site: its language only)
 //   brief_pillars   a brief from the strategy document or the site when there is none, then pillars and keywords
-//   accounts        Sprout profiles matched by Sprout's brand name and by the site's profile links (none from another client's site)
+//   accounts        Sprout profiles matched by Sprout's brand name and by the site's profile links (none from another client's site); one own account per network, any other parked
 //   social_read     the client's profiles and posts, weekly: logo, brand, location, regions, languages and scored posts (socialRead.ts)
+//   voice           the voice profile checked, and built again only when it holds a decorated display name or an own account was parked since
 //   access          the company slug, by the portal's slug rule
 //   design_refs     the client's designed posts per platform, checked weekly, and the visual style learned from them
 //   competitors     identify, pick the three closest with a website, confirm as the system
@@ -23,6 +24,7 @@
 //   tracking        RivalIQ tracking for the confirmed set (decision 1), then handles from RivalIQ; a client on another client's site waits for its own
 //   design_settings logo file, placement and background derived from data (decision 2)
 //   first_output    this week and next planned, and the first monthly report
+//   calendar_recheck the upcoming calendar checked against the copy rules when they or the voice change: names corrected, weeks re-planned
 // A demo copy (a client the API demo made) runs only the steps its demo job asks for (run.ts).
 
 import { referenceFingerprint } from "../brand-references/candidates.ts";
@@ -31,7 +33,8 @@ import { brandPosts } from "../brand-references/posts.ts";
 import { StyleError } from "../brand-references/errors.ts";
 import { liveRefsIO, readChoices, refreshReferences } from "../brand-references/learnStyle.ts";
 import { defaultSproutCustomerId } from "../sprout/customer.ts";
-import { listCustomerProfiles } from "../sprout/profiles.ts";
+import { listCustomerGroups, listCustomerProfiles } from "../sprout/profiles.ts";
+import { networkKey } from "../sprout/publishRules.ts";
 import { listBrandPosts, MAX_POST_PAGES, POSTS_YEAR_DAYS } from "../sprout/posts.ts";
 import { searchWebsite, searchWebsiteByName, statedWebsite, webReader } from "../sprout/website.ts";
 import { fetchSiteHtml, LOGO_MARKS_RULE, logoFilesOnPage, logoOnPage, normalizeWebsite, openaiKeyFor, ownMarksOnPage, ResearchError, researchBrand, standaloneSvg, type PageMark } from "../brand/research.ts";
@@ -46,7 +49,7 @@ import { FollowFailure } from "../competitive/rivaliqFollowFailure.ts";
 import { followerMarkets, pageOf, runSocialRead, socialResult, socialVersionKey, topPostsText } from "./socialRead.ts";
 import { liveSocialIO } from "./socialIO.ts";
 import { linksTo, siteLinkSet } from "./siteLinks.ts";
-import { matchProfiles, platformsOf, profileKeyOf, profileListKey, siteProfileLinks, type SproutProfile } from "./accounts.ts";
+import { matchProfiles, ONE_PER_NETWORK_RULE, ownPerNetwork, parkedReason, parkingNetwork, platformsOf, profileKeyOf, profileListKey, siteProfileLinks, type OwnRow, type ProfileMatch, type SproutProfile } from "./accounts.ts";
 import { libraryPaths, MAX_REFS, personKey, personOther, pickBackground, placementFor, storedSpotRead, toneKeyTail, type LogoSpot, type Placement } from "./designSettings.ts";
 import { referencesFor } from "../design-prompts/designRefs.ts";
 import { lifecycleMayWrite, setBy, sourceOf, writeClientFields } from "./fields.ts";
@@ -56,7 +59,11 @@ import { countryCode, htmlLanguage, regionsFor, replacesLocation, resolveLocatio
 import { normName, slugify, textHash } from "./names.ts";
 import { cleanSiteText } from "./siteText.ts";
 import { anthropicMessages } from "../anthropic.ts";
-import { competitorSet, feedSnapshots, ownPosts } from "../calendar/runWeek.ts";
+import { competitorSet, feedSnapshots, ownPosts, revisedByPerson, workedOn } from "../calendar/runWeek.ts";
+import { COPY_RULE } from "../calendar/copyChecks.ts";
+import { REPLAN_NOTE, replanWhy } from "../calendar/replan.ts";
+import { isStoryPost } from "../design/story.ts";
+import { namesInVoice, plainVoice, VOICE_RULE } from "../voice/voice.ts";
 import { companyKey } from "../calendar/evidence.ts";
 import { activeTerms, askTwice, evidenceKey, hashtagsRequest, monthIn, parseHashtags, parseProfile, profileEvidence, profileRequest, syncLifecycleTerms, writeTrendProfile, type ProfileIO } from "../trends/profile.ts";
 import { HASHTAG_PLATFORMS } from "../trends/types.ts";
@@ -72,6 +79,7 @@ import { askLogoSet, liveIo, readingOf, readNextPosts, type PictureIo, type Read
 import { chooseLogo, eitherRead, LOGO_PICK_RULE, measuredPlacement, postsCarrying, type FoundAt } from "../design/logoPick.ts";
 import type { LogoFile } from "./imaging.ts";
 import { clipText } from "../text/clip.ts";
+import { listedNames, NAME_TAGLINE, plainDisplayName, plainNames, storedNames, type ListedName } from "../text/displayName.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -125,6 +133,8 @@ export const deps = {
   scrapeMarkdown,
   fetchSiteText,
   listCustomerProfiles,
+  /** The Sprout account's groups, for the names a profile's short name may be known by (text/displayName.ts). */
+  listCustomerGroups,
   listBrandPosts,
   searchWebsite,
   siteReader: () => webReader(),
@@ -283,6 +293,61 @@ async function activeProfiles(db: Db, clientId: string): Promise<SproutProfile[]
   return (data ?? []).map((r: Record<string, unknown>) => ({
     id: String(r.sprout_profile_id), name: str(r.profile_name), native_name: str(r.native_name), network_type: str(r.network_type), native_link: str(r.native_link), status: "active",
   })).sort((a: SproutProfile, b: SproutProfile) => a.id.length - b.id.length || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+/**
+ * What the accounts step last stored under the one-account-per-network rule,
+ * while it stands: the decorated display names and the time an own account
+ * was parked. Null for a row from before the rule, and for one whose result
+ * a failed run on new inputs took away (policy.ts keeps a result only for the
+ * inputs it was made on). A run that is under way, or a refresh that failed,
+ * leaves the result standing.
+ */
+function accountsFacts(rows: Map<string, StepRow>): { names: ListedName[]; ownDroppedAt: string | null } | null {
+  const row = rows.get("accounts");
+  const result = row?.result as { display_names?: unknown; own_dropped_at?: unknown } | null | undefined;
+  if (!str(row?.inputs_key).includes(`|own:${ONE_PER_NETWORK_RULE}`) || !Array.isArray(result?.display_names)) return null;
+  return { names: storedNames(result!.display_names), ownDroppedAt: str(result!.own_dropped_at) || null };
+}
+
+/**
+ * The display names Sprout's whole account list writes with decoration, each
+ * with its plain form (text/displayName.ts). A name is shortened at a tagline
+ * only when the short form is known to be the name by an exact fact about
+ * that profile: the name of a client it is assigned to, the name of a Sprout
+ * group it is in, or the name another profile of the same client or group
+ * carries on another network. Other clients' names and the groups' names are
+ * read only when a listed name has a tagline that could be cut by them; a
+ * read that fails leaves those names whole, never fails the step.
+ */
+async function listedDisplayNames(db: Db, client: ClientRow, profiles: SproutProfile[], assigned: Map<string, string[]>): Promise<ListedName[]> {
+  const withTagline = profiles.filter((p) => String(p.name ?? "").search(NAME_TAGLINE) > 0);
+  const ownersOf = (p: SproutProfile) => assigned.get(String(p.id)) ?? [];
+  const clientNames = new Map<string, string>([[String(client.id), String(client.name ?? "")]]);
+  const others = [...new Set(withTagline.flatMap(ownersOf))].filter((id) => !clientNames.has(id));
+  if (others.length) {
+    const { data, error } = await db.from("clients").select("id, name").in("id", others);
+    if (error) console.warn("[accounts] other clients' names were not read:", error.message);
+    for (const c of data ?? []) clientNames.set(String(c.id), String(c.name ?? ""));
+  }
+  const groupNames = new Map<string, string>();
+  if (withTagline.some((p) => (p.groups ?? []).length)) {
+    try {
+      for (const g of await deps.listCustomerGroups(String(client.sprout_customer_id || defaultSproutCustomerId()))) groupNames.set(String(g.id), String(g.name ?? ""));
+    } catch (e) {
+      console.warn("[accounts] Sprout's groups were not read:", e instanceof Error ? e.message : String(e));
+    }
+  }
+  const sharesOwner = (a: SproutProfile, b: SproutProfile) =>
+    ownersOf(a).some((id) => ownersOf(b).includes(id)) || (a.groups ?? []).map(String).some((g) => (b.groups ?? []).map(String).includes(g));
+  return listedNames(profiles.map((p) => ({
+    name: p.name,
+    known: withTagline.includes(p) ? [
+      ...ownersOf(p).map((id) => clientNames.get(id)),
+      ...(p.groups ?? []).map((g) => groupNames.get(String(g))),
+      ...profiles.filter((q) => q !== p && networkKey(q.network_type) !== networkKey(p.network_type) && sharesOwner(p, q)).map((q) => plainDisplayName(q.name)),
+    ] : [],
+  })));
 }
 
 /** The platforms the client's content strategy marks "not now". */
@@ -1300,7 +1365,28 @@ export const STEPS: Record<string, StepDef> = {
   // by the profiles the client's homepage links to (accounts.ts). Looked at
   // every day, so profiles added to Sprout later are picked up within a day.
   // A profile a person removed stays removed. A page on another client's
-  // site gives no links: they are that client's profiles.
+  // site gives no links: they are that client's profiles. Its result also
+  // lists the display names Sprout's account writes with decorations, which
+  // the calendar and the voice write plainly (text/displayName.ts).
+  //
+  // A client has at most one own account per network (accounts.ts
+  // ownPerNetwork, copy sources 17 Nov 2026): among the brand accounts the
+  // client had when the rule began, the one an exact fact says is the
+  // brand's stays and any other on that network is parked. The rule never
+  // guesses: with no exact fact nothing is parked and the choice is recorded
+  // as open (own_open); a personal LinkedIn profile is never part of it; an
+  // archived client is never touched. So that the step itself never makes
+  // the choice necessary, it does not assign a profile on a network where
+  // the client already has an account, nor two profiles on one network in
+  // one run: those are listed (skipped) for a person to add on the setup
+  // page. The record of a parked account is on its row
+  // (sprout_profiles.parked_at, parked_reason), so a run that fails loses
+  // nothing; the result repeats it for the steps that follow: each decision
+  // (own) and when an account was last parked (own_dropped_at), both read
+  // from the rows on every run. The key ends in the rule's version, and
+  // names the networks that hold two active brand accounts while there are
+  // any: a second account changes the key, so the step runs at once; after
+  // it parks one the key changes back, which costs one more cheap run.
   accounts: {
     policy: { refreshDays: 0.5 },
     async inputs(db, client, rows) {
@@ -1310,9 +1396,16 @@ export const STEPS: Record<string, StepDef> = {
       const { data, error } = await db.from("sprout_profile_removals").select("sprout_profile_id").eq("client_id", client.id);
       if (error) throw new Error(`Could not read the client's removed accounts: ${error.message}`);
       const removed = (data ?? []).map((r: { sprout_profile_id: unknown }) => String(r.sprout_profile_id)).sort().join(",");
-      return `name:${normName(client.name)}|site:${site ?? ""}|links:${textHash(links.join(","))}|removed:${textHash(removed)}`;
+      const { data: active, error: activeError } = await db.from("sprout_profiles").select("network_type").eq("client_id", client.id).eq("is_active", true);
+      if (activeError) throw new Error(`Could not read the client's social accounts: ${activeError.message}`);
+      const perNetwork = new Map<string, number>();
+      for (const r of active ?? []) { const n = parkingNetwork(str((r as { network_type: unknown }).network_type)); if (n) perNetwork.set(n, (perNetwork.get(n) ?? 0) + 1); }
+      const twice = [...perNetwork].filter(([, n]) => n > 1).map(([n]) => n).sort();
+      return `name:${normName(client.name)}|site:${site ?? ""}|links:${textHash(links.join(","))}|removed:${textHash(removed)}|own:${ONE_PER_NETWORK_RULE}${twice.length ? `|dup:${twice.join(",")}` : ""}`;
     },
     async run(db, client, { rows }) {
+      // An archived client is never looked at (run.ts). The step holds the same line whoever calls it: nothing is read, matched, parked or written.
+      if (client.archived_at) return { status: "waiting", reason: "archived" };
       const customer = String(client.sprout_customer_id || defaultSproutCustomerId());
       const profiles = await deps.listCustomerProfiles(customer);
       const textOnly = await parentPageFor(db, client);
@@ -1327,7 +1420,7 @@ export const STEPS: Record<string, StepDef> = {
         }
       }
       const links = [...new Set([...stored, ...fresh])].sort();
-      const { data: assignedRows, error } = await db.from("sprout_profiles").select("client_id, sprout_profile_id, network_type, is_active");
+      const { data: assignedRows, error } = await db.from("sprout_profiles").select("client_id, sprout_profile_id, network_type, is_active, profile_name, native_name, assigned_at, parked_at, parked_reason");
       if (error) throw new Error(`Could not read the assigned accounts: ${error.message}`);
       const assigned = new Map<string, string[]>();
       for (const r of assignedRows ?? []) {
@@ -1337,7 +1430,24 @@ export const STEPS: Record<string, StepDef> = {
       const { data: removedRows, error: removedError } = await db.from("sprout_profile_removals").select("sprout_profile_id").eq("client_id", client.id);
       if (removedError) throw new Error(`Could not read the client's removed accounts: ${removedError.message}`);
       const removed = new Set<string>((removedRows ?? []).map((r: { sprout_profile_id: unknown }) => String(r.sprout_profile_id)));
-      const matches = matchProfiles({ client: { id: client.id, name: client.name }, profiles, siteLinks: links, assigned, removed });
+      const found = matchProfiles({ client: { id: client.id, name: client.name }, profiles, siteLinks: links, assigned, removed });
+      // The step never makes a second account on a network: not beside one the client has, and not two at once. Those are a person's to add.
+      const has = new Set<string>();
+      for (const r of assignedRows ?? []) {
+        const n = r.client_id === client.id && r.is_active !== false ? parkingNetwork(str(r.network_type)) : null;
+        if (n) has.add(n);
+      }
+      const perNetwork = new Map<string, number>();
+      for (const m of found) { const n = parkingNetwork(m.profile.network_type); if (n) perNetwork.set(n, (perNetwork.get(n) ?? 0) + 1); }
+      const matches: ProfileMatch[] = [];
+      const skipped: Array<{ id: string; network: string; handle: string; why: string }> = [];
+      for (const m of found) {
+        const n = parkingNetwork(m.profile.network_type);
+        const why = !n ? null : has.has(n) ? "the client already has an account on this network" : (perNetwork.get(n) ?? 0) > 1 ? "two profiles match on this network" : null;
+        if (why) skipped.push({ id: String(m.profile.id), network: m.profile.network_type, handle: m.profile.native_name, why });
+        else matches.push(m);
+      }
+      const at = deps.now().toISOString();
       if (matches.length) {
         const insert = matches.map((m) => ({
           client_id: client.id, sprout_profile_id: Number(m.profile.id), profile_name: m.profile.name, native_name: m.profile.native_name,
@@ -1346,18 +1456,58 @@ export const STEPS: Record<string, StepDef> = {
         const { error: insertError } = await db.from("sprout_profiles").upsert(insert, { onConflict: "client_id,sprout_profile_id", ignoreDuplicates: true });
         if (insertError) throw new Error(`Could not assign the matched accounts: ${insertError.message}`);
       }
-      const mine = [...(assignedRows ?? []).filter((r: { client_id: string; is_active: boolean | null }) => r.client_id === client.id && r.is_active !== false).map((r: { network_type: string }) => r.network_type),
-        ...matches.map((m) => m.profile.network_type)];
+      // The client's public profiles follow the same links, so a stored handle written without its case is mended here, not by a paid read.
+      if (!textOnly) {
+        const pi = await profileInputs(db, { id: client.id, name: client.name }, { tracking: rows.get("tracking")?.result ?? null, brand_read: null, accounts: { site_profiles: links } });
+        await syncProfiles(db, client.id, pi.rows, desiredProfiles(pi), deps.now());
+      }
+      // One own account per network: the client's rows as they are now, with what was just matched.
+      const ownRows = new Map<string, OwnRow>();
+      for (const r of assignedRows ?? []) {
+        if (r.client_id !== client.id) continue;
+        const id = String(r.sprout_profile_id);
+        ownRows.set(id, { id, name: str(r.profile_name), native_name: str(r.native_name), network_type: str(r.network_type), is_active: r.is_active !== false, assigned_at: str(r.assigned_at) || null, parked_at: str(r.parked_at) || null, removed: removed.has(id) });
+      }
+      for (const m of matches) {
+        const id = String(m.profile.id);
+        if (!ownRows.has(id)) ownRows.set(id, { id, name: str(m.profile.name), native_name: str(m.profile.native_name), network_type: str(m.profile.network_type), is_active: true, assigned_at: at, parked_at: null });
+      }
+      const { data: publicRows, error: publicError } = await db.from("client_public_profiles").select("platform, handle, source").eq("client_id", client.id);
+      if (publicError) throw new Error(`Could not read the client's public profiles: ${publicError.message}`);
+      const own = ownPerNetwork({
+        clientName: String(client.name ?? ""), rows: [...ownRows.values()],
+        publicProfiles: (publicRows ?? []).map((p: Record<string, unknown>) => ({ platform: str(p.platform), handle: str(p.handle), source: str(p.source) })),
+      });
+      // Only what changed is written, with the service role, so no removal is recorded: a parked account is not one a person removed.
+      // Parked: off, with when and why on the row. Brought back by the rule: on, with the record cleared. An account a person
+      // switched back on keeps its record while another account is parked beside it: that record is the person's choice.
+      const reasonOf = new Map(own.picks.flatMap((p) => p.dropped.map((id) => [id, parkedReason(p.network, ownRows.get(p.kept)!)] as [string, string])));
+      const onlyNow = new Set(own.picks.filter((p) => p.by === "only").map((p) => p.kept));
+      const toPark = own.park.filter((id) => ownRows.get(id)?.is_active);
+      const toRestore = own.keep.filter((id) => ownRows.get(id) && !ownRows.get(id)!.is_active);
+      const toClear = own.keep.filter((id) => ownRows.get(id)?.is_active && ownRows.get(id)!.parked_at && onlyNow.has(id));
+      const writes: Array<[string[], Record<string, unknown>, string]> = [
+        [toPark, { is_active: false, parked_at: at }, "park"],
+        [toRestore, { is_active: true, parked_at: null, parked_reason: null }, "bring back"],
+        [toClear, { parked_at: null, parked_reason: null }, "keep"],
+      ];
+      for (const [ids, patch, what] of writes) {
+        for (const id of ids) {
+          const { error: ownError } = await db.from("sprout_profiles").update(what === "park" ? { ...patch, parked_reason: reasonOf.get(id) ?? null } : patch).eq("client_id", client.id).eq("sprout_profile_id", Number(id));
+          if (ownError) throw new Error(`Could not ${what} one of the client's accounts: ${ownError.message}`);
+        }
+      }
+      const parkedNow = new Set(own.park);
+      const mine = [...ownRows.values()].filter((r) => !parkedNow.has(r.id) && (r.is_active || toRestore.includes(r.id))).map((r) => r.network_type);
+      // When an account was last parked, of the accounts that are parked now: read from the rows, so it outlives any one run.
+      const parkedTimes = [...ownRows.values()].filter((r) => (parkedNow.has(r.id) || (!r.is_active && r.parked_at && !r.removed)) && !toRestore.includes(r.id))
+        .map((r) => (toPark.includes(r.id) ? at : r.parked_at ?? "")).filter((t) => t && Number.isFinite(Date.parse(t))).sort((a, b) => Date.parse(a) - Date.parse(b));
+      const droppedAt = parkedTimes.length ? parkedTimes[parkedTimes.length - 1] : null;
       const platforms = platformsOf(mine);
       const current = Array.isArray(client.primary_platforms) ? client.primary_platforms : [];
       let written: string[] = [];
       if (platforms.length && lifecycleMayWrite(client.field_sources, "primary_platforms") && platforms.join(",") !== current.join(",")) {
         written = (await writeClientFields(db, client.id, { primary_platforms: platforms })).written;
-      }
-      // The client's public profiles follow the same links, so a stored handle written without its case is mended here, not by a paid read.
-      if (!textOnly) {
-        const pi = await profileInputs(db, { id: client.id, name: client.name }, { tracking: rows.get("tracking")?.result ?? null, brand_read: null, accounts: { site_profiles: links } });
-        await syncProfiles(db, client.id, pi.rows, desiredProfiles(pi), deps.now());
       }
       return {
         status: "done",
@@ -1365,6 +1515,12 @@ export const STEPS: Record<string, StepDef> = {
           profiles: profiles.length, list: textHash(profileListKey(profiles)),
           matched: matches.map((m) => ({ id: m.profile.id, network: m.profile.network_type, handle: m.profile.native_name, by: m.by })),
           assigned: mine.length, platforms, written, site_profiles: links,
+          // The display names Sprout's whole list writes with decorations (stars, emoji, a tagline): written plainly wherever copy is learned or written (text/displayName.ts).
+          display_names: await listedDisplayNames(db, client, profiles, new Map([...assigned, ...matches.map((m) => [String(m.profile.id), [String(client.id)]] as [string, string[]])])),
+          // Each network that has, or had, two own accounts: which one stays and why; where no exact fact decides and both stay; when an account was last parked.
+          own: own.picks, own_open: own.open, own_dropped_at: droppedAt,
+          // Profiles that match the client but would be a second account on a network: left for a person to add.
+          skipped,
         },
       };
     },
@@ -1382,6 +1538,76 @@ export const STEPS: Record<string, StepDef> = {
       return ids.length ? `profiles:${ids.join(",")}|look:${str(client.look_since)}` : null;
     },
     run: (db, client, { rows }) => runSocialRead(db, client, { rows }, deps.socialIO()),
+  },
+
+  // The client's voice profile checked against what a voice is built from, and built again only
+  // when something in it can be wrong (copy sources, 17 Nov 2026). Two exact facts decide:
+  //   names     the stored voice still holds one of the decorated display names the accounts
+  //             step lists for the client (voice.ts namesInVoice);
+  //   accounts  one of the client's own accounts was parked after the voice was built, so it
+  //             was learned from an account that is no longer read.
+  // Otherwise the voice already conforms: the step says so in its result and changes nothing,
+  // not the voice and not the date it was built, so no step that keys on the voice runs
+  // because of this one (a rebuild sets off the trend profile and the content strategy, by their
+  // own keys). A rebuild is one voice_profile job (one model call, calendar/runWeek.ts
+  // runVoiceProfile). It cannot chain: there is one rebuild for each set of facts (the rule, the
+  // listed names, the time an account was parked), under a job key made of those facts, so a
+  // voice that was built again and still holds a listed name is never built a second time for
+  // it. That voice is corrected here in code instead: each listed name in its stored text is
+  // replaced exactly by its plain form (voice.ts plainVoice), with no model call and without
+  // changing the date it was built. Plans and revisions wait for a queued voice job as they
+  // always do. The first profile belongs to the first plan (calendar_request_week); the monthly
+  // rebuild stays there too. The step waits for an accounts result under the
+  // one-account-per-network rule (accountsFacts), so a second account is parked and the names are
+  // known before the voice is looked at. It looks again whenever the voice, the names or the
+  // parked time change: a look is one or two reads, never a model call.
+  voice: {
+    policy: {},
+    async inputs(_db, client, rows) {
+      if (!client.voice_built_at) return null;
+      const facts = accountsFacts(rows);
+      if (!facts) return null;
+      return `rule:${VOICE_RULE}|built:${client.voice_built_at}|own:${facts.ownDroppedAt ?? ""}|names:${textHash(facts.names.map((n) => `${n.name}>${n.plain}`).join("\n"))}`;
+    },
+    async run(db, client, { rows }) {
+      const facts = accountsFacts(rows);
+      if (!facts) return { status: "waiting", reason: "accounts" };
+      const { data, error } = await db.from("clients").select("social_voice").eq("id", client.id).maybeSingle();
+      if (error) throw new Error(`Could not read the client's voice: ${error.message}`);
+      const voice = (data?.social_voice ?? null) as { built_at?: unknown } | null;
+      const builtAt = str(voice?.built_at);
+      if (!voice || !builtAt) return { status: "waiting", reason: "voice" };
+      const held = namesInVoice(voice, facts.names).length;
+      const parkedSince = !!facts.ownDroppedAt && Date.parse(facts.ownDroppedAt) > Date.parse(builtAt);
+      // Nothing in it can be wrong: recorded here, and nothing else is written.
+      if (!held && !parkedSince) return { status: "done", result: { conforms: true, rule: VOICE_RULE, built_at: builtAt } };
+      const why = [...(held ? ["names"] : []), ...(parkedSince ? ["accounts"] : [])];
+      // One rebuild for these facts, whatever voice they are found in: the rule, the listed names and the parked time.
+      const key = `voice_profile:${client.id}:rule${VOICE_RULE}:${textHash(`${facts.names.map((n) => `${n.name}>${n.plain}`).join("\n")}|${facts.ownDroppedAt ?? ""}`)}`;
+      const { data: asked, error: askedError } = await db.from("scheduled_jobs").select("status").eq("dedupe_key", key).limit(1);
+      if (askedError) throw new Error(`Could not read the voice profile's job: ${askedError.message}`);
+      const job = (asked ?? [])[0] as { status?: string } | undefined;
+      if (!job) {
+        const at = deps.now().toISOString();
+        const { error: queueError } = await db.from("scheduled_jobs").upsert(
+          { kind: "voice_profile", client_id: client.id, dedupe_key: key, priority: 39, available_at: at },
+          { onConflict: "dedupe_key", ignoreDuplicates: true });
+        if (queueError) return { status: "failed", error: `Could not queue the voice profile: ${queueError.message}` };
+        return { status: "done", result: { conforms: false, rule: VOICE_RULE, built_at: builtAt, why, names: held, queued: key, at } };
+      }
+      // The rebuild for these facts is on its way: the look that follows it (runVoiceProfile) reads the new voice.
+      if (!job.status || job.status === "queued" || job.status === "running") return { status: "done", result: { conforms: false, rule: VOICE_RULE, built_at: builtAt, why, names: held, queued: key } };
+      // The rebuild for these facts has been made, and the voice still holds a listed name: no second rebuild. The names are
+      // written plainly in the stored text, exactly, and the date the voice was built stays, so nothing downstream runs.
+      let corrected = 0;
+      if (held) {
+        const { data: changed, error: fixError } = await db.from("clients").update({ social_voice: plainVoice(voice, facts.names) }).eq("id", client.id).eq("social_voice->>built_at", builtAt).select("id");
+        if (fixError) throw new Error(`Could not correct the names in the client's voice: ${fixError.message}`);
+        corrected = changed?.length ? held : 0;
+      }
+      // An account parked since the voice was built, with the one rebuild already made: the monthly rebuild is the next one.
+      return { status: "done", result: { conforms: !parkedSince && (!held || corrected > 0), rule: VOICE_RULE, built_at: builtAt, why, names: held, corrected, rebuilt: key } };
+    },
   },
 
   // The company slug the portal scopes client users by, from the client's
@@ -1823,6 +2049,99 @@ export const STEPS: Record<string, StepDef> = {
       const { data, error } = await db.rpc("lifecycle_first_output", { p_client: client.id });
       if (error) throw new Error(`Could not start the client's first output: ${error.message}`);
       return { status: "done", result: (data ?? {}) as Record<string, unknown> };
+    },
+  },
+
+  // The upcoming calendar checked against the copy rules whenever they or the voice change (copy
+  // sources, 17 Nov 2026): decorated names corrected in place, and one revision asked for each week
+  // that holds posts written from an outside post, with time codes, or before the client's accounts
+  // changed (calendar/replan.ts). It waits for the voice, and for a voice profile on its way, so a
+  // week is written again in the voice that was just built. What it never does: it sets no
+  // touched_at and writes no revision for a corrected name, it asks nothing for a post a person
+  // worked on or a person's own revision rewrote (the revision keeps those too), and it leaves
+  // what Sprout already holds alone. No model call here: each week asked for is one week_revise job.
+  calendar_recheck: {
+    policy: {},
+    async inputs(db, client, rows) {
+      if (!client.voice_built_at || !settled(rows, "voice")) return null;
+      // The names to correct and the time an account was parked are the accounts step's: without its result there is nothing to check by.
+      const facts = accountsFacts(rows);
+      if (!facts) return null;
+      // A voice profile on its way: wait for it.
+      const { data: onItsWay, error } = await db.from("scheduled_jobs").select("id")
+        .eq("client_id", client.id).eq("kind", "voice_profile").in("status", ["queued", "running"]).limit(1);
+      if (error) throw new Error(`Could not check the voice profile: ${error.message}`);
+      if ((onItsWay ?? []).length) return null;
+      return `rules:${COPY_RULE}|voice:${client.voice_built_at}|own:${facts.ownDroppedAt ?? ""}`;
+    },
+    async run(db, client, { rows }) {
+      const today = weeksFor(client.timezone, deps.now()).today;
+      const { names, ownDroppedAt } = accountsFacts(rows) ?? { names: [], ownDroppedAt: null };
+      // Ready plans with days to come, and every post still to come.
+      const { data: planRows, error: plansError } = await db.from("calendar_plans").select("id, week_start, ready_at, evidence, revisions, pending_revision")
+        .eq("client_id", client.id).eq("status", "ready").gte("week_start", day(new Date(Date.parse(`${today}T00:00:00Z`) - 6 * DAY))).order("week_start", { ascending: true });
+      if (plansError) throw new Error(`Could not read the planned weeks: ${plansError.message}`);
+      const { data: postRows, error: postsError } = await db.from("calendar_posts").select("id, post_key, plan_id, post_date, platform, format, copy, cta, reasons, touched_at, story_of")
+        .eq("client_id", client.id).gte("post_date", today).order("post_date", { ascending: true });
+      if (postsError) throw new Error(`Could not read the upcoming posts: ${postsError.message}`);
+      // deno-lint-ignore no-explicit-any
+      const plans = (planRows ?? []) as any[];
+      // deno-lint-ignore no-explicit-any
+      const posts = (postRows ?? []) as any[];
+
+      // The weeks that hold a post to write again that nobody worked on. Decided on the posts as they are read, before any name is corrected.
+      let kept = 0;
+      let busy = false;
+      // deno-lint-ignore no-explicit-any
+      const toAsk: any[] = [];
+      for (const plan of plans) {
+        const candidates = posts.filter((p) => p.plan_id === plan.id && !isStoryPost(p) && replanWhy(p, plan, { ownDroppedAt }) !== null);
+        if (!candidates.length) continue;
+        const worked = await workedOn(db, client.id, candidates);
+        for (const id of revisedByPerson(plan.revisions)) worked.add(id);
+        const open = candidates.filter((p) => !worked.has(p.id));
+        kept += candidates.length - open.length;
+        if (!open.length) continue;
+        // A week being revised right now is looked at again once that revision is done.
+        if (plan.pending_revision) busy = true;
+        else toAsk.push(plan);
+      }
+
+      // Decorated display names written plainly, in every upcoming post whatever its state, and in its design options' captions.
+      // Each write holds only while the text is as it was read; one that does not go through changes nothing and is tried at the next check.
+      let renamed = 0;
+      const warn = (what: string, message: string) => console.warn(`[calendar_recheck] ${what}: ${message}`);
+      // deno-lint-ignore no-explicit-any
+      const asRead = (q: any, column: string, was: unknown) => (was == null ? q.is(column, null) : q.eq(column, was));
+      for (const p of names.length ? posts : []) {
+        const copy = typeof p.copy === "string" ? plainNames(p.copy, names) : p.copy;
+        const cta = typeof p.cta === "string" ? plainNames(p.cta, names) : p.cta;
+        if (copy !== p.copy || cta !== p.cta) {
+          const { data: changed, error } = await asRead(db.from("calendar_posts").update({ copy, cta }).eq("id", p.id), "copy", p.copy).select("id");
+          if (error) warn("a post's name was not corrected", error.message);
+          else if (changed?.length) renamed++;
+        }
+        const { data: options, error: optionsError } = await db.from("post_iterations").select("id, post_copy, cta").eq("client_id", client.id).eq("calendar_post_key", p.post_key);
+        if (optionsError) { warn("a post's design options were not read", optionsError.message); continue; }
+        for (const o of options ?? []) {
+          const optionCopy = typeof o.post_copy === "string" ? plainNames(o.post_copy, names) : o.post_copy;
+          const optionCta = typeof o.cta === "string" ? plainNames(o.cta, names) : o.cta;
+          if (optionCopy === o.post_copy && optionCta === o.cta) continue;
+          const { data: changed, error } = await asRead(db.from("post_iterations").update({ post_copy: optionCopy, cta: optionCta }).eq("id", o.id), "post_copy", o.post_copy).select("id");
+          if (error) warn("a design option's name was not corrected", error.message);
+          else if (changed?.length) renamed++;
+        }
+      }
+
+      // One revision for each of those weeks. A week that got a revision meanwhile is looked at again in ten minutes.
+      const asked: string[] = [];
+      for (const plan of toAsk) {
+        const { error } = await db.rpc("calendar_request_revision", { p_plan: plan.id, p_note: REPLAN_NOTE, p_user: null, p_scope: "replan" });
+        if (error) { busy = true; warn(`no revision asked for ${plan.week_start}`, error.message); }
+        else asked.push(String(plan.week_start).slice(0, 10));
+      }
+      const result = { renamed, asked, kept };
+      return busy ? { status: "waiting", reason: "in_progress", recheckMinutes: 10, result } : { status: "done", result };
     },
   },
 };

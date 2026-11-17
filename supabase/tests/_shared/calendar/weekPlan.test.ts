@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { buildReason, clientFit, headline, parseRevision, parseWeekPlan, revisePrompt, STRATEGY_PRECEDENCE, storyPlan, weekPrompt, withStories, type PlannedPost, type WeekContext } from "../../../functions/_shared/calendar/weekPlan";
+import { assetRule, buildReason, clientFit, factsRule, headline, outsideRule, parseRevision, parseWeekPlan, reasonForPlanner, revisePrompt, STRATEGY_PRECEDENCE, storyPlan, trendLines, weekPrompt, withStories, type PlannedPost, type WeekContext } from "../../../functions/_shared/calendar/weekPlan";
+import type { CopyCheck, RefusedPost } from "../../../functions/_shared/calendar/copyChecks";
 import { wordReason } from "../../../functions/_shared/calendar/reasonText";
 import type { EvidenceItem } from "../../../functions/_shared/calendar/evidence";
 import { imageAspectRatio, videoAspectRatio } from "../../../functions/_shared/design-prompts/aspect";
@@ -51,9 +52,141 @@ describe("weekPrompt", () => {
       date: "2026-10-14", link: "https://t/1", metric: "engagement", value: 5400,
     };
     const p = weekPrompt({ ...CTX, evidence: [...EVIDENCE, trend] });
-    expect(p).toContain('N1 [@benchpro TikTok short_video, 2026-10-14, theme "Captain POV skits"] POV: you are the captain');
+    // The theme, then the post by platform, format and date: never its caption, never who posted it (copy sources, 17 Nov 2026).
+    expect(p).toContain('Theme "Captain POV skits".\nN1 [TikTok short_video, 2026-10-14] Lesson: not summarized');
     expect(p).toContain("Industry trends this week");
     expect(p).not.toContain("Platform trends from the latest monthly report");
+    expect(p).not.toContain("POV: you are the captain");
+    expect(p).not.toContain("@benchpro");
+  });
+
+  // Copy sources, 17 Nov 2026: an outside post gives the planner a subject and nothing more. Invented companies below.
+  describe("what the planner reads of outside posts", () => {
+    const OUTSIDE: EvidenceItem[] = [
+      { id: "P1", kind: "own", text: "Our aftercare guide", platform: "Instagram", format: "carousel", date: "2026-10-05", metric: "impressions", multiple: 2.7 },
+      { id: "C1", kind: "competitor", text: "Our summer membership is back. Unlimited waxing.", company: "Brightside Wax", platform: "Instagram", format: "video", date: "2026-10-14", metric: "engagement per follower", multiple: 4, thin: true, subject: "Summer memberships" },
+      { id: "C2", kind: "competitor", text: "Meet our new esthetician Priya.", company: "Glow Parlor", platform: "Facebook", format: "photo", date: "2026-10-15", metric: "engagement per follower", multiple: 2 },
+      { id: "T1", kind: "topic", text: "Summer memberships: three studios posted offers", companies: 3 },
+      { id: "N1", kind: "trend", text: "0:00 Why month-end drags 1:45 The checklist", company: "@ledgerlane", theme: "Aftercare myths", platform: "TikTok", format: "short_video", date: "2026-10-14", link: "https://t/1", metric: "engagement", value: 640,
+        lesson: "Myth-busting in the first three seconds holds viewers.", matters: "People search these questions before they book", angle: "Answer the three questions guests ask at the desk." },
+      { id: "N2", kind: "trend", text: "Hosted by Priya Nand, part 4 of the series", company: "@waxfacts", theme: "Aftercare myths", platform: "Instagram", format: "carousel", date: "2026-10-13", link: "https://t/2", metric: "engagement", value: 300, thin: true },
+      { id: "N3", kind: "trend", text: "A trend with no theme", company: "@someone", platform: "LinkedIn", format: "image", link: "https://t/3", metric: "engagement", value: 10, lesson: "Short lists get saved." },
+    ];
+    const ctx = { ...CTX, brand: "Harbor Wax", evidence: OUTSIDE };
+    const REVISE = { brand: "Harbor Wax", voiceBlock: "Voice.", note: "Warmer", posts: [{ id: "a", date: "2026-10-27", platform: "Instagram", format: "image", pillar: "Care", copy: "Old copy about aftercare", reason: "Why it was planned" }], pillars: [], languages: [], evidence: OUTSIDE, others: [] };
+
+    it("shows a trend by its theme, why it matters, the angle and the post's lesson, and never its caption or author", () => {
+      const p = weekPrompt(ctx);
+      expect(p).toContain([
+        "Industry trends this week: subjects other companies are covering now, described in our words (their captions are left out on purpose):",
+        'Theme "Aftercare myths". Why it matters: People search these questions before they book. Angle for Harbor Wax: Answer the three questions guests ask at the desk.',
+        "N1 [TikTok short_video, 2026-10-14] Lesson: Myth-busting in the first three seconds holds viewers.",
+        "N2 [Instagram carousel, 2026-10-13, early signal] Lesson: not summarized",
+        "N3 [LinkedIn image] Lesson: Short lists get saved.",
+      ].join("\n"));
+      for (const hidden of ["0:00 Why month-end drags", "Hosted by Priya Nand", "A trend with no theme", "@ledgerlane", "@waxfacts", "@someone"]) expect(p).not.toContain(hidden);
+    });
+
+    it("leaves out the part of a theme's line it does not have", () => {
+      expect(trendLines("Harbor Wax", [{ id: "N1", kind: "trend", text: "x", theme: "Aftercare myths", platform: "TikTok", format: "short_video", angle: "Answer the desk questions!" }])).toEqual([
+        'Theme "Aftercare myths". Angle for Harbor Wax: Answer the desk questions!',
+        "N1 [TikTok short_video] Lesson: not summarized",
+      ]);
+      expect(trendLines("Harbor Wax", [])).toEqual([]);
+    });
+
+    it("shows a competitor's post by its format, date, numbers and subject, and never its caption or company", () => {
+      const p = weekPrompt(ctx);
+      expect(p).toContain([
+        "Competitor posts that beat that competitor's usual numbers this week, by format and subject (their captions are left out on purpose):",
+        "C1 [Instagram video, 2026-10-14, 4x their usual engagement per follower, early signal] Subject: Summer memberships",
+        "C2 [Facebook photo, 2026-10-15, 2x their usual engagement per follower] Subject: not summarized",
+      ].join("\n"));
+      for (const hidden of ["Our summer membership is back", "Meet our new esthetician", "Brightside Wax", "Glow Parlor"]) expect(p).not.toContain(hidden);
+      // The client's own post, the topic and the report read as they always did.
+      expect(p).toContain("P1 [Instagram carousel, 2026-10-05, 2.7x the client's usual impressions] Our aftercare guide");
+      expect(p).toContain("T1 [3 companies] Summer memberships: three studios posted offers");
+    });
+
+    it("gives both prompts the same three rules, word for word", () => {
+      expect(outsideRule("Harbor Wax")).toBe("- C, T and N evidence is what other companies posted. It says which subject is timely and nothing more. Write the post from Harbor Wax's own material: its P and R evidence, pillars, notes and voice. Never take an outside post's wording, facts, figures, people, examples or production details (chapters, series names, who appears), and never name who posted it. Use an outside subject only when it fits the client's pillars, audience and services, and say how in fit.");
+      expect(factsRule("Harbor Wax")).toBe("- Never invent facts: no names, titles, numbers, quotes, client results, launches or claims about people that aren't in Harbor Wax's own evidence (P, R and M), the pillars or the voice section.");
+      // The asset rule names exactly the client's own material the prompt holds, so an ordinary call to action stays allowed.
+      expect(assetRule("Harbor Wax")).toBe('- Tell the reader to watch, read, download, join or attend only something that Harbor Wax\'s own material here shows exists: its own posts (P), its report (R) or the voice section (what Harbor Wax told the team, and its own example posts). An outside post (C, T, N) never shows that Harbor Wax has one. Then refers_to is {"what":"video|guide|page|event|offer","evidence_id":"P1"}: the P or R id that shows it, or "notes" or "voice" for the part of Harbor Wax\'s material that names it. When the post points to nothing that already exists, refers_to is null. Never write a list of video chapters or their times: a planned video has none yet.');
+      expect(assetRule("Harbor Wax", { pillars: true, strategy: true })).toContain("shows exists: its own posts (P), its report (R), its pillars, its content strategy or the voice section (what Harbor Wax told the team, and its own example posts).");
+      expect(assetRule("Harbor Wax", { pillars: true, strategy: true })).toContain('or "notes", "pillars", "strategy" or "voice" for the part');
+      expect(assetRule("Harbor Wax", { pillars: true })).toContain('or "notes", "pillars" or "voice" for the part');
+      expect(assetRule("Harbor Wax", { strategy: true })).not.toContain("pillars");
+      // A clock time is ordinary copy: the rule forbids a chapter list and nothing else about times.
+      expect(assetRule("Harbor Wax")).not.toMatch(/time codes/);
+      const week = weekPrompt(ctx);
+      expect(week).toContain(`- Every post acts on the evidence above: list the ids in evidence_ids.\n${outsideRule("Harbor Wax")}\n`);
+      // This client has pillars and no strategy; the revision below has neither.
+      expect(week).toContain(`${factsRule("Harbor Wax")}\n${assetRule("Harbor Wax", { pillars: true })}\n`);
+      expect(weekPrompt({ ...ctx, strategy: "Lead with aftercare." })).toContain(assetRule("Harbor Wax", { pillars: true, strategy: true }));
+      expect(weekPrompt({ ...ctx, pillars: [] })).toContain(assetRule("Harbor Wax"));
+      for (const scope of ["empty", "replan"] as const) {
+        expect(revisePrompt({ ...REVISE, scope })).toContain([factsRule("Harbor Wax"), outsideRule("Harbor Wax"), assetRule("Harbor Wax")].join("\n"));
+      }
+      // A rewrite from a note keeps what its posts already say: the facts rule names them, and the other two are the same.
+      const untouched = revisePrompt({ ...REVISE, scope: "untouched" });
+      expect(untouched).toContain(["- Never invent facts: no names, titles, numbers, quotes, client results, launches or claims about people that aren't in the posts as they stand, Harbor Wax's own evidence (P, R and M), the pillars or the voice section.", outsideRule("Harbor Wax"), assetRule("Harbor Wax")].join("\n"));
+      // The rule both prompts had before named "the evidence", which included other companies' posts.
+      for (const p of [week, untouched]) expect(p).not.toContain("that aren't in the evidence");
+    });
+
+    it("asks for refers_to in both replies", () => {
+      expect(weekPrompt(ctx)).toContain('"fit":"...","refers_to":null,"test":false}]}');
+      expect(revisePrompt({ ...REVISE, scope: "untouched" })).toMatch(/"visual_direction":"\.\.\.","refers_to":null\}\]\}$/);
+      for (const scope of ["empty", "replan"] as const) expect(revisePrompt({ ...REVISE, scope })).toMatch(/"visual_direction":"\.\.\.","reason_type":"performance\|competitor\|trend\|seasonal","evidence_ids":\["\.\.\."\],"fit":"\.\.\.","refers_to":null\}\]\}$/);
+    });
+
+    it("shows a rewrite the evidence the same way: no caption, no author, trends under their theme", () => {
+      const p = revisePrompt({ ...REVISE, scope: "empty" });
+      expect(p).toContain("Evidence, by id:\nP1 [");
+      expect(p).toContain('Theme "Aftercare myths". Why it matters:');
+      expect(p).toContain("C1 [Instagram video, 2026-10-14, 4x their usual engagement per follower, early signal] Subject: Summer memberships");
+      for (const hidden of ["Our summer membership is back", "Brightside Wax", "@ledgerlane", "0:00 Why month-end drags"]) expect(p).not.toContain(hidden);
+    });
+
+    it("writes a post again without its earlier copy or its earlier reason", () => {
+      const p = revisePrompt({ ...REVISE, scope: "replan", note: "Write these posts again from the client's own material.", posts: [{ ...REVISE.posts[0], copy: "", reason: "" }] });
+      expect(p).toContain("Write each of these posts again from the evidence. Keep its date, platform and format. Pick evidence for each and cite its ids. Its earlier copy is left out on purpose.");
+      expect(p).toContain("- [a] 2026-10-27 Instagram image (pillar: Care)");
+      expect(p).not.toContain("Current copy:");
+      expect(p).not.toContain("Why it's planned:");
+      // The other two scopes keep their own instruction.
+      expect(revisePrompt({ ...REVISE, scope: "empty" })).toContain("Write each of these posts, which have no copy yet.");
+      expect(revisePrompt({ ...REVISE, scope: "untouched" })).toContain("Rewrite each of these posts following the note.");
+      expect(revisePrompt({ ...REVISE, scope: "untouched" })).toContain("Current copy: Old copy about aftercare");
+    });
+
+    it("words a rewrite's reason by its subject, and never names who posted an outside post", () => {
+      const trend = buildReason({ type: "trend", evidence: [OUTSIDE[4]], fit: "Guests ask this at the desk." });
+      const rival = buildReason({ type: "competitor", evidence: [OUTSIDE[1]], fit: "Memberships suit regulars." });
+      expect(trend.label).toContain("@ledgerlane");
+      expect(reasonForPlanner(trend)).toBe('Trend theme "Aftercare myths"');
+      expect(rival.label).toContain("Brightside Wax");
+      expect(reasonForPlanner(rival)).toBe("A competitor's Instagram video");
+      for (const words of [reasonForPlanner(trend), reasonForPlanner(rival)]) expect(words).not.toMatch(/ledgerlane|Brightside/);
+      // Any other reason reads as it does on screen.
+      const own = buildReason({ type: "performance", evidence: [OUTSIDE[0]], fit: "Guests save these." });
+      expect(reasonForPlanner(own)).toBe(wordReason(own));
+      const topic = buildReason({ type: "competitor", evidence: [OUTSIDE[3]] });
+      expect(reasonForPlanner(topic)).toBe("3 competitors posted about Summer memberships this week.");
+    });
+
+    it("keeps what only the planner reads off a post's reason", () => {
+      const [p] = parseWeekPlan(JSON.stringify({ posts: [post({ reason_type: "trend", evidence_ids: ["N1", "C1"] })] }), { ...CTX, evidence: OUTSIDE });
+      const refs = p.reasons[0].evidence!;
+      expect(refs.map((r) => r.id)).toEqual(["N1", "C1"]);
+      for (const ref of refs) for (const key of ["lesson", "matters", "angle", "subject"]) expect(ref).not.toHaveProperty(key);
+      // What a reason is worded from stays: the theme, the excerpt, the author, the link, the numbers.
+      expect(refs[0]).toEqual({ id: "N1", kind: "trend", text: "0:00 Why month-end drags 1:45 The checklist", company: "@ledgerlane", theme: "Aftercare myths", platform: "TikTok", format: "short_video", date: "2026-10-14", link: "https://t/1", metric: "engagement", value: 640 });
+      expect(refs[1]).toMatchObject({ company: "Brightside Wax", multiple: 4, thin: true });
+      const [r] = parseRevision(JSON.stringify({ posts: [{ id: "a", copy: "New", evidence_ids: ["C1"] }] }), ["a"], OUTSIDE, true);
+      expect(r.reason?.evidence?.[0]).not.toHaveProperty("subject");
+    });
   });
 
   it("leaves out ideas that need filming when the client hasn't uploaded footage in 60 days", () => {
@@ -111,8 +244,10 @@ describe("the client's content strategy in the planner's prompts", () => {
       expect(sections[at]).toBe(`${STRATEGY}\n${STRATEGY_PRECEDENCE}`);
       expect(STRATEGY_PRECEDENCE).toMatch(/^The posting rhythm, the dates and the evidence rules here win/);
       expect(withIt.split(STRATEGY).length).toBe(2);
-      // Nothing else in the prompt moves.
-      expect(withIt.replace(`\n\n${STRATEGY}\n${STRATEGY_PRECEDENCE}`, "")).toBe(without);
+      // Nothing else in the prompt moves, but the asset rule: it now counts the strategy as the client's own material.
+      const rule = assetRule(CTX.brand, { pillars: true });
+      expect(without).toContain(rule);
+      expect(withIt.replace(`\n\n${STRATEGY}\n${STRATEGY_PRECEDENCE}`, "").replace(assetRule(CTX.brand, { pillars: true, strategy: true }), rule)).toBe(without);
     }
   });
 });
@@ -247,6 +382,92 @@ describe("parseWeekPlan", () => {
     expect(posts[1].reasons[0].type).toBe("competitor");
   });
 
+  // Copy sources, 17 Nov 2026 (invented names): a display name the client's Sprout account lists with decorations is saved plain.
+  it("writes a listed display name plainly in copy, cta and visual direction, and leaves a reply alone when none is listed", () => {
+    const names = [{ name: "Dana Reed ★★★★★", plain: "Dana Reed" }, { name: "Northwind Law - Trial Lawyers", plain: "Northwind Law" }];
+    const reply = JSON.stringify({ posts: [post({ copy: "Congrats to Dana Reed ★★★★★ on five years with us.", cta: "Meet Dana Reed ★★★★★", visual_direction: "Dana Reed ★★★★★ outside Northwind Law - Trial Lawyers" })] });
+    const [plain] = parseWeekPlan(reply, CTX, { names });
+    expect(plain).toMatchObject({ copy: "Congrats to Dana Reed on five years with us.", cta: "Meet Dana Reed", visual_direction: "Dana Reed outside Northwind Law" });
+    const [asWritten] = parseWeekPlan(reply, CTX);
+    expect(asWritten.copy).toBe("Congrats to Dana Reed ★★★★★ on five years with us.");
+    expect(asWritten.cta).toBe("Meet Dana Reed ★★★★★");
+  });
+
+  // Copy sources, 17 Nov 2026 (invented companies): a post that fails a copy check is not saved.
+  describe("with the copy checks", () => {
+    const check: CopyCheck = {
+      outside: [{ id: "C1", kind: "competitor", author: "Brightside Wax", text: "Our summer membership is back. Unlimited waxing for one flat price every single month." }],
+      own: { hosts: ["harborwax.example"], handles: ["harborwax"], text: "harbor wax", hasNotes: false },
+    };
+    const reply = (...posts: Array<Record<string, unknown>>) => JSON.stringify({ posts });
+
+    it("refuses a post that borrows from an outside post: it takes no slot, and is listed with the reason and the outside id", () => {
+      const refused: RefusedPost[] = [];
+      // Instagram has 2 slots. The first post is refused; the two after it both fit.
+      const posts = parseWeekPlan(reply(
+        post({ date: "2026-10-27", copy: "Unlimited waxing for one flat price every single month.\nStarts today." }),
+        post({ date: "2026-10-28", copy: "First wax free for new guests." }),
+        post({ date: "2026-10-29", copy: "Aftercare, in three steps." }),
+      ), CTX, { check, refused });
+      expect(posts.map((p) => p.copy)).toEqual(["First wax free for new guests.", "Aftercare, in three steps."]);
+      expect(refused).toEqual([{ date: "2026-10-27", platform: "Instagram", copy: "Unlimited waxing for one flat price every single month.", why: "shares wording with C1", ids: ["C1"], kind: "borrowed" }]);
+    });
+
+    it("refuses a chapter list, an outside link or handle, and a pointer the client's evidence does not show", () => {
+      const refused: RefusedPost[] = [];
+      const posts = parseWeekPlan(reply(
+        post({ date: "2026-10-26", platform: "Facebook", copy: "0:00 Intro to waxing" }),
+        post({ date: "2026-10-27", copy: "Clean copy.", cta: "More at brightside.shop" }),
+        post({ date: "2026-10-28", copy: "Thanks @brightside_wax" }),
+        post({ date: "2026-10-29", copy: "Watch our new video.", refers_to: { what: "video", evidence_id: "C1" } }),
+        post({ date: "2026-10-30", copy: "Read our playoff checklist.", refers_to: { what: "guide", evidence_id: "P1" } }),
+      ), CTX, { check, refused });
+      expect(posts.map((p) => p.copy)).toEqual(["Read our playoff checklist."]);
+      expect(refused.map((r) => r.why)).toEqual(["lists video chapter times", "links to brightside.shop, which is not the client's", "names @brightside_wax, which is not the client's", "points to something the client's evidence does not show"]);
+      expect(refused.map((r) => r.kind)).toEqual(["chapters", "link", "handle", "pointer"]);
+      expect(refused.every((r) => r.ids.length === 0)).toBe(true);
+    });
+
+    it("keeps a post that gives a clock time, a time range or opening hours", () => {
+      const refused: RefusedPost[] = [];
+      const posts = parseWeekPlan(reply(
+        post({ date: "2026-10-27", copy: "Happy hour 4:00-6:00, live music 8:30." }),
+        post({ date: "2026-10-28", copy: "Doors 6:30, show 7:00.", cta: "Open 9:00 to 17:30 on Saturday" }),
+      ), CTX, { check, refused });
+      expect(posts).toHaveLength(2);
+      expect(refused).toEqual([]);
+    });
+
+    it("lets a post point to the pillars, the strategy or the voice section only when the planner was given them", () => {
+      const pointing = (id: string) => reply(post({ date: "2026-10-27", copy: "Join our Thursday webinar.", refers_to: { what: "event", evidence_id: id } }));
+      const given = { ...check, own: { ...check.own, material: ["pillars", "voice"] } };
+      expect(parseWeekPlan(pointing("pillars"), CTX, { check: given })).toHaveLength(1);
+      expect(parseWeekPlan(pointing("voice"), CTX, { check: given })).toHaveLength(1);
+      expect(parseWeekPlan(pointing("strategy"), CTX, { check: given })).toHaveLength(0);
+      expect(parseWeekPlan(pointing("pillars"), CTX, { check })).toHaveLength(0);
+    });
+
+    it("checks nothing when no check is given, as before", () => {
+      expect(parseWeekPlan(reply(post({ copy: "0:00 Intro @brightside_wax" })), CTX)).toHaveLength(1);
+    });
+
+    it("keeps the week's one test when a second reply is read", () => {
+      const again = parseWeekPlan(reply(post({ test: true })), CTX, { noTest: true });
+      expect(again[0].reasons[0]).toMatchObject({ type: "competitor", test: false });
+      expect(parseWeekPlan(reply(post({ test: true })), CTX)[0].reasons[0]).toMatchObject({ type: "test", test: true });
+    });
+
+    it("leaves a refused rewrite out, with its id and the reason, so the post keeps its copy", () => {
+      const refused: RefusedPost[] = [];
+      const out = parseRevision(reply({ id: "a", copy: "Unlimited waxing for one flat price every single month." }, { id: "b", copy: "First wax free, 9:00 to 17:30.", refers_to: null }, { id: "c", copy: "Chapters: 0:00 Intro, 1:20 The close" }), ["a", "b", "c"], [], false, { check, refused });
+      expect(out.map((p) => p.id)).toEqual(["b"]);
+      expect(refused).toEqual([
+        { id: "a", date: "", platform: "", copy: "Unlimited waxing for one flat price every single month.", why: "shares wording with C1", ids: ["C1"], kind: "borrowed" },
+        { id: "c", date: "", platform: "", copy: "Chapters: 0:00 Intro, 1:20 The close", why: "lists video chapter times", ids: [], kind: "chapters" },
+      ]);
+    });
+  });
+
   it("returns nothing for a reply that isn't JSON", () => {
     expect(parseWeekPlan("Sorry, I can't.", CTX)).toEqual([]);
   });
@@ -291,6 +512,13 @@ describe("revising", () => {
     expect(prompt).toContain("[a] 2026-10-27 LinkedIn");
     const out = parseRevision(JSON.stringify({ posts: [{ id: "a", copy: "New copy" }, { id: "a", copy: "Again" }, { id: "zz", copy: "Unknown" }] }), ["a"]);
     expect(out).toEqual([{ id: "a", copy: "New copy", pillar: null, hashtags: [], cta: null, visual_direction: null }]);
+  });
+
+  it("writes a listed display name plainly in a rewritten post's copy and cta", () => {
+    const names = [{ name: "Dana Reed ★★★★★", plain: "Dana Reed" }];
+    const reply = JSON.stringify({ posts: [{ id: "a", copy: "Thank you, Dana Reed ★★★★★.", cta: "Read Dana Reed ★★★★★'s story", visual_direction: "A portrait of Dana Reed ★★★★★" }] });
+    expect(parseRevision(reply, ["a"], [], false, { names })).toEqual([expect.objectContaining({ id: "a", copy: "Thank you, Dana Reed.", cta: "Read Dana Reed's story", visual_direction: "A portrait of Dana Reed" })]);
+    expect(parseRevision(reply, ["a"])[0].copy).toBe("Thank you, Dana Reed ★★★★★.");
   });
 
   it("gives posts written from empty slots a reason from the evidence they cite", () => {

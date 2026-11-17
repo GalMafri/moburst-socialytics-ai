@@ -31,6 +31,8 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loading } from "@/components/ui/loading";
 import { PlatformIcon } from "@/lib/platform-config";
+import { ParkedAccounts } from "@/components/onboarding/ParkedAccounts";
+import { parkedAccounts, type ParkedAccount } from "@/lib/parkedAccounts";
 import { clientOriginLine, countryNames, declinedBrandLine, formatDate, languageNames, locationOrigin, onboardingFacts, platformName, scheduleAwaitsTracking, scheduleLines, timeZoneName, type OnboardingStep } from "@/lib/display";
 import { changedColumns, EMPTY_FORM, formFromClient, keywordPhrases, rebaseForm, setByOf, type SetupForm } from "@/lib/clientSetupForm";
 import { invokeResendable, sendQuietly, writeResendable } from "@/lib/quietSend";
@@ -177,6 +179,17 @@ export default function ClientSetup() {
       const { data, error } = await supabase.from("sprout_profiles").select("*").eq("client_id", clientId!).neq("is_active", false);
       if (error) throw error;
       return data as Row[];
+    },
+    enabled: !!clientId,
+  });
+
+  // Accounts Socialytics set aside because the client held two on one network: shown as "Not used", with why, and a way to add one back.
+  const { data: parkedProfiles } = useQuery({
+    queryKey: ["sprout-profiles", clientId, "not-used"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("sprout_profiles").select("*").eq("client_id", clientId!).eq("is_active", false);
+      if (error) throw error;
+      return parkedAccounts(data);
     },
     enabled: !!clientId,
   });
@@ -541,6 +554,7 @@ export default function ClientSetup() {
                 {clientId ? (
                   <SproutProfileSelector
                     assigned={assignedProfiles ?? null}
+                    parked={parkedProfiles ?? []}
                     selected={selectedProfiles}
                     onChange={setSelectedProfiles}
                   />
@@ -894,8 +908,10 @@ function ReportScheduleManager({ clientId, timeZone }: { clientId: string; timeZ
  * a minute later when it does not come back; the assigned accounts show
  * either way.
  */
-function SproutProfileSelector({ assigned, selected, onChange }: {
+function SproutProfileSelector({ assigned, parked, selected, onChange }: {
   assigned: Row[] | null;
+  /** The client's accounts that are not used (src/lib/parkedAccounts.ts). */
+  parked: ParkedAccount[];
   /** The person's selection, or null while it equals what is assigned. */
   selected: SproutProfile[] | null;
   onChange: (profiles: SproutProfile[] | null) => void;
@@ -923,6 +939,12 @@ function SproutProfileSelector({ assigned, selected, onChange }: {
   const current = selected ?? fromAssigned;
   const isSelected = (p: SproutProfile) => current.some((s) => String(s.id) === String(p.id));
   const toggleProfile = (p: SproutProfile) => onChange(isSelected(p) ? current.filter((s) => String(s.id) !== String(p.id)) : [...current, p]);
+  // An account that is not used, until a person adds it back: then it is one of the selected accounts, saved with the page.
+  const notUsed = parked.filter((a) => !current.some((s) => String(s.id) === String(a.sprout_profile_id)));
+  const addBack = (a: ParkedAccount) => {
+    const listed = (allProfiles ?? []).find((p) => String(p.id) === String(a.sprout_profile_id));
+    onChange([...current, listed ?? ({ id: a.sprout_profile_id, name: a.profile_name, native_name: a.native_name, network_type: a.network_type, native_link: a.native_link } as SproutProfile)]);
+  };
 
   const filtered = (allProfiles ?? [])
     .filter((p) => !searchTerm || (p.name || "").toLowerCase().includes(searchTerm.toLowerCase()) || (p.native_name || "").toLowerCase().includes(searchTerm.toLowerCase()))
@@ -950,6 +972,8 @@ function SproutProfileSelector({ assigned, selected, onChange }: {
       ) : (
         <EmptyState compact icon={Users} title="No accounts matched yet" description="Accounts added to Moburst's Sprout account are picked up within a day." />
       )}
+
+      <ParkedAccounts accounts={notUsed} onAddBack={addBack} />
 
       {allProfiles === null ? (
         <Loading label="Loading Sprout Social profiles" />

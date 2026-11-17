@@ -64,7 +64,8 @@ const FORMAT_WORDS: Record<string, string> = {
   short_video: "short video", long_video: "long video", pin: "pin",
 };
 
-function formatWord(f?: string): string {
+/** A post's format in plain words ("short_video" is a short video; an unknown one is a post). */
+export function formatWord(f?: string): string {
   const key = String(f || "").toLowerCase().trim();
   return FORMAT_WORDS[key] ?? (key && key !== "unknown" ? key : "post");
 }

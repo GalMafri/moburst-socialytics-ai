@@ -302,10 +302,13 @@ export function snapshotOf(posts: SocialPost[], now: Date, extra: { top: string[
  * a platform's median engagement per post moving by half or more with 5 or
  * more posts on both sides; a language crossing 25% or the top follower
  * country changing; the profile picture or the look changing; 28 days with
- * 5 or more new posts.
+ * 5 or more new posts. And first of all "profiles": one of the client's own
+ * accounts was parked (the accounts step's own_dropped_at) since the version
+ * was set, so what the evidence is read from changed.
  */
-export function versionMove(prev: Snapshot | null | undefined, cur: Snapshot, posts: SocialPost[], now: Date): string | null {
+export function versionMove(prev: Snapshot | null | undefined, cur: Snapshot, posts: SocialPost[], now: Date, ownDroppedAt: string | null = null): string | null {
   if (!prev || !prev.at) return "first";
+  if (ownDroppedAt && Date.parse(ownDroppedAt) > Date.parse(prev.at)) return "profiles";
   if (cur.top.filter((id) => !(prev.top ?? []).includes(id)).length >= 4) return "top_posts";
   const names = new Set([...Object.keys(prev.platforms ?? {}), ...Object.keys(cur.platforms)]);
   for (const name of names) {
@@ -704,7 +707,8 @@ export async function runSocialRead(db: Db, client: Row, ctx: { rows: Map<string
     checked_at: now.toISOString(), window_days: windowDays, posts_read: rows.length, organic_posts: organic(posts).length, text_posts: text,
     enough: text >= MIN_TEXT_POSTS, multiples, instagram, linkedin_page,
   };
-  const moved = versionMove(prev?.snapshot as Snapshot | undefined, snapshot, posts, now);
+  const ownDroppedAt = ctx.rows.get("accounts")?.result?.own_dropped_at;
+  const moved = versionMove(prev?.snapshot as Snapshot | undefined, snapshot, posts, now, typeof ownDroppedAt === "string" && ownDroppedAt ? ownDroppedAt : null);
   const bio = instagram?.bio?.biography ?? "";
   const postTexts = [...textPosts(posts).map((p) => p.text), ...(bio ? [bio] : [])];
   const followers = followersZone(audience.cities);

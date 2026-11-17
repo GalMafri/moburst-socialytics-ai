@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  applyRhythmSetting, bestExamples, compactFeedRow, competitorPosts, feedHistories, isBoosted, latestTrendEvidence, median, medianRates, numberEvidence, platformName,
+  applyRhythmSetting, bestExamples, compactFeedRow, competitorPosts, feedHistories, isBoosted, isClientPost, latestTrendEvidence, median, medianRates, numberEvidence, outsideSources, platformName,
   postsInWeek, resolveRhythm, rhythmFromPosts, scoreCompetitorPosts, scoreOwnPosts, scoreTrendItems, storyRhythm,
   type CompetitorPost, type OwnPost, type RhythmInput, type TrackedPost, type TrendEvidenceInput,
 } from "../../../functions/_shared/calendar/evidence";
@@ -16,6 +16,27 @@ describe("median", () => {
     expect(median([3, 1, 2])).toBe(2);
     expect(median([4, 1, 2, 3])).toBe(2.5);
     expect(median([])).toBeNull();
+  });
+});
+
+// Copy sources, 17 Nov 2026 (invented brands): a feed company is the client only on its id or its exact name.
+describe("isClientPost", () => {
+  it("is the client's on the feed's id for the client, whatever the name", () => {
+    expect(isClientPost({ companyId: 77, companyName: "Something Else" }, "77", "Harbor Wax")).toBe(true);
+    expect(isClientPost({ companyId: "78", companyName: "Something Else" }, "77", "Harbor Wax")).toBe(false);
+  });
+  it("is the client's on the exact name: case, punctuation and a trailing LLC ignored", () => {
+    expect(isClientPost({ companyId: "1", companyName: "Harbor Wax" }, null, "Harbor Wax")).toBe(true);
+    expect(isClientPost({ companyId: "1", companyName: "HARBOR WAX, LLC" }, null, "Harbor Wax")).toBe(true);
+    expect(isClientPost({ companyId: "1", companyName: " Harbor Wax, Inc." }, "77", "Harbor Wax")).toBe(true);
+  });
+  it("is another company's when its name only contains the client's name", () => {
+    expect(isClientPost({ companyId: "1", companyName: "Harbor Wax (Lakeside)" }, null, "Harbor Wax")).toBe(false);
+    expect(isClientPost({ companyId: "1", companyName: "Harbor Wax Lakeside" }, "77", "Harbor Wax")).toBe(false);
+    expect(isClientPost({ companyId: "1", companyName: "The Harbor Wax Company" }, null, "Harbor Wax")).toBe(false);
+    expect(isClientPost({ companyId: "1", companyName: "" }, null, "Harbor Wax")).toBe(false);
+    expect(isClientPost({ companyId: "1", companyName: "Harbor Wax" }, null, "")).toBe(false);
+    expect(isClientPost(null, null, "Harbor Wax")).toBe(false);
   });
 });
 
@@ -244,6 +265,19 @@ describe("latestTrendEvidence", () => {
     expect(got[2]).toMatchObject({ platform: "instagram", format: "carousel", date: null });
   });
 
+  // Copy sources, 17 Nov 2026: what the planner reads of a trend, in the team's own words.
+  it("gives each post its lesson and its theme's why it matters and angle, empty where there is none", async () => {
+    const t = tables();
+    Object.assign(t.trend_themes[1], { why_it_matters: " Captains run the group chat. ", angle: "Show the captain's week." });
+    Object.assign(t.trend_posts[1], { lesson: "A first-person skit lands in the first second." });
+    const got = await latestTrendEvidence(trendDb(t), "c1", PLANNED_AT);
+    expect(got.map((g) => [g.link, g.lesson, g.matters, g.angle])).toEqual([
+      ["https://t/a", "A first-person skit lands in the first second.", "Captains run the group chat.", "Show the captain's week."],
+      ["https://t/c2", "", "Captains run the group chat.", "Show the captain's week."],
+      ["https://t/d", "", "", ""],
+    ]);
+  });
+
   it("measures each post against its platform's median over every kept post of the week", async () => {
     const got = await latestTrendEvidence(trendDb(tables()), "c1", PLANNED_AT);
     // Kept TikTok posts: 5000, 100, 300 (the dropped one is not counted).
@@ -298,7 +332,7 @@ describe("latestTrendEvidence", () => {
 
 const trend = (over: Partial<TrendEvidenceInput> = {}): TrendEvidenceInput => ({
   theme: "Captain POV skits", theme_id: "th1", platform: "tiktok", format: "short_video", author: "@benchpro", text: "POV: you are the captain and nobody RSVPs",
-  link: "https://t/1", date: "2026-10-14", fit: 80, engagement: 1000, measured: 640, ...over,
+  link: "https://t/1", date: "2026-10-14", fit: 80, engagement: 1000, measured: 640, lesson: "", matters: "", angle: "", ...over,
 });
 
 describe("scoreTrendItems", () => {
@@ -312,6 +346,18 @@ describe("scoreTrendItems", () => {
     const [bare] = scoreTrendItems([trend({ date: null, author: "" })]);
     expect(bare).not.toHaveProperty("date");
     expect(bare).not.toHaveProperty("company");
+  });
+
+  it("carries the lesson, the why and the angle to the planner, each only when there is one", () => {
+    const [full, bare] = scoreTrendItems([
+      trend({ link: "https://t/full", fit: 90, lesson: "Open on the question.", matters: "Guests search it before they book.", angle: "Answer the desk questions." }),
+      trend({ link: "https://t/bare", fit: 50 }),
+    ]);
+    expect(full).toMatchObject({ id: "N1", lesson: "Open on the question.", matters: "Guests search it before they book.", angle: "Answer the desk questions." });
+    for (const key of ["lesson", "matters", "angle"]) expect(bare).not.toHaveProperty(key);
+    // Numbered with the rest, they are still there.
+    const [n1] = numberEvidence({ ownTop: [], competitors: [], topics: [], trends: [full, bare], findings: [] });
+    expect(n1).toMatchObject({ id: "N1", kind: "trend", lesson: "Open on the question.", angle: "Answer the desk questions." });
   });
 
   it("ranks by fit and by engagement against the platform's median", () => {
@@ -560,5 +606,44 @@ describe("posting rates from the competitor feeds", () => {
     expect(rates.Facebook).toBe(0.5);
     expect(rates.Instagram).toBeGreaterThan(0);
     expect(medianRates([{ weeks: 2, posts: [...tracked("a", "LinkedIn", 2), ...tracked("b", "LinkedIn", 6), ...tracked("c", "LinkedIn", 10)] }])).toEqual({ LinkedIn: 3 });
+  });
+});
+
+// Copy sources, 17 Nov 2026 (invented companies): a competitor's post is read by its subject, and
+// the whole captions of outside posts are kept for the copy check only.
+describe("outside posts in the evidence", () => {
+  const competitors = scoreCompetitorPosts([
+    comp("h1", "Brightside Wax", "2026-10-01T10:00:00Z", 10), comp("n1", "Brightside Wax", "2026-10-14T10:00:00Z", 40),
+    comp("h2", "Glow Parlor", "2026-10-02T10:00:00Z", 10), comp("n2", "Glow Parlor", "2026-10-15T10:00:00Z", 30),
+  ], "2026-10-12", 4);
+  const topics = [
+    { topic: "Summer memberships", summary: "Two studios posted offers", companies: ["Brightside Wax", "Glow Parlor"], post_urls: ["https://c/zz", "https://c/n1"] },
+    { topic: "Later topic", summary: "Also lists it", companies: ["Brightside Wax"], post_urls: ["https://c/n1"] },
+  ];
+  const inputs = [
+    trend({ link: "https://t/a", author: "@ledgerlane", text: `A long caption. ${"word ".repeat(80)}The end of the caption.`, fit: 90 }),
+    trend({ link: "https://t/b", author: "", text: "A short caption.", fit: 50 }),
+  ];
+  const items = numberEvidence({ ownTop: [], competitors, topics, trends: scoreTrendItems(inputs), findings: [] });
+
+  it("gives a competitor's post the topic that lists its link as its subject, the first such topic, and none otherwise", () => {
+    const listed = items.find((i) => i.kind === "competitor" && i.link === "https://c/n1")!;
+    const unlisted = items.find((i) => i.kind === "competitor" && i.link === "https://c/n2")!;
+    expect(listed.subject).toBe("Summer memberships");
+    expect(unlisted).not.toHaveProperty("subject");
+    // The stored excerpt and the company stay on the item: the reason's words and the content strategy read them.
+    expect(listed).toMatchObject({ company: "Brightside Wax", text: "Competitor post n1" });
+  });
+
+  it("returns each outside post's author and whole caption by evidence id, and nothing for the client's own evidence", () => {
+    const outside = outsideSources(items, inputs, competitors);
+    expect(outside.map((o) => [o.id, o.kind, o.author])).toEqual(items.filter((i) => i.kind === "competitor" || i.kind === "trend").map((i) => [i.id, i.kind, i.kind === "trend" ? (i.company ?? "") : i.company]));
+    const n1 = outside.find((o) => o.id === "N1")!;
+    // The whole caption, not the 220 characters the item keeps.
+    expect(n1.text).toBe(inputs[0].text);
+    expect(n1.text.length).toBeGreaterThan(items.find((i) => i.id === "N1")!.text.length);
+    expect(n1.text.endsWith("The end of the caption.")).toBe(true);
+    expect(outside.find((o) => o.id === "C1")).toMatchObject({ kind: "competitor", text: competitors[0].post.text, author: competitors[0].post.company });
+    expect(outsideSources([{ id: "P1", kind: "own", text: "x" }, { id: "T1", kind: "topic", text: "y" }, { id: "N9", kind: "trend", text: "z", link: "https://t/unknown" }, { id: "C9", kind: "competitor", text: "w" }], inputs, competitors)).toEqual([]);
   });
 });

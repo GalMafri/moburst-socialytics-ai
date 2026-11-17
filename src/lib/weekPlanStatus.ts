@@ -25,12 +25,46 @@ function steps(started: boolean, writing: string): PlanStep[] {
   ];
 }
 
+/**
+ * A revision the app asked for itself, not a person: the daily run writing
+ * posts that had no copy ("empty"), and posts written again under the copy
+ * rules ("replan"). The week says it is being updated while one runs, with no
+ * note, and afterwards says what it said before: nobody asked for a revision,
+ * so none is reported. What such a run kept or rewrote stays on the plan's
+ * own record (calendar_plans.revisions).
+ */
+const byTheApp = (scope: string | undefined): boolean => scope === "empty" || scope === "replan";
+
 /** The newest revision a person or the client notes asked for, finished since the plan was ready. */
 function lastRevision(plan: CalendarPlanRow) {
-  const last = [...(plan.revisions ?? [])].reverse().find((r) => r.scope !== "empty");
+  const last = [...(plan.revisions ?? [])].reverse().find((r) => !byTheApp(r.scope));
   if (!last?.done_at || last.expired || last.failed) return null;
   if (plan.ready_at && Date.parse(last.done_at) < Date.parse(plan.ready_at)) return null;
   return last;
+}
+
+/** Why a post's new copy was not saved, in the words a person reads, by what was wrong with it. */
+export const KEPT_WHY: Record<string, string> = {
+  borrowed: "the new copy repeated another company's post",
+  chapters: "the new copy listed video chapter times, and the video is not made yet",
+  link: "the new copy linked to a site that is not the brand's own",
+  handle: "the new copy tagged an account that is not the brand's own",
+  pointer: "the new copy pointed to something the brand's own material does not show",
+};
+/** Said when the posts were kept for different reasons, or for one this page does not know. */
+export const KEPT_WHY_MIXED = "the new copy used wording, links or names that are not the brand's own";
+
+/**
+ * One short sentence for the posts a revision left as they were because
+ * their new copy was not saved, so nobody is left looking at unchanged copy
+ * with no word: how many, and why. "" when there are none.
+ */
+export function keptLine(refused: Array<{ id?: string; kind?: string }> | null | undefined): string {
+  const kept = Array.isArray(refused) ? refused : [];
+  if (!kept.length) return "";
+  const kinds = [...new Set(kept.map((r) => String(r?.kind ?? "")))];
+  const why = kinds.length === 1 && KEPT_WHY[kinds[0]] ? KEPT_WHY[kinds[0]] : KEPT_WHY_MIXED;
+  return `${kept.length} post${kept.length === 1 ? "" : "s"} kept as ${kept.length === 1 ? "it was" : "they were"}: ${why}.`;
 }
 
 /**
@@ -45,6 +79,9 @@ export function weekPlanView(plan: CalendarPlanRow | null | undefined, today: st
     const line = plan.error ? `Planning the week of ${week} is taking longer than usual. It keeps trying.` : `Planning the week of ${week}…`;
     return { kind: "planning", line, steps: steps(plan.status === "planning", "Writing the posts") };
   }
+  if (plan.status === "ready" && plan.pending_revision && byTheApp(plan.pending_revision.scope)) {
+    return { kind: "revising", line: `Updating the week of ${week}…`, note: "", steps: steps(!!plan.claimed_at, "Rewriting the posts") };
+  }
   if (plan.status === "ready" && plan.pending_revision) {
     return { kind: "revising", line: `Revising the week of ${week}…`, note: plan.pending_revision.note, steps: steps(!!plan.claimed_at, "Rewriting the posts") };
   }
@@ -53,6 +90,8 @@ export function weekPlanView(plan: CalendarPlanRow | null | undefined, today: st
     const revised = lastRevision(plan);
     if (!revised) return { kind: "planned", line: "Planned" };
     const n = revised.rewritten ?? 0;
+    const keptAsWas = keptLine(revised.refused);
+    if (keptAsWas) return { kind: "revised", line: `Revised: ${n ? `${n} post${n === 1 ? "" : "s"}` : "no post"} rewritten. ${keptAsWas}` };
     return { kind: "revised", line: n ? `Revised: ${n} post${n === 1 ? "" : "s"} rewritten` : "Revised: nothing was left to rewrite" };
   }
   if (plan.status === "canceled") {

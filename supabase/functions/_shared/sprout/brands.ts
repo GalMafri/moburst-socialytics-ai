@@ -14,7 +14,12 @@
 // (names.ts), joined across networks by a shared handle. The website search
 // can then join a brand in no group to another (website.ts, joinBrands), but
 // never two Sprout groups to each other. A profile in two groups leaves both
-// brands alone (groupConflict). The weekly onboarding job and the setup
+// brands alone (groupConflict). A group that holds two profiles on one
+// network is more than one brand (a national brand and a local franchise in
+// one group, copy sources 17 Nov 2026): it is split by the rule profiles in
+// no group follow, so a brand has one profile per network; two profiles on a
+// network that are named alike cannot be told apart, and that brand is left
+// alone (networkConflict). The weekly onboarding job and the setup
 // page's profile list (sprout-profiles) group through this one module, so
 // they agree. Free of Deno and network imports so it can be tested.
 
@@ -24,9 +29,13 @@ import { linksTo, siteLinkSet } from "../lifecycle/siteLinks.ts";
 import { pathSegments, siteKeyOf, siteMatch } from "../net/domains.ts";
 import type { CustomerGroup } from "./profiles.ts";
 import { networkKey } from "./publishRules.ts";
+import { plainDisplayName } from "../text/displayName.ts";
 
 export interface Brand {
-  /** "group:<id>" for a Sprout group; else the brand's smallest profile id, which stays the same while profiles are added. */
+  /**
+   * "group:<id>" for a Sprout group; else the brand's smallest profile id, which stays the same while profiles are added.
+   * A group split in several brands keeps "group:<id>" for the part with its oldest profile; the others are "group:<id>:<smallest profile id>".
+   */
   key: string;
   /** The brand as people know it, from its profiles' names (brandName); the group's name only when none is usable. */
   name: string;
@@ -35,6 +44,8 @@ export interface Brand {
   profiles: SproutProfile[];
   /** The Sprout group the brand is, or null for profiles in no group. */
   group: CustomerGroup | null;
+  /** One of the several brands its Sprout group holds (two profiles on one network): named by its profiles' whole names. */
+  split?: true;
 }
 
 /** A brand after the website search's joins, with the keys of the brands it is made of. */
@@ -95,10 +106,12 @@ export function profileBrandName(name: string | null | undefined): string {
  * name of several words), then the one most profiles share, a profile
  * sharing every name its own begins with ("Olo App" shares "Olo"), the
  * longest on a tie. The group's name only when no profile name is usable;
- * for profiles in no group, then, the spelling most of them carry.
+ * for profiles in no group, then, the spelling most of them carry. `clean`
+ * is how a profile's name is read as a brand's (profileBrandName unless a
+ * caller keeps more of it).
  */
-export function brandName(profiles: SproutProfile[], group: CustomerGroup | null = null): { name: string; why: string } {
-  const cleaned = profiles.map((p) => profileBrandName(p.name)).filter(Boolean);
+export function brandName(profiles: SproutProfile[], group: CustomerGroup | null = null, clean: (name: string) => string = profileBrandName): { name: string; why: string } {
+  const cleaned = profiles.map((p) => clean(p.name)).filter(Boolean);
   const several = cleaned.filter((n) => wordsOf(n).length > 1);
   const handleLike = (n: string) => n.includes("_") || n.startsWith("@") || (!/\s/.test(n) && several.some((m) => wordsOf(m).join("") === wordsOf(n).join("")));
   const handles = [...new Set(cleaned.filter(handleLike))];
@@ -137,23 +150,42 @@ export function brandName(profiles: SproutProfile[], group: CustomerGroup | null
 }
 
 /**
- * A brand from its profiles: a group's is keyed by the group, others by the
- * oldest profile; named as people know it (brandName).
+ * A profile's whole name as a brand's: plain (text/displayName.ts), so a part
+ * in brackets stays, without a legal suffix. A tagline is cut only when the
+ * part before it is a name already known for the brand (`known`: its Sprout
+ * group's name, another of its profiles' names); otherwise the whole display
+ * name is the name ("Smith - Jones Law" stays as it is).
  */
-export function brandOf(profiles: SproutProfile[], group: CustomerGroup | null = null): Brand {
+function wholeBrandName(name: string | null | undefined, known: Array<string | null | undefined> = []): string {
+  let n = plainDisplayName(name, known);
+  while (LEGAL.test(n) && n.replace(LEGAL, "").trim()) n = n.replace(LEGAL, "").trim();
+  return n;
+}
+
+/**
+ * A brand from its profiles: a group's is keyed by the group, others by the
+ * oldest profile; named as people know it (brandName). `opts.key` gives the
+ * key instead. `opts.whole` names it from its profiles' whole names, brackets
+ * kept, for one of the several brands of a split group, so it does not take
+ * its sibling's name ("Harbor Wax (Lakeside)" stays apart from "Harbor Wax").
+ */
+export function brandOf(profiles: SproutProfile[], group: CustomerGroup | null = null, opts: { key?: string; whole?: boolean } = {}): Brand {
   const sorted = [...new Map(profiles.map((p) => [String(p.id), p])).values()].sort((a, b) => byId(String(a.id), String(b.id)));
-  const { name, why } = brandName(sorted, group);
+  // A split part's short names are known by its group's name and by its other profiles' whole names.
+  const knownFor = (n: string) => [group?.name, ...sorted.filter((p) => p.name !== n).map((p) => plainDisplayName(p.name))];
+  const { name, why } = opts.whole ? brandName(sorted, group, (n) => wholeBrandName(n, knownFor(n))) : brandName(sorted, group);
   return {
-    key: group ? `group:${group.id}` : String(sorted[0]?.id ?? ""),
+    key: opts.key ?? (group ? `group:${group.id}` : String(sorted[0]?.id ?? "")),
     name,
     name_reason: why,
     profiles: sorted,
     group,
+    ...(opts.whole ? { split: true as const } : {}),
   };
 }
 
-/** Profiles in no group as brands: by the name rule, then joined by a handle shared across networks. */
-function looseBrands(live: SproutProfile[]): Brand[] {
+/** Profiles as the brands the name rule makes of them, each as its profile ids: the same normalized whole name, then a handle shared across networks. */
+function looseParts(live: SproutProfile[]): string[][] {
   const pairs: Array<[string, string]> = [];
   const byName = new Map<string, string>();
   for (const p of live) {
@@ -170,11 +202,49 @@ function looseBrands(live: SproutProfile[]): Brand[] {
       if (handleOf(live[j]) === h && networkKey(live[i].network_type) !== networkKey(live[j].network_type)) pairs.push([String(live[i].id), String(live[j].id)]);
     }
   }
-  const byId_ = new Map(live.map((p) => [String(p.id), p]));
-  return unite(live.map((p) => String(p.id)), pairs).map((g) => brandOf(g.map((id) => byId_.get(id)!)));
+  return unite(live.map((p) => String(p.id)), pairs);
 }
 
-/** Sprout's active profiles as brands: one per Sprout group, and the profiles in no group by the name rule. */
+/** Profiles in no group as brands: by the name rule, then joined by a handle shared across networks. */
+function looseBrands(live: SproutProfile[]): Brand[] {
+  const byId_ = new Map(live.map((p) => [String(p.id), p]));
+  return looseParts(live).map((g) => brandOf(g.map((id) => byId_.get(id)!)));
+}
+
+/** The networks a set of profiles holds more than one of. */
+function crowdedNetworks(profiles: SproutProfile[]): string[] {
+  const counts = new Map<string, number>();
+  for (const p of profiles) { const n = networkKey(p.network_type); counts.set(n, (counts.get(n) ?? 0) + 1); }
+  return [...counts].filter(([, n]) => n > 1).map(([n]) => n).sort();
+}
+
+/**
+ * One Sprout group as brands. A group with at most one profile per network
+ * is one brand, as ever. A group with two on a network is split by the rule
+ * profiles in no group follow; every part keeps the group, is named from its
+ * profiles' whole names, and the part with the group's oldest profile keeps
+ * the group's key.
+ */
+function groupParts(ps: SproutProfile[], group: CustomerGroup): Brand[] {
+  const live = [...new Map(ps.map((p) => [String(p.id), p])).values()];
+  if (!crowdedNetworks(live).length) return [brandOf(live, group)];
+  const byId_ = new Map(live.map((p) => [String(p.id), p]));
+  // looseParts gives each part in id order, and the parts in the order of their oldest profile.
+  return looseParts(live).map((ids, i) => brandOf(ids.map((id) => byId_.get(id)!), group, { key: i === 0 ? `group:${group.id}` : `group:${group.id}:${ids[0]}`, whole: true }));
+}
+
+/**
+ * Why a brand is left alone because it still holds two profiles on one
+ * network (two named alike, which no rule can tell apart), or null.
+ */
+export function networkConflict(brand: Brand): string | null {
+  const [network] = crowdedNetworks(brand.profiles);
+  if (!network) return null;
+  const names = brand.profiles.filter((p) => networkKey(p.network_type) === network).map((p) => p.name);
+  return `Left alone: it has two ${network} profiles named alike (${quote(names)}), so which one is the brand's is unclear.`;
+}
+
+/** Sprout's active profiles as brands: one per Sprout group (several for a group with two profiles on a network), and the profiles in no group by the name rule. */
 export function groupBrands(profiles: SproutProfile[], groups: CustomerGroup[] = []): Brand[] {
   const live = profiles.filter(isActive);
   const named = new Map(groups.map((g) => [String(g.id), g]));
@@ -185,7 +255,7 @@ export function groupBrands(profiles: SproutProfile[], groups: CustomerGroup[] =
     if (!ids.length) loose.push(p);
     for (const id of ids) members.set(id, [...(members.get(id) ?? []), p]);
   }
-  const grouped = [...members.entries()].map(([id, ps]) => brandOf(ps, named.get(id) ?? { id, name: "" }));
+  const grouped = [...members.entries()].flatMap(([id, ps]) => groupParts(ps, named.get(id) ?? { id, name: "" }));
   return [...grouped, ...looseBrands(loose)].sort(byOldest);
 }
 
@@ -215,7 +285,9 @@ export function joinBrands(brands: Brand[], pairs: Array<[string, string]>): Joi
   for (const b of [...brands].sort(byOldest)) parts.set(root(b.key), [...(parts.get(root(b.key)) ?? []), b]);
   return [...parts.entries()].map(([r, members]) => {
     const groupKey = groupIn.get(r);
-    const joined = brandOf(members.flatMap((m) => m.profiles), groupKey ? byKey.get(groupKey)!.group : null);
+    const own = groupKey ? byKey.get(groupKey)! : null;
+    // One of a split group's brands keeps its own key and its whole-name naming through a join.
+    const joined = brandOf(members.flatMap((m) => m.profiles), own?.group ?? null, own?.split ? { key: own.key, whole: true } : {});
     return { ...joined, members: members.map((m) => m.key) };
   }).sort(byOldest);
 }

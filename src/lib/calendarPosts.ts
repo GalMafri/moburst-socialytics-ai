@@ -138,8 +138,12 @@ export interface CalendarPlanRow {
   status: "queued" | "planning" | "ready" | "failed" | "expired" | "canceled";
   trigger: "monday" | "button" | "cutover" | "lifecycle";
   error: string | null;
-  pending_revision: { note: string; at: string } | null;
-  revisions: Array<{ note: string; at: string; scope?: string; done_at?: string; rewritten?: number; kept?: string[]; failed?: boolean; expired?: boolean }> | null;
+  pending_revision: { note: string; at: string; scope?: string } | null;
+  revisions: Array<{
+    note: string; at: string; scope?: string; done_at?: string; rewritten?: number; kept?: string[]; failed?: boolean; expired?: boolean;
+    /** Posts whose new copy was not saved, each with what was wrong with it; they keep the copy they had (server: _shared/calendar/copyChecks.ts). */
+    refused?: Array<{ id?: string; kind?: string }>;
+  }> | null;
   ready_at: string | null;
   created_at: string;
   /** Set while a run is writing the plan or its revision. */

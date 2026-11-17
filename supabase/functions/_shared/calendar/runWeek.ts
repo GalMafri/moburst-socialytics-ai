@@ -2,8 +2,12 @@
 //
 // The weekly calendar's jobs (Lital, 19 Oct 2026), run by run-scheduled-jobs:
 //   week_plan      write one week's plan, once, from the freshest evidence
-//   week_revise    rewrite a week's posts nobody worked on, from a note
-//   voice_profile  learn how the client writes from its published posts
+//   week_revise    rewrite a week's posts nobody worked on, from a note; or,
+//                  asked by the app itself (scope "replan", replan.ts), write
+//                  again from fresh evidence the ones written from an outside
+//                  post, with time codes or before the client's accounts changed
+//   voice_profile  learn how the client writes from its published posts, and
+//                  have the client's lifecycle look at the upcoming calendar
 // A week's plan waits for its dated moments (week_moments, runMoments.ts),
 // as it waits for the voice profile, and cites them as evidence M1, M2. It
 // also waits while the client's weekly trend collection is under way, so it
@@ -19,25 +23,33 @@
 // sees it and nothing written: the run checks before each model call and
 // before writing, every write to the plan leaves a stopped plan as it is,
 // and the database takes no posts for it (calendar_posts_plan_open).
+// Every post a plan or a revision writes is checked before it is saved
+// (copyChecks.ts, copy sources 17 Nov 2026): one that borrows from an outside
+// post, carries time codes or points to something that is not the client's
+// is refused, the planner is asked once more for it (never more than two
+// calls a run), and what is refused twice is listed on the plan.
 
 import { anthropicMessages } from "../anthropic.ts";
 import { collectOwnedCompetitive } from "../competitive/ownedSource.ts";
 import { competitiveBrief } from "../competitive/brief.ts";
 import {
   bestExamples, clientCompanyId, compactFeedRow, competitorPosts, feedHistories, isBoosted, isClientPost, latestTrendEvidence, medianRates, numberEvidence, platformName,
-  resolveRhythm, scoreCompetitorPosts, scoreOwnPosts, scoreTrendItems, storyRhythm, MIN_COMPETITOR_WEEKS, OWN_DAYS,
-  type CompetitorPost, type EvidenceItem, type FeedRow, type OwnPost, type RhythmLine, type RhythmSources,
+  outsideSources, resolveRhythm, scoreCompetitorPosts, scoreOwnPosts, scoreTrendItems, storyRhythm, MIN_COMPETITOR_WEEKS, OWN_DAYS,
+  type CompetitorPost, type EvidenceItem, type FeedRow, type OutsideSource, type OwnPost, type RhythmLine, type RhythmSources,
 } from "./evidence.ts";
-import { parseRevision, parseWeekPlan, revisePrompt, storyPlan, weekPrompt, withStories, type DroppedPost, type Reason, type RevisePost } from "./weekPlan.ts";
+import { parseRevision, parseWeekPlan, reasonForPlanner, revisePrompt, storyPlan, weekPrompt, withStories, type DroppedPost, type Reason, type RevisePost } from "./weekPlan.ts";
+import { COPY_RULE, foreignHandles, foreignLinks, outsideFromReasons, type CopyCheck, type OwnFacts, type RefusedPost } from "./copyChecks.ts";
+import { replanWhy } from "./replan.ts";
 import { momentEvidence, type JudgedMoment } from "./moments.ts";
 import { isStoryPost } from "../design/story.ts";
-import { wordReason } from "./reasonText.ts";
 import { activePreferences, buildVoiceProfile, consolidateMemory, COPY_MODEL, learnFromSignal, loadClientVoice } from "../voice/load.ts";
-import { voicePromptBlock, voiceReady } from "../voice/voice.ts";
+import { voicePromptBlock, voiceReady, type ClientVoice } from "../voice/voice.ts";
+import { notesSectionLines } from "../notes/notes.ts";
 import { activeTerms } from "../trends/profile.ts";
 import { HASHTAG_PLATFORMS, type HashtagPlatform } from "../trends/types.ts";
 import { strategyPromptBlock } from "../strategy/prompt.ts";
 import { readShownInsights, shownSocial } from "../reports/shownFields.ts";
+import { plainNames, storedNames, type ListedName } from "../text/displayName.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -117,14 +129,56 @@ export interface Gathered {
   sources: { sprout: string; feed_weeks: number; report: string | null; topics: number; trends: "themes" | "none" };
   /** The client's own Instagram Stories over 90 days, and the Stories this week gets (storyRhythm). */
   stories: { stories: number; average: number; perWeek: number };
+  /** The whole captions of the outside posts in the evidence, for the copy check only: never stored with the plan, never in a prompt, never sent to a screen. */
+  outside: OutsideSource[];
+}
+
+/**
+ * What the calendar reads of the client's accounts: the decorated display
+ * names its Sprout account lists (the accounts step's result,
+ * lifecycle/steps.ts), written plainly wherever copy is learned or written
+ * (text/displayName.ts); and when the one-account-per-network rule last
+ * parked one of its own accounts, read from the parked rows themselves
+ * (sprout_profiles.parked_at), so it does not depend on the step's result
+ * standing. Each read that fails changes nothing: no names, or no date, and a
+ * warning in the log.
+ */
+export async function accountsFacts(admin: Db, clientId: string): Promise<{ names: ListedName[]; ownDroppedAt: string | null }> {
+  const warn = (e: unknown) => console.warn("[calendar] the client's account facts could not be read:", e instanceof Error ? e.message : String(e));
+  let names: ListedName[] = [];
+  let ownDroppedAt: string | null = null;
+  try {
+    const { data, error } = await admin.from("client_lifecycle_steps").select("result").eq("client_id", clientId).eq("step", "accounts").maybeSingle();
+    if (error) throw new Error(error.message);
+    const result = (data?.result ?? null) as { display_names?: unknown } | null;
+    names = storedNames(result?.display_names);
+  } catch (e) {
+    warn(e);
+  }
+  try {
+    // Parked now: switched off, with the record on the row. A row a person added back is active and is not one of them.
+    const { data, error } = await admin.from("sprout_profiles").select("parked_at").eq("client_id", clientId).eq("is_active", false).not("parked_at", "is", null);
+    if (error) throw new Error(error.message);
+    const times = ((data ?? []) as Array<{ parked_at?: unknown }>)
+      .map((r) => r.parked_at).filter((t): t is string => typeof t === "string" && Number.isFinite(Date.parse(t)))
+      .sort((x, y) => Date.parse(x) - Date.parse(y));
+    ownDroppedAt = times.length ? times[times.length - 1] : null;
+  } catch (e) {
+    warn(e);
+  }
+  return { names, ownDroppedAt };
 }
 
 /**
  * The client's own posts for the last 90 days: Sprout where profiles are
  * assigned, RivalIQ's copy for other platforms. With them, when its Instagram
- * Stories went out (Sprout only), for the week's Story suggestions.
+ * Stories went out (Sprout only), for the week's Story suggestions. A display
+ * name the client's Sprout account lists with decorations is written plainly
+ * in every post's text (`names` are those names), so nothing that learns from
+ * the posts learns a star rating or a tagline as the client's own wording.
  */
-export async function ownPosts(admin: Db, client: Record<string, unknown>, snapshots: Array<{ payload: any }>, now: Date): Promise<{ posts: OwnPost[]; sprout: string; stories: string[] }> {
+export async function ownPosts(admin: Db, client: Record<string, unknown>, snapshots: Array<{ payload: any }>, now: Date): Promise<{ posts: OwnPost[]; sprout: string; stories: string[]; names: ListedName[] }> {
+  const { names } = await accountsFacts(admin, String(client.id ?? ""));
   const end = new Date(now.getTime() - DAY).toISOString().slice(0, 10);
   const start = new Date(now.getTime() - OWN_DAYS * DAY).toISOString().slice(0, 10);
   let posts: OwnPost[] = [];
@@ -138,7 +192,7 @@ export async function ownPosts(admin: Db, client: Record<string, unknown>, snaps
     for (const p of owned.profiles ?? []) covered.add(platformName(p.network));
     posts = (owned.posts ?? []).map((p: any) => ({
       id: String(p.postId), platform: platformName(p.channel), format: String(p.type || "unknown"), publishedAt: String(p.publishedAt),
-      text: String(p.message || ""), link: p.postLink ?? null, impressions: p.ownedImpressions ?? null, engagement: Number(p.engagementTotal) || 0,
+      text: plainNames(String(p.message || ""), names), link: p.postLink ?? null, impressions: p.ownedImpressions ?? null, engagement: Number(p.engagementTotal) || 0,
       boosted: p.boosted === true,
     }));
   } catch (e) {
@@ -155,10 +209,10 @@ export async function ownPosts(admin: Db, client: Record<string, unknown>, snaps
       const id = String(p.postId || p.nativeId || p.postLink || "");
       if (!id || covered.has(platform) || seen.has(id)) continue;
       seen.add(id);
-      posts.push({ id, platform, format: String(p.type || "unknown"), publishedAt: String(p.publishedAt), text: String(p.message || ""), link: p.postLink ?? null, impressions: null, engagement: Number(p.engagementTotal) || 0, boosted: isBoosted(p.facebookLikelyBoosted) });
+      posts.push({ id, platform, format: String(p.type || "unknown"), publishedAt: String(p.publishedAt), text: plainNames(String(p.message || ""), names), link: p.postLink ?? null, impressions: null, engagement: Number(p.engagementTotal) || 0, boosted: isBoosted(p.facebookLikelyBoosted) });
     }
   }
-  return { posts, sprout, stories };
+  return { posts, sprout, stories, names };
 }
 
 /** The client's weekly competitor feeds, newest first (14 weeks covers the 90 days of own posts). */
@@ -279,7 +333,8 @@ export async function gatherEvidence(admin: Db, client: Record<string, any>, now
   const findings = [...shown.insights.map((i) => i.text), ...shown.recommendations.map((r) => r.text), ...shown.takeaways];
 
   // Industry trends come from the newest finished weekly Trends run (its themes staff did not dismiss), not from the report.
-  const trends = scoreTrendItems(await latestTrendEvidence(admin, client.id, now));
+  const trendInputs = await latestTrendEvidence(admin, client.id, now);
+  const trends = scoreTrendItems(trendInputs);
 
   const hashtags = await profileHashtags(admin, client.id);
 
@@ -307,6 +362,58 @@ export async function gatherEvidence(admin: Db, client: Record<string, any>, now
     fallbackRates: { competitors: medianRates([rhythmInput.competitors]), allTracked: rhythmInput.allTracked },
     sources: { sprout, feed_weeks: recent.length, report: report?.id ?? null, topics: (alerts ?? []).length, trends: trends.length ? "themes" : "none" },
     stories: storyRhythm(stories, now, week),
+    outside: outsideSources(evidence, trendInputs, competitors),
+  };
+}
+
+// ── What is the client's own, for the copy checks ───────────────────────────
+
+/**
+ * The client's own handles: its active Sprout profiles' and its public
+ * profiles', lowercase, without "@". Each read that fails gives none and a
+ * warning; the handle check is then stricter, never looser.
+ */
+async function ownHandles(admin: Db, clientId: string): Promise<string[]> {
+  const read = async (table: string, column: string, filter: (q: Db) => Db): Promise<string[]> => {
+    try {
+      const { data, error } = await filter(admin.from(table).select(column).eq("client_id", clientId));
+      if (error) throw new Error(error.message);
+      return ((data ?? []) as Array<Record<string, unknown>>).map((r) => String(r[column] ?? ""));
+    } catch (e) {
+      console.warn(`[calendar] the client's handles could not be read from ${table}:`, e instanceof Error ? e.message : String(e));
+      return [];
+    }
+  };
+  const [sprout, shown] = await Promise.all([
+    read("sprout_profiles", "native_name", (q) => q.eq("is_active", true)),
+    read("client_public_profiles", "handle", (q) => q.neq("source", "removed")),
+  ]);
+  return [...new Set([...sprout, ...shown].map((h) => h.trim().toLowerCase().replace(/^@/, "")).filter(Boolean))];
+}
+
+/**
+ * What the copy checks count as the client's own (copyChecks.ts): its
+ * website's host, its handles, and its own words: its name, its posts of the
+ * last 90 days (where the run read them) and its notes in use. `material`
+ * names the other parts of the client's own material the prompt holds, which
+ * a post may point its reader to (weekPlan.ts assetRule): its pillars and its
+ * content strategy where it has them, and the voice section, always.
+ */
+function ownFacts(client: Record<string, unknown>, gathered: Gathered | null, voice: ClientVoice, profiles: { handles: string[] }, has: { pillars: boolean; strategy: boolean }): OwnFacts {
+  let host = "";
+  try {
+    const raw = String(client.website_url ?? "").trim();
+    host = raw ? new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`).hostname.toLowerCase().replace(/^www\./, "") : "";
+  } catch {
+    host = "";
+  }
+  const notes = voice.notes ? notesSectionLines(voice.notes) : [];
+  return {
+    hosts: host ? [host] : [],
+    handles: profiles.handles,
+    text: [String(client.name ?? ""), ...(gathered?.own ?? []).map((p) => p.text), ...notes].join("\n").toLowerCase(),
+    hasNotes: notes.length > 0,
+    material: [...(has.pillars ? ["pillars"] : []), ...(has.strategy ? ["strategy"] : []), "voice"],
   };
 }
 
@@ -544,7 +651,8 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
     const rhythm = { applied: gathered.rhythm, learned: gathered.learnedRhythm, sources: gathered.rhythmSources, stories: gathered.stories };
     // The dated moments the client's data checked: the only moments a seasonal post can rest on.
     const items = [...gathered.evidence, ...planMoments(plan)];
-    const evidence: Record<string, unknown> = { items, avoid: gathered.avoid, thin: gathered.thin, sources: gathered.sources, first_date: firstDate };
+    // rules: the version of the copy rules the plan is written under (copyChecks.ts COPY_RULE).
+    const evidence: Record<string, unknown> = { items, avoid: gathered.avoid, thin: gathered.thin, sources: gathered.sources, first_date: firstDate, rules: COPY_RULE };
     // A client that posts less than once a week has weeks with nothing to post on any platform.
     if (!gathered.rhythm.length && gathered.learnedRhythm.length) {
       if (!(await markReady({ rhythm, evidence }))) return STOPPED;
@@ -580,21 +688,53 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
       hashtags: gathered.hashtags,
       strategy: await clientStrategy(admin, client.id),
     };
-    let posts: ReturnType<typeof parseWeekPlan> = [];
+    // Display names the client's Sprout account lists with decorations are written plainly in what is saved.
+    const { names } = await accountsFacts(admin, client.id);
+    // Every post is checked before it is saved: against the outside posts of the week, and against what is the client's own.
+    const check: CopyCheck = { outside: gathered.outside, own: ownFacts(client, gathered, voice, { handles: await ownHandles(admin, client.id) }, { pillars: ctx.pillars.length > 0, strategy: !!ctx.strategy }) };
     const tokens = { input: 0, output: 0 };
-    let dropped: DroppedPost[] = [];
-    for (let attempt = 0; attempt < 2 && !posts.length; attempt++) {
-      // No model call starts once a person stopped the plan.
-      if (await planStopped(admin, plan.id)) return STOPPED;
-      const result = await anthropicMessages({ apiKey: apiKey(), body: { model: COPY_MODEL, max_tokens: 16000, messages: [{ role: "user", content: weekPrompt(ctx) }] } });
+    /** One model call and what its reply came to: the posts that passed, the seasonal posts dropped and the posts the checks refused. */
+    const ask = async (context: typeof ctx, noTest = false) => {
+      const result = await anthropicMessages({ apiKey: apiKey(), body: { model: COPY_MODEL, max_tokens: 16000, messages: [{ role: "user", content: weekPrompt(context) }] } });
       const u = usage(result.raw);
       tokens.input += u.input; tokens.output += u.output;
-      dropped = [];
-      posts = parseWeekPlan(result.text, ctx, { dropped });
+      const seasonal: DroppedPost[] = [];
+      const refused: RefusedPost[] = [];
+      return { posts: parseWeekPlan(result.text, context, { dropped: seasonal, refused, check, names, noTest }), seasonal, refused };
+    };
+    // No model call starts once a person stopped the plan.
+    if (await planStopped(admin, plan.id)) return STOPPED;
+    const first = await ask(ctx);
+    let posts = first.posts;
+    let dropped = first.seasonal;
+    /** The posts the checks refused that no post replaced. */
+    let droppedCopy: RefusedPost[] = [];
+    // At most two calls. A reply with nothing usable is asked again as it was. A reply with refused posts is asked once
+    // more for them: the posts that passed count as already on the calendar, and the outside posts they borrowed from are left out.
+    if (!first.posts.length && !first.refused.length) {
+      if (await planStopped(admin, plan.id)) return STOPPED;
+      const again = await ask(ctx);
+      posts = again.posts;
+      dropped = again.seasonal;
+      droppedCopy = again.refused;
+    } else if (first.refused.length) {
+      if (await planStopped(admin, plan.id)) return STOPPED;
+      const named = new Set(first.refused.flatMap((r) => r.ids));
+      const again = await ask({
+        ...ctx,
+        existing: [...ctx.existing, ...first.posts.map((p) => ({ date: p.post_date, platform: p.platform, copy: p.copy }))],
+        evidence: ctx.evidence.filter((e) => !named.has(e.id)),
+      }, first.posts.some((p) => p.reasons[0]?.test === true));
+      posts = [...first.posts, ...again.posts];
+      dropped = [...first.seasonal, ...again.seasonal];
+      // Refused again: dropped. A second reply with nothing in it replaced nothing.
+      droppedCopy = again.posts.length || again.refused.length ? again.refused : first.refused;
     }
     // Stopped during the model call: the reply is dropped.
     if (await planStopped(admin, plan.id)) return STOPPED;
     if (!posts.length) throw new Error("The planner's reply had no usable posts.");
+    // Posts the copy checks refused twice, for staff to see on the plan.
+    if (droppedCopy.length) evidence.dropped_copy = droppedCopy.map(({ date, platform, copy, why }) => ({ date, platform, copy, why }));
     // Seasonal posts the planner wrote without a checked moment, for staff to see on the plan.
     if (dropped.length) evidence.dropped_seasonal = dropped;
     const finishing = { model: COPY_MODEL, input_tokens: tokens.input, output_tokens: tokens.output, rhythm, evidence };
@@ -668,7 +808,7 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
   try {
     const { data: plan, error: planError } = await admin.from("calendar_plans").select("*").eq("client_id", job.client_id).eq("week_start", week).maybeSingle();
     if (planError) throw new Error(`Could not read the plan: ${planError.message}`);
-    const pending = plan?.pending_revision as { note: string; by: string | null; at: string; scope: "untouched" | "empty" } | null;
+    const pending = plan?.pending_revision as { note: string; by: string | null; at: string; scope: "untouched" | "empty" | "replan" } | null;
     if (plan?.status === "canceled") return STOPPED;
     if (!plan || !pending) return { status: "skipped", reason: "No revision is waiting for this week." };
     planId = plan.id;
@@ -676,6 +816,8 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
     const finish = (entry: Record<string, unknown>) => must(admin.from("calendar_plans").update({
       pending_revision: null, claimed_at: null, updated_at: new Date().toISOString(),
       revisions: [...(Array.isArray(plan.revisions) ? plan.revisions : []), { note: pending.note, by: pending.by, at: pending.at, scope: pending.scope, done_at: new Date().toISOString(), ...entry }],
+      // A replan brings the plan under the current copy rules, so it is not asked for again (replan.ts planRules).
+      ...(pending.scope === "replan" ? { evidence: { ...((plan.evidence ?? {}) as Record<string, unknown>), rules: COPY_RULE } } : {}),
     }).eq("id", plan.id).neq("status", "canceled"), "Could not record the revision");
 
     const { data: client, error } = await admin.from("clients").select(CLIENT_COLUMNS).eq("id", job.client_id).maybeSingle();
@@ -702,36 +844,83 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
     const worked = await workedOn(admin, client.id, planPosts);
     if (!pending.by) for (const id of revisedByPerson(plan.revisions)) worked.add(id);
     const kept = planPosts.filter((p) => worked.has(p.id)).map((p) => p.id);
+    // A replan writes again only the posts with a reason to be (replan.ts): written from an outside post, with time codes, or before the client's accounts changed.
+    const ownDroppedAt = pending.scope === "replan" ? (await accountsFacts(admin, client.id)).ownDroppedAt : null;
+    const inScope = (p: any) => pending.scope === "empty" ? !String(p.copy || "").trim() : pending.scope === "replan" ? replanWhy(p, plan, { ownDroppedAt }) !== null : true;
     // A Story is never rewritten as a feed post: it follows its post's new copy (below).
-    const targets = planPosts.filter((p) => !worked.has(p.id) && !isStoryPost(p) && (pending.scope === "empty" ? !String(p.copy || "").trim() : true));
+    const targets = planPosts.filter((p) => !worked.has(p.id) && !isStoryPost(p) && inScope(p));
     if (!targets.length) {
       await finish({ rewritten: 0, kept });
       return { status: "done", result: { plan_id: plan.id, rewritten: 0 } };
     }
 
     const voice = await loadClientVoice(admin, client.id);
-    const gathered = pending.scope === "empty" ? await gatherEvidence(admin, client, now, { week }) : null;
+    const { names } = await accountsFacts(admin, client.id);
+    // A rewrite from a note works on the posts as they stand; posts written fresh (empty, replan) are written from the week's evidence.
+    const fresh = pending.scope !== "untouched";
+    const gathered = fresh ? await gatherEvidence(admin, client, now, { week }) : null;
     const reviseEvidence = gathered ? [...gathered.evidence, ...planMoments(plan)] : [];
-    const reasonWords = (r: unknown) => (Array.isArray(r) && r[0] ? wordReason(r[0] as Reason) : "");
-    const revisePosts: RevisePost[] = targets.map((p) => ({ id: p.id, date: p.post_date, platform: p.platform, format: p.format, pillar: p.pillar, copy: p.copy || "", reason: pending.scope === "empty" ? "" : reasonWords(p.reasons) }));
-    const prompt = revisePrompt({
-      brand: String(client.name),
-      voiceBlock: voicePromptBlock(voice, { platforms: [...new Set(targets.map((p) => p.platform))], ...(gathered ? { examples: gathered.examples } : {}) }),
-      note: pending.note,
-      scope: pending.scope,
-      posts: revisePosts,
-      pillars: (Array.isArray(client.content_pillars) ? client.content_pillars : []).map((p: any) => ({ name: String(p?.name ?? p ?? ""), description: p?.description ? String(p.description).slice(0, 240) : undefined })).filter((p: any) => p.name),
-      languages: list(client.language),
-      evidence: reviseEvidence,
-      others: all.filter((p) => !targets.some((t) => t.id === p.id) && p.copy).map((p) => ({ date: p.post_date, platform: p.platform, copy: p.copy })),
-      strategy: await clientStrategy(admin, client.id),
+    // Why a post is planned, by its subject only: a rewrite's prompt never names who posted an outside post.
+    const reasonWords = (r: unknown) => (Array.isArray(r) && r[0] ? reasonForPlanner(r[0] as Reason) : "");
+    const asRevisePost = (p: any): RevisePost => ({
+      id: p.id, date: p.post_date, platform: p.platform, format: p.format, pillar: p.pillar,
+      // A post written again shows neither its earlier copy nor its earlier reason: both may come from an outside post.
+      copy: pending.scope === "replan" ? "" : p.copy || "", reason: fresh ? "" : reasonWords(p.reasons),
     });
+    // The copy checks (copyChecks.ts): fresh posts against the week's outside posts, a rewrite against the outside posts its posts cite.
+    const outside = gathered ? gathered.outside : [...new Map(targets.flatMap((p) => outsideFromReasons(p.reasons)).map((o) => [`${o.id}|${o.text}`, o])).values()];
+    const voiceBlock = voicePromptBlock(voice, { platforms: [...new Set(targets.map((p) => p.platform))], ...(gathered ? { examples: gathered.examples } : {}) });
+    const pillars = (Array.isArray(client.content_pillars) ? client.content_pillars : []).map((p: any) => ({ name: String(p?.name ?? p ?? ""), description: p?.description ? String(p.description).slice(0, 240) : undefined })).filter((p: any) => p.name);
+    const strategy = await clientStrategy(admin, client.id);
+    const own = ownFacts(client, gathered, voice, { handles: await ownHandles(admin, client.id) }, { pillars: pillars.length > 0, strategy: !!strategy });
+    const nobody: OwnFacts = { hosts: [], handles: [], text: "", hasNotes: false };
+    const asOwn = (texts: string[]) => {
+      own.hosts = [...new Set([...own.hosts, ...texts.flatMap((t) => foreignLinks(t, nobody))])];
+      own.handles = [...new Set([...own.handles, ...texts.flatMap((t) => foreignHandles(t, nobody))])];
+    };
+    // A rewrite from a note does not read the client's posts again, so a link or a handle its posts already carry counts as theirs.
+    if (!fresh) asOwn(targets.map((p) => `${p.copy || ""}\n${p.cta || ""}`));
+    // A person's note is the person's instruction: a link or a handle they wrote in it is the client's own for this revision.
+    if (pending.by) asOwn([String(pending.note || "")]);
+    const check: CopyCheck = { outside, own };
+    const tokens = { input: 0, output: 0 };
+    /** One model call for these posts, and what its reply came to: the posts that passed the checks, the ones refused, and whether it held any post at all. */
+    const ask = async (posts: any[], evidence: EvidenceItem[], others: Array<{ date: string; platform: string; copy: string }>) => {
+      const prompt = revisePrompt({
+        brand: String(client.name), voiceBlock, note: pending.note, scope: pending.scope, posts: posts.map(asRevisePost),
+        pillars, languages: list(client.language), evidence, others, strategy,
+      });
+      const result = await anthropicMessages({ apiKey: apiKey(), body: { model: COPY_MODEL, max_tokens: 12000, messages: [{ role: "user", content: prompt }] } });
+      const u = usage(result.raw);
+      tokens.input += u.input; tokens.output += u.output;
+      const refused: RefusedPost[] = [];
+      return { revised: parseRevision(result.text, posts.map((p) => p.id), evidence, fresh, { names, check, refused }), refused };
+    };
+    // The week's other posts, whose topics are not to be repeated. A Story of a post being rewritten is not one of them:
+    // it carries that post's earlier copy, and takes the new one below.
+    const targetKeys = new Set(targets.map((t) => t.post_key));
+    const others = all.filter((p) => !targets.some((t) => t.id === p.id) && p.copy && !(isStoryPost(p) && p.story_of && targetKeys.has(p.story_of)))
+      .map((p) => ({ date: p.post_date, platform: p.platform, copy: p.copy }));
     // No model call starts, and nothing is rewritten, once a person removed the plan.
     if (await planStopped(admin, plan.id)) return STOPPED;
-    const result = await anthropicMessages({ apiKey: apiKey(), body: { model: COPY_MODEL, max_tokens: 12000, messages: [{ role: "user", content: prompt }] } });
+    const first = await ask(targets, reviseEvidence, others);
     if (await planStopped(admin, plan.id)) return STOPPED;
-    const revised = parseRevision(result.text, targets.map((p) => p.id), reviseEvidence, pending.scope === "empty");
-    if (!revised.length) throw new Error("The rewrite's reply had no usable posts.");
+    // A reply that held no post at all is tried again later. One whose posts were all refused finishes: the posts keep their copy.
+    if (!first.revised.length && !first.refused.length) throw new Error("The rewrite's reply had no usable posts.");
+    let revised = first.revised;
+    let refused = first.refused;
+    // Posts written fresh get one more call for the ones refused, without the outside posts they borrowed from. Refused twice, a post keeps the copy it had.
+    if (fresh && first.refused.length) {
+      const again = new Set(first.refused.map((r) => r.id));
+      const named = new Set(first.refused.flatMap((r) => r.ids));
+      const written = first.revised.map((r) => { const was = targets.find((p) => p.id === r.id)!; return { date: was.post_date, platform: was.platform, copy: r.copy }; });
+      const second = await ask(targets.filter((p) => again.has(p.id)), reviseEvidence.filter((e) => !named.has(e.id)), [...others, ...written]);
+      if (await planStopped(admin, plan.id)) return STOPPED;
+      revised = [...first.revised, ...second.revised];
+      const rewrittenNow = new Set<string | undefined>(second.revised.map((r) => r.id));
+      // A second reply that left a post out says nothing new about it: its first refusal stands.
+      refused = [...second.refused, ...first.refused.filter((r) => !rewrittenNow.has(r.id) && !second.refused.some((x) => x.id === r.id))];
+    }
 
     const replaced: Array<Record<string, unknown>> = [];
     /** The new copy of each post rewritten, by its key. */
@@ -753,8 +942,11 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
       if (updateError) throw new Error(`Could not rewrite a Story: ${updateError.message}`);
       if (updated?.length) replaced.push({ id: st.id, copy: st.copy, hashtags: st.hashtags, cta: st.cta, pillar: st.pillar, visual_direction: st.visual_direction, reasons: st.reasons });
     }
-    const u = usage(result.raw);
-    await finish({ rewritten: replaced.length, kept, replaced, input_tokens: u.input, output_tokens: u.output });
+    await finish({
+      rewritten: replaced.length, kept, replaced, input_tokens: tokens.input, output_tokens: tokens.output,
+      // The posts the copy checks refused, which keep the copy they had.
+      ...(refused.length ? { refused: refused.map((r) => ({ id: r.id, why: r.why, kind: r.kind })) } : {}),
+    });
 
     // A person's note teaches the memory; the daily run's own note does not.
     if (pending.by && pending.scope === "untouched") {
@@ -793,14 +985,25 @@ async function keepMemoryShort(admin: Db, clientId: string): Promise<{ before: n
   }
 }
 
+/** How long after a voice profile is built the client's lifecycle looks at it: long enough for the job to be recorded as finished. */
+export const VOICE_LOOK_MS = 60_000;
+
 export async function runVoiceProfile(admin: Db, job: WeekJob, now = new Date()): Promise<WeekJobOutcome> {
   if (job.attempts > job.max_attempts) return { status: "failed", reason: `The voice profile stopped before finishing ${job.attempts - 1} times.` };
   try {
     const { data: client, error } = await admin.from("clients").select(CLIENT_COLUMNS).eq("id", job.client_id).maybeSingle();
     if (error || !client) throw new Error("Could not read the client.");
-    const { posts, sprout } = await ownPosts(admin, client, await feedSnapshots(admin, client.id), now);
-    const voice = await buildVoiceProfile(admin, client.id, posts, now);
+    const { posts, sprout, names } = await ownPosts(admin, client, await feedSnapshots(admin, client.id), now);
+    const voice = await buildVoiceProfile(admin, client.id, posts, now, { names });
     const memory = await keepMemoryShort(admin, client.id);
+    // A new voice: the client's lifecycle looks at the upcoming calendar (lifecycle step calendar_recheck). The look is a
+    // minute away, so this job is recorded as finished when it runs. Asked of the database directly: lifecycle/run.ts imports this file.
+    try {
+      const { error: lookError } = await admin.rpc("lifecycle_enqueue", { p_client: job.client_id, p_priority: 30, p_at: new Date(Date.now() + VOICE_LOOK_MS).toISOString() });
+      if (lookError) console.warn("[calendar] could not queue the look after the voice profile:", lookError.message);
+    } catch (e) {
+      console.warn("[calendar] could not queue the look after the voice profile:", e instanceof Error ? e.message : String(e));
+    }
     return { status: "done", result: { posts: voice.post_count, platforms: Object.keys(voice.platforms), sprout, ...(memory ? { memory } : {}) } };
   } catch (e) {
     const reason = e instanceof Error ? e.message : String(e);

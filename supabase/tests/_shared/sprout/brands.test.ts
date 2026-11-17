@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { blockedFromCreation, brandName, clientWithSite, declinedProfiles, declineFor, declineReason, groupBrands, groupConflict, isBrandAccount, joinBrands, matchBrand, matchOutcome, profileBrandName, type ClientIndex, type KnownClient } from "../../../functions/_shared/sprout/brands";
+import { blockedFromCreation, brandName, brandOf, clientWithSite, declinedProfiles, declineFor, declineReason, groupBrands, groupConflict, isBrandAccount, joinBrands, matchBrand, matchOutcome, networkConflict, profileBrandName, type ClientIndex, type KnownClient } from "../../../functions/_shared/sprout/brands";
 import type { SproutProfile } from "../../../functions/_shared/lifecycle/accounts";
 
 const p = (id: string, name: string, native: string, network: string, status = "active", groups: string[] = []): SproutProfile => ({ id, name, native_name: native, network_type: network, native_link: "", status, groups });
@@ -58,6 +58,75 @@ describe("groupBrands: one Sprout group is one brand", () => {
       ["group:12", "Yangra", ["9100", "9101"], ["group:12"]],
       ["group:99", "DermaAngel US", ["9200", "9201"], ["group:99"]],
       ["9300", "Twos", ["9300", "9301"], ["9300"]],
+    ]);
+  });
+});
+
+// Copy sources, 17 Nov 2026 (invented brands): a Sprout group that holds a national brand and a
+// local franchise has two profiles on a network, and is two brands.
+describe("groupBrands: a group with two profiles on one network", () => {
+  const GROUPS = [{ id: "21", name: "hw" }, { id: "22", name: "Northwind" }, { id: "23", name: "Twin Oaks" }];
+  const national = [inGroup(["21"], p("7020", "Harbor Wax", "harborwax", "fb_instagram_account")), inGroup(["21"], p("7021", "Harbor Wax", "harborwax", "facebook"))];
+  const local = [inGroup(["21"], p("7010", "Harbor Wax (Lakeside)", "harborwax_lakeside", "fb_instagram_account")), inGroup(["21"], p("7011", "Harbor Wax (Lakeside)", "harborwaxlakeside", "facebook"))];
+
+  it("becomes two brands with different names and keys, each with one profile per network", () => {
+    const brands = groupBrands([...national, ...local], GROUPS);
+    expect(brands.map((b) => [b.key, b.name, ids(b), b.group?.id, b.split ?? false])).toEqual([
+      // The part with the group's oldest profile keeps the group's key; the other is keyed by its own oldest profile.
+      ["group:21", "Harbor Wax (Lakeside)", ["7010", "7011"], "21", true],
+      ["group:21:7020", "Harbor Wax", ["7020", "7021"], "21", true],
+    ]);
+    for (const b of brands) expect(networkConflict(b)).toBeNull();
+    // Each is named from its profiles' whole names: brackets kept, decorations cut.
+    const starred = [p("1", "Harbor Wax (Lakeside) ★ - Smooth Skin", "a", "facebook")];
+    // A tagline is cut only when the part before it is known to be the name: here the Sprout group is called that.
+    expect(brandOf(starred, { id: "24", name: "Harbor Wax (Lakeside)" }, { whole: true }).name).toBe("Harbor Wax (Lakeside)");
+    // Or another profile of the part carries the short form as its whole name.
+    expect(brandOf([...starred, p("2", "Harbor Wax (Lakeside)", "b", "fb_instagram_account")], GROUPS[0], { whole: true }).name).toBe("Harbor Wax (Lakeside)");
+    // Nothing says the short form is the name: the whole display name is the name ("hw" is the group's label).
+    expect(brandOf(starred, GROUPS[0], { whole: true }).name).toBe("Harbor Wax (Lakeside) - Smooth Skin");
+    expect(brandOf([p("1", "Smith - Jones Law", "a", "facebook")], GROUPS[0], { whole: true }).name).toBe("Smith - Jones Law");
+    expect(brandOf(starred, GROUPS[0]).name).toBe("Harbor Wax");
+    expect(brandOf([p("1", "Harbor Wax", "a", "facebook")], GROUPS[0], { key: "group:21:1" }).key).toBe("group:21:1");
+  });
+
+  it("joins a part's profiles across networks by a shared handle, as profiles in no group are", () => {
+    const brands = groupBrands([
+      inGroup(["21"], p("7020", "Harbor Wax | Smooth Skin Studio", "harborwax", "fb_instagram_account")), inGroup(["21"], p("7021", "Harbor Wax", "harborwax", "facebook")),
+      inGroup(["21"], p("7010", "Harbor Wax (Lakeside)", "harborwax_lakeside", "fb_instagram_account")),
+    ], GROUPS);
+    // The Facebook page is called "Harbor Wax", so the short form of the Instagram name is known to be the name.
+    expect(brands.map((b) => [b.key, b.name, ids(b)])).toEqual([["group:21", "Harbor Wax (Lakeside)", ["7010"]], ["group:21:7020", "Harbor Wax", ["7020", "7021"]]]);
+    // Two different taglines and no profile with the short form: nothing says which part is the name, so none is cut.
+    const taglines = groupBrands([
+      inGroup(["21"], p("7020", "Harbor Wax | Smooth Skin Studio", "harborwax", "fb_instagram_account")), inGroup(["21"], p("7021", "Harbor Wax - Waxing", "harborwax", "facebook")),
+      inGroup(["21"], p("7010", "Harbor Wax (Lakeside)", "harborwax_lakeside", "fb_instagram_account")),
+    ], GROUPS);
+    expect(taglines.map((b) => [b.key, ids(b)])).toEqual([["group:21", ["7010"]], ["group:21:7020", ["7020", "7021"]]]);
+    expect(taglines[1].name).toBe("Harbor Wax | Smooth Skin Studio");
+  });
+
+  it("stays one brand when its networks differ, however differently its profiles are named", () => {
+    const brands = groupBrands([
+      inGroup(["22"], p("8001", "Northwind Law - Trial Lawyers", "northwindlaw", "linkedin_company")), inGroup(["22"], p("8002", "Northwind | Injury Attorneys", "northwind.law", "fb_instagram_account")),
+      inGroup(["22"], p("8003", "NW Law", "nwlaw", "tiktok")),
+    ], GROUPS);
+    expect(brands.map((b) => [b.key, ids(b), b.split ?? false])).toEqual([["group:22", ["8001", "8002", "8003"], false]]);
+    expect(networkConflict(brands[0])).toBeNull();
+  });
+
+  it("leaves a brand with two profiles named alike on one network alone, saying why", () => {
+    const brands = groupBrands([inGroup(["23"], p("9001", "Twin Oaks", "twinoaks", "fb_instagram_account")), inGroup(["23"], p("9002", "Twin Oaks", "twinoaks.two", "instagram")), inGroup(["23"], p("9003", "Twin Oaks", "twinoaks", "facebook"))], GROUPS);
+    expect(brands.map((b) => [b.key, ids(b)])).toEqual([["group:23", ["9001", "9002", "9003"]]]);
+    expect(networkConflict(brands[0])).toBe('Left alone: it has two instagram profiles named alike ("Twin Oaks", "Twin Oaks"), so which one is the brand\'s is unclear.');
+  });
+
+  it("keeps a split part's key and name through the website search's joins, and never joins two parts of a group", () => {
+    const brands = groupBrands([...national, ...local, p("7500", "Harbor Wax Lakeside Blog", "hwlakesideblog", "twitter")], GROUPS);
+    const joined = joinBrands(brands, [["group:21:7020", "group:21"], ["group:21", "7500"]]);
+    expect(joined.map((b) => [b.key, b.name, ids(b), b.members])).toEqual([
+      ["group:21", "Harbor Wax (Lakeside)", ["7010", "7011", "7500"], ["group:21", "7500"]],
+      ["group:21:7020", "Harbor Wax", ["7020", "7021"], ["group:21:7020"]],
     ]);
   });
 });

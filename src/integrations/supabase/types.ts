@@ -4048,6 +4048,8 @@ export type Database = {
           native_link: string | null
           native_name: string | null
           network_type: string
+          parked_at: string | null
+          parked_reason: string | null
           profile_name: string | null
           sprout_profile_id: number
         }
@@ -4059,6 +4061,8 @@ export type Database = {
           native_link?: string | null
           native_name?: string | null
           network_type: string
+          parked_at?: string | null
+          parked_reason?: string | null
           profile_name?: string | null
           sprout_profile_id: number
         }
@@ -4070,6 +4074,8 @@ export type Database = {
           native_link?: string | null
           native_name?: string | null
           network_type?: string
+          parked_at?: string | null
+          parked_reason?: string | null
           profile_name?: string | null
           sprout_profile_id?: number
         }

@@ -167,7 +167,7 @@ export function WeekPlanBand({ plan, today, canAct, hasPosts, onChanged }: {
           <p className="t-secondary flex items-center gap-2">
             <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> {view.line}
           </p>
-          {view.kind === "revising" && <p className="t-label max-w-[28ch] truncate" title={view.note}>"{view.note}"</p>}
+          {view.kind === "revising" && view.note && <p className="t-label max-w-[28ch] truncate" title={view.note}>"{view.note}"</p>}
           <PlanSteps steps={view.steps} />
         </div>
         {canAct && canStop(plan) && (

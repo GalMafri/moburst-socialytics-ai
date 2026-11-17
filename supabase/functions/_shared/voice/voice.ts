@@ -26,6 +26,49 @@
 import { notesSectionLines, shortDate, type NotesVoice } from "../notes/notes.ts";
 import { platformName } from "../calendar/evidence.ts";
 import { CATEGORY_WORDS, type MomentCategory } from "../calendar/moments.ts";
+import { plainNames, type ListedName } from "../text/displayName.ts";
+
+/**
+ * The version of what a voice profile is built from (copy sources, 17 Nov
+ * 2026). 1: display names the agency's Sprout account lists are written
+ * plainly, in the posts a voice is learned from and in what is stored of it.
+ * A profile carries the version it was built under (SocialVoice.rule). The
+ * lifecycle step "voice" checks each stored profile against the rule and
+ * builds again only one that the rule finds something wrong in.
+ */
+export const VOICE_RULE = 1;
+
+/**
+ * The listed decorated display names a stored voice profile still holds,
+ * anywhere in its text: a platform's or the overall voice's fields and
+ * phrases, and its example posts. Exact, as the names are written. None
+ * means the profile has nothing for the plain-names rule to fix.
+ */
+export function namesInVoice(social: unknown, names: ListedName[]): ListedName[] {
+  const texts: string[] = [];
+  const walk = (v: unknown, depth: number) => {
+    if (typeof v === "string") texts.push(v);
+    else if (v && typeof v === "object" && depth < 8) for (const x of Array.isArray(v) ? v : Object.values(v as Record<string, unknown>)) walk(x, depth + 1);
+  };
+  walk(social, 0);
+  return names.filter((n) => !!n.name && texts.some((t) => t.includes(n.name)));
+}
+
+/**
+ * A stored voice profile with every listed name written plainly, wherever a
+ * text holds one: the same exact replacement the profile gets when it is
+ * built (plainNames), done on what is stored, with no model call. Everything
+ * that is not text, and every text that holds no listed name, is as it was.
+ */
+export function plainVoice<T>(social: T, names: ListedName[]): T {
+  const walk = (v: unknown, depth: number): unknown => {
+    if (typeof v === "string") return plainNames(v, names);
+    if (!v || typeof v !== "object" || depth >= 8) return v;
+    if (Array.isArray(v)) return v.map((x) => walk(x, depth + 1));
+    return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, walk(x, depth + 1)]));
+  };
+  return walk(social, 0) as T;
+}
 
 export const PATTERN_TYPES = ["tone", "length", "emoji_usage", "cta_style", "hashtag_preference", "vocabulary", "structure", "topics", "format", "other"] as const;
 export type PatternType = typeof PATTERN_TYPES[number];
@@ -72,6 +115,8 @@ export interface SocialVoice {
   overall?: PlatformVoice;
   /** Platforms with posts but fewer than COPY_MIN_POSTS, and how many they have. */
   thin?: Record<string, number>;
+  /** The VOICE_RULE the profile was built under; absent on one built before the rule had versions. */
+  rule?: number;
 }
 
 /** Posts on one platform before it gets a voice of its own (the calendar's thin line, evidence.ts MIN_SAMPLE). */
@@ -242,31 +287,37 @@ function jsonObject(text: string): Record<string, unknown> | null {
 
 const str = (x: unknown, n = 400) => (typeof x === "string" ? x.trim().slice(0, n) : "");
 
-function platformVoice(p: Record<string, unknown> | null | undefined): PlatformVoice | null {
-  if (!p || !str(p.summary)) return null;
+/**
+ * One platform's voice from the reply. `names` are the decorated display
+ * names the client's Sprout account lists (text/displayName.ts): every field
+ * and every phrase is stored with them written plainly, before its length cut.
+ */
+function platformVoice(p: Record<string, unknown> | null | undefined, names: ListedName[] = []): PlatformVoice | null {
+  const plain = (x: unknown, n = 400) => (typeof x === "string" ? plainNames(x, names).trim().slice(0, n) : "");
+  if (!p || !plain(p.summary)) return null;
   return {
-    summary: str(p.summary), opening: str(p.opening), length: str(p.length), structure: str(p.structure), emoji: str(p.emoji),
-    hashtags: str(p.hashtags), cta: str(p.cta), person: str(p.person), formality: str(p.formality),
-    phrases: Array.isArray(p.phrases) ? (p.phrases as unknown[]).map((x) => str(x, 80)).filter(Boolean).slice(0, 8) : [],
+    summary: plain(p.summary), opening: plain(p.opening), length: plain(p.length), structure: plain(p.structure), emoji: plain(p.emoji),
+    hashtags: plain(p.hashtags), cta: plain(p.cta), person: plain(p.person), formality: plain(p.formality),
+    phrases: Array.isArray(p.phrases) ? (p.phrases as unknown[]).map((x) => plain(x, 80)).filter(Boolean).slice(0, 8) : [],
   };
 }
 
-export function parseVoiceProfile(text: string, platforms: string[]): Record<string, PlatformVoice> {
+export function parseVoiceProfile(text: string, platforms: string[], names: ListedName[] = []): Record<string, PlatformVoice> {
   const data = jsonObject(text);
   const raw = (data?.platforms ?? {}) as Record<string, Record<string, unknown>>;
   const out: Record<string, PlatformVoice> = {};
   for (const platform of platforms) {
     const key = Object.keys(raw).find((k) => k.toLowerCase() === platform.toLowerCase());
-    const pv = platformVoice(key ? raw[key] : null);
+    const pv = platformVoice(key ? raw[key] : null, names);
     if (pv) out[platform] = pv;
   }
   return out;
 }
 
 /** The overall voice from the reply, or null. */
-export function parseOverallVoice(text: string): PlatformVoice | null {
+export function parseOverallVoice(text: string, names: ListedName[] = []): PlatformVoice | null {
   const data = jsonObject(text);
-  return platformVoice(data?.overall && typeof data.overall === "object" ? data.overall as Record<string, unknown> : null);
+  return platformVoice(data?.overall && typeof data.overall === "object" ? data.overall as Record<string, unknown> : null, names);
 }
 
 // ── The preference memory ───────────────────────────────────────────────────

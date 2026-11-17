@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { weekPlanView } from '@/lib/weekPlanStatus';
+import { weekPlanView, KEPT_WHY, KEPT_WHY_MIXED, keptLine } from '@/lib/weekPlanStatus';
 import { PlanNextWeekButton, ReviseWeekButton, WeekPlanBand } from '@/components/calendar/WeekPlanControls';
 import ClientCalendar from '@/pages/ClientCalendar';
 import type { CalendarPlanRow } from '@/lib/calendarPosts';
@@ -59,6 +59,42 @@ const plan = (over: Partial<CalendarPlanRow> = {}): CalendarPlanRow => ({
 beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-03T12:00:00Z')); });
 afterEach(() => { cleanup(); vi.useRealTimers(); f.staff = true; f.plans = []; f.posts = []; f.invokes = []; f.failPlans = false; f.stopAnswer = null; f.refuse = []; });
 
+// A revision whose new copy for a post was not saved says so: how many posts were kept as they were, and why.
+describe('posts a revision kept as they were', () => {
+  const ready = plan({ status: 'ready', ready_at: '2026-11-03T09:10:00Z' });
+  const revised = (rewritten: number, refused: Array<{ id?: string; kind?: string }>) => ({ ...ready, revisions: [{ note: 'Less formal', at: '2026-11-03T10:00:00Z', scope: 'untouched', done_at: '2026-11-03T10:03:00Z', rewritten, refused }] });
+
+  it('says how many and why, in one short sentence, after what was rewritten', () => {
+    expect(weekPlanView(revised(4, [{ id: 'a', kind: 'link' }, { id: 'b', kind: 'link' }]), TODAY)).toEqual({ kind: 'revised', line: "Revised: 4 posts rewritten. 2 posts kept as they were: the new copy linked to a site that is not the brand's own." });
+    expect(weekPlanView(revised(1, [{ id: 'a', kind: 'handle' }]), TODAY)?.line).toBe("Revised: 1 post rewritten. 1 post kept as it was: the new copy tagged an account that is not the brand's own.");
+    expect(weekPlanView(revised(0, [{ id: 'a', kind: 'borrowed' }]), TODAY)?.line).toBe("Revised: no post rewritten. 1 post kept as it was: the new copy repeated another company's post.");
+  });
+
+  it('has a plain reason for each check', () => {
+    expect(KEPT_WHY).toEqual({
+      borrowed: "the new copy repeated another company's post",
+      chapters: 'the new copy listed video chapter times, and the video is not made yet',
+      link: "the new copy linked to a site that is not the brand's own",
+      handle: "the new copy tagged an account that is not the brand's own",
+      pointer: "the new copy pointed to something the brand's own material does not show",
+    });
+    for (const kind of Object.keys(KEPT_WHY)) expect(keptLine([{ kind }])).toBe(`1 post kept as it was: ${KEPT_WHY[kind]}.`);
+  });
+
+  it('says one general reason when the posts were kept for different reasons, or for one it does not know', () => {
+    expect(KEPT_WHY_MIXED).toBe("the new copy used wording, links or names that are not the brand's own");
+    expect(keptLine([{ kind: 'link' }, { kind: 'chapters' }])).toBe(`2 posts kept as they were: ${KEPT_WHY_MIXED}.`);
+    expect(keptLine([{ id: 'a' }])).toBe(`1 post kept as it was: ${KEPT_WHY_MIXED}.`);
+    expect(keptLine([{ kind: 'something new' }, { kind: 'something new' }, { kind: 'something new' }])).toBe(`3 posts kept as they were: ${KEPT_WHY_MIXED}.`);
+  });
+
+  it('says nothing when no post was kept, and never the check\'s own words', () => {
+    for (const none of [null, undefined, []]) expect(keptLine(none)).toBe('');
+    const line = weekPlanView(revised(2, [{ id: 'a', kind: 'pointer' }]), TODAY)?.line ?? '';
+    expect(line).not.toMatch(/evidence|refers_to|refused|C1|N5/);
+  });
+});
+
 describe('what the week says about its plan', () => {
   it('says the week is being planned, and where it stands: waiting to start, then writing the posts', () => {
     expect(weekPlanView(plan(), TODAY)).toEqual({ kind: 'planning', line: 'Planning the week of Nov 9…', steps: [{ label: 'Waiting to start', state: 'current' }, { label: 'Writing the posts', state: 'next' }] });
@@ -88,10 +124,25 @@ describe('what the week says about its plan', () => {
     expect(weekPlanView(revised, TODAY)).toEqual({ kind: 'revised', line: 'Revised: 6 posts rewritten' });
     expect(weekPlanView({ ...revised, revisions: [{ ...revised.revisions[0], rewritten: 1 }] }, TODAY)?.line).toBe('Revised: 1 post rewritten');
     expect(weekPlanView({ ...revised, revisions: [{ ...revised.revisions[0], rewritten: 0 }] }, TODAY)?.line).toBe('Revised: nothing was left to rewrite');
+    // No post kept as it was: the line is what it always was.
+    expect(weekPlanView({ ...revised, revisions: [{ ...revised.revisions[0], refused: [] }] }, TODAY)?.line).toBe('Revised: 6 posts rewritten');
     // The daily run writing posts that had no copy is not a revision anyone asked for.
     expect(weekPlanView({ ...ready, revisions: [{ note: 'x', at: '2026-11-03T10:00:00Z', scope: 'empty', done_at: '2026-11-03T10:03:00Z', rewritten: 2 }] }, TODAY)?.kind).toBe('planned');
     // A revision of an earlier plan for the week is not this plan's.
     expect(weekPlanView({ ...revised, ready_at: '2026-11-03T11:00:00Z' }, TODAY)?.kind).toBe('planned');
+  });
+
+  it('reports no revision for posts the app wrote again by itself, and keeps what a person\'s revision said', () => {
+    const ready = plan({ status: 'ready', ready_at: '2026-11-03T09:10:00Z' });
+    const replan = { note: 'app', at: '2026-11-03T11:00:00Z', scope: 'replan', done_at: '2026-11-03T11:03:00Z', rewritten: 4, refused: [{ id: 'a', kind: 'borrowed' }] };
+    // Nobody asked for it: the week says what it said before, and never why a post was kept.
+    expect(weekPlanView({ ...ready, revisions: [replan] }, TODAY)).toEqual({ kind: 'planned', line: 'Planned' });
+    const asked = { note: 'Less formal', at: '2026-11-03T10:00:00Z', scope: 'untouched', done_at: '2026-11-03T10:03:00Z', rewritten: 6 };
+    expect(weekPlanView({ ...ready, revisions: [asked, replan] }, TODAY)).toEqual({ kind: 'revised', line: 'Revised: 6 posts rewritten' });
+    // While it runs the week says it is being updated, with where it stands and no note.
+    const running = { ...ready, pending_revision: { note: 'app', at: '2026-11-03T11:00:00Z', scope: 'replan' } };
+    expect(weekPlanView(running, TODAY)).toEqual({ kind: 'revising', line: 'Updating the week of Nov 9…', note: '', steps: [{ label: 'Waiting to start', state: 'current' }, { label: 'Rewriting the posts', state: 'next' }] });
+    expect(weekPlanView({ ...running, pending_revision: { ...running.pending_revision, scope: 'empty' } }, TODAY)?.line).toBe('Updating the week of Nov 9…');
   });
 
   it('says planning was stopped, or the plan removed, and nothing for a week that is over or never planned', () => {
@@ -150,6 +201,12 @@ describe('the week band', () => {
     expect(within(screen.getByRole('status')).getByText('Revising the week of Nov 9…')).toBeTruthy();
     expect(screen.getByText('"Less formal"')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Stop|Remove/ })).toBeNull();
+  });
+
+  it('shows posts the app is writing again by itself as an update, with no note', () => {
+    band(plan({ status: 'ready', ready_at: '2026-11-03T09:10:00Z', pending_revision: { note: 'app', at: '2026-11-03T10:00:00Z', scope: 'replan' } }));
+    expect(within(screen.getByRole('status')).getByText('Updating the week of Nov 9…')).toBeTruthy();
+    expect(screen.queryByText(/"/)).toBeNull();
   });
 
   it('keeps Stop planning on a plan that is taking longer than usual', () => {

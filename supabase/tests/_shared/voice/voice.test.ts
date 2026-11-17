@@ -1,5 +1,5 @@
 import { afterAll, afterEach, describe, it, expect, vi } from "vitest";
-import { consolidatePrompt, mergePrompt, parseConsolidation, parseMergeOps, parseVoiceProfile, voicePlatforms, voicePromptBlock, voiceProfilePrompt, voiceReady, voiceSample, type ClientVoice, type Preference } from "../../../functions/_shared/voice/voice";
+import { consolidatePrompt, mergePrompt, parseConsolidation, parseMergeOps, namesInVoice, plainVoice, parseOverallVoice, parseVoiceProfile, VOICE_RULE, voicePlatforms, voicePromptBlock, voiceProfilePrompt, voiceReady, voiceSample, type ClientVoice, type Preference } from "../../../functions/_shared/voice/voice";
 import { buildVoiceProfile, loadClientVoice } from "../../../functions/_shared/voice/load";
 import type { OwnPost } from "../../../functions/_shared/calendar/evidence";
 
@@ -153,6 +153,42 @@ describe("voice profile", () => {
     expect(Object.keys(parsed)).toEqual(["Facebook"]);
     expect(parsed.Facebook.phrases).toEqual(["Call us"]);
   });
+
+  // Copy sources, 17 Nov 2026: a mention arrives as the display name the network shows, and a
+  // five-star name was learned as a phrase the client "uses". Invented names.
+  describe("display names the client's Sprout account lists with decorations", () => {
+    // The second name is shortened because its short form is known to be the name (the client is called Northwind Law).
+    const names = [{ name: "Dana Reed ★★★★★", plain: "Dana Reed" }, { name: "Northwind Law - Trial Lawyers", plain: "Northwind Law" }];
+    const reply = JSON.stringify({
+      platforms: { LinkedIn: { summary: "Warm, and often thanks Dana Reed ★★★★★ by name.", opening: "Tags Northwind Law - Trial Lawyers first.", phrases: ["Dana Reed ★★★★★", "proud of the team", "Northwind Law - Trial Lawyers wins"] } },
+      overall: { summary: "Thanks Dana Reed ★★★★★ often.", phrases: ["Dana Reed ★★★★★"] },
+    });
+
+    it("are stored plain in every field and every phrase", () => {
+      const pv = parseVoiceProfile(reply, ["LinkedIn"], names).LinkedIn;
+      expect(pv.summary).toBe("Warm, and often thanks Dana Reed by name.");
+      expect(pv.opening).toBe("Tags Northwind Law first.");
+      expect(pv.phrases).toEqual(["Dana Reed", "proud of the team", "Northwind Law wins"]);
+      const overall = parseOverallVoice(reply, names)!;
+      expect(overall.summary).toBe("Thanks Dana Reed often.");
+      expect(overall.phrases).toEqual(["Dana Reed"]);
+      expect(JSON.stringify([pv, overall])).not.toContain("★");
+    });
+
+    it("change nothing when no name is listed", () => {
+      const pv = parseVoiceProfile(reply, ["LinkedIn"]).LinkedIn;
+      expect(pv.summary).toBe("Warm, and often thanks Dana Reed ★★★★★ by name.");
+      expect(pv.phrases).toEqual(["Dana Reed ★★★★★", "proud of the team", "Northwind Law - Trial Lawyers wins"]);
+      expect(parseOverallVoice(reply)!.phrases).toEqual(["Dana Reed ★★★★★"]);
+      expect(parseVoiceProfile(reply, ["LinkedIn"], [])).toEqual(parseVoiceProfile(reply, ["LinkedIn"]));
+    });
+
+    it("are replaced before the length cut, so a cut never leaves half a decoration", () => {
+      const long = `${"a".repeat(70)} Dana Reed ★★★★★`;
+      const pv = parseVoiceProfile(JSON.stringify({ platforms: { LinkedIn: { summary: "s", phrases: [long] } } }), ["LinkedIn"], names).LinkedIn;
+      expect(pv.phrases).toEqual([`${"a".repeat(70)} Dana Reed`]);
+    });
+  });
 });
 
 describe("the preference memory", () => {
@@ -302,4 +338,68 @@ describe("a preference for one platform", () => {
     expect(ops).toEqual([{ op: "add", pattern_type: "emoji_usage", description: "No emoji.", platform: "LinkedIn" }, { op: "add", pattern_type: "length", description: "Short.", platform: null }]);
     expect(consolidatePrompt("Moburst", prefs)).toContain("(tone, LinkedIn only) No emoji.");
   });
+});
+
+// Copy sources, 17 Nov 2026 (invented names): a stored voice is built again only when something in it can be wrong.
+describe("namesInVoice", () => {
+  const STARS = { name: "Dana Reed ★★★★★", plain: "Dana Reed" };
+  const TAGLINE = { name: "Northwind Law - Trial Lawyers", plain: "Northwind Law" };
+  const stored = {
+    built_at: "2026-11-01T08:00:00Z", post_count: 12, rule: undefined,
+    platforms: { LinkedIn: { summary: "Warm and proud.", opening: "", length: "", structure: "", emoji: "", hashtags: "", cta: "", person: "", formality: "", phrases: ["proud of the team"] } },
+    overall: { summary: "Warm.", phrases: ["thank you"] },
+    examples: { LinkedIn: [{ text: "Five years with our front desk team.", date: "2026-10-20", link: null, format: "image" }] },
+    thin: { TikTok: 2 },
+  };
+
+  it("finds nothing in a voice that holds no listed name", () => {
+    expect(namesInVoice(stored, [STARS, TAGLINE])).toEqual([]);
+    expect(namesInVoice(stored, [])).toEqual([]);
+    expect(namesInVoice(null, [STARS])).toEqual([]);
+    // The plain form of a name is not the decorated name.
+    expect(namesInVoice({ ...stored, overall: { summary: "Thanks Dana Reed often.", phrases: ["Northwind Law"] } }, [STARS, TAGLINE])).toEqual([]);
+  });
+
+  it("finds a listed name in a phrase, in a field, in the overall voice and in an example post, exactly as written", () => {
+    expect(namesInVoice({ ...stored, platforms: { LinkedIn: { ...stored.platforms.LinkedIn, phrases: ["proud", STARS.name] } } }, [STARS, TAGLINE])).toEqual([STARS]);
+    expect(namesInVoice({ ...stored, platforms: { LinkedIn: { ...stored.platforms.LinkedIn, opening: `Tags ${TAGLINE.name} first.` } } }, [STARS, TAGLINE])).toEqual([TAGLINE]);
+    expect(namesInVoice({ ...stored, overall: { summary: `Thanks ${STARS.name} often.`, phrases: [] } }, [STARS])).toEqual([STARS]);
+    expect(namesInVoice({ ...stored, examples: { LinkedIn: [{ text: `Welcome ${STARS.name} to ${TAGLINE.name}.`, date: "2026-10-20", link: null, format: "image" }] } }, [STARS, TAGLINE])).toEqual([STARS, TAGLINE]);
+    // Another case, or stars nobody listed, are not a listed name.
+    expect(namesInVoice({ ...stored, overall: { summary: "dana reed ★★★★★ and five stars ★★★★★", phrases: [] } }, [STARS])).toEqual([]);
+  });
+
+// A rebuilt voice that still holds a listed name is corrected in code: the same exact replacement, and no second rebuild.
+describe("plainVoice", () => {
+  const STARS = { name: "Dana Reed ★★★★★", plain: "Dana Reed" };
+  const TAGLINE = { name: "Northwind Law - Trial Lawyers", plain: "Northwind Law" };
+  const stored = {
+    built_at: "2026-11-01T08:00:00Z", post_count: 12, rule: 1,
+    platforms: { LinkedIn: { summary: `Warm, and thanks ${STARS.name} by name.`, opening: `Tags ${TAGLINE.name} first.`, phrases: ["proud of the team", STARS.name] } },
+    overall: { summary: "Warm.", phrases: [`${TAGLINE.name} wins`] },
+    examples: { LinkedIn: [{ text: `Welcome ${STARS.name}.`, date: "2026-10-20", link: null, format: "image" }] },
+    thin: { TikTok: 2 },
+  };
+
+  it("writes every listed name plainly, wherever a text holds one, and leaves the rest as it was", () => {
+    const plain = plainVoice(stored, [STARS, TAGLINE]);
+    expect(plain).toEqual({
+      built_at: "2026-11-01T08:00:00Z", post_count: 12, rule: 1,
+      platforms: { LinkedIn: { summary: "Warm, and thanks Dana Reed by name.", opening: "Tags Northwind Law first.", phrases: ["proud of the team", "Dana Reed"] } },
+      overall: { summary: "Warm.", phrases: ["Northwind Law wins"] },
+      examples: { LinkedIn: [{ text: "Welcome Dana Reed.", date: "2026-10-20", link: null, format: "image" }] },
+      thin: { TikTok: 2 },
+    });
+    expect(namesInVoice(plain, [STARS, TAGLINE])).toEqual([]);
+    // The stored value is not changed in place, and the time it was built stays.
+    expect(stored.platforms.LinkedIn.phrases).toEqual(["proud of the team", STARS.name]);
+    expect(plain.built_at).toBe(stored.built_at);
+  });
+
+  it("changes nothing when no name is listed or none is held", () => {
+    expect(plainVoice(stored, [])).toEqual(stored);
+    expect(plainVoice(stored, [{ name: "Someone Else ✦", plain: "Someone Else" }])).toEqual(stored);
+    expect(plainVoice(null, [STARS])).toBeNull();
+  });
+});
 });

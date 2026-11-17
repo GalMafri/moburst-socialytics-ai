@@ -434,12 +434,348 @@ describe("accounts", () => {
     await STEPS.accounts.run(dbWith({ clients: [c], sprout_profiles: [], sprout_profile_removals: [] }), c, ctx({ rows: read }));
     expect(c.primary_platforms).toEqual(["LinkedIn"]);
   });
+  // Copy sources, 17 Nov 2026 (invented names): the names Sprout writes with decorations, from its whole list, whoever they belong to.
+  it("lists the decorated display names of Sprout's whole account list with their plain form, a personal LinkedIn profile included", async () => {
+    const c = client({ name: "Northwind Law", website_url: null });
+    deps.listCustomerProfiles = async () => [
+      { id: "11", name: "Northwind Law", native_name: "northwindlaw", network_type: "linkedin_company", native_link: "", status: "active" },
+      { id: "12", name: "Dana Reed ★★★★★", native_name: "dana-reed", network_type: "linkedin", native_link: "", status: "active" },
+      { id: "13", name: "Harbor Wax - Smooth Skin Studio ✨", native_name: "harborwax", network_type: "facebook", native_link: "", status: "active" },
+      { id: "14", name: "Harbor Wax (Lakeside)", native_name: "harborwaxlakeside", network_type: "facebook", native_link: "", status: "active" },
+    ];
+    const out = await STEPS.accounts.run(dbWith({ clients: [c], sprout_profiles: [], sprout_profile_removals: [] }), c, ctx({ rows: new Map() }));
+    // Nothing says "Harbor Wax" is that profile's name, so its whole name stays, without the sparkle.
+    expect(out).toMatchObject({ status: "done", result: { profiles: 4, display_names: [
+      { name: "Harbor Wax - Smooth Skin Studio ✨", plain: "Harbor Wax - Smooth Skin Studio" }, { name: "Dana Reed ★★★★★", plain: "Dana Reed" },
+    ] } });
+  });
+
+  // A name is shortened at its tagline only when the short form is known to be the name by an exact fact about that profile.
+  it("shortens a listed name at its tagline only when the short form is the name of its client, its Sprout group or another of its owner's profiles", async () => {
+    const c = client({ name: "Northwind Law", website_url: null });
+    const p = (id: string, name: string, network: string, groups: string[] = []) => ({ id, name, native_name: `h${id}`, network_type: network, native_link: "", status: "active", groups });
+    deps.listCustomerProfiles = async () => [
+      // Known by this client's name: the client holds the profile.
+      p("11", "Northwind Law | Trial Lawyers", "facebook"),
+      // Known by another client's name, which holds the profile.
+      p("21", "Harbor Wax - Smooth Skin Studio", "facebook"),
+      // Known by its Sprout group's name.
+      p("31", "Glow Parlor – Skin & Brows", "facebook", ["g7"]),
+      // Known by the name another profile of the same group carries on another network.
+      p("41", "Twin Oaks — Family Dental", "facebook", ["g8"]), p("42", "Twin Oaks", "fb_instagram_account", ["g8"]),
+      // A real name with a separator in it: nothing knows "Smith" as its name, though another client is called Smith.
+      p("51", "Smith - Jones Law", "facebook"), p("52", "Reed | Okafor ★", "facebook", ["g9"]),
+      // The same name on the same network proves nothing about the other.
+      p("61", "Lakeside - Waxing", "facebook", ["g10"]), p("62", "Lakeside", "facebook", ["g10"]),
+      // A profile on another network that shares no owner and no group proves nothing either.
+      p("71", "Brightside - Brow Bar", "facebook", ["g11"]), p("72", "Brightside", "fb_instagram_account", ["g12"]),
+    ];
+    let groupReads = 0;
+    deps.listCustomerGroups = async () => { groupReads++; return [{ id: "g7", name: "Glow Parlor" }, { id: "g8", name: "to" }, { id: "g9", name: "RO" }, { id: "g10", name: "LW" }, { id: "g11", name: "BB" }, { id: "g12", name: "BS" }]; };
+    const db = dbWith({
+      clients: [c, { id: "hw", name: "Harbor Wax" }, { id: "sm", name: "Smith" }],
+      sprout_profiles: [{ client_id: "hw", sprout_profile_id: 21, network_type: "facebook", is_active: true }, { client_id: "c1", sprout_profile_id: 11, network_type: "facebook", is_active: true }], sprout_profile_removals: [],
+    });
+    const out = await STEPS.accounts.run(db, c, ctx({ rows: new Map() }));
+    const names = (out as { result: { display_names: Array<{ name: string; plain: string }> } }).result.display_names;
+    expect(Object.fromEntries(names.map((n) => [n.name, n.plain]))).toEqual({
+      "Northwind Law | Trial Lawyers": "Northwind Law",
+      "Harbor Wax - Smooth Skin Studio": "Harbor Wax",
+      "Glow Parlor – Skin & Brows": "Glow Parlor",
+      "Twin Oaks — Family Dental": "Twin Oaks",
+      // Only its star goes.
+      "Reed | Okafor ★": "Reed | Okafor",
+    });
+    // "Smith - Jones Law", "Lakeside - Waxing" and "Brightside - Brow Bar" are names as they stand: not listed at all.
+    expect(groupReads).toBe(1);
+  });
+
+  it("reads no group and no other client for names when no listed name has a tagline, and keeps the names whole when those reads fail", async () => {
+    const c = client({ name: "Northwind Law", website_url: null });
+    const tables: string[] = [];
+    const db = dbWith({ clients: [c], sprout_profiles: [{ client_id: "hw", sprout_profile_id: 21, network_type: "facebook", is_active: true }], sprout_profile_removals: [] });
+    const from = db.from.bind(db);
+    db.from = (t: string) => { tables.push(t); return from(t); };
+    deps.listCustomerGroups = fail("Sprout's groups");
+    deps.listCustomerProfiles = async () => [{ id: "12", name: "Dana Reed ★★★★★", native_name: "dana-reed", network_type: "linkedin", native_link: "", status: "active", groups: ["g1"] }];
+    expect(await STEPS.accounts.run(db, c, ctx({ rows: new Map() }))).toMatchObject({ status: "done", result: { display_names: [{ name: "Dana Reed ★★★★★", plain: "Dana Reed" }] } });
+    expect(tables).not.toContain("clients");
+    // A tagline, and the group read fails: the step still finishes, with that name whole.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    deps.listCustomerGroups = async () => { throw new Error("Sprout did not answer"); };
+    deps.listCustomerProfiles = async () => [{ id: "21", name: "Harbor Wax - Smooth Skin Studio ★", native_name: "harborwax", network_type: "facebook", native_link: "", status: "active", groups: ["g1"] }];
+    expect(await STEPS.accounts.run(db, c, ctx({ rows: new Map() }))).toMatchObject({ status: "done", result: { display_names: [{ name: "Harbor Wax - Smooth Skin Studio ★", plain: "Harbor Wax - Smooth Skin Studio" }] } });
+    expect(warn).toHaveBeenCalled();
+  });
+
   it("waits for the brand read before reading the site's links, and keys on removals", async () => {
     const db = dbWith({ sprout_profile_removals: [] });
     expect(await STEPS.accounts.inputs(db, client(), new Map())).toBeNull();
     const a = await STEPS.accounts.inputs(db, client(), read);
     db.tables.sprout_profile_removals.push({ client_id: "c1", sprout_profile_id: 9 });
     expect(await STEPS.accounts.inputs(db, client(), read)).not.toBe(a);
+  });
+});
+
+// Copy sources, 17 Nov 2026 (invented brands): a client holding a national brand's accounts and a
+// local franchise's on the same networks keeps one own account per network.
+describe("accounts: one own account per network", () => {
+  const T1 = "2026-11-17T09:00:00.000Z";
+  const T2 = "2026-11-18T09:00:00.000Z";
+  const sp = (id: number, name: string, native: string, network: string, active = true) => ({ client_id: "c1", sprout_profile_id: id, profile_name: name, native_name: native, network_type: network, native_link: "", is_active: active });
+  const held = () => [
+    sp(20, "Harbor Wax", "harborwax", "fb_instagram_account"), sp(10, "Harbor Wax (Lakeside)", "harborwax_lakeside", "fb_instagram_account"),
+    sp(21, "Harbor Wax", "harborwax", "facebook"), sp(11, "Harbor Wax (Lakeside)", "harborwaxlakeside", "facebook"),
+    // The only TikTok account is the franchise's: one account on a network is never parked.
+    sp(12, "Harbor Wax (Lakeside)", "harborwax_lakeside", "tiktok"),
+    // Another client's accounts are never read into the rule.
+    { ...sp(90, "Harbor Wax", "someoneelse", "fb_instagram_account"), client_id: "other" },
+  ];
+  const harbor = (over: Record<string, unknown> = {}) => client({ name: "Harbor Wax", website_url: null, ...over });
+  const world = (c: ReturnType<typeof client>) => dbWith({ clients: [c], sprout_profiles: held(), sprout_profile_removals: [], client_public_profiles: [] });
+  const activeIds = (db: ReturnType<typeof dbWith>) => db.tables.sprout_profiles.filter((p) => p.client_id === "c1" && p.is_active).map((p) => p.sprout_profile_id).sort((a, b) => a - b);
+  const result = (out: unknown) => (out as { result: Record<string, unknown> }).result;
+
+  it("keys on the rule's version, and names the networks that hold two active accounts only while there are any", async () => {
+    const c = harbor();
+    const db = world(c);
+    const before = await STEPS.accounts.inputs(db, c, new Map());
+    expect(before).toMatch(/\|own:1\|dup:facebook,instagram$/);
+    deps.listCustomerProfiles = async () => [];
+    deps.now = () => new Date(T1);
+    await STEPS.accounts.run(db, c, ctx());
+    const after = await STEPS.accounts.inputs(db, c, new Map());
+    expect(after).toMatch(/\|own:1$/);
+    expect(after).not.toContain("|dup:");
+    // A client with one account per network never carries the part.
+    expect(await STEPS.accounts.inputs(dbWith({ sprout_profile_removals: [], sprout_profiles: [sp(20, "Harbor Wax", "harborwax", "facebook")] }), c, new Map())).toMatch(/\|own:1$/);
+  });
+
+  it("parks the second account on each network, records why and when, and writes no removal", async () => {
+    const c = harbor();
+    const db = world(c);
+    deps.listCustomerProfiles = async () => [];
+    deps.now = () => new Date(T1);
+    const out = await STEPS.accounts.run(db, c, ctx());
+    expect(out.status).toBe("done");
+    expect(activeIds(db)).toEqual([12, 20, 21]);
+    expect(result(out).own).toEqual([
+      expect.objectContaining({ network: "facebook", kept: "21", dropped: ["11"], by: "name" }),
+      expect.objectContaining({ network: "instagram", kept: "20", dropped: ["10"], by: "name" }),
+    ]);
+    expect((result(out).own as Array<{ why: string }>)[1].why).toBe('Kept "Harbor Wax" (harborwax) on Instagram: its name is the client\'s name. Parked: "Harbor Wax (Lakeside)" (harborwax_lakeside).');
+    expect(result(out).own_dropped_at).toBe(T1);
+    // Parked rows stay the client's rows, and a parked account is not one a person removed.
+    expect(db.tables.sprout_profiles.filter((p) => p.client_id === "c1")).toHaveLength(5);
+    expect(db.tables.sprout_profile_removals).toEqual([]);
+    expect(db.tables.sprout_profiles.find((p) => p.client_id === "other")).toMatchObject({ is_active: true });
+    // The client's platforms follow the accounts that stay.
+    expect(result(out)).toMatchObject({ assigned: 3, platforms: ["Instagram", "TikTok", "Facebook"] });
+    expect(c.primary_platforms).toEqual(["Instagram", "TikTok", "Facebook"]);
+  });
+
+  it("counts only the accounts that stay toward the client's platforms", async () => {
+    const c = harbor({ primary_platforms: ["Facebook", "LinkedIn", "TikTok"] });
+    deps.listCustomerProfiles = async () => [];
+    const db = dbWith({ clients: [c], sprout_profile_removals: [], client_public_profiles: [], sprout_profiles: [
+      // An earlier run parked the franchise's LinkedIn page: the record is on its row.
+      sp(21, "Harbor Wax", "harborwax", "facebook"), sp(30, "Harbor Wax", "harbor-wax", "linkedin_company"), { ...sp(31, "Harbor Wax (Lakeside)", "hw-lakeside", "linkedin_company", false), parked_at: T1, parked_reason: "x" },
+      // Switched off by a person, never parked by the rule: not counted, and not brought back.
+      sp(40, "Harbor Wax", "harborwax", "tiktok", false),
+    ] });
+    const out = await STEPS.accounts.run(db, c, ctx());
+    expect(result(out)).toMatchObject({ assigned: 2, platforms: ["Facebook", "LinkedIn"], written: ["primary_platforms"] });
+    expect(c.primary_platforms).toEqual(["Facebook", "LinkedIn"]);
+    expect(activeIds(db)).toEqual([21, 30]);
+  });
+
+  it("writes when and why on the parked row itself, and changes nothing on a second run", async () => {
+    const c = harbor();
+    const db = world(c);
+    deps.listCustomerProfiles = async () => [];
+    deps.now = () => new Date(T1);
+    const first = await STEPS.accounts.run(db, c, ctx());
+    expect(db.tables.sprout_profiles.filter((p) => p.client_id === "c1" && !p.is_active).map((p) => [p.sprout_profile_id, p.parked_at, p.parked_reason])).toEqual([
+      [10, T1, 'The brand\'s own Instagram account is "Harbor Wax".'],
+      [11, T1, 'The brand\'s own Facebook account is "Harbor Wax".'],
+    ]);
+    // The accounts that stay carry no record.
+    expect(db.tables.sprout_profiles.filter((p) => p.client_id === "c1" && p.is_active).every((p) => !p.parked_at && !p.parked_reason)).toBe(true);
+    const snapshot = JSON.stringify(db.tables.sprout_profiles);
+    deps.now = () => new Date(T2);
+    const second = await STEPS.accounts.run(db, c, ctx({ rows: rowsOf(row("accounts", { result: result(first) })) }));
+    expect(JSON.stringify(db.tables.sprout_profiles)).toBe(snapshot);
+    expect(result(second).own).toEqual(result(first).own);
+    expect(result(second).own_dropped_at).toBe(T1);
+    expect(db.tables.sprout_profile_removals).toEqual([]);
+  });
+
+  // The record must not depend on one run surviving: a failed run clears the step's stored result (policy.ts rowAfter).
+  it("reads the same decisions and the same parked time from the rows when the step's earlier result is gone", async () => {
+    const c = harbor();
+    const db = world(c);
+    deps.listCustomerProfiles = async () => [];
+    deps.now = () => new Date(T1);
+    const first = await STEPS.accounts.run(db, c, ctx());
+    const snapshot = JSON.stringify(db.tables.sprout_profiles);
+    deps.now = () => new Date(T2);
+    // The run after a failed one: no earlier result at all, then a row whose result was cleared.
+    for (const rows of [new Map<string, StepRow>(), rowsOf(row("accounts", { status: "failed", result: null, error: "Sprout did not answer", attempts: 1 }))]) {
+      const again = await STEPS.accounts.run(db, c, ctx({ rows }));
+      expect(result(again).own).toEqual(result(first).own);
+      expect(result(again).own_dropped_at).toBe(T1);
+      expect(JSON.stringify(db.tables.sprout_profiles)).toBe(snapshot);
+      expect(activeIds(db)).toEqual([12, 20, 21]);
+    }
+  });
+
+  it("brings the parked account back when a person removes the kept one, and clears its record", async () => {
+    const c = harbor();
+    const db = world(c);
+    deps.listCustomerProfiles = async () => [];
+    deps.now = () => new Date(T1);
+    await STEPS.accounts.run(db, c, ctx());
+    // A person removes the national Instagram account on the setup page: its row is deleted and the removal recorded.
+    db.tables.sprout_profiles = db.tables.sprout_profiles.filter((p) => !(p.client_id === "c1" && p.sprout_profile_id === 20));
+    db.tables.sprout_profile_removals.push({ client_id: "c1", sprout_profile_id: 20 });
+    deps.now = () => new Date(T2);
+    const second = await STEPS.accounts.run(db, c, ctx());
+    expect(activeIds(db)).toEqual([10, 12, 21]);
+    expect(db.tables.sprout_profiles.find((p) => p.sprout_profile_id === 10)).toMatchObject({ is_active: true, parked_at: null, parked_reason: null });
+    expect(result(second).own).toEqual([
+      expect.objectContaining({ network: "facebook", kept: "21", dropped: ["11"], by: "name" }),
+      expect.objectContaining({ network: "instagram", kept: "10", dropped: [], by: "only" }),
+    ]);
+    // The Facebook franchise page is still parked, since the first run.
+    expect(result(second).own_dropped_at).toBe(T1);
+    // Brought back and at rest: the next run records nothing more for Instagram.
+    const third = await STEPS.accounts.run(db, c, ctx());
+    expect((result(third).own as Array<{ network: string }>).map((p) => p.network)).toEqual(["facebook"]);
+  });
+
+  it("keeps an account a person added back, parks the other, and goes on keeping it", async () => {
+    const c = harbor();
+    const db = world(c);
+    deps.listCustomerProfiles = async () => [];
+    deps.now = () => new Date(T1);
+    await STEPS.accounts.run(db, c, ctx());
+    // A person adds the parked franchise Instagram account back on the setup page: the upsert switches it on.
+    db.tables.sprout_profiles.find((p) => p.sprout_profile_id === 10)!.is_active = true;
+    deps.now = () => new Date(T2);
+    const second = await STEPS.accounts.run(db, c, ctx());
+    expect((result(second).own as Array<Record<string, unknown>>).find((p) => p.network === "instagram")).toMatchObject({ kept: "10", dropped: ["20"], by: "person" });
+    expect(activeIds(db)).toEqual([10, 12, 21]);
+    expect(db.tables.sprout_profiles.find((p) => p.sprout_profile_id === 20)).toMatchObject({ is_active: false, parked_at: T2 });
+    expect(result(second).own_dropped_at).toBe(T2);
+    // The person's choice stands on every run after, whatever the names say, with no earlier result to lean on.
+    const snapshot = JSON.stringify(db.tables.sprout_profiles);
+    const third = await STEPS.accounts.run(db, c, ctx());
+    expect((result(third).own as Array<Record<string, unknown>>).find((p) => p.network === "instagram")).toMatchObject({ kept: "10", dropped: ["20"], by: "person" });
+    expect(JSON.stringify(db.tables.sprout_profiles)).toBe(snapshot);
+    expect(db.tables.sprout_profile_removals).toEqual([]);
+  });
+
+  // The step never makes the choice necessary: it adds no second account on a network.
+  it("does not assign a profile on a network where the client has an account, however exactly it matches, and parks nothing for it", async () => {
+    const c = harbor();
+    const db = dbWith({ clients: [c], sprout_profile_removals: [], client_public_profiles: [], sprout_profiles: [sp(10, "Harbor Wax Official Page", "hw_page", "facebook")] });
+    // Sprout lists a new Facebook page named exactly like the client, and a TikTok account: the client has no TikTok yet.
+    deps.listCustomerProfiles = async () => [
+      { id: "21", name: "Harbor Wax", native_name: "harborwax", network_type: "facebook", native_link: "", status: "active" },
+      { id: "22", name: "Harbor Wax", native_name: "harborwax", network_type: "tiktok", native_link: "", status: "active" },
+      // A person's own LinkedIn profile named like the client is no brand account: it is never held back, and never parks anything.
+      { id: "23", name: "Harbor Wax", native_name: "harbor-wax-founder", network_type: "linkedin", native_link: "", status: "active" },
+    ];
+    deps.now = () => new Date(T1);
+    const out = await STEPS.accounts.run(db, c, ctx());
+    expect(result(out)).toMatchObject({
+      matched: [{ id: "22", by: ["name"] }, { id: "23", by: ["name"] }],
+      skipped: [{ id: "21", network: "facebook", handle: "harborwax", why: "the client already has an account on this network" }],
+      own: [], own_open: [], own_dropped_at: null, assigned: 3,
+    });
+    expect(activeIds(db)).toEqual([10, 22, 23]);
+    expect(db.tables.sprout_profiles.some((p) => p.sprout_profile_id === 21)).toBe(false);
+  });
+
+  it("does not assign two profiles on one network in one run: which one is the brand's is a person's to say", async () => {
+    const c = harbor();
+    const db = dbWith({ clients: [c], sprout_profile_removals: [], client_public_profiles: [], sprout_profiles: [] });
+    deps.listCustomerProfiles = async () => [
+      { id: "21", name: "Harbor Wax", native_name: "harborwax", network_type: "fb_instagram_account", native_link: "", status: "active" },
+      { id: "24", name: "Harbor Wax", native_name: "harborwax.two", network_type: "instagram", native_link: "", status: "active" },
+      { id: "22", name: "Harbor Wax", native_name: "harborwax", network_type: "tiktok", native_link: "", status: "active" },
+    ];
+    const out = await STEPS.accounts.run(db, c, ctx());
+    expect(result(out)).toMatchObject({ matched: [{ id: "22" }], skipped: [{ id: "21", why: "two profiles match on this network" }, { id: "24", why: "two profiles match on this network" }], assigned: 1 });
+    expect(activeIds(db)).toEqual([22]);
+  });
+
+  // "The oldest" is a guess. With no exact fact, both accounts stay in use and the step says the choice is open.
+  it("parks nothing when no exact fact decides, and records the choice as open", async () => {
+    const c = harbor();
+    const db = dbWith({ clients: [c], sprout_profile_removals: [], client_public_profiles: [], sprout_profiles: [sp(10, "Lakeside Waxing", "lakeside", "facebook"), sp(20, "Smooth Skin Studio", "smooth", "facebook"), sp(30, "Harbor Wax", "harborwax", "fb_instagram_account")] });
+    deps.listCustomerProfiles = async () => [];
+    const before = JSON.stringify(db.tables.sprout_profiles);
+    const out = await STEPS.accounts.run(db, c, ctx());
+    expect(JSON.stringify(db.tables.sprout_profiles)).toBe(before);
+    expect(result(out)).toMatchObject({
+      own: [], own_dropped_at: null, assigned: 3,
+      own_open: [{ network: "facebook", accounts: ["10", "20"], why: '"Lakeside Waxing" (lakeside) and "Smooth Skin Studio" (smooth) stay in use on Facebook: no exact fact says which one is the brand\'s own.' }],
+    });
+    // The key still names the network, so nothing runs twice for it: it is the same before and after.
+    expect(await STEPS.accounts.inputs(db, c, new Map())).toMatch(/\|own:1\|dup:facebook$/);
+  });
+
+  it("leaves a company page and a personal LinkedIn profile together, and does not name LinkedIn as a network with two", async () => {
+    const c = harbor();
+    const db = dbWith({ clients: [c], sprout_profile_removals: [], client_public_profiles: [], sprout_profiles: [sp(50, "Harbor Wax", "harbor-wax", "linkedin_company"), sp(5, "Dana Reed", "dana-reed", "linkedin"), sp(6, "Sam Okafor", "sam-okafor", "linkedin")] });
+    deps.listCustomerProfiles = async () => [];
+    expect(await STEPS.accounts.inputs(db, c, new Map())).toMatch(/\|own:1$/);
+    const out = await STEPS.accounts.run(db, c, ctx());
+    expect(result(out)).toMatchObject({ own: [], own_open: [], own_dropped_at: null, assigned: 3, platforms: ["LinkedIn"] });
+    expect(activeIds(db)).toEqual([5, 6, 50]);
+  });
+
+  it("never sorts out an account a person added after the rule began", async () => {
+    const c = harbor();
+    const db = dbWith({ clients: [c], sprout_profile_removals: [], client_public_profiles: [], sprout_profiles: [
+      { ...sp(10, "Harbor Wax Official Page", "hw_page", "facebook"), assigned_at: "2026-09-01T10:00:00.000Z" },
+      { ...sp(90, "Harbor Wax", "harborwax", "facebook"), assigned_at: "2026-12-01T10:00:00.000Z" },
+    ] });
+    deps.listCustomerProfiles = async () => [];
+    const out = await STEPS.accounts.run(db, c, ctx());
+    expect(activeIds(db)).toEqual([10, 90]);
+    expect(result(out)).toMatchObject({ own: [], own_dropped_at: null, own_open: [expect.objectContaining({ network: "facebook", accounts: ["10", "90"] })] });
+  });
+
+  // The lifecycle does not run for an archived client (run.ts); the step itself holds the same line.
+  it("changes nothing of an archived client, whoever calls the step: nothing is read from Sprout, matched, parked or written", async () => {
+    const c = harbor({ archived_at: "2026-10-01T00:00:00.000Z" });
+    const db = world(c);
+    let reads = 0;
+    // A profile that would be matched and assigned for a client in use.
+    deps.listCustomerProfiles = async () => { reads++; return [{ id: "77", name: "Harbor Wax", native_name: "harborwax", network_type: "tiktok", native_link: "", status: "active" }]; };
+    deps.now = () => new Date(T1);
+    const before = JSON.stringify(db.tables);
+    const tables: string[] = [];
+    const from = db.from.bind(db);
+    db.from = (t: string) => { tables.push(t); return from(t); };
+    expect(await STEPS.accounts.run(db, c, ctx())).toEqual({ status: "waiting", reason: "archived" });
+    expect(JSON.stringify(db.tables)).toBe(before);
+    expect(tables).toEqual([]);
+    expect(reads).toBe(0);
+    expect(activeIds(db)).toEqual([10, 11, 12, 20, 21]);
+    // The same accounts, for the client in use, are sorted out.
+    const live = world(harbor());
+    await STEPS.accounts.run(live, harbor(), ctx());
+    expect(activeIds(live)).not.toEqual([10, 11, 12, 20, 21]);
+  });
+
+  it("gives a client that never had two accounts on a network an empty list and no date", async () => {
+    const c = harbor();
+    const db = dbWith({ clients: [c], sprout_profile_removals: [], client_public_profiles: [], sprout_profiles: [sp(20, "Harbor Wax", "harborwax", "facebook")] });
+    deps.listCustomerProfiles = async () => [];
+    expect(result(await STEPS.accounts.run(db, c, ctx()))).toMatchObject({ own: [], own_open: [], skipped: [], own_dropped_at: null, assigned: 1 });
   });
 });
 
@@ -706,7 +1042,7 @@ describe("a plain-domain client is unchanged by the parent-page rule", () => {
     deps.listCustomerProfiles = async () => [{ id: "7", name: "Olo - Skip the Line", native_name: "olo", network_type: "linkedin_company", native_link: "", status: "active" }];
     const accounts = await STEPS.accounts.run(db, c, ctx({ rows }));
     expect(accounts).toMatchObject({ status: "done", result: { profiles: 1, matched: [{ id: "7", network: "linkedin_company", handle: "olo", by: ["site_link"] }], assigned: 1, platforms: ["LinkedIn"], written: ["primary_platforms"] } });
-    expect(Object.keys((accounts as { result: Record<string, unknown> }).result).sort()).toEqual(["assigned", "list", "matched", "platforms", "profiles", "site_profiles", "written"]);
+    expect(Object.keys((accounts as { result: Record<string, unknown> }).result).sort()).toEqual(["assigned", "display_names", "list", "matched", "own", "own_dropped_at", "own_open", "platforms", "profiles", "site_profiles", "skipped", "written"]);
 
     const { FollowFailure } = await import("../../../functions/_shared/competitive/rivaliqFollowFailure");
     let asked = 0;
@@ -2878,5 +3214,352 @@ describe("accounts mends the public profiles' handle case without a paid read", 
     const { profileInputs, desiredProfiles } = await import("../../../functions/_shared/strategy/profiles");
     const pi = await profileInputs(db, { id: "c1", name: "Uproar" }, { brand_read: rows.get("brand_read")!.result, accounts: (out as { result: Record<string, unknown> }).result });
     expect(desiredProfiles(pi).map((r) => r.handle)).toEqual([ID]);
+  });
+});
+
+// Copy sources, 17 Nov 2026: after the rules change, the app rebuilds each client's voice and
+// checks its upcoming calendar by itself. Every company, person and caption below is invented.
+describe("voice", () => {
+  const BUILT = "2026-11-01T08:00:00.000Z";
+  const STARS = "Dana Reed ★★★★★";
+  const LISTED = { name: STARS, plain: "Dana Reed" };
+  const namesKey = (...names: Array<{ name: string; plain: string }>) => textHash(names.map((n) => `${n.name}>${n.plain}`).join("\n"));
+  const UNDER_RULE = "name:harbor wax|site:|links:00000000|removed:00000000|own:1";
+  const accounts = (over: Partial<StepRow> = {}, facts: Record<string, unknown> = {}) =>
+    rowsOf(row("accounts", { inputs_key: UNDER_RULE, result: { display_names: [LISTED], own: [], own_dropped_at: null, ...facts }, ...over }));
+  const harbor = (over: Record<string, unknown> = {}) => client({ name: "Harbor Wax", voice_built_at: BUILT, ...over });
+  /** A stored voice: a platform's fields and phrases, the overall voice and its example posts. */
+  const voice = (over: Record<string, unknown> = {}) => ({
+    built_at: BUILT, post_count: 12,
+    platforms: { LinkedIn: { summary: "Warm and proud.", opening: "A thank you.", phrases: ["proud of the team"] } },
+    overall: { summary: "Warm.", phrases: ["thank you"] },
+    examples: { LinkedIn: [{ text: "Five years with our front desk team.", date: "2026-10-20", link: null, format: "image" }] },
+    ...over,
+  });
+  const world = (social_voice: unknown, c = harbor()) => dbWith({ clients: [{ ...c, social_voice }], scheduled_jobs: [] });
+  const jobs = (db: ReturnType<typeof dbWith>) => db.tables.scheduled_jobs.filter((j) => j.kind === "voice_profile");
+
+  it("waits for a client to have a voice, and for an accounts result under the one-account rule", async () => {
+    const db = dbWith({});
+    expect(await STEPS.voice.inputs(db, harbor({ voice_built_at: null }), accounts())).toBeNull();
+    expect(await STEPS.voice.inputs(db, harbor(), new Map())).toBeNull();
+    // The accounts step last ran before the rule: a second account may still be parked and no names are stored, so the voice waits.
+    expect(await STEPS.voice.inputs(db, harbor(), accounts({ inputs_key: "name:harbor wax|site:|links:00000000|removed:00000000" }))).toBeNull();
+    // The first run under the rule is under way, or failed: there is no result to decide by yet.
+    expect(await STEPS.voice.inputs(db, harbor(), rowsOf(row("accounts", { inputs_key: UNDER_RULE, status: "running", done_at: null, result: {} })))).toBeNull();
+    expect(await STEPS.voice.inputs(db, harbor(), rowsOf(row("accounts", { inputs_key: UNDER_RULE, status: "failed", done_at: null, attempts: 1, result: null, error: "Sprout did not answer" })))).toBeNull();
+    // A later refresh that is under way or that failed leaves the result standing, and holds nothing.
+    const key = await STEPS.voice.inputs(db, harbor(), accounts());
+    expect(key).toBe(`rule:1|built:${BUILT}|own:|names:${namesKey(LISTED)}`);
+    expect(await STEPS.voice.inputs(db, harbor(), accounts({ status: "running" }))).toBe(key);
+    expect(await STEPS.voice.inputs(db, harbor(), accounts({ status: "failed", attempts: 1, error: "Sprout did not answer" }))).toBe(key);
+  });
+
+  it("looks again when the voice, the listed names or the time an account was parked change, and at nothing else", async () => {
+    const db = dbWith({ sprout_profiles: [] });
+    const key = await STEPS.voice.inputs(db, harbor(), accounts());
+    expect(await STEPS.voice.inputs(db, harbor({ voice_built_at: "2026-12-01T08:00:00.000Z" }), accounts())).not.toBe(key);
+    expect(await STEPS.voice.inputs(db, harbor(), accounts({}, { display_names: [LISTED, { name: "Harbor Wax ✨", plain: "Harbor Wax" }] }))).not.toBe(key);
+    expect(await STEPS.voice.inputs(db, harbor(), accounts({}, { own_dropped_at: "2026-11-17T09:00:00.000Z" }))).toBe(`rule:1|built:${BUILT}|own:2026-11-17T09:00:00.000Z|names:${namesKey(LISTED)}`);
+    // The client's accounts as such are not in the key: an account a person adds is no reason to look at the voice.
+    db.tables.sprout_profiles.push({ client_id: "c1", sprout_profile_id: 30, network_type: "tiktok", is_active: true });
+    expect(await STEPS.voice.inputs(db, harbor(), accounts())).toBe(key);
+  });
+
+  it("records that a voice with nothing to fix conforms, and writes nothing else: no job, no change to the voice or its date", async () => {
+    const stored = voice();
+    const db = world(stored);
+    const before = JSON.stringify(db.tables);
+    const out = await STEPS.voice.run(db, harbor(), ctx({ rows: accounts() }));
+    expect(out).toEqual({ status: "done", result: { conforms: true, rule: 1, built_at: BUILT } });
+    expect(JSON.stringify(db.tables)).toBe(before);
+    expect(jobs(db)).toEqual([]);
+    expect(db.rpcCalls).toEqual([]);
+    // What the trend profile and the content strategy key on is as it was.
+    expect(db.tables.clients[0].social_voice).toEqual(stored);
+    expect((db.tables.clients[0].social_voice as { built_at: string }).built_at).toBe(BUILT);
+  });
+
+  it("conforms when the client's accounts list no decorated name, and when an account was parked before the voice was built", async () => {
+    // A voice that happens to hold stars nobody listed is not this rule's to fix.
+    const db = world(voice({ overall: { summary: "Five stars ★★★★★ from clients.", phrases: [] } }));
+    expect(await STEPS.voice.run(db, harbor(), ctx({ rows: accounts({}, { display_names: [] }) }))).toMatchObject({ status: "done", result: { conforms: true } });
+    expect(await STEPS.voice.run(world(voice()), harbor(), ctx({ rows: accounts({}, { own_dropped_at: "2026-10-30T09:00:00.000Z" }) }))).toMatchObject({ status: "done", result: { conforms: true } });
+    expect(jobs(db)).toEqual([]);
+  });
+
+  /** The job key of the one rebuild for a set of facts: the rule, the listed names and the time an account was parked. */
+  const jobKey = (parked = "", ...names: Array<{ name: string; plain: string }>) => `voice_profile:c1:rule1:${textHash(`${(names.length ? names : [LISTED]).map((n) => `${n.name}>${n.plain}`).join("\n")}|${parked}`)}`;
+
+  it("builds the voice again when its stored text holds a listed decorated name, wherever it is", async () => {
+    deps.now = () => new Date("2026-11-17T10:00:00.000Z");
+    const key = jobKey();
+    const places: Array<Record<string, unknown>> = [
+      { platforms: { LinkedIn: { summary: "Warm.", phrases: [STARS] } } },
+      { platforms: { LinkedIn: { summary: `Often thanks ${STARS} by name.`, phrases: [] } } },
+      { overall: { summary: "Warm.", opening: `Tags ${STARS} first.`, phrases: [] } },
+      { examples: { LinkedIn: [{ text: `Welcome ${STARS} to the firm.`, date: "2026-10-20", link: null, format: "image" }] } },
+    ];
+    for (const place of places) {
+      const db = world(voice(place));
+      const out = await STEPS.voice.run(db, harbor(), ctx({ rows: accounts() }));
+      expect(out).toEqual({ status: "done", result: { conforms: false, rule: 1, built_at: BUILT, why: ["names"], names: 1, queued: key, at: "2026-11-17T10:00:00.000Z" } });
+      expect(jobs(db)).toEqual([expect.objectContaining({ kind: "voice_profile", client_id: "c1", dedupe_key: key, priority: 39, available_at: "2026-11-17T10:00:00.000Z" })]);
+      // The step itself changes nothing in the voice: the job does.
+      expect((db.tables.clients[0].social_voice as { built_at: string }).built_at).toBe(BUILT);
+    }
+  });
+
+  it("builds the voice again when one of the client's own accounts was parked after it was built", async () => {
+    deps.now = () => new Date("2026-11-17T10:00:00.000Z");
+    const parked = "2026-11-17T09:00:00.000Z";
+    const db = world(voice());
+    const out = await STEPS.voice.run(db, harbor(), ctx({ rows: accounts({}, { own_dropped_at: parked }) }));
+    expect(out).toMatchObject({ status: "done", result: { conforms: false, why: ["accounts"], names: 0, queued: jobKey(parked) } });
+    expect(jobs(db)).toHaveLength(1);
+    // Both facts at once are one rebuild.
+    const both = world(voice({ overall: { summary: STARS, phrases: [] } }));
+    expect(await STEPS.voice.run(both, harbor(), ctx({ rows: accounts({}, { own_dropped_at: parked }) }))).toMatchObject({ result: { why: ["names", "accounts"] } });
+    expect(jobs(both)).toHaveLength(1);
+  });
+
+  it("queues one rebuild for a set of facts however often it looks, under a key a profile built today does not hold back", async () => {
+    deps.now = () => new Date("2026-11-17T10:00:00.000Z");
+    const today = "voice_profile:c1:2026-11-17";
+    const db = world(voice({ overall: { summary: STARS, phrases: [] } }));
+    db.tables.scheduled_jobs.push({ kind: "voice_profile", client_id: "c1", dedupe_key: today, status: "done" });
+    await STEPS.voice.run(db, harbor(), ctx({ rows: accounts() }));
+    // Still queued, or running: looked at again, nothing more is asked.
+    expect(await STEPS.voice.run(db, harbor(), ctx({ rows: accounts() }))).toMatchObject({ status: "done", result: { conforms: false, queued: jobKey() } });
+    db.tables.scheduled_jobs.find((j) => j.dedupe_key === jobKey())!.status = "running";
+    await STEPS.voice.run(db, harbor(), ctx({ rows: accounts() }));
+    expect(jobs(db).map((j) => j.dedupe_key)).toEqual([today, jobKey()]);
+    // Once the job built the voice again, plain, the step finds nothing to fix and asks nothing more.
+    const rebuilt = "2026-11-17T10:03:00.000Z";
+    db.tables.scheduled_jobs.find((j) => j.dedupe_key === jobKey())!.status = "done";
+    db.tables.clients[0].social_voice = voice({ built_at: rebuilt, rule: 1 });
+    expect(await STEPS.voice.run(db, harbor({ voice_built_at: rebuilt }), ctx({ rows: accounts() }))).toEqual({ status: "done", result: { conforms: true, rule: 1, built_at: rebuilt } });
+    expect(jobs(db)).toHaveLength(2);
+  });
+
+  // A rebuild sets off the trend profile and the content strategy. A voice that was built again and still holds a listed name must not start another.
+  it("never builds a second time for the same facts: a rebuilt voice that still holds a listed name is corrected in code, with its date kept", async () => {
+    deps.now = () => new Date("2026-11-17T10:10:00.000Z");
+    const rebuilt = "2026-11-17T10:03:00.000Z";
+    const stillHolds = voice({ built_at: rebuilt, rule: 1, overall: { summary: `Thanks ${STARS} often.`, phrases: [STARS, "thank you"] }, examples: { LinkedIn: [{ text: `Welcome ${STARS}.`, date: "2026-10-20", link: null, format: "image" }] } });
+    const db = world(stillHolds, harbor({ voice_built_at: rebuilt }));
+    db.tables.scheduled_jobs.push({ kind: "voice_profile", client_id: "c1", dedupe_key: jobKey(), status: "done" });
+    const out = await STEPS.voice.run(db, harbor({ voice_built_at: rebuilt }), ctx({ rows: accounts() }));
+    expect(out).toEqual({ status: "done", result: { conforms: true, rule: 1, built_at: rebuilt, why: ["names"], names: 1, corrected: 1, rebuilt: jobKey() } });
+    // No second job, whatever its key would be.
+    expect(jobs(db)).toHaveLength(1);
+    const stored = db.tables.clients[0].social_voice as Record<string, unknown>;
+    expect(stored).toEqual({ ...stillHolds, overall: { summary: "Thanks Dana Reed often.", phrases: ["Dana Reed", "thank you"] }, examples: { LinkedIn: [{ text: "Welcome Dana Reed.", date: "2026-10-20", link: null, format: "image" }] } });
+    // The date it was built is as it was: nothing that keys on the voice runs.
+    expect(stored.built_at).toBe(rebuilt);
+    expect(JSON.stringify(stored)).not.toContain("★");
+    // Looked at again, it conforms.
+    expect(await STEPS.voice.run(db, harbor({ voice_built_at: rebuilt }), ctx({ rows: accounts() }))).toEqual({ status: "done", result: { conforms: true, rule: 1, built_at: rebuilt } });
+    // The same when the one rebuild did not finish: no second one, and the names are corrected in what is stored.
+    const failed = world(voice({ overall: { summary: STARS, phrases: [] } }));
+    failed.tables.scheduled_jobs.push({ kind: "voice_profile", client_id: "c1", dedupe_key: jobKey(), status: "failed" });
+    expect(await STEPS.voice.run(failed, harbor(), ctx({ rows: accounts() }))).toMatchObject({ status: "done", result: { conforms: true, corrected: 1 } });
+    expect(jobs(failed)).toHaveLength(1);
+    expect(JSON.stringify(failed.tables.clients[0].social_voice)).not.toContain("★");
+  });
+
+  it("asks for one more rebuild only when the facts themselves change: another listed name, or another account parked", async () => {
+    deps.now = () => new Date("2026-11-17T10:10:00.000Z");
+    const SPARKLE = { name: "Harbor Wax ✨", plain: "Harbor Wax" };
+    const db = world(voice({ overall: { summary: "Harbor Wax ✨ is how it signs off.", phrases: [] } }));
+    db.tables.scheduled_jobs.push({ kind: "voice_profile", client_id: "c1", dedupe_key: jobKey(), status: "done" });
+    const out = await STEPS.voice.run(db, harbor(), ctx({ rows: accounts({}, { display_names: [LISTED, SPARKLE] }) }));
+    expect(out).toMatchObject({ result: { conforms: false, why: ["names"], queued: jobKey("", LISTED, SPARKLE) } });
+    expect(jobs(db).map((j) => j.dedupe_key)).toEqual([jobKey(), jobKey("", LISTED, SPARKLE)]);
+  });
+
+  it("waits, and queues nothing, when the accounts result or the voice is not there to read", async () => {
+    expect(await STEPS.voice.run(world(voice()), harbor(), ctx({ rows: new Map() }))).toEqual({ status: "waiting", reason: "accounts" });
+    const none = world(null);
+    expect(await STEPS.voice.run(none, harbor(), ctx({ rows: accounts() }))).toEqual({ status: "waiting", reason: "voice" });
+    expect(jobs(none)).toEqual([]);
+  });
+});
+
+describe("calendar_recheck", () => {
+  const BUILT = "2026-11-17T10:05:00.000Z";
+  const NOW = new Date("2026-11-17T10:10:00.000Z");
+  const NOTE = "Write these posts again from the client's own material.";
+  const STARS = "Dana Reed ★★★★★";
+  const fromTrend = [{ type: "trend", label: "x", evidence: [{ id: "N1", kind: "trend", text: "An outside caption", company: "@booksfast", theme: "Month-end in days" }], test: false }];
+  const fromOwn = [{ type: "performance", label: "x", evidence: [{ id: "P1", kind: "own", text: "Our checklist" }], test: false }];
+  const plan = (id: string, week_start: string, over: Record<string, unknown> = {}) => ({ id, client_id: "c1", week_start, status: "ready", ready_at: "2026-11-10T07:20:00.000Z", evidence: { items: [] }, revisions: [], pending_revision: null, ...over });
+  const post = (id: string, plan_id: string | null, post_date: string, copy: string, reasons: unknown, over: Record<string, unknown> = {}) =>
+    ({ id, client_id: "c1", post_key: `k-${id}`, plan_id, post_date, platform: "Instagram", format: "image", copy, cta: null, reasons, touched_at: null, story_of: null, ...over });
+  const c = (over: Record<string, unknown> = {}) => client({ name: "Harbor Wax", voice_built_at: BUILT, timezone: "UTC", ...over });
+  const rows = (accounts: Record<string, unknown> = {}) => rowsOf(row("voice"), row("accounts", { inputs_key: "name:harbor wax|site:|links:00000000|removed:00000000|own:1", result: { display_names: [{ name: STARS, plain: "Dana Reed" }], own_dropped_at: null, ...accounts } }));
+  /** The database half: calendar_post_worked by key, and calendar_request_revision as the migration has it. */
+  const world = (tables: Record<string, Record<string, unknown>[]>, worked: string[] = []) => dbWith({ scheduled_jobs: [], post_iterations: [], ...tables }, {
+    calendar_post_worked: (args: { p_key: string }) => worked.includes(args.p_key),
+    calendar_request_revision: (args: Record<string, unknown>, d: { tables: Record<string, Record<string, unknown>[]> }) => {
+      const p = d.tables.calendar_plans.find((x) => x.id === args.p_plan);
+      if (!p) throw new Error("No such plan.");
+      if (p.pending_revision) throw new Error("This week is already being revised.");
+      p.pending_revision = { note: args.p_note, by: args.p_user, at: "now", scope: args.p_scope };
+      d.tables.scheduled_jobs.push({ kind: "week_revise", client_id: p.client_id, occurrence: p.week_start });
+      return p;
+    },
+  });
+  const asked = (db: ReturnType<typeof dbWith>) => db.rpcCalls.filter((r) => r.name === "calendar_request_revision").map((r) => r.args);
+
+  it("waits for the voice step, and while a voice profile is on its way", async () => {
+    const db = world({});
+    expect(await STEPS.calendar_recheck.inputs(db, c({ voice_built_at: null }), rows())).toBeNull();
+    expect(await STEPS.calendar_recheck.inputs(db, c(), rowsOf(row("accounts")))).toBeNull();
+    // The accounts step's result is what names and dates are read from: with none standing, there is nothing to check by.
+    expect(await STEPS.calendar_recheck.inputs(db, c(), rowsOf(row("voice"), row("accounts", { inputs_key: "x|own:1", status: "failed", result: null, error: "Sprout did not answer", attempts: 1 })))).toBeNull();
+    expect(await STEPS.calendar_recheck.inputs(db, c(), rowsOf(row("voice"), row("accounts", { inputs_key: "from before the rule", result: { display_names: [] } })))).toBeNull();
+    expect(await STEPS.calendar_recheck.inputs(db, c(), rowsOf(row("voice")))).toBeNull();
+    for (const status of ["queued", "running"]) {
+      const waiting = world({ scheduled_jobs: [{ id: "j1", kind: "voice_profile", client_id: "c1", status }] });
+      expect(await STEPS.calendar_recheck.inputs(waiting, c(), rows())).toBeNull();
+    }
+    // A finished voice job, another client's, or another kind of job holds nothing.
+    const free = world({ scheduled_jobs: [{ id: "j1", kind: "voice_profile", client_id: "c1", status: "done" }, { id: "j2", kind: "voice_profile", client_id: "other", status: "queued" }, { id: "j3", kind: "week_plan", client_id: "c1", status: "queued" }] });
+    expect(await STEPS.calendar_recheck.inputs(free, c(), rows())).toBe(`rules:1|voice:${BUILT}|own:`);
+  });
+
+  it("keys on the copy rules, the voice and the time an own account was parked", async () => {
+    const db = world({});
+    const key = await STEPS.calendar_recheck.inputs(db, c(), rows());
+    expect(await STEPS.calendar_recheck.inputs(db, c({ voice_built_at: "2026-12-01T08:00:00.000Z" }), rows())).toBe("rules:1|voice:2026-12-01T08:00:00.000Z|own:");
+    expect(await STEPS.calendar_recheck.inputs(db, c(), rows({ own_dropped_at: "2026-11-17T09:00:00.000Z" }))).toBe(`rules:1|voice:${BUILT}|own:2026-11-17T09:00:00.000Z`);
+    // Nothing the step writes is in its key.
+    expect(await STEPS.calendar_recheck.inputs(world({ calendar_plans: [plan("p1", "2026-11-16", { pending_revision: { note: NOTE } })] }), c(), rows())).toBe(key);
+  });
+
+  it("corrects a decorated name in place, in a post a person worked on and in its design option, without marking it touched", async () => {
+    deps.now = () => NOW;
+    const db = world({
+      calendar_plans: [plan("p1", "2026-11-16", { evidence: { rules: 1 } })],
+      calendar_posts: [
+        post("a", "p1", "2026-11-18", `Five years with ${STARS} at the front desk.`, fromOwn, { cta: `Say hi to ${STARS}`, touched_at: "2026-11-12T09:00:00.000Z" }),
+        post("b", "p1", "2026-11-19", "Nothing to correct here.", fromOwn),
+        post("s", "p1", "2026-11-18", `Five years with ${STARS} at the front desk.`, [{ type: "story", label: "One Story with each Instagram post." }], { format: "Story", story_of: "k-a" }),
+        // A post that has gone out is not an upcoming post.
+        post("past", "p1", "2026-11-16", `Yesterday with ${STARS}.`, fromOwn),
+        { ...post("x", "px", "2026-11-18", `Another client's ${STARS}.`, fromOwn), client_id: "other" },
+      ],
+      post_iterations: [
+        { id: "i1", client_id: "c1", calendar_post_key: "k-a", post_copy: `Five years with ${STARS} at the front desk.`, cta: `Say hi to ${STARS}` },
+        { id: "i2", client_id: "c1", calendar_post_key: "k-b", post_copy: `An option that names ${STARS}.`, cta: null },
+        { id: "i3", client_id: "c1", calendar_post_key: "k-b", post_copy: "A plain option.", cta: null },
+        { id: "i4", client_id: "other", calendar_post_key: "k-a", post_copy: `Not this client's ${STARS}.`, cta: null },
+      ],
+    }, ["k-a"]);
+    const out = await STEPS.calendar_recheck.run(db, c(), ctx({ rows: rows() }));
+    expect(out).toEqual({ status: "done", result: { renamed: 4, asked: [], kept: 0 } });
+    const byId = (table: string, id: string) => db.tables[table].find((r) => r.id === id)!;
+    expect(byId("calendar_posts", "a")).toMatchObject({ copy: "Five years with Dana Reed at the front desk.", cta: "Say hi to Dana Reed", touched_at: "2026-11-12T09:00:00.000Z" });
+    expect(byId("calendar_posts", "s")).toMatchObject({ copy: "Five years with Dana Reed at the front desk.", touched_at: null });
+    expect(byId("calendar_posts", "b")).toMatchObject({ copy: "Nothing to correct here.", touched_at: null });
+    expect(byId("calendar_posts", "past").copy).toBe(`Yesterday with ${STARS}.`);
+    expect(byId("calendar_posts", "x").copy).toBe(`Another client's ${STARS}.`);
+    expect(byId("post_iterations", "i1")).toMatchObject({ post_copy: "Five years with Dana Reed at the front desk.", cta: "Say hi to Dana Reed" });
+    expect(byId("post_iterations", "i2").post_copy).toBe("An option that names Dana Reed.");
+    expect(byId("post_iterations", "i4").post_copy).toBe(`Not this client's ${STARS}.`);
+    // A corrected name is no revision: nothing is asked of the planner, and the plan is as it was.
+    expect(asked(db)).toEqual([]);
+    expect(db.tables.calendar_plans[0]).toMatchObject({ pending_revision: null, revisions: [] });
+    expect(db.tables.scheduled_jobs).toEqual([]);
+  });
+
+  it("makes no write for a client whose account list has no decorated name", async () => {
+    deps.now = () => NOW;
+    const db = world({ calendar_plans: [plan("p1", "2026-11-16", { evidence: { rules: 1 } })], calendar_posts: [post("a", "p1", "2026-11-18", `Five years with ${STARS}.`, fromOwn)], post_iterations: [{ id: "i1", client_id: "c1", calendar_post_key: "k-a", post_copy: STARS, cta: null }] });
+    const before = JSON.stringify(db.tables);
+    expect(await STEPS.calendar_recheck.run(db, c(), ctx({ rows: rows({ display_names: [] }) }))).toEqual({ status: "done", result: { renamed: 0, asked: [], kept: 0 } });
+    expect(JSON.stringify(db.tables)).toBe(before);
+  });
+
+  it("asks one revision for each week that holds a post to write again, and none for a week whose only such posts were worked on", async () => {
+    deps.now = () => NOW;
+    const db = world({
+      calendar_plans: [
+        // This week, planned before the rules: one post from a trend nobody touched, one from the client's own post.
+        plan("p1", "2026-11-16"),
+        // Next week: its only post from a trend has a design; another one carries time codes but a person's revision rewrote it.
+        plan("p2", "2026-11-23", { revisions: [{ note: "Warmer", by: "u1", at: "x", scope: "untouched", replaced: [{ id: "e", copy: "Old" }] }] }),
+        // The week after: written under the current rules, nothing to do.
+        plan("p3", "2026-11-30", { evidence: { rules: 1 } }),
+        // Not ready, or over: never asked.
+        plan("p4", "2026-12-07", { status: "planning" }), plan("p0", "2026-11-02"),
+      ],
+      calendar_posts: [
+        post("a", "p1", "2026-11-18", "Borrowed from a trend.", fromTrend), post("b", "p1", "2026-11-19", "From our own checklist.", fromOwn),
+        post("a2", "p1", "2026-11-20", "Also borrowed.", fromTrend),
+        post("d", "p2", "2026-11-24", "Borrowed, then designed.", fromTrend), post("e", "p2", "2026-11-25", "0:00 Intro", fromOwn),
+        post("f", "p3", "2026-12-01", "Written under the rules.", fromTrend),
+        post("g", "p4", "2026-12-08", "Still being planned.", fromTrend),
+        // A Story is never a reason to ask: it follows its post.
+        post("st", "p3", "2026-12-01", "0:00 in a Story", fromTrend, { format: "Story", story_of: "k-f" }),
+        // A post nobody planned (no plan) is nobody's to re-plan.
+        post("h", null, "2026-11-21", "0:00 added by hand", fromTrend),
+      ],
+    }, ["k-d"]);
+    const out = await STEPS.calendar_recheck.run(db, c(), ctx({ rows: rows({ display_names: [] }) }));
+    expect(out).toEqual({ status: "done", result: { renamed: 0, asked: ["2026-11-16"], kept: 2 } });
+    expect(asked(db)).toEqual([{ p_plan: "p1", p_note: NOTE, p_user: null, p_scope: "replan" }]);
+    expect(db.tables.scheduled_jobs).toEqual([{ kind: "week_revise", client_id: "c1", occurrence: "2026-11-16" }]);
+    // Asked of calendar_post_worked only for the posts with a reason to be written again.
+    expect(db.rpcCalls.filter((r) => r.name === "calendar_post_worked").map((r) => r.args.p_key).sort()).toEqual(["k-a", "k-a2", "k-d", "k-e"]);
+  });
+
+  it("asks for every week planned before one of the client's own accounts was parked", async () => {
+    deps.now = () => NOW;
+    const db = world({
+      calendar_plans: [plan("p1", "2026-11-16", { evidence: { rules: 1 } }), plan("p2", "2026-11-23", { evidence: { rules: 1 }, ready_at: "2026-11-17T09:30:00.000Z" })],
+      calendar_posts: [post("a", "p1", "2026-11-18", "From our own checklist.", fromOwn), post("b", "p2", "2026-11-24", "Planned after the account was parked.", fromOwn)],
+    });
+    const out = await STEPS.calendar_recheck.run(db, c(), ctx({ rows: rows({ display_names: [], own_dropped_at: "2026-11-17T09:00:00.000Z" }) }));
+    expect(out).toMatchObject({ status: "done", result: { asked: ["2026-11-16"] } });
+  });
+
+  it("answers waiting while a week with such posts is being revised, and asks once that revision is done", async () => {
+    deps.now = () => NOW;
+    const db = world({
+      calendar_plans: [plan("p1", "2026-11-16", { pending_revision: { note: "Less formal", by: "u1", at: "x", scope: "untouched" } })],
+      calendar_posts: [post("a", "p1", "2026-11-18", "Borrowed from a trend.", fromTrend)],
+    });
+    const out = await STEPS.calendar_recheck.run(db, c(), ctx({ rows: rows({ display_names: [] }) }));
+    expect(out).toEqual({ status: "waiting", reason: "in_progress", recheckMinutes: 10, result: { renamed: 0, asked: [], kept: 0 } });
+    expect(asked(db)).toEqual([]);
+    // The person's revision finished and left the post as it was: now the week is asked for.
+    db.tables.calendar_plans[0].pending_revision = null;
+    expect(await STEPS.calendar_recheck.run(db, c(), ctx({ rows: rows({ display_names: [] }) }))).toMatchObject({ status: "done", result: { asked: ["2026-11-16"] } });
+  });
+
+  it("asks nothing on a second run: the week is being revised, and once the replan is done it is under the rules", async () => {
+    deps.now = () => NOW;
+    const db = world({ calendar_plans: [plan("p1", "2026-11-16")], calendar_posts: [post("a", "p1", "2026-11-18", "Borrowed from a trend.", fromTrend)] });
+    expect(await STEPS.calendar_recheck.run(db, c(), ctx({ rows: rows({ display_names: [] }) }))).toMatchObject({ status: "done", result: { asked: ["2026-11-16"] } });
+    // Run again at once: the revision it asked for is waiting.
+    expect(await STEPS.calendar_recheck.run(db, c(), ctx({ rows: rows({ display_names: [] }) }))).toMatchObject({ status: "waiting", result: { asked: [] } });
+    expect(asked(db)).toHaveLength(1);
+    // The replan finished (runWeek.ts stamps the plan and records the revision).
+    Object.assign(db.tables.calendar_plans[0], { pending_revision: null, evidence: { items: [], rules: 1 }, revisions: [{ scope: "replan", by: null, done_at: "2026-11-17T10:20:00.000Z", rewritten: 1 }] });
+    expect(await STEPS.calendar_recheck.run(db, c(), ctx({ rows: rows({ display_names: [] }) }))).toEqual({ status: "done", result: { renamed: 0, asked: [], kept: 0 } });
+    expect(asked(db)).toHaveLength(1);
+  });
+
+  it("counts a week a revision reached first as still to do, and never fails for it", async () => {
+    deps.now = () => NOW;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const db = dbWith({ scheduled_jobs: [], post_iterations: [], calendar_plans: [plan("p1", "2026-11-16")], calendar_posts: [post("a", "p1", "2026-11-18", "Borrowed from a trend.", fromTrend)] }, {
+      calendar_post_worked: () => false,
+      calendar_request_revision: () => { throw new Error("This week is already being revised."); },
+    });
+    expect(await STEPS.calendar_recheck.run(db, c(), ctx({ rows: rows({ display_names: [] }) }))).toEqual({ status: "waiting", reason: "in_progress", recheckMinutes: 10, result: { renamed: 0, asked: [], kept: 0 } });
+    expect(warn).toHaveBeenCalled();
   });
 });

@@ -325,3 +325,103 @@ describe("the job with Sprout's groups", () => {
     expect(byKey["group:11"]).toMatchObject({ decision: "declined", decline: { id: "d4" } });
   });
 });
+
+// Copy sources, 17 Nov 2026 (invented brands): a Sprout group that holds a national brand and a
+// local franchise is two brands, each with one profile per network.
+describe("a Sprout group with two profiles on one network", () => {
+  const g = (group: string, profile: SproutProfile): SproutProfile => ({ ...profile, groups: [group] });
+  const GROUPS = [{ id: "21", name: "hw" }, { id: "22", name: "nl" }, { id: "23", name: "Twin Oaks" }];
+  const HARBOR = [
+    g("21", p("7020", "Harbor Wax", "harborwax", "fb_instagram_account")), g("21", p("7021", "Harbor Wax", "harborwax", "facebook")),
+    g("21", p("7010", "Harbor Wax (Lakeside)", "harborwax_lakeside", "fb_instagram_account")), g("21", p("7011", "Harbor Wax (Lakeside)", "harborwaxlakeside", "facebook")),
+  ];
+  const NORTHWIND = [
+    g("22", p("8030", "Northwind Law", "northwindlaw", "fb_instagram_account")), g("22", p("8031", "Northwind Law", "northwindlaw", "facebook")),
+    g("22", p("8032", "Northwind Law (Riverside)", "northwindlaw_riverside", "fb_instagram_account")), g("22", p("8033", "Northwind Law (Riverside)", "northwindlawriverside", "facebook")),
+  ];
+  const TWINS = [g("23", p("9001", "Twin Oaks", "twinoaks", "fb_instagram_account")), g("23", p("9002", "Twin Oaks", "twinoaks.two", "instagram"))];
+  const run = (db: FakeDb, listed: SproutProfile[]) => sproutOnboarding(db, deps({
+    profiles: async () => listed, groups: async () => GROUPS,
+    posts: async (ids: string[]): Promise<SproutPost[]> => ids.map((id) => ({ text: "Open this week.", created_time: NOW.toISOString(), perma_link: null, profile_id: id })),
+  }), { dryRun: false });
+
+  it("leaves both brands to the client that holds their profiles, parked ones included", async () => {
+    const db = world();
+    db.tables.clients.push({ id: "hw", name: "Harbor Wax", website_url: null, archived_at: null, demo_job_id: null });
+    // The one-account-per-network rule parked the franchise's accounts: they stay the client's rows.
+    db.tables.sprout_profiles.push(
+      { id: "h1", client_id: "hw", sprout_profile_id: 7020, is_active: true }, { id: "h2", client_id: "hw", sprout_profile_id: 7021, is_active: true },
+      { id: "h3", client_id: "hw", sprout_profile_id: 7010, is_active: false }, { id: "h4", client_id: "hw", sprout_profile_id: 7011, is_active: false },
+    );
+    const clients = db.tables.clients.length;
+    const report = await run(db, HARBOR);
+    expect(report.results.map((r) => [r.key, r.brand, r.decision, r.client_ids])).toEqual([
+      ["group:21", "Harbor Wax (Lakeside)", "matched", ["hw"]],
+      ["group:21:7020", "Harbor Wax", "matched", ["hw"]],
+    ]);
+    expect(db.tables.clients).toHaveLength(clients);
+    expect(report.created).toEqual([]);
+  });
+
+  // The split tells two brands apart. It is never by itself a reason to make a client.
+  it("never creates a client from a split: both parts are left for a person, and no posts are read for them", async () => {
+    const db = world();
+    const clients = db.tables.clients.length;
+    const d = deps({ profiles: async () => NORTHWIND, groups: async () => GROUPS });
+    for (const dryRun of [true, false, false]) {
+      const report = await sproutOnboarding(db, d, { dryRun });
+      const why = 'Left alone: its Sprout group holds more than one brand ("Northwind Law", "Northwind Law (Riverside)"), so a person decides which of them become clients.';
+      expect(report.results.map((r) => [r.key, r.brand, r.decision, r.reason])).toEqual([
+        ["group:22", "Northwind Law", "group_split", why],
+        ["group:22:8032", "Northwind Law (Riverside)", "group_split", why],
+      ]);
+      expect(report.created).toEqual([]);
+    }
+    expect(db.rpcCalls.filter((c) => c.name === "sprout_onboard_client")).toEqual([]);
+    expect(db.tables.clients).toHaveLength(clients);
+    expect(d.postReads).toEqual([]);
+  });
+
+  it("leaves the other brand of a group alone when the group already is a client, whether the client holds its profiles or is matched by name", async () => {
+    const why = "Left alone: its Sprout group already is Northwind Law, and this is another brand in that group. A person adds it as a client of its own if it is one.";
+    // The client holds the national pair; the city pair was never its own.
+    const held = world();
+    held.tables.clients.push({ id: "nw", name: "Northwind Law", website_url: null, archived_at: null, demo_job_id: null });
+    held.tables.sprout_profiles.push({ id: "n1", client_id: "nw", sprout_profile_id: 8030, is_active: true }, { id: "n2", client_id: "nw", sprout_profile_id: 8031, is_active: true });
+    // The client holds no profile yet and is matched by its name.
+    const named = world();
+    named.tables.clients.push({ id: "nw", name: "Northwind Law", website_url: null, archived_at: null, demo_job_id: null });
+    for (const db of [held, named]) {
+      const clients = db.tables.clients.length;
+      const report = await run(db, NORTHWIND);
+      expect(report.results.map((r) => [r.key, r.brand, r.decision, r.client_ids])).toEqual([
+        ["group:22", "Northwind Law", "matched", ["nw"]],
+        ["group:22:8032", "Northwind Law (Riverside)", "group_client", ["nw"]],
+      ]);
+      expect(report.results[1].reason).toBe(why);
+      expect(report.created).toEqual([]);
+      expect(db.rpcCalls.filter((c) => c.name === "sprout_onboard_client")).toEqual([]);
+      expect(db.tables.clients).toHaveLength(clients);
+    }
+  });
+
+  it("still creates a group that is one brand, as before", async () => {
+    const db = world();
+    const report = await run(db, NORTHWIND.slice(0, 2));
+    expect(report.results.map((r) => [r.key, r.brand, r.decision])).toEqual([["group:22", "Northwind Law", "created"]]);
+    expect(db.rpcCalls.filter((c) => c.name === "sprout_onboard_client").map((c) => c.args.p_profiles.map((x: { id: string }) => x.id))).toEqual([["8030", "8031"]]);
+  });
+
+  it("leaves a brand with two profiles named alike on one network alone, and reads no posts for it", async () => {
+    const db = world();
+    const clients = db.tables.clients.length;
+    const d = deps({ profiles: async () => TWINS, groups: async () => GROUPS });
+    const report = await sproutOnboarding(db, d, { dryRun: false });
+    expect(report.results).toEqual([expect.objectContaining({
+      key: "group:23", brand: "Twin Oaks", decision: "group_conflict",
+      reason: 'Left alone: it has two instagram profiles named alike ("Twin Oaks", "Twin Oaks"), so which one is the brand\'s is unclear.',
+    })]);
+    expect(d.postReads).toEqual([]);
+    expect(db.tables.clients).toHaveLength(clients);
+  });
+});

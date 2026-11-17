@@ -1,5 +1,7 @@
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { learnFromSignal, undoLearning } from "../../../functions/_shared/voice/load";
+import { buildVoiceProfile, learnFromSignal, undoLearning } from "../../../functions/_shared/voice/load";
+import { VOICE_RULE } from "../../../functions/_shared/voice/voice";
+import type { OwnPost } from "../../../functions/_shared/calendar/evidence";
 import { fakeDb, type FakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
 
 // The preference memory learning from one signal, and a rewrite note's
@@ -108,5 +110,41 @@ describe("undoLearning", () => {
     ]);
     expect(undone).toBe(0);
     expect(db.tables.brand_voice_learnings.map((p) => [p.id, p.status])).toEqual([["e1", "active"], ["n2", "active"], ["p1", "replaced"]]);
+  });
+});
+
+// Copy sources, 17 Nov 2026 (invented names): a voice profile is stored with the display names the
+// client's Sprout account lists written plainly, and carries the version of the rule it was built under.
+describe("buildVoiceProfile", () => {
+  const NOW = new Date("2026-11-17T08:00:00Z");
+  const posts: OwnPost[] = Array.from({ length: 6 }, (_, i) => ({
+    id: `li${i}`, platform: "LinkedIn", format: "image", publishedAt: new Date(NOW.getTime() - (i + 3) * 86_400_000).toISOString(),
+    text: "Proud of the team this week, and thankful for every client who trusted us.", link: null, impressions: 100 + i, engagement: 5 + i,
+  }));
+  const reply = JSON.stringify({
+    platforms: { LinkedIn: { summary: "Warm and proud; thanks Dana Reed ★★★★★ by name.", phrases: ["Dana Reed ★★★★★", "proud of the team"] } },
+    overall: { summary: "Warm and proud.", phrases: ["Northwind Law - Trial Lawyers"] },
+  });
+
+  it("stores the rule's version and plain phrases", async () => {
+    anthropic.mockResolvedValue({ text: reply, raw: {} });
+    const db = fakeDb({ clients: [{ id: "c1", name: "Northwind Law", timezone: "UTC" }] });
+    const voice = await buildVoiceProfile(db, "c1", posts, NOW, { names: [{ name: "Dana Reed ★★★★★", plain: "Dana Reed" }, { name: "Northwind Law - Trial Lawyers", plain: "Northwind Law" }] });
+    expect(VOICE_RULE).toBe(1);
+    expect(voice.rule).toBe(VOICE_RULE);
+    expect(voice.platforms.LinkedIn.summary).toBe("Warm and proud; thanks Dana Reed by name.");
+    expect(voice.platforms.LinkedIn.phrases).toEqual(["Dana Reed", "proud of the team"]);
+    expect(voice.overall?.phrases).toEqual(["Northwind Law"]);
+    // What the database holds is what was returned.
+    expect(db.tables.clients[0].social_voice).toEqual(voice);
+    expect(JSON.stringify(db.tables.clients[0].social_voice)).not.toContain("★");
+  });
+
+  it("stores the rule's version for a client with no listed names, and leaves its phrases as written", async () => {
+    anthropic.mockResolvedValue({ text: reply, raw: {} });
+    const db = fakeDb({ clients: [{ id: "c1", name: "Northwind Law", timezone: "UTC" }] });
+    const voice = await buildVoiceProfile(db, "c1", posts, NOW);
+    expect(voice.rule).toBe(VOICE_RULE);
+    expect(voice.platforms.LinkedIn.phrases).toEqual(["Dana Reed ★★★★★", "proud of the team"]);
   });
 });

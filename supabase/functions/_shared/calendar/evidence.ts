@@ -10,6 +10,11 @@
 //   * the industry trends of the newest finished Trends week: each theme staff
 //     did not dismiss, shown by up to two of its best-fitting kept posts,
 //     ranked by fit and by engagement against the platform's kept median;
+//     the planner reads each as a subject in the team's own words (the
+//     theme's why and angle, the post's lesson), never its caption or author
+//     (copy sources, 17 Nov 2026: an outside post tells which subject is
+//     timely and nothing more). A competitor's post is read by its format,
+//     its numbers and its subject the same way;
 //   * the client's posting rhythm, which always resolves (resolveRhythm):
 //     its own posting, then its competitors', then every tracked company's.
 // There is no published threshold for "outperformed", so posts are ranked by
@@ -17,6 +22,7 @@
 // Free of Deno and network imports so it can be tested.
 
 import type { TrendFormat, TrendPlatform } from "../trends/types.ts";
+import { sameName } from "../lifecycle/names.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -74,6 +80,16 @@ export interface EvidenceItem {
   key?: string;
   category?: string;
   fit?: string;
+  /**
+   * What the planner reads of an outside post in place of its caption, in the
+   * team's own words; never kept on a post's reason (weekPlan.ts toRef).
+   * Trends: what the post teaches (trend_posts.lesson), and its theme's why it
+   * matters and angle for the client. Competitor posts: the topic that lists it.
+   */
+  lesson?: string;
+  matters?: string;
+  angle?: string;
+  subject?: string;
 }
 
 /**
@@ -438,11 +454,17 @@ export function clientCompanyId(payload: any, clientName: string): string | null
   return own?.companyId ? String(own.companyId) : null;
 }
 
+/**
+ * Whether a feed post is the client's own: the feed's id for the client, or
+ * the exact company name by the lifecycle's name rule (names.ts). A company
+ * whose name only contains the client's ("Harbor Wax (Lakeside)" for "Harbor
+ * Wax") is another company: counting it as the client mixed two brands'
+ * posts (copy sources, 17 Nov 2026).
+ */
 // deno-lint-ignore no-explicit-any
 export function isClientPost(p: any, clientCompany: string | null, clientName: string): boolean {
   if (clientCompany && String(p?.companyId) === clientCompany) return true;
-  const name = String(p?.companyName || "").toLowerCase();
-  return !!clientName && !!name && name.includes(clientName.toLowerCase());
+  return sameName(p?.companyName, clientName);
 }
 
 /** A weekly feed snapshot reduced to what posting rates need; the post text is left behind, since snapshots are large. */
@@ -680,6 +702,11 @@ export interface TrendEvidenceInput {
   measured: number;
   /** The median engagement of every kept post on this platform that week, the baseline the score measures against. Without it the items' own median stands in. */
   platform_median?: number;
+  /** What the post teaches, in the team's words (trend_posts.lesson); "" when it has none. */
+  lesson: string;
+  /** Its theme's why it matters and angle for the client (trend_themes); "" when the theme has none. */
+  matters: string;
+  angle: string;
 }
 
 export const TREND_POSTS_PER_THEME = 2;
@@ -709,13 +736,13 @@ export async function latestTrendEvidence(db: Db, clientId: string, now: Date): 
   // Stale trends are no trends: a client whose weekly runs stopped is planned from its own and competitor evidence only.
   const oldest = new Date(now.getTime() - TREND_WEEK_MAX_AGE_DAYS * 86_400_000).toISOString().slice(0, 10);
   if (String(week.week_start).slice(0, 10) < oldest) return [];
-  const { data: themes, error: themeError } = await db.from("trend_themes").select("id, title, post_ids").eq("week_id", week.id)
+  const { data: themes, error: themeError } = await db.from("trend_themes").select("id, title, post_ids, why_it_matters, angle").eq("week_id", week.id)
     .is("dismissed_at", null).order("position", { ascending: true });
   if (themeError) throw new Error(`Could not read the latest trends: ${themeError.message}`);
   if (!themes?.length) return [];
   // A kept post the tripwire flagged (a junk phrase got past the filter) is never cited, and never counts toward a median.
   const { data: posts, error: postError } = await db.from("trend_posts")
-    .select("id, platform, url, author, text, posted_at, format, fit, engagement, likes, comments, shares").eq("week_id", week.id).eq("kept", true).eq("tripwire", false);
+    .select("id, platform, url, author, text, lesson, posted_at, format, fit, engagement, likes, comments, shares").eq("week_id", week.id).eq("kept", true).eq("tripwire", false);
   if (postError) throw new Error(`Could not read the latest trends: ${postError.message}`);
 
   // deno-lint-ignore no-explicit-any
@@ -740,6 +767,7 @@ export async function latestTrendEvidence(db: Db, clientId: string, now: Date): 
         text: String(p.text ?? ""), link: String(p.url), date: validDay(p.posted_at) ? day(p.posted_at) : null, fit: Number(p.fit) || 0,
         engagement: Number(p.engagement) || 0, measured: (Number(p.likes) || 0) + (Number(p.comments) || 0) + (Number(p.shares) || 0),
         platform_median: platformMedian.get(p.platform) ?? 0,
+        lesson: String(p.lesson ?? "").trim(), matters: String(t.why_it_matters ?? "").trim(), angle: String(t.angle ?? "").trim(),
       });
     }
   }
@@ -754,7 +782,9 @@ export async function latestTrendEvidence(db: Db, clientId: string, now: Date): 
  * once, under the theme it scored best for. The author is kept in company.
  * The item's value is the measured engagement (likes, comments and shares):
  * it is stored on calendar posts, which client members read, so the weighted
- * engagement the score uses never leaves this function.
+ * engagement the score uses never leaves this function. Each item carries
+ * what the planner reads of it: the post's lesson and its theme's why and
+ * angle, where they exist.
  */
 export function scoreTrendItems(items: TrendEvidenceInput[]): EvidenceItem[] {
   const own = new Map<string, number[]>();
@@ -774,6 +804,7 @@ export function scoreTrendItems(items: TrendEvidenceInput[]): EvidenceItem[] {
     out.push({
       id: `N${out.length + 1}`, kind: "trend", text: excerpt(t.text), theme: t.theme, ...(t.author ? { company: t.author } : {}), platform: platformName(t.platform),
       format: t.format, ...(t.date ? { date: t.date } : {}), link: t.link, metric: "engagement", value: t.measured,
+      ...(t.lesson ? { lesson: t.lesson } : {}), ...(t.matters ? { matters: t.matters } : {}), ...(t.angle ? { angle: t.angle } : {}),
     });
     if (out.length === TREND_ITEMS) break;
   }
@@ -796,10 +827,20 @@ export function numberEvidence(input: EvidenceInput): EvidenceItem[] {
     id: `P${i + 1}`, kind: "own", text: excerpt(s.post.text), platform: s.post.platform, format: s.post.format, date: day(s.post.publishedAt),
     link: s.post.link, metric: s.metric, value: s.value, median: s.median, multiple: s.multiple, sample: s.sample, thin: s.thin,
   }));
-  input.competitors.forEach((s, i) => items.push({
-    id: `C${i + 1}`, kind: "competitor", text: excerpt(s.post.text), company: s.post.company, platform: s.post.platform, format: s.post.format,
-    date: day(s.post.publishedAt), link: s.post.link, metric: s.metric, value: s.value, median: s.median, multiple: s.multiple, sample: s.sample, thin: s.thin,
-  }));
+  // A competitor post's subject, as the planner reads it: the topic (the team's own summary) that lists the post.
+  const subjectOf = (link: string | null) => {
+    if (!link) return "";
+    const topic = input.topics.find((t) => Array.isArray(t.post_urls) && (t.post_urls as unknown[]).map(String).includes(link));
+    return String(topic?.topic ?? "").replace(/\s+/g, " ").trim();
+  };
+  input.competitors.forEach((s, i) => {
+    const subject = subjectOf(s.post.link);
+    items.push({
+      id: `C${i + 1}`, kind: "competitor", text: excerpt(s.post.text), company: s.post.company, platform: s.post.platform, format: s.post.format,
+      date: day(s.post.publishedAt), link: s.post.link, metric: s.metric, value: s.value, median: s.median, multiple: s.multiple, sample: s.sample, thin: s.thin,
+      ...(subject ? { subject } : {}),
+    });
+  });
   input.topics.slice(0, 8).forEach((t, i) => {
     const companies = Array.isArray(t.companies) ? t.companies.length : undefined;
     const urls = Array.isArray(t.post_urls) ? (t.post_urls as unknown[]).map(String) : [];
@@ -808,4 +849,28 @@ export function numberEvidence(input: EvidenceInput): EvidenceItem[] {
   input.trends.slice(0, TREND_ITEMS).forEach((t, i) => items.push({ ...t, id: `N${i + 1}`, kind: "trend" }));
   input.findings.slice(0, 10).forEach((f, i) => items.push({ id: `R${i + 1}`, kind: "report", text: excerpt(f, 260) }));
   return items;
+}
+
+/** An outside post behind a piece of evidence: who posted it and its whole caption. */
+export interface OutsideSource { id: string; kind: "trend" | "competitor"; author: string; text: string }
+
+/**
+ * The full captions of the outside posts in the evidence, for the copy check
+ * only (copyChecks.ts). Never stored, never in a prompt. A trend item's is
+ * the input with the same link; a competitor item "C<n>" is the nth scored
+ * competitor post.
+ */
+export function outsideSources(evidence: EvidenceItem[], trends: TrendEvidenceInput[], competitors: Array<{ post: CompetitorPost }>): OutsideSource[] {
+  const out: OutsideSource[] = [];
+  for (const e of evidence) {
+    if (e.kind === "trend") {
+      const t = trends.find((x) => x.link === e.link);
+      if (t) out.push({ id: e.id, kind: "trend", author: t.author, text: t.text });
+    } else if (e.kind === "competitor") {
+      const n = /^C(\d+)$/.exec(e.id);
+      const c = n ? competitors[Number(n[1]) - 1] : undefined;
+      if (c) out.push({ id: e.id, kind: "competitor", author: c.post.company, text: c.post.text });
+    }
+  }
+  return out;
 }
