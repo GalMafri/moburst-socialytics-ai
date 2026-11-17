@@ -13,6 +13,22 @@
 // its id in PICTURE_CALL_HEADER, and the service claims that id once
 // (claim_picture_call) before it reads the request.
 //
+// The four routes that search for a logo (locate, post-logos, slot,
+// slot-file: PICTURE_SEARCH_ROUTES) can work to a time budget (17 Nov 2026).
+// A search costs what the client's logo and pictures make it cost, from a
+// fraction of a second to tens of seconds, so no fixed amount of work to a
+// call is right for every client. A worker sends PICTURE_BUDGET_HEADER with
+// the time the service may work, by the service's own clock; when that time
+// is used before the work is done, the service answers `unfinished` with
+// how far it got, and the worker sends that back in PICTURE_FROM_HEADER on
+// its next call, which carries on from there and ends in the same result.
+// Both travel as headers and no request body changed, so a worker and a
+// service of different ages always understand each other: a service from
+// before reads neither header and works to the end as it always did, and a
+// worker from before sends neither and gets the answer it always got. A
+// worker asks for one search with a budget at most PICTURE_MAX_ASKS times;
+// after that it asks without one, and the service works to the end.
+//
 // URL strings in requests are signed storage URLs: `logo`, `design`,
 // `picture` and `layer` are GET URLs, and every `out` entry is a signed
 // upload URL. A template's or a compare entry's `logo`, and every entry of
@@ -30,6 +46,30 @@ export const PICTURE_CALL_MAX_AGE_SECONDS = 120;
 /** How long the worker waits for the database to open a call before it counts the call as not opened. */
 export const PICTURE_OPEN_TIMEOUT_MS = 5_000;
 export const PICTURE_CALL_TIMEOUT_MS = 60_000;
+/**
+ * How long the service may work on a call's searches, by its own clock,
+ * before it answers with how far it got: a third of the call limit. The rest
+ * of the limit is for the claim, the call's reads and writes (the service
+ * gives storage half the limit, counted only while storage is read or
+ * written) and the one step of work that is in progress when the time is
+ * used.
+ */
+export const PICTURE_WORK_BUDGET_MS = 20_000;
+/** Carries the time, in whole milliseconds, the service may work before it answers how far it got. Only the routes that search read it. */
+export const PICTURE_BUDGET_HEADER = "x-socialytics-budget";
+/** Carries how far an earlier call got (a SearchSoFar as JSON), exactly as the service answered it. */
+export const PICTURE_FROM_HEADER = "x-socialytics-from";
+/**
+ * The most calls with a budget a worker spends on one search (one design's
+ * slot, one cleaned picture's slot, one post). A call that is still not
+ * finished after them is followed by a call with no budget, which the
+ * service works to its end and which can only be answered with a result or
+ * a failure, as every call was before budgets. So no search is asked for
+ * without end, whatever the service answers. Twelve budgets are four
+ * minutes of the service's time on one search; the longest one measured
+ * took under one (17 Nov 2026).
+ */
+export const PICTURE_MAX_ASKS = 12;
 export const PICTURE_RETRY_AFTER_MS = 2_000;
 export const PICTURE_MAX_INPUT_BYTES = 64 * 1024 * 1024;
 export const READ_JPEG_QUALITY = 92;
@@ -178,6 +218,25 @@ export type LogoSetResult = {
   inks: { stored: Ink[]; other: Ink[] | null; white: Ink[] | null };
 };
 
+/** Where a file matched best in one finished search, and its score. */
+export type SearchMatch = { x: number; y: number; width: number; height: number; score: number };
+/**
+ * How far the searches of one picture got. `of` is the service's own mark of
+ * what was being searched (the picture, the files, the placement and the
+ * sizes): a call that asks for anything else starts from the beginning.
+ * `done` holds each finished search in the order sent; `at` says how far the
+ * first pass of the next one got. A worker keeps it and sends it back as it
+ * is, and reads nothing from it.
+ */
+export type SearchSoFar = { of: string; done: SearchMatch[]; at?: { size: number; row: number; best: SearchMatch } };
+/**
+ * What a call that worked to a budget answers when the time was used first.
+ * `search` is how far the search in progress got. For post-logos, `posts`
+ * holds the posts the call finished, in the order sent, and `search` belongs
+ * to the post after them (absent when the time was used between two posts).
+ */
+export type Unfinished = { search?: SearchSoFar; posts?: Array<PostLogo | null> };
+
 /** One to four of a client's posts, searched as a design is: the stored file's search first. */
 export type PostLogosRequest = PictureMeta & {
   posts: string[]; placement: Placement; scales: [number, number];
@@ -192,4 +251,8 @@ export type PictureRoute = "canvas" | "locate" | "read" | "finish" | "transcode"
 export const PICTURE_ROUTES: readonly PictureRoute[] = ["canvas", "locate", "read", "finish", "transcode", "title-read", "logo-set", "post-logos", "slot", "slot-file"];
 export type PictureRequests = { canvas: CanvasRequest; locate: LocateRequest; read: ReadRequest; finish: FinishRequest; transcode: TranscodeRequest; "title-read": TitleReadRequest; "logo-set": LogoSetRequest; "post-logos": PostLogosRequest; slot: SlotRequest; "slot-file": SlotFileRequest };
 export type PictureResults = { canvas: CanvasResult; locate: LocateResult; read: ReadResult; finish: FinishResult; transcode: TranscodeResult; "title-read": TitleReadResult; "logo-set": LogoSetResult; "post-logos": PostLogosResult; slot: SlotResult; "slot-file": SlotFileResult };
-export type PictureAnswer<R extends PictureRoute> = { ok: true; result: PictureResults[R]; ms: number } | { ok: false; reason: string };
+/** The routes that search for a logo: the ones that read a budget and answer how far they got. */
+export type SearchRoute = "locate" | "post-logos" | "slot" | "slot-file";
+export const PICTURE_SEARCH_ROUTES: readonly SearchRoute[] = ["locate", "post-logos", "slot", "slot-file"];
+/** An answer has `result`, or, only for a call that sent a budget, `unfinished`. */
+export type PictureAnswer<R extends PictureRoute> = { ok: true; result: PictureResults[R]; ms: number } | { ok: true; unfinished: Unfinished; ms: number } | { ok: false; reason: string };

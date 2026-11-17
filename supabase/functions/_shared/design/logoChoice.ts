@@ -14,9 +14,15 @@
 // and how it waits for a service that does not have the two routes yet
 // (waitFor). The locate half stays for the tone check's history and for a
 // worker from before the change.
+//
+// The two slot routes search, and the service works on a call's search for
+// its time budget only (17 Nov 2026, picture/client.ts). The last part of
+// this file is the call a step makes to them (slotSearch) and what a job
+// keeps of a search the service did not finish (searchKept, searchWorked),
+// so the step's next run carries it on.
 
-import { PictureError } from "../picture/client.ts";
-import type { LocateResult, LogoFileName, Placement, Rect, Rgb, SlotFileResult, SlotResult } from "../picture/contract.ts";
+import { callPictureWithin, carriedOf, PictureError, type CallOpener, type Carried, type PictureDeps, type Worked } from "../picture/client.ts";
+import type { LocateResult, LogoFileName, PictureRequests, PictureResults, Placement, Rect, Rgb, SlotFileResult, SlotResult } from "../picture/contract.ts";
 import { logoFound } from "./logoMatch.ts";
 import { jobLogos, stampList, type JobLogos, type LogoSet, type StampEntry } from "./logoTone.ts";
 
@@ -268,4 +274,74 @@ export function notThereYet(e: unknown): boolean {
  */
 export function waitFor(e: unknown): unknown {
   return notThereYet(e) ? new PictureError("The picture service does not have this route yet.", (e as PictureError).route, "unavailable") : e;
+}
+
+// ── A search the service did not finish (17 Nov 2026) ───────────────────────
+
+/** Where a job's state keeps a search the service did not finish, by route. Both keys go when a new design is made (modelSteps.ts, OF_THE_DESIGN). */
+export const SEARCH_KEPT = { slot: "slot_so_far", "slot-file": "slot_file_so_far" } as const;
+type SlotRoute = keyof typeof SEARCH_KEPT;
+
+/**
+ * What an earlier call for this search left on the job, to send with the
+ * next one; null for a first call. `picture` is the stored path of the
+ * picture searched (the design for the slot, the cleaned picture for the
+ * slot's file): what was kept for another picture is not this search's and
+ * is left out, so a new design or a new cleaning starts from the beginning
+ * with its calls uncounted.
+ */
+export function searchKept(state: Record<string, unknown> | null | undefined, route: SlotRoute, picture: string): Carried | null {
+  const kept = state?.[SEARCH_KEPT[route]] as { of?: unknown } | null | undefined;
+  return kept && typeof kept === "object" && kept.of === picture ? carriedOf(kept) : null;
+}
+
+/**
+ * What a step does with the service's answer to a search. The service works
+ * on one call for its time budget only. When the search ended, the answer is
+ * the result and nothing stays on the job. When the time was used first,
+ * how far the search got is kept on the job with the picture it is of, and
+ * null is answered: the step runs again, at once while the job's request
+ * has time and on the next pass otherwise, and the service carries on from
+ * there. No try is spent, because nothing failed. The calls spent are
+ * counted with it, and after PICTURE_MAX_ASKS of them the next call carries
+ * no budget (client.ts, callPictureWithin), so a step answers null for one
+ * search PICTURE_MAX_ASKS times at most.
+ */
+export function searchWorked<R extends SlotRoute>(state: Record<string, unknown>, route: R, picture: string, worked: Worked<R>): PictureResults[R] | null {
+  if ("result" in worked) {
+    delete state[SEARCH_KEPT[route]];
+    return worked.result;
+  }
+  state[SEARCH_KEPT[route]] = { of: picture, ...worked.carried };
+  return null;
+}
+
+/** A call the service turned away, or a picture it could not use, leaves nothing to carry on: the next try searches from the beginning. A service that was unavailable leaves what was kept. */
+export function searchFailed(state: Record<string, unknown>, route: SlotRoute, e: unknown): void {
+  if (e instanceof PictureError && !e.transient) delete state[SEARCH_KEPT[route]];
+}
+
+/**
+ * One call of a job's step to a slot route: worked to the service's time
+ * budget and carried on from what the job kept of the call before.
+ * `picture` is the stored picture searched. The answer is the route's
+ * result, or null when the service's time was used first: the step then
+ * answers "next" and runs again, with no try spent, and it can do so
+ * PICTURE_MAX_ASKS times at most for one picture (searchWorked).
+ *
+ * A service that does not have the route yet is waited for, without
+ * spending a try (waitFor). A call the service turned away leaves nothing
+ * kept, so the try after it searches from the beginning.
+ */
+export async function slotSearch<R extends SlotRoute>(admin: CallOpener, state: Record<string, unknown>, route: R, picture: string, body: PictureRequests[R], deps: PictureDeps = {}): Promise<{ result: PictureResults[R] | null; ms: number }> {
+  let worked: Worked<R>;
+  try {
+    worked = await callPictureWithin(admin, route, body, searchKept(state, route, picture), deps);
+  } catch (e) {
+    // First what the failure is for the job (a route that is not there yet is a wait), then what it leaves kept.
+    const failure = waitFor(e);
+    searchFailed(state, route, failure);
+    throw failure;
+  }
+  return { result: searchWorked(state, route, picture, worked), ms: worked.ms };
 }

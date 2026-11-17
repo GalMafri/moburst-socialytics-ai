@@ -15,10 +15,13 @@
 //   POST {action:"advance", job_id}   one job, in a request of its own (operational secret)
 //   POST {action:"picture_check", count}  the finish call for the newest done designs, answered
 //                                     at once with each call's time (operational secret)
-//   POST {action:"tone_check", client_id, designs?}  the live logo set and one read of posts for
-//                                     one client, or with `designs` the live slot on its newest
-//                                     stored designs and the file for each cleaned picture; writes
-//                                     nothing to a job or a client (operational secret)
+//   POST {action:"tone_check", client_id, designs?, skip?}  the live logo set and the read of the
+//                                     first posts of one client, asked as the lifecycle step asks
+//                                     (each call worked to the service's time budget), or with
+//                                     `designs` the live slot on its newest stored designs and the
+//                                     file for each cleaned picture, one design after another, after
+//                                     the first `skip` of them; writes nothing to a job or a client
+//                                     (operational secret)
 //
 // Every picture is made, read and resized by the picture service on Vercel
 // (_shared/picture/client.ts, 12 Nov 2026); this worker never decodes one.
@@ -40,14 +43,14 @@ import { outputSize, pictureSize } from "../_shared/canva/finish.ts";
 import { logoCheckPrompt, marksPrompt, parseLogoCheck, parseMarks, parseRead, readPrompt, removePrompt, wordsMatch } from "../_shared/design/pipeline.ts";
 import { LOGO_SCALES } from "../_shared/design/logoMatch.ts";
 import { STORY_SURFACE, storyTextBand } from "../_shared/design/story.ts";
-import { callPicture, notePicture, pictureCheckCount, signedRead, signedWrite } from "../_shared/picture/client.ts";
-import type { LogoTemplate, Placement, SlotFileRequest, SlotRequest } from "../_shared/picture/contract.ts";
+import { NotEnded, callPicture, notePicture, pictureCheckCount, searchToEnd, signedRead, signedWrite } from "../_shared/picture/client.ts";
+import { PICTURE_WORK_BUDGET_MS, type LogoTemplate, type Placement, type SlotFileRequest, type SlotRequest } from "../_shared/picture/contract.ts";
 import { heldWork } from "../_shared/canva/hold.ts";
 import { DESIGN_LIMITS, MAX_DESIGN_ATTEMPTS, type StepResult, Stopped, advanceDesignJob } from "../_shared/design/advance.ts";
 import { type GenerateDeps, OF_THE_DESIGN, runGenerate, runUnlogo } from "../_shared/design/modelSteps.ts";
-import { REASONS, type SlotPlan, type StampPlan, checkInput, slotPlan, slotState, stampFile, stampOutcome, stampPlan, waitFor } from "../_shared/design/logoChoice.ts";
+import { REASONS, type SlotPlan, type StampPlan, checkInput, slotPlan, slotSearch, slotState, stampFile, stampOutcome, stampPlan } from "../_shared/design/logoChoice.ts";
 import { jobLogos, postSearchPlan } from "../_shared/design/logoTone.ts";
-import { POSTS_PER_CALL, askLogoSet, askPostLogos, liveIo } from "../_shared/design/logoSetWork.ts";
+import { POSTS_PER_CALL, type Reading, askLogoSet, liveIo, readNextPosts } from "../_shared/design/logoSetWork.ts";
 import { personOther } from "../_shared/lifecycle/designSettings.ts";
 import { logoAreaRect } from "../_shared/picture/geometry.ts";
 import { askCleanedSlot, basePicture, composedPath, dropComposed } from "../_shared/design/firstPictureJob.ts";
@@ -93,7 +96,8 @@ Deno.serve(async (req) => {
     if (body?.action === "advance" && typeof body.job_id === "string") return background(advanceOne(admin, body.job_id));
     if (body?.action === "picture_check") return json(await pictureCheck(admin, pictureCheckCount(body.count)));
     if (body?.action === "tone_check" && typeof body.client_id === "string") {
-      return json(await toneCheck(admin, body.client_id, body.designs === undefined || body.designs === null ? null : pictureCheckCount(body.designs)));
+      const skip = Math.min(400, Math.max(0, Math.trunc(Number(body.skip) || 0)));
+      return json(await toneCheck(admin, body.client_id, body.designs === undefined || body.designs === null ? null : pictureCheckCount(body.designs), skip));
     }
     return json({ error: "Unknown action." }, 400);
   } catch (err) {
@@ -277,8 +281,11 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       // carried. The model redraws the logo in the tone and weight its picture needs, so a drawing that is no
       // close match of the file is no reason to make the design again: nothing is sent back here.
       const plan = slotPlan({ logo_path: job.input.logo_path, generate: g, logos: job.input.logos });
-      const { result: found, ms } = await slotCall(admin, "slot", await slotRequest(admin, plan, { job: job.id, step: "locate", designPath: s.design_path, placement: job.input.placement }));
+      // The service works on one call for its time budget. A search that needs longer comes back with how far it got;
+      // that is kept on the job, no try is spent, and the step runs again from there (logoChoice.ts, slotSearch).
+      const { result: found, ms } = await slotSearch(admin, s, "slot", s.design_path, await slotRequest(admin, plan, { job: job.id, step: "locate", designPath: s.design_path, placement: job.input.placement }));
       notePicture(s, "slot", ms);
+      if (!found) return "next";
       Object.assign(s, slotState(plan, found));
       // A design that already has its logo-free picture goes on to have its slot measured.
       job.step = s.nologo_path ? "marks" : "unlogo";
@@ -312,9 +319,14 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       const { result: slot, ms: slotMs } = await askCleanedSlot(s, base, !!stamp.drawn, async (compose) => {
         const request = await slotFileRequest(admin, stamp, { job: job.id, step: "marks", picturePath: s.nologo_path });
         if (compose) Object.assign(request, { first: await signedRead(admin, BUCKET, s.design_path), out: await signedWrite(admin, BUCKET, composedPath(base, s)) });
-        return slotCall(admin, "slot-file", request);
+        // The look for the drawing at the slot is a search: worked to the service's time budget and carried on from what the job kept
+        // of the call before (_shared/design/logoChoice.ts, slotSearch), with or without the first picture.
+        return slotSearch(admin, s, "slot-file", s.nologo_path, request);
       });
       notePicture(s, "slot-file", slotMs);
+      // The service's time was used before the search ended: nothing is decided about the slot or the composed picture yet, no try
+      // is spent, and the step asks again from where the service got. The service stores a composed picture only with the call that ends the search.
+      if (!slot) return "next";
       const picture = basePicture(s);
       const outcome = stampOutcome(stamp, slot, g.brand_name);
       // A composed picture that fails a check is dropped, and this step runs again on the cleaned picture, as before the rule.
@@ -580,6 +592,9 @@ async function pictureCheck(admin: any, count: number): Promise<{ elapsed_ms: nu
   return { elapsed_ms: Date.now() - started, results };
 }
 
+/** How long tone_check keeps asking before it reports what it has: inside the edge request's own wall time. */
+const TONE_CHECK_MS = 100_000;
+
 /**
  * The deployed picture service tried on one client's logo set, with nothing
  * written to a job or a client (the release's proof with no spend, spec
@@ -587,19 +602,33 @@ async function pictureCheck(admin: any, count: number): Promise<{ elapsed_ms: nu
  *
  * Without `designs`: the live logo-set call for the client's stored logo
  * (its two copies go under picture-check/tone/, so no product file changes)
- * and one post-logos call for the first four of its posts, with each call's
- * time: the service's speed on these searches.
+ * and the read of the first posts the lifecycle step would ask for, asked
+ * the way the step asks (readNextPosts, each call worked to the service's
+ * time budget and carried on from the one before) until every one is read:
+ * the number of calls it took, the longest of them (`ms`), their sum
+ * (`total_ms`), and each post's result. The longest call is the proof of
+ * the budget: it stays near PICTURE_WORK_BUDGET_MS however slow the
+ * client's logo is to search for. `ended` is false when the read had not
+ * ended when the check stopped asking.
  *
  * With `designs`: the live slot on the client's newest ended still
  * designs, each asked the way a job started from the client's set as it is
- * now would ask (the job's own placement): whether the slot is where the
- * model drew the logo or where the canvas carried it, the matched file,
- * each score and the time; and for a job that has its logo-free picture,
- * the ground under the slot and the file that would be stamped there. A
- * client with no current set answers that and calls nothing.
+ * now would ask (the job's own placement) and carried on until it ends, as
+ * the locate step does: whether the slot is where the model drew the logo
+ * or where the canvas carried it, the matched file, each score, the number
+ * of calls it took, the longest of them (`ms`) and their sum (`total_ms`);
+ * and for a job that has its logo-free picture, the ground under the slot
+ * and the file that would be stamped there, asked the same way. The designs
+ * are asked one after another, so each call's time is the service's own and
+ * not that of several searches sharing its one core, and the check stops
+ * asking when its time is up: `next_skip` is then the `skip` to send to
+ * carry on with the designs it did not finish, and null when it finished
+ * them all. A client with no current set answers that and calls
+ * nothing.
  */
-async function toneCheck(admin: any, clientId: string, designs: number | null): Promise<Record<string, unknown>> {
+async function toneCheck(admin: any, clientId: string, designs: number | null, skip = 0): Promise<Record<string, unknown>> {
   const started = Date.now();
+  const timeUp = () => Date.now() - started > TONE_CHECK_MS;
   const { data: row, error } = await admin.from("design_brand_settings").select("source, logo_path, placement, background, reference_paths, logo_set").eq("client_id", clientId).maybeSingle();
   if (error) throw new Error(`Could not read the design settings: ${error.message}`);
   if (!row) return { elapsed_ms: Date.now() - started, settings: false };
@@ -612,12 +641,32 @@ async function toneCheck(admin: any, clientId: string, designs: number | null): 
     try {
       const set = await askLogoSet(io, { clientId, logoPath: row.logo_path, site: [], person, out });
       const plan = postSearchPlan(row.logo_path, set.facts, { other: set.facts.made.other ? out.other : null, white: set.facts.made.white ? out.white : null, site: null, person: set.facts.person ? person : null });
-      const posts: string[] = (Array.isArray(row.reference_paths) ? row.reference_paths : []).slice(0, POSTS_PER_CALL);
-      const read = posts.length ? await askPostLogos(io, { clientId, posts, placement: row.placement, plan }) : { posts: [], ms: 0 };
+      const posts: string[] = [...new Set<string>((Array.isArray(row.reference_paths) ? row.reference_paths : []).filter((p: unknown): p is string => typeof p === "string"))].slice(0, POSTS_PER_CALL);
+      // The step's own bookkeeping, kept here in place of the step's result: what each post gave, and the post the service stopped in.
+      // Every look settles a post or counts against the one it stopped in (readNextPosts), so the loop ends by itself; the time limit keeps it inside this request.
+      const shown = new Map<string, unknown>();
+      let reading: Reading | null = null;
+      let calls = 0, longest = 0, total = 0;
+      for (;;) {
+        const unread = posts.filter((p) => !shown.has(p));
+        if (!unread.length || timeUp()) break;
+        const looked = await readNextPosts(io, { clientId, unread, placement: row.placement, plan, reading });
+        for (const { post, logo } of looked.read) shown.set(post, logo);
+        reading = looked.reading;
+        // A look with no post left in storage made no call.
+        if (looked.ms) {
+          calls++;
+          total += looked.ms;
+          longest = Math.max(longest, looked.ms);
+        }
+      }
       return {
         elapsed_ms: Date.now() - started, ok: true,
         logo_set: { ms: set.ms, facts: set.facts },
-        post_logos: { ms: read.ms, posts: posts.map((path, i) => ({ path, result: read.posts[i] ?? null })) },
+        post_logos: {
+          ms: longest, total_ms: total, calls, budget_ms: PICTURE_WORK_BUDGET_MS, asked: posts.length, read: shown.size, ended: shown.size === posts.length,
+          posts: posts.filter((p) => shown.has(p)).map((path) => ({ path, result: shown.get(path) ?? null })),
+        },
       };
     } catch (e) {
       return { elapsed_ms: Date.now() - started, ok: false, reason: reason(e) };
@@ -628,42 +677,42 @@ async function toneCheck(admin: any, clientId: string, designs: number | null): 
   const { data: rows, error: jobsError } = await admin.from("canva_finish_jobs").select("id, input, state, status")
     .eq("client_id", clientId).in("status", ["done", "failed", "canceled"])
     .not("state->>design_path", "is", null)
-    .order("created_at", { ascending: false }).limit(designs * 3);
+    .order("created_at", { ascending: false }).limit((skip + designs) * 3);
   if (jobsError) throw new Error(`Could not read the client's designs: ${jobsError.message}`);
   // Video jobs are left out, as in picture_check.
-  const jobs = (rows ?? []).filter((r: any) => r.input?.kind !== "video" && r.input?.placement && r.state?.design_path).slice(0, designs);
-  const results = await Promise.all(jobs.map(async (r: any) => {
+  const jobs = (rows ?? []).filter((r: any) => r.input?.kind !== "video" && r.input?.placement && r.state?.design_path).slice(skip, skip + designs);
+  const results: Record<string, unknown>[] = [];
+  // How many designs have their answer: the next check carries on after them.
+  let finished = 0;
+  for (const r of jobs) {
+    if (timeUp()) break;
     const t = Date.now();
     try {
       const input = checkInput(row, r)!;
       const plan = slotPlan(input);
-      const { result: found, ms } = await callPicture(admin, "slot", await slotRequest(admin, plan, { job: r.id, step: "tone_check", designPath: r.state.design_path, placement: r.input.placement }));
+      // Asked until the search ends, each call carrying on from the one before, as the locate step does (client.ts, searchToEnd). Nothing is kept on the job.
+      const slot = await searchToEnd(admin, "slot", () => slotRequest(admin, plan, { job: r.id, step: "tone_check", designPath: r.state.design_path, placement: r.input.placement }), {}, timeUp);
+      const found = slot.result;
       const out: Record<string, unknown> = {
-        job: r.id as string, status: r.status as string, ms, ok: true,
+        job: r.id as string, status: r.status as string, ms: slot.ms, total_ms: slot.total, calls: slot.calls, ok: true,
         slot: found.from, of: found.of, rect: found.slot, score: Math.round(found.score * 1000) / 1000,
         matched: found.matched, scores: found.scores.map((v) => Math.round(v * 1000) / 1000),
       };
       // The job's own logo-free picture, when it got that far: the ground under the slot and the file that would be stamped.
       if (r.state.nologo_path) {
         const stamp = stampPlan(input, slotState(plan, found) as unknown as Parameters<typeof stampPlan>[1]);
-        const { result: slot, ms: fileMs } = await callPicture(admin, "slot-file", await slotFileRequest(admin, stamp, { job: r.id, step: "tone_check", picturePath: r.state.nologo_path }));
-        Object.assign(out, { file_ms: fileMs, ground: slot.ground, flat: Math.round(slot.flat * 1000) / 1000, file: slot.file, shows: slot.shows, still_drawn: slot.drawn ?? null });
+        const file = await searchToEnd(admin, "slot-file", () => slotFileRequest(admin, stamp, { job: r.id, step: "tone_check", picturePath: r.state.nologo_path }), {}, timeUp);
+        Object.assign(out, { file_ms: file.ms, file_total_ms: file.total, file_calls: file.calls, ground: file.result.ground, flat: Math.round(file.result.flat * 1000) / 1000, file: file.result.file, shows: file.result.shows, still_drawn: file.result.drawn ?? null });
       }
-      return out;
+      results.push(out);
     } catch (e) {
-      return { job: r.id as string, status: r.status as string, ms: Date.now() - t, ok: false, reason: reason(e) };
+      results.push({ job: r.id as string, status: r.status as string, ms: Date.now() - t, ok: false, reason: reason(e) });
+      // The check's own time was up in the middle of this design: it has no answer yet, so the next check starts with it.
+      if (e instanceof NotEnded) break;
     }
-  }));
-  return { elapsed_ms: Date.now() - started, set: true, results };
-}
-
-/** A call to one of the slot routes. A service that does not have the route yet is waited for, without spending a try (_shared/design/logoChoice.ts, waitFor). */
-async function slotCall<R extends "slot" | "slot-file">(admin: any, route: R, body: R extends "slot" ? SlotRequest : SlotFileRequest) {
-  try {
-    return await callPicture(admin, route, body as never);
-  } catch (e) {
-    throw waitFor(e);
+    finished++;
   }
+  return { elapsed_ms: Date.now() - started, set: true, budget_ms: PICTURE_WORK_BUDGET_MS, skip, asked: jobs.length, next_skip: finished < jobs.length ? skip + finished : null, results };
 }
 
 /** The slot request for a plan (_shared/design/logoChoice.ts), with every stored path signed for the service to read. */

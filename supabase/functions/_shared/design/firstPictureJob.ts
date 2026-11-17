@@ -84,13 +84,20 @@ export function beforeTheRule(e: unknown): boolean {
  * the found drawing again (it carries `drawn`). What came of composing is
  * kept on the state; the answer is the service's, read on the picture
  * `basePicture` then names.
+ *
+ * The call's search works to the service's time budget (logoChoice.ts,
+ * slotSearch), so its answer can be no result yet (null): the service
+ * stores a composed picture only with the call that ends the search, so
+ * nothing is known about composing then and nothing is kept. The step asks
+ * again, this function makes the same choice from the same state, and what
+ * came of composing is kept from the call that ends the search.
  */
 export async function askCleanedSlot<T extends { composed?: FirstPictureFacts }>(
   s: State,
   base: string,
   checked: boolean,
-  call: (compose: boolean) => Promise<{ result: T; ms: number }>,
-): Promise<{ result: T; ms: number }> {
+  call: (compose: boolean) => Promise<{ result: T | null; ms: number }>,
+): Promise<{ result: T | null; ms: number }> {
   // Ruled out for this cleaned picture: asked as before the rule, and the record of why stays.
   if (!composeWanted(s)) return call(false);
   const of = s.nologo_path as string;
@@ -99,7 +106,7 @@ export async function askCleanedSlot<T extends { composed?: FirstPictureFacts }>
     s.composed = { of, path: null, why: "canvas" };
     return call(false);
   }
-  let answer: { result: T; ms: number };
+  let answer: { result: T | null; ms: number };
   try {
     answer = await call(true);
   } catch (e) {
@@ -108,6 +115,8 @@ export async function askCleanedSlot<T extends { composed?: FirstPictureFacts }>
     s.composed = { of, path: null, why: "service" };
     return answer;
   }
+  // Not finished within the service's time: no composed picture is stored yet, and the same request is asked again.
+  if (!answer.result) return answer;
   const facts = answer.result.composed;
   if (!facts) s.composed = { of, path: null, why: "service" };
   else if (facts.made) s.composed = { of, path: composedPath(base, s), share: facts.share, join: facts.join, box: facts.box };

@@ -29,8 +29,12 @@ export type AppDeps = {
   log?: Log;
   /** The one address the service reads from and writes to. The product's own storage unless a test gives its own. */
   storage?: string;
-  /** How long one call's reads and writes may take together. */
+  /** How long one call's reads and writes may take together, counted only while storage is read or written. */
   storageTimeoutMs?: number;
+  /** This machine's own clock in milliseconds: what a call's working time is measured on. */
+  clock?: () => number;
+  /** The version of the search's steps a point's mark carries: the search's own (SEARCH_STEPS_VERSION) unless a test gives another. */
+  searchVersion?: number;
 };
 
 const NOT_ALLOWED = "Not allowed.";
@@ -66,7 +70,7 @@ export function createApp(deps: AppDeps): Hono {
     return next();
   });
 
-  app.route(PICTURE_API_BASE, pictureRoutes({ fetchImpl, log, now, storage: deps.storage ?? PRODUCT_STORAGE, storageTimeoutMs: deps.storageTimeoutMs ?? STORAGE_TIMEOUT_MS }));
+  app.route(PICTURE_API_BASE, pictureRoutes({ fetchImpl, log, now, storage: deps.storage ?? PRODUCT_STORAGE, storageTimeoutMs: deps.storageTimeoutMs ?? STORAGE_TIMEOUT_MS, clock: deps.clock ?? (() => performance.now()), searchVersion: deps.searchVersion }));
 
   app.notFound((c) => c.json({ ok: false, reason: "Unknown route." }, 404));
 

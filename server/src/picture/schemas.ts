@@ -47,6 +47,10 @@ function fileRules(templates: Named[], compare: Named[], key: string, ctx: z.Ref
   });
 }
 
+const match = z.strictObject({ x: z.int(), y: z.int(), width: side, height: side, score: z.number() });
+/** How far the searches of one picture got, as the service answered it (contract.ts, SearchSoFar): at most two finished searches, and how far the first pass of the next one is. */
+export const searchSoFar = z.strictObject({ of: z.string().min(1).max(64), done: z.array(match).max(2), at: z.strictObject({ size: side, row: side, best: match }).optional() });
+
 /** The ten bodies, for a service that reads and writes under `storage`. */
 export function pictureSchemas(storage: string) {
   const stored = z.string().refine((link) => inStorage(link, storage), "The link is not in the product's storage.");

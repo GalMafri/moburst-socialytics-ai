@@ -891,9 +891,11 @@ describe("design_settings", () => {
     page?: string | null;
     /** What the service answers for one logo file, by its stored path: its facts, and what each post shows of it, or the failure it answers with. */
     byLogo?: Record<string, { facts?: Record<string, unknown>; shows?: Record<string, unknown>; fail?: Error }>;
+    /** How far the service gets in a read of posts within its time: every post sent when not given. `shown` is what a post shows of the file searched for. */
+    within?: (body: Record<string, unknown>, carried: { search?: unknown; asks: number } | null, shown: (link: string) => unknown) => unknown;
   } = {}) {
     const db = dbWith({ design_brand_settings: opts.row === null ? [] : [opts.row ?? stored()] }, { ...rpcs, ...(opts.given ?? {}) });
-    const seen = { key: 0, spot: 0, pages: [] as string[], sizes: [] as string[], logoPng: [] as string[], hash: [] as string[], calls: [] as Array<{ route: string; body: Record<string, unknown> }> };
+    const seen = { key: 0, spot: 0, pages: [] as string[], sizes: [] as string[], logoPng: [] as string[], hash: [] as string[], calls: [] as Array<{ route: string; body: Record<string, unknown>; carried?: { search?: unknown; asks: number } | null }> };
     deps.now = () => new Date(T);
     deps.projectUrl = () => "https://project.test";
     deps.fetchSiteHtml = (async (url: string, o: { firecrawlKey?: string | null } = {}) => {
@@ -923,9 +925,18 @@ describe("design_settings", () => {
         const logo = String(route === "logo-set" ? body.logo : (body.searches as Array<{ logo: string }>)[0].logo).replace("generated-media/", "");
         const own = opts.byLogo?.[logo];
         if (own?.fail) throw own.fail;
-        if (route === "logo-set") return { result: { ...FACTS, ...(opts.facts ?? {}), ...(own?.facts ?? {}) }, ms: 40 };
+        return { result: { ...FACTS, ...(opts.facts ?? {}), ...(own?.facts ?? {}) }, ms: 40 };
+      },
+      // A read of posts, worked to the service's time: every post sent unless the test says how far the service gets (`within`).
+      within: async (route: string, body: Record<string, unknown>, carried: { search?: unknown; asks: number } | null) => {
+        opts.picture?.(route);
+        seen.calls.push({ route, body, carried });
+        const logo = String((body.searches as Array<{ logo: string }>)[0].logo).replace("generated-media/", "");
+        const own = opts.byLogo?.[logo];
+        if (own?.fail) throw own.fail;
         const shows = own ? own.shows ?? {} : opts.shows ?? {};
-        return { result: { posts: (body.posts as string[]).map((link) => shows[link.replace("design-references/", "")] ?? MISSED) }, ms: 900 };
+        const shown = (link: string) => shows[link.replace("design-references/", "")] ?? MISSED;
+        return opts.within?.(body, carried, shown) ?? { result: { posts: (body.posts as string[]).map(shown) }, ms: 900 };
       },
       read: async (bucket: string, path: string) => {
         // A file that is gone from storage: what signedRead gives for it.
@@ -1138,34 +1149,137 @@ describe("design_settings", () => {
     expect(db.rpcCalls.map((r) => r.name)).toEqual(["lifecycle_write_design_settings"]);
   });
 
-  it("asks for half as many posts after a read the service did not answer in time, down to one, and still reads them all", async () => {
+  /**
+   * A service whose time is used after a post and a half: a post takes two
+   * units of work and a call has three. What it did of a post it did not
+   * finish comes back as the point to carry on from, and a call that brings
+   * that point for its first post starts there. `work` counts the units
+   * spent on each post, so a post searched again from the beginning shows.
+   */
+  function slowService() {
+    const work: Record<string, number> = {};
+    const within = (body: Record<string, unknown>, carried: { search?: unknown; asks: number } | null, shown: (link: string) => unknown) => {
+      const links = body.posts as string[];
+      const point = (carried?.search ?? null) as { of: string; done: unknown[]; at: { size: number; row: number; best: unknown } } | null;
+      const asks = (carried?.asks ?? 0) + 1;
+      let units = 3;
+      const done: unknown[] = [];
+      for (const [i, link] of links.entries()) {
+        const had = i === 0 && point?.of === link ? point.at.size : 0;
+        const spend = Math.min(units, 2 - had);
+        work[link] = (work[link] ?? 0) + spend;
+        units -= spend;
+        if (had + spend < 2) {
+          const search = { of: link, done: [], at: { size: had + spend, row: 0, best: { x: 0, y: 0, width: 0, height: 0, score: -2 } } };
+          return { unfinished: { posts: done, search }, carried: { search, asks }, ms: 20_003 };
+        }
+        done.push(shown(link));
+        if (units === 0 && i < links.length - 1) return { unfinished: { posts: done }, carried: { asks }, ms: 20_001 };
+      }
+      return { result: { posts: done }, ms: 9_000 };
+    };
+    return { work, within };
+  }
+  type Asked = { body: { posts: string[] }; carried: { search?: { of: string }; asks: number } | null };
+
+  it("keeps what the service read within its time, carries on in the post it stopped in, and ends in the set one read of them all gives", async () => {
     const nine = posts(9).map((p) => p.path);
-    // The service answers a read of posts only when it holds one post: a slow service, or a logo that is slow to search for.
-    let asked: number[] = [];
+    const shows = { "c1/social-1.jpg": found("other"), "c1/social-6.jpg": found("other", [15, 41, 76]), "c1/social-8.jpg": found("stored", [250, 250, 250]) };
+    // One read of everything, as a fast service gives it.
+    const fast = world({ row: stored({ reference_paths: nine }), shows });
+    await drive(fast.db, c({ harvested_design_references: posts(9) }), before());
+
+    const service = slowService();
+    const w = world({ row: stored({ reference_paths: nine }), shows, within: service.within });
+    const outs = await drive(w.db, c({ harvested_design_references: posts(9) }), before(), 20);
+    // Every look that leaves posts unread is the step's own short wait, never a wait for the service.
+    expect(outs.slice(0, -1).every((o) => o.status === "waiting" && o.reason === "in_progress" && o.recheckMinutes === 1)).toBe(true);
+    expect(outs.at(-1)).toMatchObject({ status: "done" });
+    // The same set, from the same posts.
+    expect(w.row().logo_set).toEqual(fast.row().logo_set);
+    expect(w.row().logo_set).toMatchObject({ posts: { read: 9, found: 3, shown: { stored: 1, other: 2, white: 0 } } });
+    // Each post cost its two units of work and no more: nothing was searched from the beginning twice.
+    expect(service.work).toEqual(Object.fromEntries(nine.map((p) => [`design-references/${p}`, 2])));
+    // Nine posts at a post and a half to a call: six calls, each starting with the first post not yet read.
+    const asked = picture(w.seen, "post-logos") as unknown as Asked[];
+    expect(asked.map((x) => x.body.posts[0].replace("design-references/c1/social-", "").replace(".jpg", ""))).toEqual(["0", "1", "3", "4", "6", "7"]);
+    expect(asked.map((x) => x.carried?.search?.of ?? null)).toEqual([null, "design-references/c1/social-1.jpg", null, "design-references/c1/social-4.jpg", null, "design-references/c1/social-7.jpg"]);
+    // The step never asks for more than the request may carry, and nothing of the read is left in its result once it ended.
+    expect(asked.every((x) => x.body.posts.length <= 4)).toBe(true);
+    expect(outs.at(-1)!.result!.tone).not.toHaveProperty("reading");
+    expect(outs.at(-1)!.result!.tone).not.toHaveProperty("batch");
+  });
+
+  it("waits quietly when the service does not answer, keeps what was read, and asks for the same read again", async () => {
+    const nine = posts(9).map((p) => p.path);
+    const service = slowService();
     const slow = new PictureError("The picture service did not answer: timeout.", "post-logos", "unavailable");
-    const w = world({ row: stored({ reference_paths: nine }) });
-    const io = deps.picture;
-    deps.picture = ((db: unknown) => {
-      const real = (io as (db: unknown) => { call: (route: string, body: Record<string, unknown>) => Promise<unknown> })(db);
-      return { ...real, call: async (route: string, body: Record<string, unknown>) => {
-        if (route === "post-logos") { asked.push((body.posts as string[]).length); if ((body.posts as string[]).length > 1) throw slow; }
-        return real.call(route, body);
-      } };
-    }) as never;
+    let down = false;
+    const w = world({ row: stored({ reference_paths: nine }), within: (body, carried, shown) => { if (down) throw slow; return service.within(body, carried, shown); } });
     const rows = before();
     const cl = c({ harvested_design_references: posts(9) });
-    const outs: Out[] = [];
-    for (let i = 0; i < 14; i++) {
-      const got = await drive(w.db, cl, rows);
-      outs.push(got.at(-1)!);
-      if (got.at(-1)!.status === "done") break;
-    }
-    // Four posts, then two, then one: each a quiet wait for the service. From then on one post to a call until all nine are read.
-    expect(asked.slice(0, 3)).toEqual([4, 2, 1]);
-    expect(asked.slice(2)).toEqual(Array(9).fill(1));
-    expect(outs.slice(0, 2).map((o) => [o.status, o.reason, o.recheckMinutes])).toEqual([["waiting", "picture_service", 10], ["waiting", "picture_service", 10]]);
+    // One look: post 0 is read and post 1 begun.
+    const key = await STEPS.design_settings.inputs(w.db, cl, rows);
+    const first = await STEPS.design_settings.run(w.db, cl, { force: false, previous: null, rows }) as Out;
+    rows.set("design_settings", rowAfter(rows.get("design_settings") ?? null, { client_id: "c1", step: "design_settings", inputs_key: key! }, first as never, new Date(T)));
+    expect(first.result!.tone.reading).toMatchObject({ post: "c1/social-1.jpg", asks: 1, soFar: { of: "design-references/c1/social-1.jpg", at: { size: 1 } } });
+    // The service stops answering: a quiet wait of ten minutes, with the read so far kept.
+    down = true;
+    const waited = await drive(w.db, cl, rows);
+    expect(waited).toHaveLength(1);
+    expect(waited[0]).toMatchObject({ status: "waiting", reason: "picture_service", recheckMinutes: 10 });
+    expect(Object.keys(waited[0].result!.tone.posts)).toEqual(["c1/social-0.jpg"]);
+    expect(waited[0].result!.tone.reading).toEqual(first.result!.tone.reading);
+    // It answers again: the same posts are asked for, from the same point, and the read ends.
+    down = false;
+    const outs = await drive(w.db, cl, rows, 20);
     expect(outs.at(-1)).toMatchObject({ status: "done" });
+    const asked = picture(w.seen, "post-logos") as unknown as Asked[];
+    expect(asked[2].body.posts).toEqual(asked[1].body.posts);
+    expect(asked[2].carried).toEqual(asked[1].carried);
+    expect(asked[1].body.posts).toHaveLength(4);
     expect(w.row().logo_set).toMatchObject({ of: LOGO, posts: { read: 9 } });
+    expect(service.work).toEqual(Object.fromEntries(nine.map((p) => [`design-references/${p}`, 2])));
+  });
+
+  it("searches a post from the beginning when the way the posts are searched changed while it was being read", async () => {
+    const two = posts(2).map((p) => p.path);
+    const service = slowService();
+    const w = world({ row: stored({ reference_paths: two, placement: { ...PLACEMENT } }), within: service.within });
+    const rows = before();
+    const cl = c();
+    const key = await STEPS.design_settings.inputs(w.db, cl, rows);
+    const first = await STEPS.design_settings.run(w.db, cl, { force: false, previous: null, rows }) as Out;
+    rows.set("design_settings", rowAfter(rows.get("design_settings") ?? null, { client_id: "c1", step: "design_settings", inputs_key: key! }, first as never, new Date(T)));
+    expect(first.result!.tone.reading).toMatchObject({ post: "c1/social-1.jpg" });
+    // The read of the logo's spot gives another placement on the next run: what the posts gave, and the point, are for another search.
+    const kept = rows.get("design_settings")!;
+    (kept.result as { tone: { searched: string } }).tone.searched = "another search";
+    await drive(w.db, cl, rows, 20);
+    const asked = picture(w.seen, "post-logos") as unknown as Asked[];
+    expect(asked[1].body.posts.map((l) => l.replace("design-references/", ""))).toEqual(two);
+    expect(asked[1].carried).toBeNull();
+  });
+
+  it("ends the read of a post the service never finishes: twelve reads with a budget are counted against it, and the next asks for it alone", async () => {
+    const three = posts(3).map((p) => p.path);
+    // Every read that carries fewer than twelve spent calls uses its time in its first post and gets no further. A read that
+    // carries twelve is the one the client sends with no budget (picture/client.ts), which the service works to its end.
+    const w = world({ row: stored({ reference_paths: three }), within: (body, carried, shown) => {
+      if ((carried?.asks ?? 0) >= 12) return { result: { posts: (body.posts as string[]).map(shown) }, ms: 51_000 };
+      const search = { of: "same", done: [], at: { size: 0, row: 1, best: { x: 0, y: 0, width: 0, height: 0, score: -2 } } };
+      return { unfinished: { posts: [], search }, carried: { search, asks: (carried?.asks ?? 0) + 1 }, ms: 20_000 };
+    } });
+    const outs = await drive(w.db, c({ harvested_design_references: posts(3) }), before(), 40);
+    expect(outs.at(-1)).toMatchObject({ status: "done" });
+    const asked = picture(w.seen, "post-logos") as unknown as Asked[];
+    // Twelve looks at the first post that settle nothing, each one more counted; the thirteenth asks for that post alone and settles it.
+    expect(asked.slice(0, 13).map((x) => x.carried?.asks ?? 0)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    expect(asked.slice(0, 12).every((x) => x.body.posts.length === 3)).toBe(true);
+    expect(asked[12].body.posts).toEqual(["design-references/c1/social-0.jpg"]);
+    // The posts after it start their own count, and the set is settled from all three.
+    expect(asked[13].carried).toBeNull();
+    expect(w.row().logo_set).toMatchObject({ of: LOGO, posts: { read: 3 } });
   });
 
   it("fails with the lifecycle's own backoff when the service refuses the call", async () => {
@@ -1474,6 +1588,25 @@ describe("design_settings", () => {
       expect(outs.at(-2)!.result).toMatchObject({ written: true, logo_path: LOGO, tone: { of: LOGO, settled: T } });
     });
 
+    it("chooses the same logo from a service that reads a post and a half in its time: a post it did not reach is never taken for one with no logo", async () => {
+      const byLogo = { [WORDMARK]: { facts: WIDE, shows: wordmarkOn(5) }, [BADGE]: { facts: WIDE } };
+      const fast = world({ row: stored({ reference_paths: six }), page: PAGE, site, byLogo });
+      await drive(fast.db, brand(), before(), 30);
+      const chosen = fast.row();
+
+      const service = slowService();
+      const slow = world({ row: stored({ reference_paths: six }), page: PAGE, site, byLogo, within: service.within });
+      const outs = await drive(slow.db, brand(), before(), 80);
+      expect(outs.at(-1)).toMatchObject({ status: "done", result: { logo_path: WORDMARK, pick: { of: WORDMARK, chosen: null } } });
+      // The wordmark on five of six posts, as one read of them all finds it, and the same row written.
+      expect(slow.row()).toEqual(chosen);
+      expect(slow.row().derived).toMatchObject({ logo_pick: { found: 5, posts: 6 } });
+      // More reads than a fast service needs, every one of them the step's own short wait, and nothing of a read left in the result.
+      expect(readsOf(slow.seen, WORDMARK)).toBeGreaterThan(readsOf(fast.seen, WORDMARK));
+      expect(outs.slice(0, -1).every((o) => o.status === "waiting" && o.reason === "in_progress")).toBe(true);
+      for (const unit of Object.values((outs.at(-1)!.result!.pick as { units: Record<string, object> }).units)) expect(unit).not.toHaveProperty("reading");
+    });
+
     it("holds one read of posts to a look, and converts no candidate in the look that made the set's last calls", async () => {
       const { db, seen } = world({ row: stored({ reference_paths: six }), page: PAGE, site, byLogo: { [WORDMARK]: { facts: WIDE, shows: wordmarkOn(5) }, [BADGE]: { facts: WIDE } } });
       const rows = before();
@@ -1532,7 +1665,8 @@ describe("design_settings", () => {
       // A service that is unavailable is a quiet wait, and the set stays settled.
       const down = world({ row: stored({ reference_paths: six }), page: PAGE, site, byLogo: { [WORDMARK]: { fail: new PictureError("The picture service did not answer.", "post-logos", "unavailable") } } });
       const waits = await drive(down.db, brand(), before(), 30);
-      expect(waits.at(-1)).toMatchObject({ status: "waiting", reason: "picture_service", recheckMinutes: 10, result: { logo_path: LOGO, tone: { settled: T }, pick: { open: true, batch: 2 } } });
+      expect(waits.at(-1)).toMatchObject({ status: "waiting", reason: "picture_service", recheckMinutes: 10, result: { logo_path: LOGO, tone: { settled: T }, pick: { open: true } } });
+      expect(waits.at(-1)!.result!.pick).not.toHaveProperty("batch");
     });
 
     it("looks for no candidate for a logo a person gave or a page on another client's site", async () => {
@@ -1599,9 +1733,9 @@ describe("design_settings", () => {
       const { db, row: settings } = world({ row: stored({ reference_paths: six }), page: PAGE, site, shows: icon, byLogo: { [WORDMARK]: { facts: WIDE, shows }, [BADGE]: { facts: WIDE } } });
       const io = deps.picture;
       deps.picture = ((d: unknown) => {
-        const real = (io as (d: unknown) => { call: (route: string, body: Record<string, unknown>) => Promise<{ result: Record<string, unknown>; ms: number }> })(d);
-        return { ...real, call: async (route: string, body: Record<string, unknown>) => {
-          const got = await real.call(route, body);
+        const real = (io as (d: unknown) => { within: (route: string, body: Record<string, unknown>, carried: unknown) => Promise<{ result: Record<string, unknown>; ms: number }> })(d);
+        return { ...real, within: async (route: string, body: Record<string, unknown>, carried: unknown) => {
+          const got = await real.within(route, body, carried);
           const at = body.placement as { anchor: string; width: number; top: number } | undefined;
           const atSpot = route === "post-logos" && (body.searches as Array<{ logo: string }>)[0].logo === `generated-media/${WORDMARK}` && at?.anchor === PLACEMENT.anchor && at.width === PLACEMENT.width && at.top === PLACEMENT.top;
           return atSpot ? { ...got, result: { posts: (body.posts as string[]).map((link) => spot[link.replace("design-references/", "")] ?? MISSED) } } : got;

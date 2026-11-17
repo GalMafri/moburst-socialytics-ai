@@ -67,7 +67,7 @@ import type { StepOutcome, StepPolicy, StepRow } from "./policy.ts";
 import { NotInStorage, PictureError } from "../picture/client.ts";
 import type { LogoSetResult, PostLogo } from "../picture/contract.ts";
 import { chooseSet, postSearchPlan, TONE_RULE, type SetPaths } from "../design/logoTone.ts";
-import { askLogoSet, askPostLogos, liveIo, POSTS_PER_CALL, type PictureIo } from "../design/logoSetWork.ts";
+import { askLogoSet, liveIo, readingOf, readNextPosts, type PictureIo, type Reading } from "../design/logoSetWork.ts";
 import { chooseLogo, eitherRead, LOGO_PICK_RULE, measuredPlacement, postsCarrying, type FoundAt } from "../design/logoPick.ts";
 import type { LogoFile } from "./imaging.ts";
 import { clipText } from "../text/clip.ts";
@@ -323,8 +323,8 @@ interface ToneWork {
   paths?: SetPaths;
   searched?: string;
   posts: Record<string, PostLogo | null>;
-  /** How many posts the next read holds: fewer than POSTS_PER_CALL after a read the service did not answer in time. */
-  batch?: number;
+  /** The post whose search the service did not finish within its time, and how far it got: sent with the next read, which starts with that post. */
+  reading?: Reading;
   settled?: string;
   unusable?: string;
   ms?: { logo_set?: number; post_logos?: number };
@@ -333,7 +333,7 @@ interface ToneWork {
 function toneWork(result: Record<string, unknown> | null | undefined): ToneWork | null {
   const t = result?.tone as Partial<ToneWork> | null | undefined;
   if (!t || typeof t !== "object" || typeof t.of !== "string") return null;
-  return { ...t, of: t.of, site: t.site && typeof t.site === "object" ? t.site : {}, posts: t.posts && typeof t.posts === "object" ? t.posts : {} };
+  return { ...t, of: t.of, site: t.site && typeof t.site === "object" ? t.site : {}, posts: t.posts && typeof t.posts === "object" ? t.posts : {}, reading: readingOf(t.reading) };
 }
 
 /** The parts of a lifecycle row's key the read of the logo's spot depends on (designSettings.ts, readInputs). */
@@ -406,13 +406,18 @@ async function writeDesignSettings(db: Db, client: ClientRow, ctx: StepContext, 
  *     run (each decodes an image here);
  *   the files: one logo-set call makes the two recolored copies and tests
  *     the website files;
- *   the posts: post-logos calls, four posts to a call, one call to a run;
+ *   the posts: post-logos calls, one call to a run. A call asks for the
+ *     next posts not yet read (up to POSTS_PER_CALL) and the service reads
+ *     as many as its time budget allows: what it finished is kept, and so is
+ *     how far it got in the next post, which the next run's call carries on
+ *     from. How long a client's logo takes to search for therefore decides
+ *     only how many runs the read takes, never whether it ends;
  *   the choice (chooseSet), and its write, which holds only while the logo
  *     and a person's second file are what this run read.
  * While work remains the step waits a minute and is looked at again, so no
  * run holds more than one such call. A service that is unavailable is a
- * quiet wait of ten minutes, and the next read of posts then holds half as
- * many, down to one; a call it refuses is a failure with the
+ * quiet wait of ten minutes with everything read so far kept; a call it
+ * refuses is a failure with the
  * lifecycle's own backoff; a logo it cannot use ends the step with no set.
  * In every case designs start with the one file, as before, until a set is
  * settled. `settings` are the result keys the step always had.
@@ -421,8 +426,8 @@ async function settleLogoSet(db: Db, client: ClientRow, ctx: StepContext, row: S
   const same = toneWork(ctx.previous?.result);
   const kept = same ?? toneWork(ctx.rows.get("design_settings")?.result);
   const tone: ToneWork = { of: row.logo_path, hash: kept?.hash, site: {}, asked: kept?.asked, facts: kept?.facts, paths: kept?.paths, searched: kept?.searched, posts: { ...(kept?.posts ?? {}) }, ms: kept?.ms };
-  // A smaller read is kept only while the inputs stay the same; new inputs start from four posts again.
-  if (same?.batch) tone.batch = same.batch;
+  // How far the service got in a post is kept like the posts it finished: while they are searched the same way.
+  if (kept?.reading) tone.reading = kept.reading;
   const result = () => ({ ...settings, tone });
   const wait = (): StepOutcome => ({ status: "waiting", reason: "in_progress", recheckMinutes: 1, result: result() });
 
@@ -472,25 +477,26 @@ async function settleLogoSet(db: Db, client: ClientRow, ctx: StepContext, row: S
     if (tone.searched !== searched) {
       tone.searched = searched;
       tone.posts = {};
+      delete tone.reading;
     }
     tone.posts = Object.fromEntries(refs.filter((p) => p in tone.posts).map((p) => [p, tone.posts[p]]));
     const unread = refs.filter((p) => !(p in tone.posts));
     if (unread.length) {
-      const batch = unread.slice(0, Math.min(POSTS_PER_CALL, Math.max(1, tone.batch ?? POSTS_PER_CALL)));
-      const { posts, ms } = await askPostLogos(io, { clientId: client.id, posts: batch, placement: row.placement, plan });
-      batch.forEach((p, i) => { tone.posts[p] = posts[i] ?? null; });
-      // A batch with no post left in storage made no call, and has no time to keep.
-      if (ms) tone.ms = { ...(tone.ms ?? {}), post_logos: ms };
-      if (unread.length > batch.length) return wait();
+      // The next posts not yet read. The service reads as many as its time allows and says how far it got in the one after them (logoSetWork.ts, readNextPosts).
+      const looked = await readNextPosts(io, { clientId: client.id, unread, placement: row.placement, plan, reading: tone.reading });
+      for (const { post, logo } of looked.read) tone.posts[post] = logo;
+      if (looked.reading) tone.reading = looked.reading;
+      else delete tone.reading;
+      // A read with no post left in storage made no call, and has no time to keep.
+      if (looked.ms) tone.ms = { ...(tone.ms ?? {}), post_logos: looked.ms };
+      if (unread.length > looked.read.length) return wait();
+    } else {
+      delete tone.reading;
     }
   } catch (e) {
     if (!(e instanceof PictureError)) throw e;
-    if (e.why === "unavailable") {
-      // A read of posts the service did not answer in time is asked again with half as many posts, down to one,
-      // so a slow service or a logo that is slow to search for still gets its set, with nobody changing anything.
-      if (e.route === "post-logos") tone.batch = Math.max(1, Math.floor((tone.batch ?? POSTS_PER_CALL) / 2));
-      return { status: "waiting", reason: "picture_service", recheckMinutes: 10, result: result() };
-    }
+    // The service could not be reached or did not answer: what was read so far is kept, and the same read is asked again later.
+    if (e.why === "unavailable") return { status: "waiting", reason: "picture_service", recheckMinutes: 10, result: result() };
     // The service ran and could not use the stored logo (its pixels cannot be read, or it has no ink): no set, and designs run with the one file.
     if (e.why === "unusable" && e.route === "logo-set") {
       tone.unusable = e.message;
@@ -527,6 +533,8 @@ interface PickUnit {
   paths?: SetPaths;
   searched?: string;
   posts: Record<string, PostLogo | null>;
+  /** The post whose search the service did not finish within its time, and how far it got: sent with this file's next read, which starts with that post. */
+  reading?: Reading;
   /** The service ran and could not use this file: it is no candidate. */
   unusable?: string;
 }
@@ -549,7 +557,6 @@ interface PickWork {
   listed?: { site: string; files: string[]; unread?: number };
   files: Record<string, PickFile | null>;
   units: Record<string, PickUnit>;
-  batch?: number;
   candidates?: number;
   /** How many posts count for each file (logoPick.ts, postsCarrying): the logo the client has counts every post it is found on, a candidate the posts it matches best. */
   counts?: Record<string, number>;
@@ -652,8 +659,9 @@ async function markAddresses(db: Db, clientId: string, marks: PageMark[], main: 
  *     run. A homepage that does not answer is read again half an hour
  *     later, three times in all;
  *   the test: each candidate gets the two calls the client's logo gets for
- *     its set (logo-set, then post-logos, four posts to a call, one call to
- *     a run), searched where the model's stored read says the posts carry
+ *     its set (logo-set, then post-logos, one call to a run, each worked
+ *     to the service's time budget and carried on by the next, as for the
+ *     set), searched where the model's stored read says the posts carry
  *     the logo;
  *   the count (postsCarrying): the logo the client has counts every post
  *     it is found on, whatever a candidate scores there; a candidate counts
@@ -699,10 +707,10 @@ async function pickLogo(db: Db, client: ClientRow, ctx: StepContext, base: Recor
   // What an earlier look read of the posts is kept through every wait of this one, so no post is read twice for the same file.
   // A file the service could not use is asked about again once the step's inputs have changed.
   for (const [path, unit] of Object.entries(kept?.units ?? {})) {
-    pick.units[path] = { ...unit, posts: { ...(unit.posts ?? {}) } };
+    pick.units[path] = { ...unit, posts: { ...(unit.posts ?? {}) }, reading: readingOf(unit.reading) };
+    if (!pick.units[path].reading) delete pick.units[path].reading;
     if (!same) delete pick.units[path].unusable;
   }
-  if (same?.batch) pick.batch = same.batch;
   if (kept?.placed) pick.placed = kept.placed;
 
   // The brand's own marks on the homepage.
@@ -782,6 +790,7 @@ async function pickLogo(db: Db, client: ClientRow, ctx: StepContext, base: Recor
         const { facts } = await askLogoSet(io, { clientId: client.id, logoPath: path, site: [], person: null, out });
         Object.assign(unit, { hash, asked, facts, paths: { other: facts.made.other ? out.other : null, white: facts.made.white ? out.white : null, site: null, person: null }, searched: undefined, posts: {} });
         delete unit.unusable;
+        delete unit.reading;
       }
       const plan = postSearchPlan(path, unit.facts!, unit.paths!);
       const placement = searchPlace(unit.facts!.size.width, unit.facts!.size.height);
@@ -789,16 +798,23 @@ async function pickLogo(db: Db, client: ClientRow, ctx: StepContext, base: Recor
       if (unit.searched !== searched) {
         unit.searched = searched;
         unit.posts = {};
+        delete unit.reading;
       }
       unit.posts = Object.fromEntries(refs.filter((p) => p in unit.posts).map((p) => [p, unit.posts[p]]));
       const unread = refs.filter((p) => !(p in unit.posts));
-      if (!unread.length) continue;
+      if (!unread.length) {
+        delete unit.reading;
+        continue;
+      }
       if (called) return wait();
-      const batch = unread.slice(0, Math.min(POSTS_PER_CALL, Math.max(1, pick.batch ?? POSTS_PER_CALL)));
-      const { posts } = await askPostLogos(io, { clientId: client.id, posts: batch, placement, plan });
-      batch.forEach((p, i) => { unit.posts[p] = posts[i] ?? null; });
+      // The next posts not yet read for this file, asked as the set's are (logoSetWork.ts, readNextPosts): the service settles as many as its
+      // time allows and says how far it got in the one after them. Only a post it settled is kept, so a post it did not reach is never taken for one with no logo.
+      const looked = await readNextPosts(io, { clientId: client.id, unread, placement, plan, reading: unit.reading });
+      for (const { post, logo } of looked.read) unit.posts[post] = logo;
+      if (looked.reading) unit.reading = looked.reading;
+      else delete unit.reading;
       called = true;
-      if (unread.length > batch.length) return wait();
+      if (unread.length > looked.read.length) return wait();
     } catch (e) {
       // A file that is gone from storage is no candidate.
       if (e instanceof NotInStorage) {
@@ -806,11 +822,8 @@ async function pickLogo(db: Db, client: ClientRow, ctx: StepContext, base: Recor
         continue;
       }
       if (!(e instanceof PictureError)) throw e;
-      if (e.why === "unavailable") {
-        // As for the set: a read the service did not answer in time is asked again with half as many posts, down to one.
-        if (e.route === "post-logos") pick.batch = Math.max(1, Math.floor((pick.batch ?? POSTS_PER_CALL) / 2));
-        return { status: "waiting", reason: "picture_service", recheckMinutes: 10, result: { ...base, pick: { ...pick, open: true } } };
-      }
+      // As for the set: the service could not be reached or did not answer. What was read so far is kept, and the same read is asked again later.
+      if (e.why === "unavailable") return { status: "waiting", reason: "picture_service", recheckMinutes: 10, result: { ...base, pick: { ...pick, open: true } } };
       // The service could not use this file (no ink, pixels it cannot read) or turned the call away: it is no candidate.
       // The set is settled already, so a candidate never fails the step.
       unit.unusable = e.message;

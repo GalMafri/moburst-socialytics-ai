@@ -1,8 +1,8 @@
 // @vitest-environment node
 // Node, not jsdom: the client sets AbortSignal.timeout, which jsdom lacks and Deno has.
 import { describe, expect, it, vi } from "vitest";
-import { NotInStorage, PictureError, callPicture, notePicture, pictureCheckCount, signedRead, signedWrite } from "../../../functions/_shared/picture/client";
-import { PICTURE_OPEN_TIMEOUT_MS, type FinishRequest } from "../../../functions/_shared/picture/contract";
+import { NotEnded, NotInStorage, PictureError, callPicture, callPictureWithin, carriedOf, notePicture, pictureCheckCount, searchToEnd, signedRead, signedWrite, type Carried } from "../../../functions/_shared/picture/client";
+import { PICTURE_CALL_TIMEOUT_MS, PICTURE_MAX_ASKS, PICTURE_OPEN_TIMEOUT_MS, PICTURE_SEARCH_ROUTES, PICTURE_WORK_BUDGET_MS, type FinishRequest, type LocateRequest, type LocateResult, type PostLogosRequest, type SearchSoFar, type SlotFileRequest, type SlotFileResult, type SlotRequest, type SlotResult } from "../../../functions/_shared/picture/contract";
 
 const body: FinishRequest = {
   job: "job-1",
@@ -296,6 +296,194 @@ describe("callPicture", () => {
     const e = await failure(callPicture(admin, "finish", body, { fetchImpl, sleep: async () => {} }));
     expect(e.message).toBe("The picture service was not called: the database could not open a call.");
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe("callPictureWithin", () => {
+  const locate: LocateRequest = { job: "job-1", step: "locate", design: "https://storage.test/read/design.png?token=d", logo: "https://storage.test/read/logo.png?token=l", background: [255, 255, 255], placement: { anchor: "center", width: 0.2, top: 0.04 }, scales: [0.45, 1.35] };
+  const found: LocateResult = { x: 466, y: 60, width: 150, height: 44, score: 0.96, usual: { x: 468, y: 54, width: 152, height: 44 }, frame: [1088, 1360] };
+  const soFar: SearchSoFar = { of: "0123456789abcdef0123456789abcdef", done: [{ x: 10, y: 12, width: 40, height: 16, score: 0.4123456789012345 }], at: { size: 7, row: 12, best: { x: 4, y: 2, width: 22, height: 9, score: -2 } } };
+  const posts: PostLogosRequest = { job: "c1", step: "design_settings", posts: ["https://storage.test/read/a.jpg?token=a", "https://storage.test/read/b.jpg?token=b"], placement: locate.placement, scales: [0.45, 1.35], searches: [{ file: "stored", logo: "https://storage.test/read/logo.png?token=l", ground: [255, 255, 255] }], compare: [] };
+  const slot: SlotRequest = { job: "job-1", step: "locate", design: locate.design, placement: locate.placement, scales: [0.45, 1.35], templates: [{ file: "stored", logo: "https://storage.test/read/logo.png?token=l", ground: [255, 255, 255] }] };
+  const slotFound: SlotResult = { slot: { x: 466, y: 60, width: 150, height: 44 }, from: "drawn", of: "stored", index: 0, frame: [1088, 1360], canvas: { x: 468, y: 54, width: 152, height: 44 }, drawn: { x: 466, y: 60, width: 150, height: 44 }, score: 0.96, matched: "stored", scores: [0.96] };
+  const slotFile: SlotFileRequest = { job: "job-1", step: "marks", picture: "https://storage.test/read/nologo.png?token=n", rect: slotFound.slot, frame: [1088, 1360], of: "stored", files: [{ file: "stored", logo: "https://storage.test/read/logo.png?token=l" }], drawn: { file: "stored", ground: [255, 255, 255] } };
+  const fileFound: SlotFileResult = { ground: [250, 250, 250], flat: 0.98, file: "stored", rect: slotFound.slot, shows: { stored: 14.2 }, drawn: { score: 0.31, found: false } };
+  const headersOf = (c: { init: RequestInit }) => c.init.headers as Record<string, string>;
+
+  it("sends the time the service may work, and nothing else new: the body is the one the route has always had", async () => {
+    const { calls, fetchImpl } = fakeFetch([answer(200, { ok: true, result: found, ms: 2100 })]);
+    const { admin, opened } = db();
+    const got = await callPictureWithin(admin, "locate", locate, null, { fetchImpl, baseUrl: "https://pictures.test" });
+    expect(got).toEqual({ result: found, ms: 2100 });
+    expect(calls[0].url).toBe("https://pictures.test/api/picture/locate");
+    expect(calls[0].init.headers).toEqual({ "content-type": "application/json", "x-socialytics-call": opened[0], "x-socialytics-budget": String(PICTURE_WORK_BUDGET_MS) });
+    expect(JSON.parse(String(calls[0].init.body))).toEqual(locate);
+    // The budget leaves most of the call's own limit for the claim, the reads and the answer.
+    expect(PICTURE_WORK_BUDGET_MS).toBeLessThanOrEqual(PICTURE_CALL_TIMEOUT_MS / 3);
+  });
+
+  it("answers how far the service got when its time was used, and sends that back exactly as it was given", async () => {
+    const { calls, fetchImpl } = fakeFetch([answer(200, { ok: true, unfinished: { search: soFar }, ms: 20_007 }), answer(200, { ok: true, result: found, ms: 3100 })]);
+    const { admin } = db();
+    const first = await callPictureWithin(admin, "locate", locate, null, { fetchImpl });
+    // What to keep: the point, and one call spent on this search.
+    expect(first).toEqual({ unfinished: { search: soFar }, carried: { search: soFar, asks: 1 }, ms: 20_007 });
+    if (!("unfinished" in first)) throw new Error("expected an unfinished answer");
+    const second = await callPictureWithin(admin, "locate", locate, first.carried, { fetchImpl });
+    expect(second).toEqual({ result: found, ms: 3100 });
+    const sent = headersOf(calls[1])["x-socialytics-from"];
+    // Every digit of a score comes back: the search carries on from the very number it stopped at.
+    expect(JSON.parse(sent)).toEqual(soFar);
+    expect(sent).toContain("0.4123456789012345");
+    expect(headersOf(calls[0])["x-socialytics-from"]).toBeUndefined();
+  });
+
+  it("asks for the slot and for the cleaned slot's file the way it asks for locate: the budget out, how far it got back, and the result at the end", async () => {
+    for (const [route, request, result] of [["slot", slot, slotFound], ["slot-file", slotFile, fileFound]] as const) {
+      const { calls, fetchImpl } = fakeFetch([answer(200, { ok: true, unfinished: { search: soFar }, ms: 20_004 }), answer(200, { ok: true, result, ms: 2_900 })]);
+      const { admin } = db();
+      const first = await callPictureWithin(admin, route, request as never, null, { fetchImpl, baseUrl: "https://pictures.test" });
+      expect(first, route).toEqual({ unfinished: { search: soFar }, carried: { search: soFar, asks: 1 }, ms: 20_004 });
+      if (!("unfinished" in first)) throw new Error("expected an unfinished answer");
+      expect(await callPictureWithin(admin, route, request as never, first.carried, { fetchImpl, baseUrl: "https://pictures.test" }), route).toEqual({ result, ms: 2_900 });
+      expect(calls.map((c) => c.url)).toEqual([`https://pictures.test/api/picture/${route}`, `https://pictures.test/api/picture/${route}`]);
+      expect(headersOf(calls[0])["x-socialytics-budget"]).toBe(String(PICTURE_WORK_BUDGET_MS));
+      expect(JSON.parse(headersOf(calls[1])["x-socialytics-from"])).toEqual(soFar);
+      // The body of both calls is the request the route has always had.
+      for (const c of calls) expect(JSON.parse(String(c.init.body))).toEqual(request);
+    }
+    expect([...PICTURE_SEARCH_ROUTES].sort()).toEqual(["locate", "post-logos", "slot", "slot-file"]);
+  });
+
+  it("answers the posts a read finished and the point of the next one", async () => {
+    const part = { posts: [{ found: false, score: 0.31 }], search: soFar };
+    const { fetchImpl } = fakeFetch([answer(200, { ok: true, unfinished: part, ms: 20_002 })]);
+    expect(await callPictureWithin(db().admin, "post-logos", posts, null, { fetchImpl })).toEqual({ unfinished: part, carried: { search: soFar, asks: 1 }, ms: 20_002 });
+  });
+
+  it("is answered by a service from before the budget exactly as callPicture is: the whole result", async () => {
+    // A service that reads neither header works to its end and answers `result`, whichever route is asked.
+    const whole = { posts: [{ found: false, score: 0.31 }, null] };
+    const old = fakeFetch([answer(200, { ok: true, result: whole, ms: 47_000 }), answer(200, { ok: true, result: slotFound, ms: 29_700 }), answer(200, { ok: true, result: fileFound, ms: 24_000 })]);
+    expect(await callPictureWithin(db().admin, "post-logos", posts, { search: soFar, asks: 3 }, { fetchImpl: old.fetchImpl })).toEqual({ result: whole, ms: 47_000 });
+    expect(await callPictureWithin(db().admin, "slot", slot, null, { fetchImpl: old.fetchImpl })).toEqual({ result: slotFound, ms: 29_700 });
+    expect(await callPictureWithin(db().admin, "slot-file", slotFile, null, { fetchImpl: old.fetchImpl })).toEqual({ result: fileFound, ms: 24_000 });
+    // The headers it does not read went with a body it has always read.
+    expect(JSON.parse(String(old.calls[1].init.body))).toEqual(slot);
+  });
+
+  it("sends the same budget and the same point with the retry of a call that did not arrive, and counts the two as one call", async () => {
+    const { calls, fetchImpl } = fakeFetch([answer(503, { ok: false, reason: "A picture could not be read from storage." }), answer(200, { ok: true, unfinished: { search: soFar }, ms: 20_000 })]);
+    const sleep = vi.fn(async () => {});
+    const { admin, opened } = db();
+    const got = await callPictureWithin(admin, "locate", locate, { search: soFar, asks: 4 }, { fetchImpl, sleep });
+    expect(sleep).toHaveBeenCalledTimes(1);
+    expect(opened).toHaveLength(2);
+    for (const c of calls) {
+      expect(headersOf(c)["x-socialytics-budget"]).toBe(String(PICTURE_WORK_BUDGET_MS));
+      expect(JSON.parse(headersOf(c)["x-socialytics-from"])).toEqual(soFar);
+    }
+    expect(got).toMatchObject({ carried: { asks: 5 } });
+  });
+
+  it("keeps the point it had when an unfinished answer names none", async () => {
+    const { fetchImpl } = fakeFetch([answer(200, { ok: true, unfinished: {}, ms: 20_000 })]);
+    expect(await callPictureWithin(db().admin, "slot", slot, { search: soFar, asks: 2 }, { fetchImpl })).toEqual({ unfinished: {}, carried: { search: soFar, asks: 3 }, ms: 20_000 });
+  });
+
+  it("fails as callPicture does: unavailable is waited out, a refusal and an unusable picture are told apart", async () => {
+    const down = fakeFetch([timeout(), timeout()]);
+    expect((await failure(callPictureWithin(db().admin, "locate", locate, null, { fetchImpl: down.fetchImpl, sleep: async () => {} }))).why).toBe("unavailable");
+    const refused = fakeFetch([answer(400, { ok: false, reason: "The request is not well formed: x-socialytics-budget" })]);
+    expect((await failure(callPictureWithin(db().admin, "locate", locate, null, { fetchImpl: refused.fetchImpl }))).why).toBe("refused");
+    const unusable = fakeFetch([answer(200, { ok: false, reason: "The file is not a picture that can be read." })]);
+    expect((await failure(callPictureWithin(db().admin, "locate", locate, null, { fetchImpl: unusable.fetchImpl }))).why).toBe("unusable");
+  });
+
+  it("refuses an answer that has neither a result nor how far the call got", async () => {
+    const { fetchImpl } = fakeFetch([answer(200, { ok: true, ms: 5 })]);
+    const e = await failure(callPictureWithin(db().admin, "locate", locate, null, { fetchImpl }));
+    expect(e.why).toBe("refused");
+    expect(e.message).toBe("The picture service answered something it should not have.");
+  });
+
+  describe("the hard cap on asking again", () => {
+    it("sends no budget once a search has had its calls with one, and still says how far the search got", async () => {
+      const { calls, fetchImpl } = fakeFetch([answer(200, { ok: true, result: slotFound, ms: 41_000 })]);
+      const got = await callPictureWithin(db().admin, "slot", slot, { search: soFar, asks: PICTURE_MAX_ASKS }, { fetchImpl });
+      expect(got).toEqual({ result: slotFound, ms: 41_000 });
+      expect(headersOf(calls[0])["x-socialytics-budget"]).toBeUndefined();
+      expect(JSON.parse(headersOf(calls[0])["x-socialytics-from"])).toEqual(soFar);
+      // The call before it, the last with a budget.
+      const last = fakeFetch([answer(200, { ok: true, unfinished: { search: soFar }, ms: 20_000 })]);
+      expect(await callPictureWithin(db().admin, "slot", slot, { search: soFar, asks: PICTURE_MAX_ASKS - 1 }, { fetchImpl: last.fetchImpl })).toMatchObject({ carried: { asks: PICTURE_MAX_ASKS } });
+      expect(headersOf(last.calls[0])["x-socialytics-budget"]).toBe(String(PICTURE_WORK_BUDGET_MS));
+    });
+
+    it("refuses an unfinished answer to that call, so a service that never finishes cannot be asked without end", async () => {
+      const { calls, fetchImpl } = fakeFetch([answer(200, { ok: true, unfinished: { search: soFar }, ms: 20_000 })]);
+      const e = await failure(callPictureWithin(db().admin, "slot-file", slotFile, { search: soFar, asks: PICTURE_MAX_ASKS }, { fetchImpl }));
+      expect(e.why).toBe("refused");
+      expect(e.transient).toBe(false);
+      expect(calls).toHaveLength(1);
+    });
+
+    it("ends a search asked for until it ends, against a service that answers unfinished every time: PICTURE_MAX_ASKS calls with a budget, one without, then a failure", async () => {
+      // Each call gets the same point back: a service that makes no progress at all.
+      const calls: Array<Record<string, string>> = [];
+      const fetchImpl = (async (_url: string, init: RequestInit) => {
+        calls.push(init.headers as Record<string, string>);
+        return answer(200, { ok: true, unfinished: { search: soFar }, ms: 20_000 });
+      }) as unknown as typeof fetch;
+      const e = await failure(searchToEnd(db().admin, "slot", () => slot, { fetchImpl }));
+      expect(e.why).toBe("refused");
+      expect(calls).toHaveLength(PICTURE_MAX_ASKS + 1);
+      expect(calls.slice(0, PICTURE_MAX_ASKS).every((h) => h["x-socialytics-budget"] === String(PICTURE_WORK_BUDGET_MS))).toBe(true);
+      expect(calls[PICTURE_MAX_ASKS]["x-socialytics-budget"]).toBeUndefined();
+    });
+
+    it("gives the result, the calls it took and the longest of them when the search ends", async () => {
+      const { fetchImpl } = fakeFetch([answer(200, { ok: true, unfinished: { search: soFar }, ms: 20_004 }), answer(200, { ok: true, unfinished: { search: soFar }, ms: 20_010 }), answer(200, { ok: true, result: slotFound, ms: 6_000 })]);
+      expect(await searchToEnd(db().admin, "slot", async () => slot, { fetchImpl })).toEqual({ result: slotFound, ms: 20_010, total: 46_014, calls: 3 });
+    });
+
+    it("leaves a search where it is when its caller's own time is up, after the call in progress", async () => {
+      const { calls, fetchImpl } = fakeFetch([answer(200, { ok: true, unfinished: { search: soFar }, ms: 20_004 }), answer(200, { ok: true, unfinished: { search: soFar }, ms: 20_004 }), answer(200, { ok: true, result: slotFound, ms: 6_000 })]);
+      let looks = 0;
+      // The caller's time is up at its second look: two calls were made, the third never.
+      const e = await searchToEnd(db().admin, "slot", () => slot, { fetchImpl }, () => ++looks >= 2).catch((err) => err);
+      expect(e).toBeInstanceOf(NotEnded);
+      expect(calls).toHaveLength(2);
+      // A caller whose time is already up still makes the first call: a check always asks once.
+      const once = fakeFetch([answer(200, { ok: true, result: slotFound, ms: 6_000 })]);
+      expect(await searchToEnd(db().admin, "slot", () => slot, { fetchImpl: once.fetchImpl }, () => true)).toMatchObject({ result: slotFound, calls: 1 });
+    });
+
+    it("is small enough to end and large enough for the slowest search measured", () => {
+      // Twelve budgets are four minutes of the service's time on one search; the slowest search measured took 51 seconds.
+      expect(PICTURE_MAX_ASKS).toBe(12);
+      expect(PICTURE_MAX_ASKS * PICTURE_WORK_BUDGET_MS).toBeGreaterThanOrEqual(4 * 51_000);
+    });
+  });
+
+  it("reads back what a caller kept, and takes anything else for a first call", () => {
+    const kept: Carried = { search: soFar, asks: 3 };
+    expect(carriedOf(JSON.parse(JSON.stringify(kept)))).toEqual(kept);
+    expect(carriedOf(null)).toBeNull();
+    expect(carriedOf("x")).toBeNull();
+    expect(carriedOf({ asks: "many" })).toEqual({ asks: 0 });
+    expect(carriedOf({ search: soFar })).toEqual({ search: soFar, asks: 0 });
+    expect(carriedOf({ search: 7, asks: 2.9 })).toEqual({ asks: 2 });
+  });
+});
+
+describe("callPicture and a call that was not finished", () => {
+  it("refuses an unfinished answer to a call that sent no budget, since only a budget can be answered that way", async () => {
+    const { calls, fetchImpl } = fakeFetch([answer(200, { ok: true, unfinished: { posts: [] }, ms: 5 })]);
+    const e = await failure(callPicture(db().admin, "finish", body, { fetchImpl }));
+    expect(e.why).toBe("refused");
+    expect(calls).toHaveLength(1);
+    expect(Object.keys(calls[0].init.headers as Record<string, string>).sort()).toEqual(["content-type", "x-socialytics-call"]);
   });
 });
 

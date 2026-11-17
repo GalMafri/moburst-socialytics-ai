@@ -3,12 +3,15 @@
 // The logo in the tone its picture needs, on decoded pictures (16 Nov 2026).
 // Everything that decides is in the shared module the workers and the tests
 // read too (supabase/functions/_shared/design/logoTone.ts); this file only
-// runs it on the rasters a call was given.
+// runs it on the rasters a call was given. The two that search (locate with
+// templates, and what a post shows) are stepwise work, so a route can give
+// other calls a turn between steps and can stop at its budget (17 Nov 2026);
+// each also has a form that runs to its end in one go, with the same answer.
 
 import type { LocateResult, LogoFileName, LogoSetResult, Placement, PostLogo } from "../../../supabase/functions/_shared/picture/contract.ts";
 import { makeCopies } from "../../../supabase/functions/_shared/design/logoCopies.ts";
-import { logoFound } from "../../../supabase/functions/_shared/design/logoMatch.ts";
-import { groundAround, nameFile, partsOf, sameLogo, searchTemplates, stampRect, wholeExposedInks, type CompareIn, type TemplateIn } from "../../../supabase/functions/_shared/design/logoTone.ts";
+import { logoFound, toEnd } from "../../../supabase/functions/_shared/design/logoMatch.ts";
+import { groundAround, nameFile, partsOf, sameLogo, searchTemplatesSteps, stampRect, wholeExposedInks, type CompareIn, type Searched, type TemplateIn } from "../../../supabase/functions/_shared/design/logoTone.ts";
 import type { Raster } from "./raster.ts";
 
 /** A logo the service ran on and could not use, said in the product's words. */
@@ -29,9 +32,12 @@ const NAME_ORDER: LogoFileName[] = ["stored", "other", "white"];
  * of the design), and a file one of whose whole parts has that color is not
  * named: stamped there, the part would not show. With no file left, `file`
  * is null and `lost` is true.
+ *
+ * After each step of its searches it says how far they got; `from` carries
+ * on from such a point.
  */
-export function locateTemplates(design: Raster, templates: TemplateIn[], compare: CompareIn[], placement: Placement, scales: [number, number]): LocateResult {
-  const found = searchTemplates(design, templates, placement, scales);
+export function* locateTemplatesSteps(design: Raster, templates: TemplateIn[], compare: CompareIn[], placement: Placement, scales: [number, number], from?: Searched): Generator<Searched, LocateResult, void> {
+  const found = yield* searchTemplatesSteps(design, templates, placement, scales, { from });
   const ground = groundAround(design, found.rect)?.ground ?? null;
   const named = nameFile(design, found, templates, compare, [found.matched, ...NAME_ORDER], ground);
   const rasterOf = (file: LogoFileName) => templates.find((t) => t.file === file)?.raster ?? compare.find((c) => c.file === file)?.raster ?? templates[found.index].raster;
@@ -43,6 +49,11 @@ export function locateTemplates(design: Raster, templates: TemplateIn[], compare
     ...(ground ? { ground } : {}),
     ...(named.file === null ? { lost: true } : {}),
   };
+}
+
+/** Locate with templates, run to its end in one go. */
+export function locateTemplates(design: Raster, templates: TemplateIn[], compare: CompareIn[], placement: Placement, scales: [number, number]): LocateResult {
+  return toEnd(locateTemplatesSteps(design, templates, compare, placement, scales));
 }
 
 /**
@@ -94,13 +105,21 @@ export function logoSet(logo: Raster, site: Array<Raster | null>, person: Raster
  * searches near the logo's usual spot, the one test (logoFound), and for a
  * found logo the file closest to it in color and the ground around it. A
  * post with no pixel to sample around its logo says nothing.
+ *
+ * After each step of its searches it says how far they got; `from` carries
+ * on from such a point.
  */
-export function postLogo(post: Raster, searches: TemplateIn[], compare: CompareIn[], placement: Placement, scales: [number, number]): PostLogo {
-  const found = searchTemplates(post, searches, placement, scales);
+export function* postLogoSteps(post: Raster, searches: TemplateIn[], compare: CompareIn[], placement: Placement, scales: [number, number], from?: Searched): Generator<Searched, PostLogo, void> {
+  const found = yield* searchTemplatesSteps(post, searches, placement, scales, { from });
   if (!logoFound({ width: found.rect.width, score: found.score }, found.usual.width)) return { found: false, score: found.score };
   const around = groundAround(post, found.rect);
   if (!around) return { found: false, score: found.score };
   const named = nameFile(post, found, searches, compare, NAME_ORDER);
   // No ground is given to the naming of a post's file, so a file is always named: a post shows what it shows.
   return { found: true, score: found.score, matched: found.matched, rect: found.rect, gaps: named.gaps, shows: named.file ?? found.matched, ground: around.ground, flat: around.flat };
+}
+
+/** What a post shows, run to its end in one go. */
+export function postLogo(post: Raster, searches: TemplateIn[], compare: CompareIn[], placement: Placement, scales: [number, number]): PostLogo {
+  return toEnd(postLogoSteps(post, searches, compare, placement, scales));
 }

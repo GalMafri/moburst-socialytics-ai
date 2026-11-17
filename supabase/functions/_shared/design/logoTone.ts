@@ -32,7 +32,7 @@
 import { canvasLogoRect, resampleRGBA } from "../canva/brief.ts";
 import { bestNeutral, contrast, groundRank, hidesInk, LOGO_TONE_READ_RULES, LOGO_TONE_RULE, NEUTRAL_DARK, NEUTRAL_LIGHT, weakestContrast } from "../lifecycle/designSettings.ts";
 import type { Ground, Ink, LogoFileName, LogoSetResult, Placement, PostLogo, Rect, Rgb } from "../picture/contract.ts";
-import { findLogo, logoFound } from "./logoMatch.ts";
+import { findLogoSteps, logoFound, shrunkOf, toEnd, type Candidate, type SearchAt } from "./logoMatch.ts";
 
 /** RGBA, straight alpha, row by row, 4 bytes a pixel. */
 export type Raster = { width: number; height: number; data: Uint8ClampedArray };
@@ -378,24 +378,69 @@ export interface CompareIn { file: LogoFileName; raster: Raster }
 export interface Found { index: number; matched: LogoFileName; rect: Rect; score: number; usual: Rect; scores: number[] }
 
 /**
+ * How far the searches of one picture got: `done` holds the match of each
+ * finished template, in the order sent, and `at` how far the first pass of
+ * the next one got (logoMatch.ts, SearchAt). Only numbers, so it can be kept
+ * as JSON and given back.
+ */
+export interface Searched { done: Candidate[]; at?: SearchAt }
+
+/**
+ * True when point `a` of a picture's searches is further along than point
+ * `b`: more templates finished, or more of the next one's first pass. Any
+ * point is further than no point. A search says the same point more than
+ * once while it runs the short levels after a first pass, so a caller that
+ * stops only at a point further than the one it began from always leaves
+ * the search further than it found it, or ends it.
+ */
+export function further(a: Searched, b: Searched | undefined): boolean {
+  if (!b) return true;
+  if (a.done.length !== b.done.length) return a.done.length > b.done.length;
+  if (!a.at) return false;
+  if (!b.at) return true;
+  return a.at.size > b.at.size || (a.at.size === b.at.size && a.at.row > b.at.row);
+}
+
+/**
  * Each template is searched for near its file's usual rectangle with the
- * product's own search (findLogo, logoMatch.ts), laid over its ground. Of
+ * product's own search (findLogoSteps, logoMatch.ts), laid over its ground. Of
  * the matches that are the logo by the one test (logoFound: the score and a
  * size the client uses), the better score wins, the first template's when
  * equal. When none is, the better score of all is answered, so the caller's
  * test fails it as before. A second template can therefore never turn a
  * design that passes with the first into one that is made again. Whether
  * the answered match is the logo stays the one test, made by the caller.
- * `either` reads each match in either tone (logoMatch.ts, findLogo): the
+ * `either` reads each match in either tone (logoMatch.ts, findLogoSteps): the
  * search for a design's slot asks for it, a post's search does not.
+ *
+ * Stepwise work (17 Nov 2026): after every step of a search it says how far
+ * the searches got, the caller may stop there, and a later run given that
+ * point (`from`) skips the finished templates and carries on in the next
+ * one. The answer is the same however the work is cut up. The picture's
+ * luminance and its shrunk copies are made once for all the templates of a
+ * run (shrunkOf).
  */
-export function searchTemplates(picture: Raster, templates: TemplateIn[], placement: Placement, scales: [number, number], opts: { either?: boolean } = {}): Found {
+export function* searchTemplatesSteps(picture: Raster, templates: TemplateIn[], placement: Placement, scales: [number, number], opts: { either?: boolean; from?: Searched } = {}): Generator<Searched, Found, void> {
+  const from = opts.from;
+  const done: Candidate[] = from ? from.done.slice(0, templates.length) : [];
+  const usuals = templates.map((t) => canvasLogoRect(placement, t.raster.width, t.raster.height, picture.width, picture.height));
+  const of = shrunkOf(picture.data, picture.width, picture.height);
+  for (let index = done.length; index < templates.length; index++) {
+    const t = templates[index];
+    const search = findLogoSteps(picture.data, picture.width, picture.height, t.raster.data, t.raster.width, t.raster.height, usuals[index], t.ground,
+      { scales, either: opts.either, of, from: from && index === from.done.length ? from.at : undefined });
+    for (;;) {
+      const step = search.next();
+      // The app's own compiler setting does not narrow a generator's result by `done`, so each side says its type.
+      if (step.done) { done.push(step.value as Candidate); break; }
+      yield { done: done.slice(), at: step.value as SearchAt };
+    }
+  }
   let best: Found | null = null;
   let bestPasses = false;
   const scores: number[] = [];
   templates.forEach((t, index) => {
-    const usual = canvasLogoRect(placement, t.raster.width, t.raster.height, picture.width, picture.height);
-    const f = findLogo(picture.data, picture.width, picture.height, t.raster.data, t.raster.width, t.raster.height, usual, t.ground, { scales, either: opts.either });
+    const usual = usuals[index], f = done[index];
     scores.push(f.score);
     const passes = logoFound({ width: f.width, score: f.score }, usual.width);
     if (!best || (passes && !bestPasses) || (passes === bestPasses && f.score > best.score)) {
@@ -405,6 +450,11 @@ export function searchTemplates(picture: Raster, templates: TemplateIn[], placem
   });
   if (!best) throw new Error("A search needs at least one template.");
   return best;
+}
+
+/** The search over one or two templates run to its end in one go (searchTemplatesSteps). */
+export function searchTemplates(picture: Raster, templates: TemplateIn[], placement: Placement, scales: [number, number], opts: { either?: boolean } = {}): Found {
+  return toEnd(searchTemplatesSteps(picture, templates, placement, scales, opts));
 }
 
 /**

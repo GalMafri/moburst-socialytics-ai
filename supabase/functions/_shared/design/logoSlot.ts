@@ -26,7 +26,7 @@
 
 import { weakestContrast } from "../lifecycle/designSettings.ts";
 import type { LogoFileName, Rect, Rgb } from "../picture/contract.ts";
-import { findLogo, LOGO_MIN_SCORE, logoFound } from "./logoMatch.ts";
+import { findLogoSteps, LOGO_MIN_SCORE, logoFound, toEnd, type SearchAt } from "./logoMatch.ts";
 import { hidesPart, PART_STEP, showsWhole, stampRect, type Raster } from "./logoTone.ts";
 
 /** Where the logo goes: the rectangle, why, and the file whose shape the rectangle has. */
@@ -118,10 +118,19 @@ const STILL_SCALES: [number, number] = [0.9, 1.1];
  * picture: the template that found it is searched for again at the slot,
  * in either tone, with the same bar (0.75). A picture cleaned to a flat or
  * softly shaded ground has no such match.
+ *
+ * It is the product's one search (findLogoSteps), so it is stepwise work
+ * like every other: after each step it says how far it got, and `from`
+ * carries it on from such a point with the same answer.
  */
-export function stillDrawn(picture: Raster, template: { raster: Raster; ground: Rgb }, rect: Rect): { score: number; found: boolean } {
-  const f = findLogo(picture.data, picture.width, picture.height, template.raster.data, template.raster.width, template.raster.height, rect, template.ground, { reach: STILL_REACH, scales: STILL_SCALES, either: true });
+export function* stillDrawnSteps(picture: Raster, template: { raster: Raster; ground: Rgb }, rect: Rect, from?: SearchAt): Generator<SearchAt, { score: number; found: boolean }, void> {
+  const f = yield* findLogoSteps(picture.data, picture.width, picture.height, template.raster.data, template.raster.width, template.raster.height, rect, template.ground, { reach: STILL_REACH, scales: STILL_SCALES, either: true, from });
   return { score: f.score, found: f.score >= LOGO_MIN_SCORE };
+}
+
+/** The same look run to its end in one go (stillDrawnSteps). */
+export function stillDrawn(picture: Raster, template: { raster: Raster; ground: Rgb }, rect: Rect): { score: number; found: boolean } {
+  return toEnd(stillDrawnSteps(picture, template, rect));
 }
 
 /**
