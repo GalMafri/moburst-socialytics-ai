@@ -5130,6 +5130,20 @@ export type Database = {
         Args: { p_client: string; p_from: string; p_to: string }
         Returns: Json
       }
+      trend_week_write: {
+        Args: {
+          p_client: string
+          p_cost: Json
+          p_filter_status: string
+          p_finished_at: string
+          p_platforms: Json
+          p_posts: Json
+          p_status: string
+          p_themes: Json
+          p_week: string
+        }
+        Returns: Json
+      }
       usage_actions: {
         Args: { p_since?: string }
         Returns: {
