@@ -155,6 +155,20 @@ function cleanPlacing(raw: unknown): string {
   return wordCount(placing) > MAX_PLACING_WORDS ? "" : placing;
 }
 
+/** The words of a line as a reader counts them: runs of letters and digits, in lower case. */
+function wordsOf(text: string): string[] {
+  return text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+}
+
+/** Whether the headline already says a label: the label's words stand together, in order, inside the headline's. */
+export function saidBy(headline: string[], label: string): boolean {
+  const head = wordsOf(headline.join(" "));
+  const want = wordsOf(label);
+  if (!want.length) return false;
+  for (let i = 0; i + want.length <= head.length; i++) if (want.every((w, k) => head[i + k] === w)) return true;
+  return false;
+}
+
 /**
  * One slide of the planner's reply, or null when its headline or picture is
  * not well formed. Labels are read only for a post with a planned visual
@@ -168,7 +182,9 @@ function readSlide(o: unknown, withLabels: boolean): { slide: Slide; over: boole
   if (!headline.length || !picture || words > MAX_HEADLINE_WORDS) return null;
   const plain = { headline, picture };
   if (!withLabels) return { slide: plain, over: false };
-  const labels = cleanLabels((o as { labels?: unknown })?.labels);
+  const given = cleanLabels((o as { labels?: unknown })?.labels);
+  // A label the headline already says is set once by the image model, and the design would then be turned down for a missing word (17 Nov 2026: "Myth one" beside "Myth one: ..."), so it is no label.
+  const labels = given ? given.filter((l) => !saidBy(headline, l)) : given;
   if (!labels || words + labels.reduce((n, l) => n + wordCount(l), 0) > MAX_DESIGN_WORDS) return { slide: plain, over: true };
   if (!labels.length) return { slide: plain, over: false };
   const placing = cleanPlacing((o as { placing?: unknown })?.placing);
@@ -439,7 +455,7 @@ const NO_PERSON = "It shows no real or identifiable person and no portrait stand
 /** The labels the first option may carry, asked for only of a post with a planned visual; "" without one. */
 function labelsAsk(visual: string | null | undefined): string {
   return planned(visual)
-    ? `labels: only on the first option, and only when the planned visual calls for lettering beyond the headline (list items, labels, numbers): those pieces in the planned visual's own words, one label for each piece. Words and numbers only: no symbols and no emoji. At most ${MAX_LABELS} labels, each of at most ${MAX_LABEL_WORDS} words, and at most ${MAX_DESIGN_WORDS} words on the design with the headline; when the planned visual calls for more, give the pieces that carry its point within these limits. Leave labels out when the planned visual calls for no lettering beyond the headline.`
+    ? `labels: only on the first option, and only when the planned visual calls for lettering beyond the headline (list items, labels, numbers): those pieces in the planned visual's own words, one label for each piece. A label never repeats words the headline already has. Words and numbers only: no symbols and no emoji. At most ${MAX_LABELS} labels, each of at most ${MAX_LABEL_WORDS} words, and at most ${MAX_DESIGN_WORDS} words on the design with the headline; when the planned visual calls for more, give the pieces that carry its point within these limits. Leave labels out when the planned visual calls for no lettering beyond the headline.`
     : "";
 }
 

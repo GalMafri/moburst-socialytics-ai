@@ -87,7 +87,7 @@ describe("a post whose planned visual calls for lettering", () => {
   const visual = "The four signs stacked beside white hearts on a soft green background.";
 
   it("asks the planner for labels on the first option only, when the planned visual calls for them, as words and numbers within the limits", () => {
-    const line = "labels: only on the first option, and only when the planned visual calls for lettering beyond the headline (list items, labels, numbers): those pieces in the planned visual's own words, one label for each piece. Words and numbers only: no symbols and no emoji. At most 6 labels, each of at most 8 words, and at most 45 words on the design with the headline; when the planned visual calls for more, give the pieces that carry its point within these limits. Leave labels out when the planned visual calls for no lettering beyond the headline.";
+    const line = "labels: only on the first option, and only when the planned visual calls for lettering beyond the headline (list items, labels, numbers): those pieces in the planned visual's own words, one label for each piece. A label never repeats words the headline already has. Words and numbers only: no symbols and no emoji. At most 6 labels, each of at most 8 words, and at most 45 words on the design with the headline; when the planned visual calls for more, give the pieces that carry its point within these limits. Leave labels out when the planned visual calls for no lettering beyond the headline.";
     expect(plannerPrompt({ ...base, visual }).split("\n")).toContain(`- ${line}`);
     expect(plannerPrompt({ ...base, story: true, visual }).split("\n")).toContain(`- ${line}`);
     // A carousel's labels are each slide's own.
@@ -330,5 +330,37 @@ describe("a job and its labels", () => {
 
   it("still tells the planner what a recent design showed, labels or none", () => {
     expect(recentLines([{ refs: ["a.jpg"], layout: "list", picture: "a clean steel bench" }], ["a.jpg"])).toContain("- built on Post 1, list: a clean steel bench");
+  });
+});
+
+import { saidBy, parseBriefs as parsePlan } from "../../../functions/_shared/canva/options";
+
+describe("a label the headline already says", () => {
+  it("is found when its words stand together in the headline, whatever the case and punctuation", () => {
+    expect(saidBy(["Myth one: a silent room is quietest"], "Myth one")).toBe(true);
+    expect(saidBy(["Handled. Direct keeps the margin.", "Save this for later."], "Handled")).toBe(true);
+    expect(saidBy(["Handled. Direct keeps the margin."], "DIRECT")).toBe(true);
+    expect(saidBy(["Myth one: a silent room is quietest"], "Actually")).toBe(false);
+    expect(saidBy(["Myth one: a silent room is quietest"], "one myth")).toBe(false);
+    expect(saidBy(["Myth one"], "")).toBe(false);
+  });
+
+  it("is left out of the plan, and the other labels stay", () => {
+    const reply = JSON.stringify({ options: [
+      { posts: [1], layout: "list", headline: ["Myth one: a silent room is quietest"], labels: ["Myth one", "Actually", "In silence, every creak stands out"], placing: "stacked under the headline", picture: "a calm navy field" },
+      { posts: [1], layout: "plain", headline: ["A silent room is not the quietest"], picture: "a calm navy field" },
+    ] });
+    const briefs = parsePlan(reply, ["a.jpg"], { labels: true });
+    expect(briefs[0].labels).toEqual(["Actually", "In silence, every creak stands out"]);
+    expect(briefs[0].placing).toBe("stacked under the headline");
+  });
+
+  it("makes the option plain when the headline says every label", () => {
+    const reply = JSON.stringify({ options: [
+      { posts: [1], layout: "list", headline: ["Handled. Direct keeps the margin."], labels: ["Handled", "Direct"], placing: "under the headline", picture: "a table" },
+    ] });
+    const briefs = parsePlan(reply, ["a.jpg"], { labels: true });
+    expect(briefs[0].labels).toBeUndefined();
+    expect(briefs[0].placing).toBeUndefined();
   });
 });
