@@ -12,8 +12,9 @@
 //   frame        the image model draws the clip's opening frame from the
 //                brief, with the kit's stills as its references (on the posts
 //                route, from the brief alone), at most MAX_FRAMES times;
-//   frame_check  the frame must show no writing at all and no other brand's
-//                marks, or it is drawn again;
+//   frame_check  the frame must show no writing a viewer could make out
+//                (compose.ts, writingCounts) and no other brand's marks, or
+//                it is drawn again;
 //   clip         at the price approved for the video, the one clip is
 //                ordered from Higgsfield (clipStep.ts): its order is
 //                recorded on the job, once and under a renewed lease, before
@@ -369,7 +370,7 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       }
       // A video post is never silent, and its clip is ordered once: a silent clip ends the video.
       if (made.audio < 1) throw new Error(`FINAL: ${REASONS.silent}`);
-      // The clip carries no writing of its own: the only words are the title's.
+      // The clip carries no writing of its own a viewer could make out: the only words are the title's.
       const seen = await footageWriting(admin, s.still_paths ?? []);
       s.footage_writing = seen;
       if (seen.writing) {
@@ -443,8 +444,8 @@ async function generateImage(apiKey: string, prompt: string, size: [number, numb
 }
 
 
-/** Whether the footage's stills show any writing, read by the vision model. */
-async function footageWriting(admin: any, paths: string[], bucket = BUCKET): Promise<{ writing: boolean; where: string }> {
+/** Whether the footage's stills show writing that counts (compose.ts, writingCounts), read by the vision model; left is what it saw and let through. */
+async function footageWriting(admin: any, paths: string[], bucket = BUCKET): Promise<{ writing: boolean; where: string; left: string }> {
   if (!paths.length) throw new Error("The footage's stills are missing.");
   const content: unknown[] = await jpegBlocks(admin, bucket, paths);
   content.push({ type: "text", text: footageTextPrompt() });

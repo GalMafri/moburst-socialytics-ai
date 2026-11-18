@@ -23,13 +23,15 @@ import { DesignNote } from "./DesignNote";
 import { NoteBox } from "./NoteBox";
 import { useDesignRequests } from "./DesignRequestsContext";
 import { NOTE_PLACEHOLDER, notStartedLine } from "@/lib/postNotes";
-import { DESIGN_FEEDBACK_REASONS, currentDesign, isVideoMedia, type DesignRequest, type DesignVersion, type ShotBrief } from "@/lib/designRequests";
+import { DESIGN_FEEDBACK_REASONS, currentDesign, isVideoMedia, notMadeLine, type DesignRequest, type DesignVersion, type ShotBrief } from "@/lib/designRequests";
 import { STORY_POSTED_BY_HAND, storageDownloadUrl } from "@/lib/story";
 
 interface Props {
   versions: DesignVersion[];
   /** The post's latest request, when one is being prepared. */
   preparing: DesignRequest | null;
+  /** The post's latest request, when it ended without a design: the tab says so until another is asked for. */
+  notMade?: DesignRequest | null;
   isStaff: boolean;
   /** Tailwind aspect class for the post's format, e.g. "aspect-[4/5]". */
   aspect: string;
@@ -65,7 +67,7 @@ interface Props {
   storyFileName?: string | null;
 }
 
-export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub, onCreate, onRegenerate, brand, creating, onUse, usingId, onFeedback, feedbackLine, waitingForCopy, onCamera, textOnly, onUploadClip, uploadingClip, onMakeFromPosts, filmedReason, shotBrief, storyFileName }: Props) {
+export function PostDesign({ versions, preparing, notMade, isStaff, aspect, filenameStub, onCreate, onRegenerate, brand, creating, onUse, usingId, onFeedback, feedbackLine, waitingForCopy, onCamera, textOnly, onUploadClip, uploadingClip, onMakeFromPosts, filmedReason, shotBrief, storyFileName }: Props) {
   const clipInput = useRef<HTMLInputElement>(null);
   const requests = useDesignRequests()?.requests;
   /** Regenerate's note box: open, its note, and whether the last press did not start. */
@@ -94,6 +96,7 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
   if (!design) {
     return (
       <div className="space-y-4">
+        {!preparing && notMade && <NotYet>{notMadeLine(notMade, false)}</NotYet>}
         {preparing ? (
           <DesignProgressCard request={preparing} isStaff={isStaff} brand={brand} />
         ) : (
@@ -145,6 +148,8 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
   return (
     <div className="space-y-4">
       {preparing && <DesignProgressCard request={preparing} isStaff={isStaff} replacing brand={brand} />}
+      {/* Asked for after the design shown, and ended without one. */}
+      {!preparing && notMade && notMade.created_at > design.createdAt && <NotYet>{notMadeLine(notMade, true)}</NotYet>}
 
       {isVideo ? (
         <VideoViewer key={design.iterationId} url={design.urls[0]} />

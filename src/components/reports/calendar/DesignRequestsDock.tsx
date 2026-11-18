@@ -1,7 +1,9 @@
 /**
- * Design progress that stays on screen: one card per post whose designs are
- * being prepared, and a card for each that just finished, in the
- * bottom-right column. "Open" takes you to the
+ * Design progress that stays on screen: one card per post the person asked a
+ * design for, from the press until its end, in the bottom-right column. The
+ * card says the design is being prepared, then that it is ready, that the
+ * video is filmed, or that it was not made (18 Nov 2026: a request that ended
+ * without a design took its card away with no word). "Open" takes you to the
  * post's Design tab. A week being designed (the week's design button) is one
  * card for the whole week, not one per post.
  *
@@ -14,7 +16,7 @@ import { useEffect, useState } from "react";
 import { ArrowRight, CheckCircle2, Loader2, Sparkles, X } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useDesignRequests } from "./DesignRequestsContext";
-import { isPreparing, progressPercent, stageLine, type DesignRequest } from "@/lib/designRequests";
+import { endedWithoutDesign, isPreparing, nextStepLine, nounOf, progressPercent, stageLine, type DesignRequest } from "@/lib/designRequests";
 import { postLabel } from "@/lib/designRequestLabels";
 import { weekProgress } from "@/lib/designWeek";
 
@@ -80,10 +82,20 @@ export function DesignRequestsDockItems() {
     return [{ id, requests, progress }];
   });
 
-  const shown = mine.filter((r) => {
-    if (r.batch_id || dismissed.has(r.id)) return false;
+  // One card per post: the newest request the person made for it (requests come newest first),
+  // so a post asked for twice shows where its latest request stands.
+  const posts = new Set<string>();
+  const latest = mine.filter((r) => {
+    if (r.batch_id || posts.has(r.calendar_post_key)) return false;
+    posts.add(r.calendar_post_key);
+    return true;
+  });
+  const shown = latest.filter((r) => {
+    if (dismissed.has(r.id)) return false;
     if (isPreparing(r, isMoburstStaff)) return true;
-    return r.status === "ready" && recent(r.updated_at);
+    if (r.status === "ready" || r.status === "needs_filming") return recent(r.updated_at);
+    // Ended without a design: the card stays to say so, as long as a finished one does.
+    return endedWithoutDesign(r) && recent(r.ended_at ?? r.updated_at);
   }).slice(0, Math.max(0, 4 - weekCards.length));
   if (!shown.length && !weekCards.length) return null;
 
@@ -146,6 +158,8 @@ function DockCard({ request, isStaff, onOpen, onDismiss }: { request: DesignRequ
   const preparing = isPreparing(request, isStaff);
   const ready = request.status === "ready";
   const pct = progressPercent(request);
+  // Neither being prepared nor ready: filmed, or not made. The card says which and what comes next.
+  const next = nextStepLine(request);
   return (
     <div role="status" aria-live="polite" className="glass-elevated rounded-[16px] p-4 w-80 animate-slide-up">
       <div className="flex items-start gap-3">
@@ -164,9 +178,11 @@ function DockCard({ request, isStaff, onOpen, onDismiss }: { request: DesignRequ
           </button>
         )}
       </div>
-      <div className="mt-3 h-1.5 w-full rounded-full bg-[rgba(255,255,255,0.06)] overflow-hidden">
-        <div className={`h-full transition-[width] duration-500 ease-out ${ready ? "bg-success" : "bg-[#b9e045]"}`} style={{ width: `${pct}%` }} role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} />
-      </div>
+      {next ? <p className="mt-3 t-secondary">{next}</p> : (
+        <div className="mt-3 h-1.5 w-full rounded-full bg-[rgba(255,255,255,0.06)] overflow-hidden">
+          <div className={`h-full transition-[width] duration-500 ease-out ${ready ? "bg-success" : "bg-[#b9e045]"}`} style={{ width: `${pct}%` }} role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} />
+        </div>
+      )}
       {preparing && <p className="mt-1.5 t-subhead">{stageLine(request, isStaff)}</p>}
       <div className="mt-3 flex gap-2">
         <button type="button" onClick={onOpen} className="flex-1 inline-flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-[8px] bg-[rgba(255,255,255,0.06)] hover:bg-[rgba(255,255,255,0.10)] text-sm font-medium text-white tracking-[-0.2px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
@@ -176,9 +192,5 @@ function DockCard({ request, isStaff, onOpen, onDismiss }: { request: DesignRequ
       </div>
     </div>
   );
-}
-
-function nounOf(r: DesignRequest): string {
-  return r.kind === "carousel" ? "carousel" : r.kind === "video" ? "video" : "design";
 }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { VIDEO_SIZE, audioScript, captionFontName, captionWeight, captionsAss, framesScript, parseAudio, parseFrames, videoLogoBox, composeScript, footageTextPrompt, hookPlacement, parseComposed, parseFootageText, shellQuote } from "../../../functions/_shared/video/compose";
+import { VIDEO_SIZE, audioScript, captionFontName, captionWeight, captionsAss, framesScript, parseAudio, parseFrames, videoLogoBox, composeScript, footageTextPrompt, hookPlacement, parseComposed, parseFootageText, shellQuote, writingCounts } from "../../../functions/_shared/video/compose";
 import { filmedNeed, parseShotBrief, parseVideoBriefs, parseVideoStyle, sceneLettering, shotBriefPrompt, videoPlannerPrompt, videoStylePrompt } from "../../../functions/_shared/canva/options";
 import { hookPrompt } from "../../../functions/_shared/video/hook";
 
@@ -71,11 +71,44 @@ describe("footage stills", () => {
     expect(script).toContain("@still1.jpg 'https://s/s1'");
     expect(script.indexOf("still0.jpg")).toBeLessThan(script.indexOf("-filter_complex"));
   });
-  it("asks about any writing, garbled or not, and reads the answer", () => {
+  it("asks about every piece of writing, garbled or not, and reads the answer", () => {
     expect(footageTextPrompt()).toMatch(/labels on screens, dashboards or charts.*garbled/);
-    expect(parseFootageText('{"writing": true, "where": "labels on the "dashboard" panels"}')).toEqual({ writing: true, where: 'labels on the "dashboard" panels' });
-    expect(parseFootageText('{"writing": false, "where": ""}')).toEqual({ writing: false, where: "" });
+    expect(parseFootageText('{"writing": [{"what": "labels on the dashboard panels", "legible": true, "far": false}]}'))
+      .toEqual({ writing: true, where: "labels on the dashboard panels", left: "" });
+    expect(parseFootageText('{"writing": []}')).toEqual({ writing: false, where: "", left: "" });
+    expect(parseFootageText('Here it is: {"writing": []} as asked.')).toEqual({ writing: false, where: "", left: "" });
+    // An answer in no form the check asked for says nothing about the footage.
     expect(parseFootageText("no idea")).toBeNull();
+    expect(parseFootageText('{"writing": false, "where": ""}')).toBeNull();
+    expect(parseFootageText('{"writing": ["a sign"]}')).toBeNull();
+    expect(parseFootageText('{"writing": [')).toBeNull();
+  });
+  it("lets through only far-off background writing too small to make out", () => {
+    expect(writingCounts({ legible: false, far: true })).toBe(false);
+    expect(writingCounts({ legible: true, far: true })).toBe(true);
+    expect(writingCounts({ legible: false, far: false })).toBe(true);
+    expect(writingCounts({ legible: true, far: false })).toBe(true);
+    // A fact left out, or given as anything but true or false, counts against the footage.
+    expect(writingCounts({ far: true })).toBe(true);
+    expect(writingCounts({ legible: false })).toBe(true);
+    expect(writingCounts({ legible: "false", far: "true" })).toBe(true);
+    expect(writingCounts({})).toBe(true);
+  });
+  it("passes a street scene whose only writing is far-off signs, and keeps what it let through", () => {
+    const seen = parseFootageText(JSON.stringify({ writing: [
+      { what: "road signs where the road curves, mid-distance", legible: false, far: true },
+      { what: "a small lit sign on a distant tower", legible: false, far: true },
+    ] }));
+    expect(seen).toEqual({ writing: false, where: "", left: "road signs where the road curves, mid-distance; a small lit sign on a distant tower" });
+  });
+  it("refuses footage when one piece of writing can be made out, whatever else is far off", () => {
+    const seen = parseFootageText(JSON.stringify({ writing: [
+      { what: "a far road sign", legible: false, far: true },
+      { what: "a readable sign over the road", legible: true, far: true },
+      { what: "garbled letters on a screen in the foreground", legible: false, far: false },
+      { legible: true, far: false },
+    ] }));
+    expect(seen).toEqual({ writing: true, where: "a readable sign over the road; garbled letters on a screen in the foreground; writing", left: "a far road sign" });
   });
 });
 
@@ -219,7 +252,11 @@ describe("no words in the footage (the scene-word allow-list is gone, 11 Nov 202
   });
   it("asks the writing check about every word, with no names to let through", () => {
     const p = footageTextPrompt();
-    expect(p).toContain("however small or garbled");
+    expect(p).toContain("List every piece of writing anywhere in them");
+    expect(p).toContain("garbled ones included");
+    // What is let through is decided by two facts about each piece (writingCounts), never by a word.
+    expect(p).toContain("false only when it is too small for any letter to be made out");
+    expect(p).toContain("far: true only when it is a small detail of the distant background");
     expect(p).not.toMatch(/belong to the brand|spelled exactly|do not count/);
     // No allow-list parameter, optional or not: the check reads every word.
     expect(footageTextPrompt.toString()).toMatch(/^function footageTextPrompt\(\)\s*\{/);

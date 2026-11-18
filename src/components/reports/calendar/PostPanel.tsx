@@ -19,7 +19,7 @@ import { FeedbackDialog, PostDesign } from "./PostDesign";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { NOT_YET, NotYet, useNotYet } from "@/components/ui/not-yet";
 import { CalendarPostActions } from "@/components/calendar/CalendarPostActions";
-import { ClipNotAccepted, createDesigns, designVersions, isDesignOption, isPreparing, putDesignInUse, sendDesignFeedback, uploadFilmedClip, type ShotBrief } from "@/lib/designRequests";
+import { ClipNotAccepted, createDesigns, designVersions, endedWithoutDesign, isDesignOption, isPreparing, putDesignInUse, sendDesignFeedback, uploadFilmedClip, type ShotBrief } from "@/lib/designRequests";
 import { useAuth } from "@/hooks/useAuth";
 import { PlatformBadge } from "@/lib/platform-config";
 import { CopyEditor } from "./CopyEditor";
@@ -361,6 +361,7 @@ export function PostPanel({
                   <PostDesign
                     versions={versions}
                     preparing={preparingDesigns ? designRequest : null}
+                    notMade={endedWithoutDesign(designRequest) ? designRequest : null}
                     // A filmed post offers its two ways whenever it has no video yet, whatever was tried last.
                     onCamera={filmedReason}
                     textOnly={isTextOnlyFormat(post.format)}

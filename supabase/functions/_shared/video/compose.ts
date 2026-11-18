@@ -224,19 +224,54 @@ export function parseComposed(reply: string): { bytes: number; seconds: number; 
 /** How many stills of the footage are read for stray writing. */
 export const FOOTAGE_STILLS = 4;
 
-/** The instruction for reading the footage's stills. */
+/**
+ * The instruction for reading the footage's stills (the opening frame before
+ * the clip is ordered, and four stills of the clip after it). It names no
+ * words to let through. Since 18 Nov 2026 it asks for each piece of writing
+ * and two facts about it, and writingCounts decides: a city or street scene
+ * always has far-off signs no viewer can read, and counting those threw away
+ * three good opening frames in a row, so no video was made.
+ */
 export function footageTextPrompt(): string {
-  return "These are stills from the footage of a social video, before any title or logo is laid over it. " +
-    "Is there any writing anywhere in them: letters, words, numbers, labels on screens, dashboards or charts, signs, captions, logos or watermarks, however small or garbled? " +
-    'Reply with JSON only: {"writing": true or false, "where": "what must go and where it is, or empty"}';
+  return "These are stills from the footage of a social video, before any title or logo is laid over it. The video is watched full screen on a phone. " +
+    "List every piece of writing anywhere in them: letters, words, numbers, labels on screens, dashboards or charts, signs, captions, logos or watermarks, garbled ones included. " +
+    "Give two facts for each. legible: true when a viewer at that size could read it, or could see its letters or digits, garbled or not; false only when it is too small for any letter to be made out. " +
+    "far: true only when it is a small detail of the distant background, such as a road sign far down a street or a lit sign on a far-off building; false when it is on the subject, in the foreground or the middle ground, on a screen, or laid over the picture. " +
+    'Reply with JSON only: {"writing": [{"what": "what it is and where", "legible": true or false, "far": true or false}]}, with an empty list when there is none.';
 }
 
-/** The answer about the footage's stills, or null when it gives none. */
-export function parseFootageText(text: string): { writing: boolean; where: string } | null {
-  const w = /"writing"\s*:\s*"?(true|false)"?/i.exec(text);
-  if (!w) return null;
-  const where = /"where"\s*:\s*"([\s\S]*?)"\s*}/.exec(text);
-  return { writing: w[1].toLowerCase() === "true", where: where ? where[1] : "" };
+/** One piece of writing the check saw in the footage's stills. */
+export interface FootageMark { what: string; legible: boolean; far: boolean }
+
+/**
+ * Whether a piece of writing ends the footage. Everything counts except a
+ * detail of the distant background too small for any letter to be made out:
+ * a viewer cannot read it, the title is not laid against it as lettering,
+ * and the video model has no letters there to garble. A fact the answer
+ * left out counts against the footage.
+ */
+export function writingCounts(mark: { legible?: unknown; far?: unknown }): boolean {
+  return !(mark.legible === false && mark.far === true);
+}
+
+/**
+ * The answer about the footage's stills, or null when it gives none.
+ * writing and where: the writing that counts (writingCounts); left: what was
+ * seen and let through, kept with the job so staff can see it.
+ */
+export function parseFootageText(text: string): { writing: boolean; where: string; left: string } | null {
+  const a = text.indexOf("{"), b = text.lastIndexOf("}");
+  if (a < 0 || b <= a) return null;
+  let list: unknown;
+  try { list = JSON.parse(text.slice(a, b + 1))?.writing; } catch { return null; }
+  if (!Array.isArray(list)) return null;
+  const counted: string[] = [], left: string[] = [];
+  for (const m of list) {
+    if (!m || typeof m !== "object") return null;
+    const what = String((m as { what?: unknown }).what ?? "").trim() || "writing";
+    (writingCounts(m as FootageMark) ? counted : left).push(what);
+  }
+  return { writing: counted.length > 0, where: counted.join("; "), left: left.join("; ") };
 }
 
 /** A spoken word and when it is said, in seconds from the clip's start. */

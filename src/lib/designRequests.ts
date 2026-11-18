@@ -3,10 +3,11 @@
 // every screen uses for them.
 //
 // Wording rule (Lital, 12 Oct 2026): nothing a client sees says AI, prompt,
-// model, score, pipeline or gate. Since 19 Oct nobody, client or staff, sees a
-// failure: a request that ends without a design closes quietly and the post's
-// design is made again later, so a screen shows a design when it exists, a
-// request being prepared while it is, and otherwise nothing.
+// model, score, pipeline or gate. Nobody, client or staff, sees why a request
+// ended without a design. Since 18 Nov the person who asked does see that it
+// ended (Lital: "the pop up for the status just disappears, I clicked and
+// nothing happened"): the progress card and the post's Design tab say the
+// design was not made and that it can be made again, in those words only.
 
 import { supabase } from "@/integrations/supabase/client";
 import { describeInvokeError } from "@/lib/invokeError";
@@ -45,6 +46,8 @@ export interface DesignRequest {
   /** What the brand's design memory learned from the note; null while nothing was learned yet. */
   note_learned?: NoteLearned | null;
   error: string | null;
+  /** Why a closed request ended (the server's end_reason); never shown as it is. */
+  end_reason?: string | null;
   created_at: string;
   /** When the current preparation began (a request can prepare again). */
   started_at?: string;
@@ -112,6 +115,39 @@ export function isPreparing(r: DesignRequest | null | undefined, _isStaff?: bool
   return r?.status === "preparing";
 }
 
+/**
+ * True for a request that was being prepared and ended without a design
+ * (every option was tried, or it ran out of time). Nothing makes it again on
+ * its own, so the person who asked is told and can ask again.
+ */
+export function endedWithoutDesign(r: Pick<DesignRequest, "status" | "end_reason"> | null | undefined): boolean {
+  return r?.status === "closed" && (r.end_reason === "no_design" || r.end_reason === "no_progress");
+}
+
+/** What a request makes, in the words the screens use. */
+export function nounOf(r: Pick<DesignRequest, "kind">): "design" | "carousel" | "video" {
+  return r.kind === "carousel" ? "carousel" : r.kind === "video" ? "video" : "design";
+}
+
+/**
+ * What a progress card says under its title once the request is no longer
+ * being prepared and made nothing: what the person can do next. Null for a
+ * request being prepared or one that made its design.
+ */
+export function nextStepLine(r: DesignRequest): string | null {
+  if (r.status === "needs_filming") return "Upload the filmed clip, or make it from your posts.";
+  if (endedWithoutDesign(r)) return "You can make it again from the post.";
+  return null;
+}
+
+/** What the post's Design tab says when the last request for it ended without a design. */
+export function notMadeLine(r: Pick<DesignRequest, "kind">, hasDesign: boolean): string {
+  const noun = nounOf(r);
+  return hasDesign
+    ? `The new ${noun} asked for this post wasn't made. This one stays, and you can make a new one again.`
+    : `The last ${noun} asked for this post wasn't made. You can make it again.`;
+}
+
 export function stageIndex(r: DesignRequest): number {
   const steps = stepsFor(r);
   const i = steps.findIndex((s) => s.stage === r.stage);
@@ -128,6 +164,8 @@ export function progressPercent(r: DesignRequest): number {
 export function stageLine(r: DesignRequest, _isStaff?: boolean): string {
   const noun = r.kind === "carousel" ? "Carousel" : r.kind === "video" ? "Video" : "Design";
   if (r.status === "ready") return `${noun} ready`;
+  if (r.status === "needs_filming") return "This video is filmed";
+  if (endedWithoutDesign(r)) return `${noun} not made`;
   const steps = stepsFor(r);
   return steps[Math.min(stageIndex(r), steps.length - 1)].label;
 }
