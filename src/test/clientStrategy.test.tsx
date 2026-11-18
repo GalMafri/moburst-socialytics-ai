@@ -354,7 +354,8 @@ describe('staff only', () => {
   it('has no route for client users', async () => {
     const app = readFileSync(join(__dirname, '..', 'App.tsx'), 'utf8');
     expect(app).toContain('<Route path="/strategy" element={<StaffOnlyRoute><StrategyIndex /></StaffOnlyRoute>} />');
-    expect(app).toContain('<Route path="/clients/:id/strategy" element={<StaffOnlyRoute><ClientStrategy /></StaffOnlyRoute>} />');
+    // One client's pages sit under /clients/:id (ClientAccessGate); its strategy page is staff-only.
+    expect(app).toMatch(/<Route path="\/clients\/:id" element=\{<ClientAccessGate \/>\}>[\s\S]*<Route path="strategy" element=\{<StaffOnlyRoute><ClientStrategy \/><\/StaffOnlyRoute>\} \/>[\s\S]*<\/Route>/);
     f.role = 'client';
     mount('/clients/c1/strategy', <StaffOnlyRoute><ClientStrategy /></StaffOnlyRoute>);
     expect(await screen.findByText('Dashboard')).toBeInTheDocument();

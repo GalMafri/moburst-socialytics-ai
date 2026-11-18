@@ -37,8 +37,11 @@ const IS_LOVABLE_PREVIEW =
   HOSTNAME === "localhost" ||
   HOSTNAME === "127.0.0.1";
 
+/** The editor preview's stand-in user: it has no database session, so row access returns nothing for it. */
+export const DEV_USER_ID = "00000000-0000-0000-0000-000000000000";
+
 const DEV_USER: HubUser = {
-  _id: "00000000-0000-0000-0000-000000000000",
+  _id: DEV_USER_ID,
   name: "Dev user",
   email: "dev@localhost",
   role: "admin",
