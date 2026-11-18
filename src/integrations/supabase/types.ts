@@ -5116,8 +5116,19 @@ export type Database = {
           schedule_id: string
         }[]
       }
+      set_client_access: {
+        Args: { p_client_ids: string[]; p_user_id: string }
+        Returns: number
+      }
       set_design_logo_other: {
         Args: { p_client: string; p_path: string }
+        Returns: undefined
+      }
+      set_user_role: {
+        Args: {
+          p_role: Database["public"]["Enums"]["app_role"]
+          p_user_id: string
+        }
         Returns: undefined
       }
       settle_design_logo_set: {
