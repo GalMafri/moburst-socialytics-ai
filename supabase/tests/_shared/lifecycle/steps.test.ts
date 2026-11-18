@@ -1510,6 +1510,44 @@ describe("design_settings", () => {
     expect(rows.get("design_settings")!.result).toMatchObject({ tone: { of: LOGO, settled: T } });
   });
 
+  it("reads again after a failed read and a wait for the logo file, never taking the work handed back as its own", async () => {
+    // A client as it stands today, its stored read a cut-off reply kept as null.
+    const w = world({ row: stored({ derived: { ...stored().derived, logo_read_for: INPUTS } }), shows: { "c1/social-0.jpg": found("stored"), "c1/social-1.jpg": found("stored") } });
+    const rows = before();
+    expect((await drive(w.db, c(), rows)).at(-1)).toMatchObject({ status: "done" });
+    Object.assign(w.row(), { placement: { ...DEFAULT_PLACE }, derived: { ...w.row().derived, placement_from: "default", logo_read: null, logo_read_rule: undefined } });
+    const key = (await STEPS.design_settings.inputs(w.db, c(), rows))!;
+    const base = { client_id: "c1", step: "design_settings", inputs_key: key };
+    const look = async () => {
+      const prev = rows.get("design_settings")!;
+      // The runner marks the row running, and hands the row over when it ran on the same key.
+      const running = { ...prev, status: "running" as const };
+      const out = await STEPS.design_settings.run(w.db, c(), { force: false, previous: running.inputs_key === key ? running : null, rows }) as Out;
+      rows.set("design_settings", rowAfter(running, base, out as never, new Date(T)));
+      return out;
+    };
+    // 1. The read fails: the earlier work is handed back.
+    w.opts.spot = new Error("The logo's place on the client's posts could not be read: the reply was cut off at its limit");
+    expect(await look()).toMatchObject({ status: "failed" });
+    expect(rows.get("design_settings")!.result).toMatchObject({ carried_over: true, tone: { of: LOGO } });
+    // 2. The retry waits for the logo file before it reaches the read. The wait clears the row's error and keeps the result.
+    delete w.opts.spot;
+    const imaging = deps.imaging;
+    deps.imaging = (async () => ({ ...(await imaging()), logoPng: async () => null })) as never;
+    expect(await look()).toMatchObject({ status: "waiting", reason: "logo_file" });
+    expect(rows.get("design_settings")).toMatchObject({ status: "waiting", error: null, result: { carried_over: true } });
+    expect(w.seen.spot).toBe(1);
+    // 3. The next look, the logo file there again: the work is still the earlier one, so the place is read, not taken as settled.
+    deps.imaging = imaging;
+    for (let i = 0; i < 12 && rows.get("design_settings")!.status !== "done"; i++) await look();
+    expect(w.seen.spot).toBe(2);
+    expect(rows.get("design_settings")).toMatchObject({ status: "done", result: { placement_from: "client_posts", placement: PLACEMENT, carried_over: false } });
+    expect(w.row()).toMatchObject({ placement: PLACEMENT });
+    expect(w.row().derived).toMatchObject({ logo_read: SPOT, logo_read_rule: 2 });
+    // Once the result is the step's own, a later look on the same key reads nothing.
+    expect(decide(rows.get("design_settings")!, key, {}, new Date(T))).toMatchObject({ due: false, why: "current" });
+  });
+
   it("gives a new client its row at the default place when its first read fails, and asks again on the retry", async () => {
     const w = world({ row: null, spot: new Error("The logo's place on the client's posts could not be read: the reply did not arrive in time") });
     const rows = rowsOf(row("design_refs", { result: { synthesized_at: T } }));

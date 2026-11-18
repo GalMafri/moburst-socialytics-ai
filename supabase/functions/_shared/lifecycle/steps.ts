@@ -2043,9 +2043,10 @@ export const STEPS: Record<string, StepDef> = {
     },
     async run(db, client, given) {
       // A run whose read of the logo's place failed handed back the work its row held from before its inputs changed
-      // (failedRead). It is still that older work: on these inputs the step has done none of its own. The row of a
-      // failed run is the one that holds an error (it is marked running by the time it runs again, policy.ts).
-      const handedBack = !!given.previous?.error && given.previous.result?.[CARRIED] === true;
+      // (failedRead). It is still that older work: on these inputs the step has done none of its own, until a run
+      // writes the settings and marks the result its own (CARRIED false below). The mark alone decides: a run in
+      // between that only waited (for the logo file, say) keeps the result it was given, and clears the row's error.
+      const handedBack = given.previous?.result?.[CARRIED] === true;
       const ctx: StepContext = handedBack ? { ...given, previous: null } : given;
       const { data: existing, error } = await db.from("design_brand_settings").select(SETTINGS_COLUMNS).eq("client_id", client.id).maybeSingle();
       if (error) throw new Error(`Could not read the design settings: ${error.message}`);
