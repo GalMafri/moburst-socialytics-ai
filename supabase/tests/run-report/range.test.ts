@@ -13,12 +13,14 @@ class FakeAuthzError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
 
-interface Db { inserts: Any[]; answers: Record<string, Any> }
+interface Db { inserts: Any[]; answers: Record<string, Any>; strategyOnly?: boolean }
 let db: Db;
 
 /** A query chain that answers from `answers[table]` and records an insert into scheduled_jobs. */
 function fakeAdmin() {
   return {
+    // Is the client strategy-only (no active account in Sprout)? db.strategyOnly says; by default it is not.
+    rpc: async (name: string) => ({ data: name === "client_strategy_only" ? !!db.strategyOnly : null, error: null }),
     from(table: string) {
       const chain: Any = {
         select: () => chain, eq: () => chain, in: () => chain, is: () => chain, gt: () => chain, order: () => chain, limit: () => chain,
@@ -115,6 +117,29 @@ describe("run-report period", () => {
     const res = await ask(h, { client_id: "c1" });
     expect(res.status).toBe(422);
     expect((await res.json()).error).toBe("Moburst is archived.");
+  });
+
+  // A strategy-only client (no active account in Sprout) gets no report.
+  it.each(["social", "competitive"] as const)("answers a %s run for a strategy-only client with the one sentence, and queues nothing", async (kind) => {
+    db.answers.clients = { id: "c1", name: "Harbor Lane", archived_at: null };
+    db.strategyOnly = true;
+    const h = await load();
+    const res = await ask(h, { client_id: "c1", kind, date_range_start: "2026-10-01", date_range_end: "2026-10-31" });
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe("Harbor Lane is set up for strategy only. Its calendar, designs, analytics and reports open once its social accounts are connected.");
+    expect(db.inserts).toEqual([]);
+  });
+
+  it("queues the same client's run once it has an account in Sprout", async () => {
+    db.answers.clients = { id: "c1", name: "Harbor Lane", archived_at: null };
+    db.strategyOnly = true;
+    const h = await load();
+    expect((await ask(h, { client_id: "c1", kind: "social", date_range_start: "2026-10-01", date_range_end: "2026-10-31" })).status).toBe(422);
+    db.strategyOnly = false;
+    const res = await ask(h, { client_id: "c1", kind: "social", date_range_start: "2026-10-01", date_range_end: "2026-10-31" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ queued: true, kind: "social" });
+    expect(db.inserts).toHaveLength(1);
   });
 
   it("asks a competitive run for confirmed competitors first", async () => {

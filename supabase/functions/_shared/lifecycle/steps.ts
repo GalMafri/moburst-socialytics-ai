@@ -26,6 +26,9 @@
 //   first_output    this week and next planned, and the first monthly report
 //   calendar_recheck the upcoming calendar checked against the copy rules when they or the voice change: names corrected, weeks re-planned
 // A demo copy (a client the API demo made) runs only the steps its demo job asks for (run.ts).
+// A strategy-only client (no active account in Sprout, sprout/strategyOnly.ts) goes through every step up to its
+// strategy. trend_hashtags and calendar_recheck wait until an account is connected, and first_output plans nothing and
+// starts no report: it only asks for the voice profile the strategy is written in, as the client's first plan would have.
 
 import { referenceFingerprint } from "../brand-references/candidates.ts";
 import { choicesKey, LIBRARY_RULE } from "../brand-references/corpus.ts";
@@ -33,6 +36,7 @@ import { brandPosts } from "../brand-references/posts.ts";
 import { StyleError } from "../brand-references/errors.ts";
 import { liveRefsIO, readChoices, refreshReferences } from "../brand-references/learnStyle.ts";
 import { defaultSproutCustomerId } from "../sprout/customer.ts";
+import { isStrategyOnly } from "../sprout/strategyOnly.ts";
 import { listCustomerGroups, listCustomerProfiles } from "../sprout/profiles.ts";
 import { networkKey } from "../sprout/publishRules.ts";
 import { listBrandPosts, MAX_POST_PAGES, POSTS_YEAR_DAYS } from "../sprout/posts.ts";
@@ -1838,6 +1842,8 @@ export const STEPS: Record<string, StepDef> = {
       if (rows.get("trend_profile")?.status !== "done") return null;
       const { data: p } = await db.from("trend_profiles").select("written_at").eq("client_id", client.id).maybeSingle();
       if (!p) return null;
+      // The hashtags only steer the weekly trends collection, which a strategy-only client does not get.
+      if (await isStrategyOnly(db, client.id)) return null;
       return `${monthIn(deps.now())}:${p.written_at}`;
     },
     async run(db, client) {
@@ -2089,6 +2095,10 @@ export const STEPS: Record<string, StepDef> = {
       if (!settled(rows, "brief_pillars") || !settled(rows, "accounts")) return null;
       if (!str(client.brief_text) && !produced(rows, "brief_pillars")) return null;
       const w = weeksFor(client.timezone, deps.now());
+      // A strategy-only client gets no plan and no report. What its first plan would also have asked for, the voice profile its
+      // strategy is written in, is asked for here instead, once a week as the Monday plan would (run below). The key is its own,
+      // so the step runs in full on the look the client's first account sets off.
+      if (await isStrategyOnly(db, client.id)) return `strategy_only|week:${w.monday}|voice:${client.voice_built_at ? 1 : 0}`;
       const [{ data: plans, error: pe }, { data: reports, error: re }, { data: schedules, error: se }] = await Promise.all([
         db.from("calendar_plans").select("week_start").eq("client_id", client.id).in("week_start", [w.monday, w.next]),
         db.from("reports").select("id").eq("client_id", client.id).eq("status", "completed").limit(1),
@@ -2100,6 +2110,12 @@ export const STEPS: Record<string, StepDef> = {
       return `week:${w.monday}|plans:${cur}${weeks.has(w.next) ? 1 : 0}|voice:${client.voice_built_at ? 1 : 0}|report:${(reports ?? []).length ? 1 : 0}|schedules:${(schedules ?? []).length}`;
     },
     async run(db, client) {
+      // Asked again here, so a client whose last account went between the look and the run gets no plan either.
+      if (await isStrategyOnly(db, client.id)) {
+        const { data: asked, error: voiceError } = await db.rpc("voice_profile_request", { p_client: client.id });
+        if (voiceError) throw new Error(`Could not ask for the client's voice profile: ${voiceError.message}`);
+        return { status: "done", result: { strategy_only: true, voice_requested: asked === true } };
+      }
       const { data, error } = await db.rpc("lifecycle_first_output", { p_client: client.id });
       if (error) throw new Error(`Could not start the client's first output: ${error.message}`);
       return { status: "done", result: (data ?? {}) as Record<string, unknown> };
@@ -2126,6 +2142,8 @@ export const STEPS: Record<string, StepDef> = {
         .eq("client_id", client.id).eq("kind", "voice_profile").in("status", ["queued", "running"]).limit(1);
       if (error) throw new Error(`Could not check the voice profile: ${error.message}`);
       if ((onItsWay ?? []).length) return null;
+      // A strategy-only client's calendar is closed: nothing in it is corrected or planned again until an account is connected.
+      if (await isStrategyOnly(db, client.id)) return null;
       return `rules:${COPY_RULE}|voice:${client.voice_built_at}|own:${facts.ownDroppedAt ?? ""}`;
     },
     async run(db, client, { rows }) {

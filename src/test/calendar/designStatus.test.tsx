@@ -121,6 +121,23 @@ describe('the progress card of a request the person made', () => {
     expect(screen.getAllByRole('status')).toHaveLength(1);
   });
 
+  it('follows a post asked for again: filmed, not made, then filmed again on the same kept answer', async () => {
+    // The filmed answer is one row per post: asked again, the server stamps it anew and adds no row.
+    f.requests = [filmed('v1', { updated_at: ago(9) })];
+    const next = dock();
+    expect(await screen.findByText('This video is filmed')).toBeInTheDocument();
+    await next([notMade('v2', { created_at: ago(8), ended_at: ago(5), updated_at: ago(5) }), filmed('v1', { updated_at: ago(9) })]);
+    expect(await screen.findByText('Video not made')).toBeInTheDocument();
+    await next([notMade('v2', { created_at: ago(8), ended_at: ago(5), updated_at: ago(5) }), filmed('v1', { updated_at: ago(0) })]);
+    expect(await screen.findByText('This video is filmed')).toBeInTheDocument();
+    expect(screen.queryByText('Video not made')).toBeNull();
+    expect(screen.getAllByRole('status')).toHaveLength(1);
+    // And a request being prepared is where the post stands, whatever was touched after it began.
+    await next([request('v3', { updated_at: ago(2) }), notMade('v2', { updated_at: ago(5) }), filmed('v1', { updated_at: ago(0) })]);
+    expect(await screen.findByText('Preparing your video')).toBeInTheDocument();
+    expect(screen.getAllByRole('status')).toHaveLength(1);
+  });
+
   it('keeps a carousel on screen through every look at the server until it is ready', async () => {
     const carousel = (over: any = {}) => request('c1', { calendar_post_key: 'post:c1', kind: 'carousel', platform: 'LinkedIn', options_wanted: 1, ...over });
     f.requests = [carousel({ stage: 'planning' })];
@@ -159,6 +176,13 @@ describe("the post's Design tab", () => {
     expect(screen.getByRole('button', { name: /Make this video/ })).toBeEnabled();
     expect(screen.getByText(/This video is filmed: it needs the coach talking to camera/)).toBeInTheDocument();
     expect(screen.queryByText(/opening shot|brand's rules/)).toBeNull();
+  });
+
+  it('says nothing of the kind once the post was asked for again and came back as filmed', async () => {
+    f.requests = [notMade('v2', { video_route: 'posts', created_at: ago(8), ended_at: ago(5), updated_at: ago(5) }), filmed('v1', { created_at: ago(9), updated_at: ago(0) })];
+    panel([], videoPost);
+    expect(await screen.findByText(/This video is filmed: it needs the coach talking to camera/)).toBeInTheDocument();
+    expect(screen.queryByText(/wasn't made/)).toBeNull();
   });
 
   it('says nothing of the kind while a new one is being prepared, or when none ended that way', async () => {

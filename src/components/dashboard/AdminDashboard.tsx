@@ -42,6 +42,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
+import { StrategyOnlyNotice } from "@/components/clients/StrategyOnly";
+import { useStrategyOnlyClients } from "@/lib/strategyOnly";
 
 export function AdminDashboard() {
   const navigate = useNavigate();
@@ -126,6 +128,10 @@ export function AdminDashboard() {
     },
   });
 
+  // A strategy-only client (no active account in Sprout): its card says so and leads to its strategy,
+  // in place of its performance, this week's posts and its reports (src/lib/strategyOnly.ts).
+  const strategyOnly = useStrategyOnlyClients();
+
   // The dashboard is the one screen that shows the archive, on request. The
   // active list uses the shared definition every other client list uses.
   const filtered = clients?.filter((c: any) => {
@@ -137,8 +143,9 @@ export function AdminDashboard() {
   const chooseClient = (id: string) => setParams(prev => { prev.set("client", id); return prev; }, { replace: true });
 
   const active = (clients ?? []).filter(isActiveClient);
-  // The tiles describe the active clients; an archived client's reports are not theirs.
-  const allReports = active.flatMap((c: any) => c.reports ?? []);
+  // The tiles describe the active clients; an archived client's reports are not theirs,
+  // and a strategy-only client's stored reports are not shown anywhere.
+  const allReports = active.filter((c) => !strategyOnly.has(c.id)).flatMap((c: any) => c.reports ?? []);
   const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
   const reportsThisMonth = allReports.filter((r: any) => new Date(r.created_at) >= monthStart).length;
   const runningNow = allReports.filter((r: any) => r.status === "running").length;
@@ -178,7 +185,7 @@ export function AdminDashboard() {
       {/* A failed load leaves `clients` undefined, and every tile below counts
           off it. Rendering them would put four confident zeros on the staff
           landing page for an agency with a full roster. */}
-      {!isLoading && !clientsFailed && (
+      {!isLoading && !strategyOnly.isLoading && !clientsFailed && (
         <StatGrid>
           <StatCard label="Active clients" value={active.length} icon={<Users />} />
           <StatCard label="Completed reports" value={completedReports} icon={<BarChart3 />} />
@@ -193,7 +200,7 @@ export function AdminDashboard() {
           error={clientsError}
           onRetry={() => refetchClients()}
         />
-      ) : isLoading ? (
+      ) : isLoading || strategyOnly.isLoading ? (
         // The same two columns the loaded page has, so nothing jumps when it lands.
         <div className="grid gap-section lg:grid-cols-[260px_minmax(0,1fr)]">
           {[0, 1].map((i) => (
@@ -219,6 +226,7 @@ export function AdminDashboard() {
               null,
             );
             const reportCount = client.reports?.length ?? 0;
+            const closed = !client.archived_at && strategyOnly.has(client.id);
             return (
               <Card key={client.id}>
                 <CardHeader className="border-b border-white/10">
@@ -248,7 +256,7 @@ export function AdminDashboard() {
                       )}
                     </div>
                     <div className="flex items-center gap-2">
-                      {canRunAnalysis && !client.archived_at && (
+                      {canRunAnalysis && !client.archived_at && !closed && (
                         <Button size="sm" onClick={() => navigate(`/clients/${client.id}/analyze`)}>
                           <Play /> Run monthly report
                         </Button>
@@ -297,13 +305,17 @@ export function AdminDashboard() {
                 </CardHeader>
                 <CardContent className="space-y-4 pt-card">
                   {/* The client's status at a glance, with what needs doing. */}
-                  {!client.archived_at && <ClientOverview clientId={client.id} isStaff />}
+                  {closed
+                    ? <StrategyOnlyNotice clientId={client.id} clientName={client.name} compact setupLink={false} />
+                    : !client.archived_at && <ClientOverview clientId={client.id} isStaff />}
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-2 t-label">
+                    {!closed && (
                     <span className="inline-flex items-center gap-1.5">
                       <Calendar className="h-3.5 w-3.5" aria-hidden />
                       {lastReport ? `Last report ${formatDate(lastReport.created_at)}` : "No reports yet"}
                       {reportCount > 0 ? ` · ${reportCount} report${reportCount === 1 ? "" : "s"}` : ""}
                     </span>
+                    )}
                     <span className="flex flex-wrap items-center gap-1.5">
                       {client.primary_platforms?.map((p: string) => (
                         <PlatformBadge key={p} platform={p} size="sm" />
@@ -315,10 +327,10 @@ export function AdminDashboard() {
                   <nav aria-label={`${client.name} pages`} className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                     <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${client.id}/setup`)}><Settings /> Client setup</Button>
                     {canRunAnalysis && !client.archived_at && <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${client.id}/competitive`)}><Crosshair /> Edit competitors</Button>}
-                    {canRunAnalysis && !client.archived_at && <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${client.id}/competitive/run`)}><Play /> Run competitive analysis</Button>}
-                    <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${client.id}/reports`)}><FileText /> Monthly reports</Button>
-                    <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${client.id}/competitive/reports`)}><Crosshair /> Competitive analyses</Button>
-                    <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${client.id}/analytics`)}><BarChart3 /> Analytics</Button>
+                    {canRunAnalysis && !client.archived_at && !closed && <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${client.id}/competitive/run`)}><Play /> Run competitive analysis</Button>}
+                    {!closed && <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${client.id}/reports`)}><FileText /> Monthly reports</Button>}
+                    {!closed && <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${client.id}/competitive/reports`)}><Crosshair /> Competitive analyses</Button>}
+                    {!closed && <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${client.id}/analytics`)}><BarChart3 /> Analytics</Button>}
                   </nav>
                 </CardContent>
               </Card>

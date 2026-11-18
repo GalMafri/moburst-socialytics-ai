@@ -124,6 +124,31 @@ export function endedWithoutDesign(r: Pick<DesignRequest, "status" | "end_reason
   return r?.status === "closed" && (r.end_reason === "no_design" || r.end_reason === "no_progress");
 }
 
+/**
+ * Where each post stands: its request being prepared (there is never more
+ * than one), else the one touched last. Not the one created last: the answer
+ * that a video is filmed is one row per post, used again and only stamped
+ * anew when the post is asked for again.
+ */
+export function latestPerPost(requests: DesignRequest[]): Map<string, DesignRequest> {
+  const byPost = new Map<string, DesignRequest>();
+  for (const r of requests) {
+    const held = byPost.get(r.calendar_post_key);
+    if (!held) { byPost.set(r.calendar_post_key, r); continue; }
+    if (held.status === "preparing") continue;
+    if (r.status === "preparing" || r.updated_at > held.updated_at) byPost.set(r.calendar_post_key, r);
+  }
+  return byPost;
+}
+
+/** What a post's panel says on its other tabs about the post's own request; null when there is nothing to say. */
+export function ownStatusLine(r: DesignRequest | null | undefined): string | null {
+  if (!r) return null;
+  if (r.status === "preparing") return `This post's ${nounOf(r)} is being prepared.`;
+  if (endedWithoutDesign(r)) return `The last ${nounOf(r)} asked for this post wasn't made.`;
+  return null;
+}
+
 /** What a request makes, in the words the screens use. */
 export function nounOf(r: Pick<DesignRequest, "kind">): "design" | "carousel" | "video" {
   return r.kind === "carousel" ? "carousel" : r.kind === "video" ? "video" : "design";

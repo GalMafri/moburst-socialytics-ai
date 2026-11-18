@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PERSON_WAIT_MS, roomFor } from "../../functions/_shared/anthropicReply";
 
 vi.mock("../../functions/_shared/supabase.ts", () => ({
-  createClient: () => ({ from: () => { const q: Record<string, unknown> = { select: () => q, eq: () => q, maybeSingle: async () => ({ data: { name: "the brand", content_pillars: [], brand_book_text: "" }, error: null }) }; return q; } }),
+  // The client has an account in Sprout, so it is not strategy-only (_shared/sprout/strategyOnly.ts).
+  createClient: () => ({ rpc: async (name: string) => ({ data: name === "client_strategy_only" ? false : null, error: null }), from: () => { const q: Record<string, unknown> = { select: () => q, eq: () => q, maybeSingle: async () => ({ data: { name: "the brand", content_pillars: [], brand_book_text: "" }, error: null }) }; return q; } }),
 }));
 vi.mock("../../functions/_shared/auth/requireStaff.ts", () => ({ staffGate: async () => null }));
 vi.mock("../../functions/_shared/voice/load.ts", () => ({ COPY_MODEL: "claude-opus-5-5", loadClientVoice: async () => ({}) }));

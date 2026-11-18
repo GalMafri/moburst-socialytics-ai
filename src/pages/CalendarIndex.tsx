@@ -3,10 +3,14 @@
  * filter. A client's own users go straight to their calendar when they have
  * one client, choose between them when they have several, and see the
  * dashboard's empty state when none is linked yet.
+ *
+ * A strategy-only client (no active account in Sprout, src/lib/strategyOnly.ts)
+ * has no calendar: its posts are left off the week, and one line under the
+ * week names it, with the way to its strategy.
  */
 
 import { useEffect, useMemo } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { CalendarDays } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -25,6 +29,7 @@ import { readAll } from "@/lib/readAll";
 import { thisWeek as thisWeekWindow, viewerTimeZone, weekFromParam } from "@/lib/weekWindow";
 import { AllClientsWeek, type ClientPost } from "@/components/calendar/AllClientsWeek";
 import { addDays, mondayOf, shortDate, type CalendarPostRow } from "@/lib/calendarPosts";
+import { STRATEGY_ONLY_SHORT_STAFF, useStrategyOnlyClients } from "@/lib/strategyOnly";
 
 export default function CalendarIndex() {
   const navigate = useNavigate();
@@ -48,6 +53,9 @@ export default function CalendarIndex() {
   const thisWeek = current.start;
   const goTo = (monday: string) => setParams((prev) => { const next = new URLSearchParams(prev); next.set("week", monday); return next; });
 
+  // A strategy-only client's posts stay where they are and are not shown; they are there again once it has an account.
+  const strategyOnly = useStrategyOnlyClients();
+  const hidden = [...strategyOnly.ids].sort();
   const posts = useQuery({
     queryKey: ["calendar-all-posts", week],
     enabled: isMoburstStaff,
@@ -58,17 +66,21 @@ export default function CalendarIndex() {
         .select("*").gte("post_date", week).lte("post_date", addDays(week, 6)).order("post_date").order("id").range(from, to)),
   });
   const nextPlanned = useQuery({
-    queryKey: ["calendar-all-next", week],
-    enabled: isMoburstStaff && !!posts.data && posts.data.length === 0,
+    queryKey: ["calendar-all-next", week, hidden.join(",")],
+    enabled: isMoburstStaff && !strategyOnly.isLoading && !!posts.data && posts.data.every((p) => strategyOnly.has(p.client_id)),
     queryFn: async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data } = await (supabase.from("calendar_posts" as never) as any).select("post_date").gt("post_date", addDays(week, 6)).order("post_date").limit(1);
+      let later = (supabase.from("calendar_posts" as never) as any).select("post_date").gt("post_date", addDays(week, 6));
+      // The next week that has posts to show: never one that holds only a strategy-only client's.
+      if (hidden.length) later = later.not("client_id", "in", `(${hidden.join(",")})`);
+      const { data } = await later.order("post_date").limit(1);
       return (data?.[0]?.post_date as string | undefined) ?? null;
     },
   });
 
   const active = useMemo(() => new Map((clients.data || []).filter(isActiveClient).map((c) => [c.id, c] as const)), [clients.data]);
-  const weekPosts: ClientPost[] = (posts.data || []).filter((p) => active.has(p.client_id)).map((p) => ({ ...p, client_name: active.get(p.client_id)!.name, client_timezone: active.get(p.client_id)!.timezone }));
+  const closed = [...active.values()].filter((c) => strategyOnly.has(c.id));
+  const weekPosts: ClientPost[] = (posts.data || []).filter((p) => active.has(p.client_id) && !strategyOnly.has(p.client_id)).map((p) => ({ ...p, client_name: active.get(p.client_id)!.name, client_timezone: active.get(p.client_id)!.timezone }));
 
   if (isClient) {
     return (
@@ -98,7 +110,7 @@ export default function CalendarIndex() {
       description="Every client's planned posts on their dates."
       actions={<ClientPicker value={ALL_CLIENTS} week={week} />}
     >
-      {clients.isLoading || posts.isLoading ? (
+      {clients.isLoading || posts.isLoading || strategyOnly.isLoading ? (
         <Loading label="Loading the calendar" />
       ) : clients.isError || posts.isError ? (
         <LoadRetry context="calendar" error={clients.error || posts.error} onRetry={() => { void clients.refetch(); void posts.refetch(); }} />
@@ -116,6 +128,15 @@ export default function CalendarIndex() {
             />
           ) : (
             <AllClientsWeek posts={weekPosts} week={week} />
+          )}
+          {closed.length > 0 && (
+            <ul className="space-y-1" aria-label="Clients set up for strategy only">
+              {closed.map((c) => (
+                <li key={c.id} className="t-secondary">
+                  <Link to={`/clients/${c.id}/strategy`} className="t-link">{c.name}</Link>: {STRATEGY_ONLY_SHORT_STAFF}
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       )}

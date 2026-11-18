@@ -19,6 +19,7 @@ import { LoadRetry } from "@/components/ui/load-error";
 import { EmptyState } from "@/components/ui/empty-state";
 import { describeReport, describeSelection, describeTracking, pickRunSelection, type SetRow } from "@/lib/competitiveFlow";
 import { Crosshair, FileText, History, Play, Rss } from "lucide-react";
+import { STRATEGY_ONLY_SHORT_STAFF, useStrategyOnlyClients } from "@/lib/strategyOnly";
 
 export default function CompetitiveIndex() {
   const navigate = useNavigate();
@@ -64,13 +65,16 @@ export default function CompetitiveIndex() {
     },
   });
 
+  // A strategy-only client (no active account in Sprout) keeps its competitors, tracking and feed, which its
+  // strategy reads; its competitive reports are closed, so their buttons and the last report give way to one line.
+  const strategyOnly = useStrategyOnlyClients();
   const visibleClients = (data || []).filter(c => c.name.toLowerCase().includes(search.trim().toLowerCase()));
   const selectedClient = visibleClients.find(c => c.id === params.get("client")) || visibleClients[0];
   const chooseClient = (id: string) => setParams(prev => { prev.set("client", id); return prev; }, { replace: true });
 
   return (
     <AppLayout title="Competitive analysis" description="Each client's competitors, tracking and competitive reports.">
-        {isLoading ? (
+        {isLoading || strategyOnly.isLoading ? (
           <Loading label="Loading clients" />
         ) : isError ? (
           // A failed read used to render as "No clients yet", which reads as a
@@ -96,10 +100,11 @@ export default function CompetitiveIndex() {
                 description="Competitors and reports for this client only."
                 action={
                   <>
-                    {c.report?.status === "complete" && (
+                    {!strategyOnly.has(c.id) && c.report?.status === "complete" && (
                       <Button size="sm" onClick={() => navigate(`/clients/${c.id}/competitive/reports/${c.report.id}`)}><FileText /> Latest report</Button>
                     )}
                     <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${c.id}/competitive`)}><Crosshair /> Edit competitors</Button>
+                    {!strategyOnly.has(c.id) && (
                     <Button
                       size="sm"
                       variant="outline"
@@ -108,7 +113,8 @@ export default function CompetitiveIndex() {
                     >
                       <Play /> {c.report?.status === "running" ? "View running report" : "Run competitive analysis"}
                     </Button>
-                    {c.report && (
+                    )}
+                    {!strategyOnly.has(c.id) && c.report && (
                       <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${c.id}/competitive/reports`)}><History /> All runs</Button>
                     )}
                     {c.runnable && (
@@ -129,11 +135,18 @@ export default function CompetitiveIndex() {
                       <p className="t-h4">{c.tracking.headline}</p>
                     </div>
                   )}
+                  {strategyOnly.has(c.id) ? (
+                    <div className="glass-inner p-inner space-y-1 min-w-0">
+                      <p className="t-subhead">Reports</p>
+                      <p className="t-secondary">{STRATEGY_ONLY_SHORT_STAFF}</p>
+                    </div>
+                  ) : (
                   <div className="glass-inner p-inner space-y-1 min-w-0">
                     <p className="t-subhead">Last report</p>
                     <p className="t-h4">{c.outcome.headline}</p>
                     {c.report && <p className="t-label">Last run {formatDateTime(c.report.created_at)}</p>}
                   </div>
+                  )}
                 </StatGrid>
               </Section>
             ))}

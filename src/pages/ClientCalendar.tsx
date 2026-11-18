@@ -126,6 +126,13 @@ export default function ClientCalendar() {
   const openPostId = params.get("post");
   const openPostKey = openPostId ? all.find((p) => p.id === openPostId)?.post_key : undefined;
 
+  // A design progress card's Open for a post in another week: go to that week and open the post's Design tab.
+  const openElsewhere = (postKey: string) => {
+    const there = all.find((p) => p.post_key === postKey);
+    if (!there) return;
+    setParams((prev) => { const next = new URLSearchParams(prev); next.set("week", mondayOf(there.post_date)); next.set("post", there.id); next.set("tab", "design"); return next; }, { replace: false });
+  };
+
   const weekPlan = (plans.data ?? []).find((p) => p.week_start === week) ?? null;
   const planOnItsWay = !!weekPlan && (weekPlan.status === "queued" || weekPlan.status === "planning");
   const nextWeek = plans.data ? nextPlannableWeek(plans.data, today) : null;
@@ -185,7 +192,22 @@ export default function ClientCalendar() {
             )}
           </WeekNav>
 
-          {inWeek.length === 0 ? (
+          {/* The board's frame is there for every week, so design progress stays on screen on a week with no posts. */}
+          <ContentIdeasTab
+            key={week}
+            mode="calendar"
+            contentCalendar={board}
+            aiAnalysis={null}
+            sproutPerformance={null}
+            clientContext={clientContext}
+            clientId={id}
+            clientTimezone={clientContext.timezone}
+            availablePlatforms={filterPlatforms}
+            availableLanguages={languages}
+            openPostKey={openPostKey}
+            openPostTab={params.get("tab") === "design" ? "design" : undefined}
+            onOpenElsewhere={openElsewhere}
+            empty={inWeek.length > 0 ? undefined : (
             <EmptyState
               icon={CalendarDays}
               title="No posts planned for this week"
@@ -204,21 +226,8 @@ export default function ClientCalendar() {
                 <Button size="sm" variant="outline" onClick={() => goTo(mondayOf(prevPlanned.post_date))}>Go to the last planned week</Button>
               ) : undefined}
             />
-          ) : (
-            <ContentIdeasTab
-              key={week}
-              mode="calendar"
-              contentCalendar={board}
-              aiAnalysis={null}
-              sproutPerformance={null}
-              clientContext={clientContext}
-              clientId={id}
-              clientTimezone={clientContext.timezone}
-              availablePlatforms={filterPlatforms}
-              availableLanguages={languages}
-              openPostKey={openPostKey}
-            />
-          )}
+            )}
+          />
 
         </div>
       )}

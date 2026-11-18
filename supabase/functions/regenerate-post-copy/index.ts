@@ -22,6 +22,7 @@ import { voicePromptBlock } from "../_shared/voice/voice.ts";
 import { isStoryPost } from "../_shared/design/story.ts";
 import { cleanNote } from "../_shared/notes/regenerateNote.ts";
 import { rewritePrompt } from "./prompt.ts";
+import { strategyOnlyRefusal } from "../_shared/sprout/strategyOnly.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -51,6 +52,10 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
+
+    // A strategy-only client (no active account in Sprout) has no calendar: no copy is written again and nothing is spent.
+    const closed = await strategyOnlyRefusal(supabase, String(client_id));
+    if (closed) return jsonResp({ error: closed }, 409);
 
     // How the client writes: the team's preferences, its real social voice, then the brief.
     const voice = await loadClientVoice(supabase, client_id);

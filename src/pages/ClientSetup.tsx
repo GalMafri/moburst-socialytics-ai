@@ -33,6 +33,7 @@ import { Loading } from "@/components/ui/loading";
 import { PlatformIcon } from "@/lib/platform-config";
 import { ParkedAccounts } from "@/components/onboarding/ParkedAccounts";
 import { parkedAccounts, type ParkedAccount } from "@/lib/parkedAccounts";
+import { useStrategyOnlyClients } from "@/lib/strategyOnly";
 import { clientOriginLine, countryNames, declinedBrandLine, formatDate, languageNames, locationOrigin, onboardingFacts, platformName, scheduleAwaitsTracking, scheduleLines, timeZoneName, type OnboardingStep } from "@/lib/display";
 import { changedColumns, EMPTY_FORM, formFromClient, keywordPhrases, rebaseForm, setByOf, type SetupForm } from "@/lib/clientSetupForm";
 import { invokeResendable, sendQuietly, writeResendable } from "@/lib/quietSend";
@@ -319,6 +320,8 @@ export default function ClientSetup() {
       void queryClient.invalidateQueries({ queryKey: ["clients"] });
       void queryClient.invalidateQueries({ queryKey: ["client", isNew ? data.id : id] });
       void queryClient.invalidateQueries({ queryKey: ["sprout-profiles"] });
+      // An account added or removed can open or close the client's calendar, analytics and reports (src/lib/strategyOnly.ts).
+      void queryClient.invalidateQueries({ queryKey: ["strategy-only-clients"] });
       toast.success("Saved");
       if (isNew) navigate(`/clients/${data.id}/setup`, { replace: true });
     },
@@ -835,6 +838,10 @@ function ReportScheduleManager({ clientId, timeZone }: { clientId: string; timeZ
     { kind: "competitive", noun: "competitive" as const, label: "Monthly competitive analysis", description: "The client and its tracked competitors for the previous calendar month. It runs first, so the social report can use it." },
   ] as const;
 
+  // A strategy-only client (no active account in Sprout) gets no reports: no run date is promised until an account is connected.
+  const strategyOnly = useStrategyOnlyClients();
+  const closed = strategyOnly.has(clientId);
+
   const { data, isLoading } = useQuery({
     queryKey: ["report-schedules", clientId],
     queryFn: async () => {
@@ -866,7 +873,7 @@ function ReportScheduleManager({ clientId, timeZone }: { clientId: string; timeZ
     onSettled: () => void queryClient.invalidateQueries({ queryKey: ["report-schedules", clientId] }),
   });
 
-  if (isLoading) return <Loading label="Loading schedules" />;
+  if (isLoading || strategyOnly.isLoading) return <Loading label="Loading schedules" />;
 
   return (
     <Section
@@ -879,7 +886,7 @@ function ReportScheduleManager({ clientId, timeZone }: { clientId: string; timeZ
           const row = (data?.schedules || []).find((s) => (s.report_kind || "social") === kind);
           const active = !!row?.is_active;
           const latest = data?.latest[kind];
-          const lines = scheduleLines({
+          const lines = closed ? ["Starts once the client's social accounts are connected in Sprout."] : scheduleLines({
             kind: noun, active, nextRunAt: row?.next_run_at,
             latest: latest ? { start: latest.date_range_start, end: latest.date_range_end, ranAt: latest.created_at } : null,
             timeZone,

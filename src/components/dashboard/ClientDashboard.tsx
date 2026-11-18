@@ -14,6 +14,8 @@ import { FileText, TrendingUp, BarChart3, Clock, Crosshair } from "lucide-react"
 import { Loading } from "@/components/ui/loading";
 import { LoadRetry } from "@/components/ui/load-error";
 import { EmptyState } from "@/components/ui/empty-state";
+import { StrategyOnlyNotice } from "@/components/clients/StrategyOnly";
+import { useStrategyOnlyClients } from "@/lib/strategyOnly";
 
 /**
  * What a client user sees before its account is linked to a client: the
@@ -43,6 +45,8 @@ export function ClientDashboard() {
   const [pickedId, setPickedId] = useState<string | null>(null);
   const firstClient = matchingClients.find((c) => c.id === pickedId) ?? matchingClients[0];
   const clientId = firstClient?.id;
+  // A strategy-only client (no active account in Sprout): the one sentence stands where its overview and report links would.
+  const strategyOnly = useStrategyOnlyClients();
 
   const { data: latestReport } = useQuery({
     queryKey: ["client-dashboard-latest-report", clientId],
@@ -61,7 +65,7 @@ export function ClientDashboard() {
     enabled: !!clientId,
   });
 
-  if (isLoading) {
+  if (isLoading || strategyOnly.isLoading) {
     return <Loading variant="page" label="Loading your dashboard" />;
   }
 
@@ -91,6 +95,10 @@ export function ClientDashboard() {
           </div>
         ) : undefined}
       />
+      {strategyOnly.has(firstClient.id) ? (
+        <StrategyOnlyNotice clientId={firstClient.id} clientName={firstClient.name} />
+      ) : (
+      <>
       <Card>
         <CardContent>
           <ClientOverview clientId={firstClient.id} isStaff={false} />
@@ -171,6 +179,8 @@ export function ClientDashboard() {
           </CardContent>
         </ClickableCard>
       </div>
+      </>
+      )}
     </div>
   );
 }

@@ -11,6 +11,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { LoadRetry } from "@/components/ui/load-error";
 import { BarChart3, ArrowRight } from "lucide-react";
 import { ClientLogo } from "@/components/clients/ClientLogo";
+import { strategyOnlyShort, useStrategyOnlyClients } from "@/lib/strategyOnly";
 
 export default function AnalyticsIndex() {
   const navigate = useNavigate();
@@ -27,11 +28,13 @@ export default function AnalyticsIndex() {
     if (only) navigate(`/clients/${only.id}/analytics`, { replace: true });
   }, [only, navigate]);
   const shown = mine ?? clients;
+  // A strategy-only client (no active account in Sprout) has no analytics: its card says so in a few words.
+  const strategyOnly = useStrategyOnlyClients();
 
   return (
     <AppLayout title="Analytics"
       description="Each client's live performance, trends and competitive view.">
-        {isLoading ? (
+        {isLoading || strategyOnly.isLoading ? (
           <Loading label="Loading clients" />
         ) : isError ? (
           <LoadRetry context="clients" error={error} onRetry={() => refetch()} />
@@ -43,7 +46,23 @@ export default function AnalyticsIndex() {
           <EmptyState icon={BarChart3} title="No clients yet" />
         ) : (
           <div className="grid gap-inner sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 stagger-children">
-            {shown.map((c) => (
+            {shown.map((c) => (strategyOnly.has(c.id) ? (
+              // Its analytics page says the whole sentence, with the way to its strategy.
+              <ClickableCard
+                key={c.id}
+                className="hover-lift"
+                onClick={() => navigate(`/clients/${c.id}/analytics`)}
+                ariaLabel={`${c.name}: strategy only`}
+              >
+                <CardContent className="flex items-center gap-3">
+                  <ClientLogo client={c} />
+                  <div className="min-w-0">
+                    <div className="t-h4 truncate">{c.name}</div>
+                    <div className="t-secondary">{strategyOnlyShort(!isClient)}</div>
+                  </div>
+                </CardContent>
+              </ClickableCard>
+            ) : (
               <ClickableCard
                 key={c.id}
                 className="hover-lift"
@@ -58,7 +77,7 @@ export default function AnalyticsIndex() {
                   </div>
                 </CardContent>
               </ClickableCard>
-            ))}
+            )))}
           </div>
         )}
     </AppLayout>

@@ -19,6 +19,8 @@ import { useActiveClients } from "@/lib/activeClients";
 import { useNextRun } from "@/lib/nextRun";
 import { listedMonthlyReports } from "@/lib/reportRun";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { StrategyOnlyNotice } from "@/components/clients/StrategyOnly";
+import { useStrategyOnlyClients } from "@/lib/strategyOnly";
 
 type MonthlyListRow = { id: string; client_id: string; status: string | null; created_at: string; date_range_start: string | null; date_range_end: string | null; gamma_url: string | null; report_period?: unknown; clients: unknown };
 
@@ -40,12 +42,20 @@ export default function AllReports() {
   const nextMonthly = useNextRun(clientFilter !== "all" ? clientFilter : null, "monthly");
   const nextCompetitive = useNextRun(clientFilter !== "all" ? clientFilter : null, "competitive");
 
+  // A strategy-only client (no active account in Sprout) has no reports page: the reports it already has stay
+  // stored and are left out of both lists, in the query, so a page of 50 is still 50. Chosen in the picker, it
+  // shows the one sentence in place of the lists.
+  const strategyOnly = useStrategyOnlyClients();
+  const hidden = [...strategyOnly.ids].sort();
+  const closedClient = clientFilter !== "all" && strategyOnly.has(clientFilter) ? clientFilter : null;
+
   // The reports the list shows: one ready report per client and period, so a
   // page is cut from the collapsed list, never from raw rows (a rerun of a
   // month would come back on the next page). Rows come newest first in
   // chunks, and only the columns the list reads.
   const { data: reports, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["all-reports", clientFilter, socialLimit],
+    queryKey: ["all-reports", clientFilter, socialLimit, hidden.join(",")],
+    enabled: !strategyOnly.isLoading && !closedClient,
     queryFn: async () => {
       const CHUNK = 200;
       const all: MonthlyListRow[] = [];
@@ -58,6 +68,7 @@ export default function AllReports() {
           .range(from, from + CHUNK - 1);
         // Filtered in the query, not in the page, so a client's older reports are never cut off.
         if (clientFilter !== "all") query = query.eq("client_id", clientFilter);
+        else if (hidden.length) query = query.not("client_id", "in", `(${hidden.join(",")})`);
         const { data, error } = await query;
         if (error) throw error;
         all.push(...(data ?? []));
@@ -68,7 +79,8 @@ export default function AllReports() {
   });
 
   const { data: competitive, isLoading: competitiveLoading, isError: competitiveFailed, error: competitiveError, refetch: refetchCompetitive } = useQuery({
-    queryKey: ["all-competitive-reports", clientFilter, competitiveLimit],
+    queryKey: ["all-competitive-reports", clientFilter, competitiveLimit, hidden.join(",")],
+    enabled: !strategyOnly.isLoading && !closedClient,
     queryFn: async () => {
       let query = supabase
         .from("competitive_reports")
@@ -77,6 +89,7 @@ export default function AllReports() {
         .order("id", { ascending: false })
         .range(competitiveLimit - 50, competitiveLimit);
       if (clientFilter !== "all") query = query.eq("client_id", clientFilter);
+      else if (hidden.length) query = query.not("client_id", "in", `(${hidden.join(",")})`);
       const { data, error } = await query;
       if (error) throw error;
       return data;
@@ -107,6 +120,9 @@ export default function AllReports() {
         </Select>
       }
     >
+        {closedClient ? (
+          <StrategyOnlyNotice clientId={closedClient} clientName={filteredClientName} />
+        ) : (
         <Tabs value={tab} onValueChange={(v) => setTab(v as any)} className="space-y-section">
           <TabsList>
             <TabsTrigger value="social" className="gap-1.5"><FileText className="h-4 w-4" /> Monthly reports</TabsTrigger>
@@ -119,7 +135,7 @@ export default function AllReports() {
                 <CardTitle className="t-h3">{filteredClientName ? `${filteredClientName}: monthly reports` : "All monthly reports"}</CardTitle>
               </CardHeader>
               <CardContent>
-                {isLoading ? (
+                {isLoading || strategyOnly.isLoading ? (
                   <Loading label="Loading reports" />
                 ) : isError ? (
                   <LoadRetry context="reports" error={error} onRetry={() => refetch()} />
@@ -186,7 +202,7 @@ export default function AllReports() {
                 <CardTitle className="t-h3">{filteredClientName ? `${filteredClientName}: competitive analyses` : "All competitive analyses"}</CardTitle>
               </CardHeader>
               <CardContent>
-                {competitiveLoading ? (
+                {competitiveLoading || strategyOnly.isLoading ? (
                   <Loading label="Loading competitive analyses" />
                 ) : competitiveFailed ? (
                   <LoadRetry context="competitive analyses" error={competitiveError} onRetry={() => refetchCompetitive()} />
@@ -244,6 +260,7 @@ export default function AllReports() {
             </Card>
           </TabsContent>
         </Tabs>
+        )}
     </AppLayout>
   );
 }

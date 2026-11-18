@@ -115,9 +115,17 @@ export function weekWriteRpc(args: Row, db: FakeDb): Row {
   return { posts: stored.size, themes: now.filter((t) => t.dismissed_at == null).length, dismissed_kept: now.filter((t) => t.dismissed_at != null).length };
 }
 
+/**
+ * client_strategy_only: false unless the test says so. The rule itself (no
+ * active row in sprout_profiles, not a demo copy) is the database's and is
+ * tested there (supabase/tests/migrations/strategyOnlyClients.test.ts); a
+ * test that needs a strategy-only client hands in `client_strategy_only: () => true`.
+ */
+const strategyOnlyRpc = () => false;
+
 export function fakeDb(tables: Record<string, Row[]> = {}, given: Record<string, (args: Row, db: FakeDb) => unknown> = {}): FakeDb {
   const rpcs: Record<string, (args: Row, db: FakeDb) => unknown> = {
-    lifecycle_enqueue: lookRpc, trend_search_override_put: overridePutRpc, trend_hashtags_refreshed: hashtagsRefreshedRpc, trend_week_write: weekWriteRpc, ...given,
+    client_strategy_only: strategyOnlyRpc, lifecycle_enqueue: lookRpc, trend_search_override_put: overridePutRpc, trend_hashtags_refreshed: hashtagsRefreshedRpc, trend_week_write: weekWriteRpc, ...given,
   };
   const db: FakeDb = {
     tables,

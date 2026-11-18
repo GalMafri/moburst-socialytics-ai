@@ -16,7 +16,7 @@ import { useEffect, useState } from "react";
 import { ArrowRight, CheckCircle2, Loader2, Sparkles, X } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useDesignRequests } from "./DesignRequestsContext";
-import { endedWithoutDesign, isPreparing, nextStepLine, nounOf, progressPercent, stageLine, type DesignRequest } from "@/lib/designRequests";
+import { endedWithoutDesign, isPreparing, latestPerPost, nextStepLine, nounOf, progressPercent, stageLine, type DesignRequest } from "@/lib/designRequests";
 import { postLabel } from "@/lib/designRequestLabels";
 import { weekProgress } from "@/lib/designWeek";
 
@@ -52,7 +52,20 @@ export function DesignRequestsDock() {
   );
 }
 
-export function DesignRequestsDockItems() {
+/**
+ * The same cards inside an open post panel, which covers the page's column:
+ * they follow the panel's content, in its flow, so they never lie over it.
+ * The open post's own card is left out: the panel says that post's status itself.
+ */
+export function DesignRequestsPanelDock({ exceptPost }: { exceptPost?: string }) {
+  return (
+    <div className="mt-6 flex flex-col items-end gap-3 empty:hidden [&>*]:max-w-full print:hidden">
+      <DesignRequestsDockItems exceptPost={exceptPost} />
+    </div>
+  );
+}
+
+export function DesignRequestsDockItems({ exceptPost }: { exceptPost?: string } = {}) {
   const ctx = useDesignRequests();
   const { isMoburstStaff } = useAuth();
   const [dismissed, setDismissed] = useState<Set<string>>(loadDismissed);
@@ -82,16 +95,10 @@ export function DesignRequestsDockItems() {
     return [{ id, requests, progress }];
   });
 
-  // One card per post: the newest request the person made for it (requests come newest first),
-  // so a post asked for twice shows where its latest request stands.
-  const posts = new Set<string>();
-  const latest = mine.filter((r) => {
-    if (r.batch_id || posts.has(r.calendar_post_key)) return false;
-    posts.add(r.calendar_post_key);
-    return true;
-  });
+  // One card per post: where the person's requests for it stand now (latestPerPost), the latest touched first.
+  const latest = [...latestPerPost(mine.filter((r) => !r.batch_id)).values()].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
   const shown = latest.filter((r) => {
-    if (dismissed.has(r.id)) return false;
+    if (dismissed.has(r.id) || r.calendar_post_key === exceptPost) return false;
     if (isPreparing(r, isMoburstStaff)) return true;
     if (r.status === "ready" || r.status === "needs_filming") return recent(r.updated_at);
     // Ended without a design: the card stays to say so, as long as a finished one does.

@@ -71,12 +71,14 @@ describe(FILE, () => {
     expect(before).toContain("revoke all on function public.calendar_request_revision(uuid, text, uuid, text) from public, anon, authenticated;");
   });
 
-  it("is the only definition after the first, so nothing later is undone by restating it", () => {
+  it("is the only definition after the first until the strategy-only migration, which restates it with one refusal added", () => {
     // The daily filler and the notes' rewrite call the function; neither defines it.
     const filler = read("20261019190000_calendar_self_serve.sql");
     expect(filler).toContain("perform public.calendar_request_revision(v_plan.id, 'Write the posts that have no copy yet.', null, 'empty');");
     expect(filler).not.toMatch(/create or replace function public\.calendar_request_revision/i);
     const defining = readdirSync(join(root, "supabase", "migrations")).filter((f) => f.endsWith(".sql") && /create or replace function public\.calendar_request_revision\(/i.test(read(f))).sort();
-    expect(defining).toEqual(["20261019140000_weekly_calendar.sql", FILE]);
+    // 20261118140000 restates it from this file with the refusal for a strategy-only client and nothing else
+    // (supabase/tests/migrations/strategyOnlyClients.test.ts holds it to that).
+    expect(defining).toEqual(["20261019140000_weekly_calendar.sql", FILE, "20261118140000_strategy_only_clients.sql"]);
   });
 });

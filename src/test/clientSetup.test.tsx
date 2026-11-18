@@ -9,14 +9,18 @@ import ClientSetup from '@/pages/ClientSetup';
 // The setup page is a view of what the lifecycle produced, with edit
 // controls (self-serve design, section 1, 19 Oct 2026).
 
-const f = vi.hoisted(() => ({ runningStep: '' as string, updates: [] as any[], deletes: [] as any[], upserts: [] as any[], rpcs: [] as any[], invokes: [] as string[], client: null as any }));
+const f = vi.hoisted(() => ({ runningStep: '' as string, updates: [] as any[], deletes: [] as any[], upserts: [] as any[], rpcs: [] as any[], invokes: [] as string[], client: null as any, strategyOnly: [] as string[] }));
 vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ canManageClients: true }) }));
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }));
 vi.mock('@/components/layout/AppLayout', () => ({ AppLayout: ({ children, actions }: any) => <main>{actions}{children}</main> }));
 vi.mock('@/integrations/supabase/client', () => ({ supabase: {
   auth: { getUser: async () => ({ data: { user: { id: 'person-1' } } }) },
-  rpc: async (name: string, args: any) => { f.rpcs.push({ name, ...args }); if (name === 'lifecycle_request') f.runningStep = args.p_step; return { data: null, error: null }; },
+  rpc: async (name: string, args: any) => {
+    // The clients with no active account in Sprout (src/lib/strategyOnly.ts): none, unless a test says so.
+    if (name === 'strategy_only_clients') return { data: f.strategyOnly, error: null };
+    f.rpcs.push({ name, ...args }); if (name === 'lifecycle_request') f.runningStep = args.p_step; return { data: null, error: null };
+  },
   functions: { invoke: async (name: string) => { f.invokes.push(name); return name === 'sprout-profiles' ? { data: { profiles: [{ id: 11, name: 'Bader IG', native_name: 'baderlaw', network_type: 'fb_instagram_account' }, { id: 12, name: 'Bader FB', network_type: 'facebook' }, { id: 13, name: 'Someone else', network_type: 'facebook', declined: { brand: 'Someone else', declined_at: '2026-11-02T12:30:00Z' } }] }, error: null } : { data: {}, error: null }; } },
   storage: { from: () => ({ createSignedUrls: async () => ({ data: [] }), getPublicUrl: () => ({ data: { publicUrl: 'https://x/logo.png' } }) }) },
   from: (table: string) => {
@@ -59,7 +63,7 @@ function mount(tab = 'info') {
   return render(<QueryClientProvider client={qc}><MemoryRouter initialEntries={[`/clients/c1/setup?tab=${tab}`]}><Routes><Route path="/clients/:id/setup" element={<ClientSetup />} /></Routes></MemoryRouter></QueryClientProvider>);
 }
 beforeEach(() => {
-  f.runningStep = ''; f.updates = []; f.deletes = []; f.upserts = []; f.rpcs = []; f.invokes = [];
+  f.runningStep = ''; f.updates = []; f.deletes = []; f.upserts = []; f.rpcs = []; f.invokes = []; f.strategyOnly = [];
   f.client = {
     id: 'c1', name: 'Bader Law', website_url: 'https://baderlaw.com', timezone: 'America/New_York', geo: 'US', language: 'en',
     primary_platforms: ['Instagram', 'Facebook'], content_pillars: [{ name: 'Injury law', description: 'Plain answers' }], social_keywords: ['car accident lawyer'],
@@ -122,6 +126,14 @@ it("says where each schedule stands in plain words, never the scheduler's own no
   expect(screen.getByText('The next one runs on Nov 7, 2026.')).toBeInTheDocument();
   expect(screen.getByText('Paused.')).toBeInTheDocument();
   expect(screen.queryByText(/triggered social report|at Lital's request|Latest:/)).toBeNull();
+});
+
+it('promises no report date to a strategy-only client: each schedule says what starts it', async () => {
+  f.strategyOnly = ['c1'];
+  mount('schedule');
+  expect(await screen.findAllByText("Starts once the client's social accounts are connected in Sprout.")).toHaveLength(2);
+  expect(screen.queryByText(/The next one runs on/)).toBeNull();
+  expect(screen.queryByText(/Last report:/)).toBeNull();
 });
 
 it('names the monthly run in the header, and keeps the data vendor out of the Sprout Social tab', async () => {

@@ -27,6 +27,10 @@
 //        Puts one finished design in use for its post; every other design of
 //        that post stops being in use.
 //
+// A strategy-only client (no active account in Sprout) gets no designs or
+// videos: the actions that start one answer "not_set_up", waiting for its
+// social accounts (closed.ts).
+//
 // Clients cannot write post_iterations directly (staff-only RLS), so using a
 // design goes through here with the service role after a membership check.
 
@@ -57,6 +61,7 @@ import { plannerLibrary } from "./library.ts";
 import { postTimeOf } from "./postTime.ts";
 import { type CreateDeps, createDesign } from "./create.ts";
 import { cancelRequest } from "./cancel.ts";
+import { closedForStrategyOnly } from "./closed.ts";
 import { footageFor } from "./footage.ts";
 import { shotBriefFor } from "./shotBrief.ts";
 import { designFeedback } from "./feedback.ts";
@@ -81,6 +86,10 @@ Deno.serve(async (req) => {
   const admin = service();
   try {
     const body = await req.json().catch(() => ({}));
+
+    // Nothing is started for a strategy-only client (closed.ts).
+    const closed = await closedForStrategyOnly({ db: admin, requireMember: (clientId) => requireMember(req, clientId) }, body);
+    if (closed) return json(closed.body, closed.status ?? 200);
 
     if (body?.action === "create") {
       const answer = await createDesign(createDeps(admin, req), body);

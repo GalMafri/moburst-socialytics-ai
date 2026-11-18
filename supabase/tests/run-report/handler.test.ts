@@ -6,7 +6,8 @@ const db = vi.hoisted(() => ({ timezone: "UTC" as string | null, inserted: [] as
 vi.mock("../../functions/_shared/supabase.ts", () => ({
   createClient: () => ({
     auth: { getUser: async () => ({ data: { user: { id: "u1" } }, error: null }) },
-    rpc: async () => ({ data: true, error: null }),
+    // The staff checks answer yes; the client has an account in Sprout, so it is not strategy-only.
+    rpc: async (name: string) => ({ data: name !== "client_strategy_only", error: null }),
     from: (table: string) => {
       let inserting: Record<string, any> | null = null;
       const q: Record<string, any> = {

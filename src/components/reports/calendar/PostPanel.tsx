@@ -15,11 +15,12 @@ import { useQuery } from "@tanstack/react-query";
 import { mondayOf } from "@/lib/calendarPosts";
 import { previewWeek, waitingLine } from "@/lib/designWeek";
 import { useDesignRequestForPost, useDesignRequests, useFilmedReasonForPost } from "./DesignRequestsContext";
+import { DesignRequestsPanelDock } from "./DesignRequestsDock";
 import { FeedbackDialog, PostDesign } from "./PostDesign";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { NOT_YET, NotYet, useNotYet } from "@/components/ui/not-yet";
 import { CalendarPostActions } from "@/components/calendar/CalendarPostActions";
-import { ClipNotAccepted, createDesigns, designVersions, endedWithoutDesign, isDesignOption, isPreparing, putDesignInUse, sendDesignFeedback, uploadFilmedClip, type ShotBrief } from "@/lib/designRequests";
+import { ClipNotAccepted, createDesigns, designVersions, endedWithoutDesign, isDesignOption, isPreparing, ownStatusLine, putDesignInUse, sendDesignFeedback, uploadFilmedClip, type ShotBrief } from "@/lib/designRequests";
 import { useAuth } from "@/hooks/useAuth";
 import { PlatformBadge } from "@/lib/platform-config";
 import { CopyEditor } from "./CopyEditor";
@@ -512,6 +513,10 @@ export function PostPanel({
               </TabsContent>
             )}
           </Tabs>
+          {/* The panel covers the page's progress cards, so they show here while it is open. */}
+          {/* The Design tab says this post's own status; on the other tabs one line does. */}
+          {tab !== "design" && ownStatusLine(designRequest) && <NotYet className="mt-6">{ownStatusLine(designRequest)}</NotYet>}
+          <DesignRequestsPanelDock exceptPost={post._calendarPostKey} />
         </SheetContent>
       </Sheet>
 

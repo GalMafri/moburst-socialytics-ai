@@ -31,6 +31,12 @@
 //        the week's dated moments as judged, when they are), with no model
 //        call
 //
+// A strategy-only client (no active account in Sprout,
+// _shared/sprout/strategyOnly.ts) has no calendar: plan_next_week and
+// revise_week answer 409 with the one sentence its screens show. The
+// database refuses the same requests (calendar_request_week,
+// calendar_request_revision), whoever asks.
+//
 // Reasons are worded when shown (_shared/calendar/reasonText.ts) and the
 // monthly voice job keeps the preference memory short, so neither needs an
 // action here.
@@ -43,6 +49,7 @@ import { CLIENT_COLUMNS, gatherEvidence } from "../_shared/calendar/runWeek.ts";
 import { plannable } from "../_shared/calendar/planState.ts";
 import { type CopyDeps, saveCopyAction, undoNote } from "../_shared/calendar/saveCopy.ts";
 import { momentEvidence } from "../_shared/calendar/moments.ts";
+import { strategyOnlyRefusal } from "../_shared/sprout/strategyOnly.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
@@ -84,6 +91,8 @@ Deno.serve(async (req) => {
       const userId = await requireMember(req, clientId);
       const { data: client } = await admin.from("clients").select("timezone").eq("id", clientId).maybeSingle();
       if (!client) return json({ error: "No such client." }, 404);
+      const closed = await strategyOnlyRefusal(admin, clientId);
+      if (closed) return json({ error: closed }, 409);
       const tomorrow = addDays(todayIn(String(client.timezone || "UTC")), 1);
       const thisWeek = mondayOf(todayIn(String(client.timezone || "UTC")));
       const weeks = Array.from({ length: WEEKS_AHEAD + 1 }, (_, i) => addDays(thisWeek, i * 7)).filter((w) => addDays(w, 6) >= tomorrow);
@@ -115,6 +124,8 @@ Deno.serve(async (req) => {
       if (!found) return json({ error: "No such plan." }, 404);
       const viaSecret = !!req.headers.get("x-socialytics-secret");
       const userId = await requireMember(req, found.client_id);
+      const closed = await strategyOnlyRefusal(admin, found.client_id);
+      if (closed) return json({ error: closed }, 409);
       // Writing the posts that have no copy yet is the daily run's job (enqueue_scheduled_report_jobs), not a button.
       const scope = viaSecret && body.scope === "empty" ? "empty" : "untouched";
       const { data: plan, error } = await admin.rpc("calendar_request_revision", { p_plan: planId, p_note: note, p_user: viaSecret ? null : userId, p_scope: scope });

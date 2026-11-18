@@ -121,6 +121,8 @@ import { bindRefreshFeed, runFeedJob } from "./feed.ts";
 import { runVoiceProfile, runWeekPlan, runWeekRevise } from "../_shared/calendar/runWeek.ts";
 import { runMomentFeedback, runMomentsList, runWeekMoments } from "../_shared/calendar/runMoments.ts";
 import { runLifecycle, runLifecycleStep, type LifecycleJob } from "../_shared/lifecycle/run.ts";
+import { isStrategyOnly } from "../_shared/sprout/strategyOnly.ts";
+import { runUnlessStrategyOnly } from "./strategyOnly.ts";
 import { LEASE_SECONDS, PIPELINE_CONCURRENCY, repairsFor, summarize, workerTick, type TickResult } from "./worker.ts";
 import { readEngine } from "../_shared/pipelines/engine.ts";
 import { REGISTRY } from "../_shared/pipelines/registry.ts";
@@ -218,6 +220,8 @@ Deno.serve(async (req) => {
       // A report still not made a day after its first try: one message to #ai-products-issues.
       // Without the webhook secret nothing is posted, and the report keeps running again.
       alert: (text) => postIssue(Deno.env.get(ISSUES_WEBHOOK_ENV), text),
+      // A strategy-only client gets no report: its dispatch ends before anything is made (dispatch.ts).
+      strategyOnly: (clientId) => isStrategyOnly(db, clientId),
     });
     const pipelineDeps: RunnerDeps = {
       now: () => new Date(),
@@ -238,7 +242,8 @@ Deno.serve(async (req) => {
     const runQueue = (): Promise<TickResult> => workerTick({
       now: () => new Date(),
       lease: () => jobs.lease(LEASE_SECONDS),
-      run: (job) => {
+      // A plan, a revision or a trends collection queued for a strategy-only client ends quietly, unrun (strategyOnly.ts).
+      run: (job) => runUnlessStrategyOnly(job, (clientId) => isStrategyOnly(db, clientId), () => {
         switch (job.kind) {
           // One stored report's figures and text (_shared/reports/correctText.ts).
           case "report_text": return runReportText(db, job, {
@@ -280,7 +285,7 @@ Deno.serve(async (req) => {
           case "platform_sizes": return runPlatformSizes(db, job, liveSizeDeps(env));
           default: return Promise.resolve({ status: "failed" as const, reason: `Unknown job kind ${(job as ScheduledJob).kind}` });
         }
-      },
+      }),
       finish: (job, outcome) => jobs.finish(job, outcome),
       // Reports that stopped, and decks whose worker died (each kept from stopping the other).
       closeAbandoned: () => closeAbandonedAll({

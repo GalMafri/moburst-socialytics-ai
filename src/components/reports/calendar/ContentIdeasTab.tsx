@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { sendQuietly, writeResendable } from "@/lib/quietSend";
@@ -31,6 +31,12 @@ interface Props {
   mode?: "report" | "calendar";
   /** A post to open as soon as the board has it (arriving from the all-clients calendar). */
   openPostKey?: string;
+  /** The tab that post opens on ("design" when arriving from a design progress card). */
+  openPostTab?: string;
+  /** A progress card's post that is not on this board (another week): the page takes the person to it. */
+  onOpenElsewhere?: (calendarPostKey: string) => void;
+  /** Shown in place of the board for a week with no posts; design progress stays on screen around it. */
+  empty?: ReactNode;
   /** Which trends the report shows, for its highlights (reportTrends). */
   trends?: ReportTrends;
 }
@@ -47,6 +53,9 @@ export function ContentIdeasTab({
   availableLanguages,
   mode = "report",
   openPostKey,
+  openPostTab,
+  onOpenElsewhere,
+  empty,
   trends,
 }: Props) {
   const [chosenFilters, setFilters] = useState<CalendarFilterState>({
@@ -186,15 +195,17 @@ export function ContentIdeasTab({
     if (!post) return;
     openedRef.current = openPostKey;
     setActivePost(post);
-  }, [openPostKey, revisedCalendar, iterationsLoading]);
+    setPanelTab(openPostTab);
+  }, [openPostKey, openPostTab, revisedCalendar, iterationsLoading]);
 
   // A design progress card names its post by key; find that post on the board.
   const openDesignsFor = useCallback((postKey: string) => {
     const post = (revisedCalendar as any[]).flatMap((d: any) => (Array.isArray(d?.posts) ? d.posts : [d])).find((p: any) => p?._calendarPostKey === postKey);
-    if (!post) return;
+    // A post in another week: the page goes to its week and opens it there.
+    if (!post) return onOpenElsewhere?.(postKey);
     setActivePost(post);
     setPanelTab("design");
-  }, [revisedCalendar]);
+  }, [revisedCalendar, onOpenElsewhere]);
 
   return (
     <DesignRequestsProvider clientId={clientId} onOpenPost={openDesignsFor}>
@@ -221,6 +232,7 @@ export function ContentIdeasTab({
           </div>
         )}
 
+        {empty ?? <>
         <CalendarFilters
           filters={chosenFilters}
           onChange={setFilters}
@@ -243,6 +255,7 @@ export function ContentIdeasTab({
             onToggleApproved={(iterationId) => toggleApproved.mutate(iterationId)}
           />}
         </div>
+        </>}
 
         <PostPanel
           open={!!activePost && !iterationsFailed}
@@ -275,7 +288,8 @@ export function ContentIdeasTab({
           }}
         />
 
-        <DesignRequestsDock />
+        {/* An open post panel covers the page and shows the cards itself. */}
+        {!(activePost && !iterationsFailed) && <DesignRequestsDock />}
       </div>
     </DesignRequestsProvider>
   );

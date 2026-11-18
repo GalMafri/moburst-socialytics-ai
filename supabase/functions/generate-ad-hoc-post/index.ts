@@ -12,6 +12,7 @@ import { answerText, PERSON_WAIT_MS, roomFor } from "../_shared/anthropicReply.t
 import { COPY_MODEL, loadClientVoice } from "../_shared/voice/load.ts";
 import { voicePromptBlock } from "../_shared/voice/voice.ts";
 import { adHocFormat, settleFormat } from "./format.ts";
+import { strategyOnlyRefusal } from "../_shared/sprout/strategyOnly.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -45,6 +46,10 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
+
+    // A strategy-only client (no active account in Sprout) has no calendar to add a post to: nothing is written or spent.
+    const closed = await strategyOnlyRefusal(supabase, String(client_id));
+    if (closed) return jsonResp({ error: closed }, 409);
 
     // Load client context
     const { data: client } = await supabase

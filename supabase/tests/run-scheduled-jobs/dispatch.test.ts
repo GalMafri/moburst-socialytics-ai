@@ -150,7 +150,7 @@ const BUSY: LandscapeCheck = { ok: false, code: "RIVALIQ_BUSY", status: 429, mes
 
 type Transport = "accept" | "reject" | "throw";
 
-function harness(w: ReturnType<typeof world>, transport: Transport = "accept", opts: { onCompetitivePost?: () => void; dryRun?: boolean; tracking?: LandscapeCheck; alert?: (text: string) => Promise<boolean> } = {}) {
+function harness(w: ReturnType<typeof world>, transport: Transport = "accept", opts: { onCompetitivePost?: () => void; dryRun?: boolean; tracking?: LandscapeCheck; alert?: (text: string) => Promise<boolean>; strategyOnly?: () => boolean } = {}) {
   const posts: Array<{ url: string; body: Record<string, unknown> }> = [];
   const saved: Array<Record<string, unknown>> = [];
   const checks: string[] = [];
@@ -179,6 +179,7 @@ function harness(w: ReturnType<typeof world>, transport: Transport = "accept", o
     // These rules are checked on the n8n route, a switch set by hand; the app route is in dispatch.engine.test.ts.
     async engine() { return { engine: "n8n" as const }; },
     ...(opts.alert ? { alert: opts.alert } : {}),
+    ...(opts.strategyOnly ? { strategyOnly: async () => opts.strategyOnly!() } : {}),
   });
   /** One lease of the job, written back the way the worker's finish() does. */
   const run = async (job: ScheduledJob): Promise<JobOutcome> => {
@@ -1208,5 +1209,137 @@ describe("one Slack alert for a report still not made after a day", () => {
       expect((await harness(w).run(job)).status).toBe("queued");
       expect(endOf(job)).toBe("error");
     });
+  });
+});
+
+// A strategy-only client (no active account in Sprout) gets no report: a
+// dispatch that is in the queue anyway makes nothing. A client can read as
+// strategy-only for a moment while its accounts change, so the job looks
+// again a few minutes later and only its last attempt ends it.
+describe("a strategy-only client gets no report", () => {
+  const REASON = "The client is set up for strategy only: nothing is made until its social accounts are connected in Sprout.";
+  const LAST = { attempts: 3, max_attempts: 3 };
+
+  for (const kind of ["social", "competitive"] as const) {
+    it(`a ${kind} dispatch looks again a few minutes later first: nothing is made and the schedule is not touched`, async () => {
+      const w = world({ kinds: [kind] });
+      const h = harness(w, "accept", { strategyOnly: () => true });
+      for (const attempts of [1, 2]) {
+        const out = await h.run(jobFor(kind, { attempts }));
+        expect(out).toMatchObject({ status: "queued", reason: REASON, available_at: at(RETRY_MINUTES).toISOString() });
+      }
+      expect(h.posts).toEqual([]);
+      expect(w.tables.reports).toEqual([]);
+      expect(w.writes).toEqual([]);
+      expect(w.tables.schedules[0].next_run_at).toBe(DUE);
+    });
+
+    it(`a ${kind} dispatch ends quietly on its last attempt: no report, no request, and the schedule's next run takes over`, async () => {
+      const w = world({ kinds: [kind] });
+      const alert = vi.fn(async () => true);
+      const h = harness(w, "accept", { strategyOnly: () => true, alert });
+      const out = await h.run(jobFor(kind, LAST));
+      expect(out).toEqual({ status: "skipped", reason: REASON });
+      expect(h.posts).toEqual([]);
+      expect(h.checks).toEqual([]);
+      expect(w.tables.reports).toEqual([]);
+      expect(w.tables.competitive.map((r) => r.id)).toEqual(["old-complete"]);
+      // The occurrence closes the way one does when no run finished in time: nothing to show, and the next run's date.
+      expect(w.writes).toEqual([`close sched-${kind}`]);
+      expect(w.tables.schedules[0]).toMatchObject({ next_run_at: NEXT, last_result: null });
+      expect(alert).not.toHaveBeenCalled();
+    });
+  }
+
+  it("a client that read as strategy-only for a moment keeps its report: the next look makes it", async () => {
+    const w = world({ kinds: ["social"] });
+    let only = true;
+    const h = harness(w, "accept", { strategyOnly: () => only });
+    const job = jobFor("social");
+    expect((await h.run(job)).status).toBe("queued");
+    // The accounts step brought the kept account back, or the person added the new one.
+    only = false;
+    job.attempts = 2;
+    expect((await h.run(job)).status).toBe("waiting");
+    expect(h.posts).toHaveLength(1);
+    expect(w.tables.reports).toHaveLength(1);
+    expect(w.writes).not.toContain("close sched-social");
+    expect(w.tables.schedules[0].next_run_at).toBe(DUE);
+  });
+
+  it("keeps what the job remembered through the wait", async () => {
+    const w = world({ kinds: ["social"] });
+    const h = harness(w, "accept", { strategyOnly: () => true });
+    const memory = { range: { start: "2026-09-01", end: "2026-09-30" }, runs: [{ report_id: "social-0", started_at: DUE, ended_at: DUE, outcome: "stopped" as const }] };
+    const out = await h.run(jobFor("social", { result: memory }));
+    expect(out.result).toEqual(memory);
+  });
+
+  it("never writes over a next run a person chose, on any attempt", async () => {
+    for (const attempts of [1, 3]) {
+      const w = world({ kinds: ["social"] });
+      const CHOSEN = "2026-10-20T07:15:00.000Z";
+      w.tables.schedules[0].next_run_at = CHOSEN;
+      const h = harness(w, "accept", { strategyOnly: () => true });
+      const out = await h.run(jobFor("social", { attempts }));
+      expect(out.status).toBe("skipped");
+      expect(w.writes).toEqual([]);
+      expect(w.tables.schedules[0].next_run_at).toBe(CHOSEN);
+    }
+  });
+
+  it("a manual run ends quietly too on its last attempt, with no schedule touched", async () => {
+    const w = world({ kinds: ["social"] });
+    const h = harness(w, "accept", { strategyOnly: () => true });
+    expect((await h.run(manualJob("social"))).status).toBe("queued");
+    const out = await h.run(manualJob("social", LAST));
+    expect(out.status).toBe("skipped");
+    expect(h.posts).toEqual([]);
+    expect(w.tables.reports).toEqual([]);
+    expect(w.writes).toEqual([]);
+    expect(w.tables.schedules[0].next_run_at).toBe(DUE);
+  });
+
+  it("a report that is already being made is left to finish", async () => {
+    const w = world({ kinds: ["social"] });
+    let only = false;
+    const h = harness(w, "accept", { strategyOnly: () => only });
+    const job = jobFor("social");
+    expect((await h.run(job)).status).toBe("waiting");
+    // Its last account goes while the report runs: the job goes on watching its report.
+    only = true;
+    w.tables.reports[0].status = "completed";
+    expect((await h.run(job)).status).toBe("done");
+    expect(w.writes).toContain("advance sched-social");
+    expect(w.writes).not.toContain("close sched-social");
+  });
+
+  it("a dry run says so and writes nothing", async () => {
+    const w = world({ kinds: ["social"] });
+    const h = harness(w, "accept", { strategyOnly: () => true, dryRun: true });
+    expect(await h.run(jobFor("social", LAST))).toMatchObject({ status: "skipped", reason: `dry run: ${REASON}` });
+    expect(w.writes).toEqual([]);
+    expect(w.tables.schedules[0].next_run_at).toBe(DUE);
+  });
+
+  it("a client with an account in Sprout is dispatched exactly as before, and so is one that got its account before the schedule's next run", async () => {
+    const plain = world({ kinds: ["social"] });
+    const before = harness(plain);
+    await before.run(jobFor("social"));
+    const w = world({ kinds: ["social"] });
+    const h = harness(w, "accept", { strategyOnly: () => false });
+    expect((await h.run(jobFor("social"))).status).toBe("waiting");
+    expect(h.posts).toEqual(before.posts);
+    expect(w.writes).toEqual(plain.writes);
+    // The schedule's next run, queued once the client has an account, makes its report.
+    const later = world({ kinds: ["social"] });
+    let only = true;
+    const g = harness(later, "accept", { strategyOnly: () => only });
+    expect((await g.run(jobFor("social", LAST))).status).toBe("skipped");
+    only = false;
+    later.tables.clock = new Date(NEXT);
+    expect((await g.run(jobFor("social", { id: "job-next", occurrence: NEXT, available_at: NEXT, created_at: NEXT, started_at: NEXT }))).status).toBe("waiting");
+    expect(g.posts).toHaveLength(1);
+    expect(later.tables.reports).toHaveLength(1);
   });
 });

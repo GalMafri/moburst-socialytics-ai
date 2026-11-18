@@ -10,6 +10,7 @@ import { AdminOnlyRoute } from "@/components/AdminOnlyRoute";
 import { Telemetry } from "@/components/Telemetry";
 import { ReturnTo } from "@/components/ReturnTo";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { StrategyOnlyGate } from "@/components/clients/StrategyOnly";
 import { RolePreviewSync } from "@/components/preview/RolePreviewBand";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
@@ -64,16 +65,16 @@ const App = () => (
               <Route path="/" element={<Index />} />
               {/* Staff-only: client management + cross-client views */}
               <Route path="/clients/:id/setup" element={<StaffOnlyRoute><ClientSetup /></StaffOnlyRoute>} />
-              <Route path="/clients/:id/analyze" element={<StaffOnlyRoute><RunAnalysis /></StaffOnlyRoute>} />
+              <Route path="/clients/:id/analyze" element={<StaffOnlyRoute><StrategyOnlyGate title="Reports"><RunAnalysis /></StrategyOnlyGate></StaffOnlyRoute>} />
               {/* Competitive analysis — staff-only while sets are reviewed;
                   the client-facing surface is the finished deck via RLS. */}
               <Route path="/clients/:id/competitive" element={<StaffOnlyRoute><CompetitorReview /></StaffOnlyRoute>} />
-              <Route path="/clients/:id/competitive/run" element={<StaffOnlyRoute><CompetitiveRun /></StaffOnlyRoute>} />
+              <Route path="/clients/:id/competitive/run" element={<StaffOnlyRoute><StrategyOnlyGate title="Reports"><CompetitiveRun /></StrategyOnlyGate></StaffOnlyRoute>} />
               <Route path="/clients/:id/competitive/feed" element={<StaffOnlyRoute><CompetitiveFeed /></StaffOnlyRoute>} />
               <Route path="/competitive" element={<StaffOnlyRoute><CompetitiveIndex /></StaffOnlyRoute>} />
               {/* Finished competitive reports are client-readable via RLS (status=complete only) */}
-              <Route path="/clients/:id/competitive/reports" element={<CompetitiveReportHistory />} />
-              <Route path="/clients/:id/competitive/reports/:reportId" element={<CompetitiveReportView />} />
+              <Route path="/clients/:id/competitive/reports" element={<StrategyOnlyGate title="Reports"><CompetitiveReportHistory /></StrategyOnlyGate>} />
+              <Route path="/clients/:id/competitive/reports/:reportId" element={<StrategyOnlyGate title="Reports"><CompetitiveReportView /></StrategyOnlyGate>} />
               <Route path="/analytics" element={<AnalyticsIndex />} />
               <Route path="/calendar" element={<CalendarIndex />} />
               <Route path="/reports" element={<StaffOnlyRoute><AllReports /></StaffOnlyRoute>} />
@@ -83,11 +84,13 @@ const App = () => (
               <Route path="/settings" element={<StaffOnlyRoute><Settings /></StaffOnlyRoute>} />
               <Route path="/api-keys" element={<StaffOnlyRoute><ApiKeys /></StaffOnlyRoute>} />
               <Route path="/usage" element={<AdminOnlyRoute><Usage /></AdminOnlyRoute>} />
-              {/* Open to Clients for their own mapped clients only (RLS-scoped) */}
-              <Route path="/clients/:id/reports/:reportId" element={<ReportView />} />
-              <Route path="/clients/:id/reports" element={<ReportHistory />} />
-              <Route path="/clients/:id/analytics" element={<Analytics />} />
-              <Route path="/clients/:id/calendar" element={<ClientCalendar />} />
+              {/* Open to Clients for their own mapped clients only (RLS-scoped). A strategy-only
+                  client's Calendar, Analytics and Reports pages show one sentence in their place
+                  (StrategyOnlyGate); its Strategy, setup and competitor pages are as for any client. */}
+              <Route path="/clients/:id/reports/:reportId" element={<StrategyOnlyGate title="Reports"><ReportView /></StrategyOnlyGate>} />
+              <Route path="/clients/:id/reports" element={<StrategyOnlyGate title="Reports"><ReportHistory /></StrategyOnlyGate>} />
+              <Route path="/clients/:id/analytics" element={<StrategyOnlyGate title="Analytics"><Analytics /></StrategyOnlyGate>} />
+              <Route path="/clients/:id/calendar" element={<StrategyOnlyGate title="Calendar"><ClientCalendar /></StrategyOnlyGate>} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </AuthProvider>

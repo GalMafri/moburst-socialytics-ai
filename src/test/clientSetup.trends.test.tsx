@@ -32,6 +32,8 @@ vi.mock('@/integrations/supabase/client', () => ({ supabase: {
   // The two functions behave as the database's do: a hashtag gets its '#', a term that is already there
   // (removed or not) becomes the team's own, and a removed term stays as a row with removed_at set.
   rpc: async (name: string, args: any) => {
+    // The page's read of the clients with no active account in Sprout (src/lib/strategyOnly.ts): none here, and not one of the calls these tests count.
+    if (name === 'strategy_only_clients') return { data: [], error: null };
     f.rpcs.push({ name, ...args });
     if (f.writeFails && (name === 'trend_term_add' || name === 'trend_term_remove' || name === 'trend_search_override_clear')) {
       return { data: null, error: { code: '42501', message: 'Only Moburst staff can change what trends track.' } };

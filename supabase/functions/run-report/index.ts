@@ -19,6 +19,11 @@ import { competitiveRangeError, dayInZone, socialRangeError } from "../_shared/r
 // has. The answer says so (waiting_for: "tracking"), read here from what the
 // last check left on the set; it is never made again and again in between.
 //
+// A strategy-only client (no active account in Sprout,
+// _shared/sprout/strategyOnly.ts) gets no report: the request is answered
+// 422 with the one sentence its screens show, as an archived client's is,
+// and nothing is queued.
+//
 // A report id (an older screen's "Run now" on a run that did not finish)
 // asks for that report's kind and period again, the same way.
 
@@ -26,6 +31,7 @@ import { createClient } from "../_shared/supabase.ts";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { type ReportRange, STUCK_AFTER_MINUTES } from "../_shared/reports/payloads.ts";
 import { trackedOnRecord } from "../_shared/competitive/selectionTracking.ts";
+import { strategyOnlyRefusal } from "../_shared/sprout/strategyOnly.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -68,6 +74,8 @@ Deno.serve(async (req) => {
     const { data: client, error: clientErr } = await admin.from("clients").select("id, name, archived_at, timezone").eq("id", clientId).maybeSingle();
     if (clientErr || !client) return json({ error: "Client not found" }, 404);
     if (client.archived_at) return json({ error: `${client.name} is archived.` }, 422);
+    const closed = await strategyOnlyRefusal(admin, clientId);
+    if (closed) return json({ error: closed }, 422);
 
     // Default range: the last 30 days, matching what the run pages offer.
     if (kind === "competitive" && (!!range.start !== !!range.end)) return json({ error: "Choose both start and end dates." }, 400);

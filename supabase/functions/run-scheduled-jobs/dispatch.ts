@@ -38,6 +38,17 @@
 // the held row (report_data.redo: queued with the redo's time, or none), and
 // every screen reads "Being redone" or "Not shared" from it.
 //
+// A strategy-only client (no active account in Sprout,
+// _shared/sprout/strategyOnly.ts) gets no report. The daily enqueue queues no
+// dispatch for it, and a dispatch that is there anyway (queued before its
+// last account went, or asked for by hand) makes nothing: no report row, no
+// request, no alert. It looks again a few minutes later, since a client can
+// read as strategy-only for a moment while its accounts change, and ends on
+// its last attempt. A schedule's occurrence closes the way
+// one closes when no run finished in time, so the schedule's next run takes
+// over; that run is queued only once the client is in Sprout. A report that
+// is already being made is left to finish.
+//
 // Each dispatch is its own job with recorded phases:
 //
 //   prepared  the report row exists and its id is on the job. A resumed job
@@ -104,6 +115,7 @@ import { HELD_REDO_MINUTES, HELD_REDOS, type HeldRedo } from "../_shared/competi
 export { HELD_REDO_MINUTES };
 import type { JobOutcome, ScheduledJob } from "../_shared/scheduled-jobs/types.ts";
 import { RETRY_MINUTES } from "./worker.ts";
+import { STRATEGY_ONLY_JOB_REASON } from "../_shared/sprout/strategyOnly.ts";
 import type { Engine, PipelineDefinition } from "../_shared/pipelines/types.ts";
 import type { ReportPipelineStart } from "../_shared/pipelines/shadow.ts";
 import type { AppRunView } from "../_shared/pipelines/store.ts";
@@ -294,6 +306,8 @@ export interface DispatchDeps {
   pipelineRun?(reportId: string): Promise<AppRunView | null>;
   /** Posts one message to #ai-products-issues; true when it was posted. Absent: nothing is posted. */
   alert?(text: string): Promise<boolean>;
+  /** Is the client strategy-only (_shared/sprout/strategyOnly.ts isStrategyOnly)? Absent: no client is. */
+  strategyOnly?(clientId: string): Promise<boolean>;
 }
 
 /** One run of an occurrence, kept on the job for the logs. */
@@ -648,6 +662,25 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
   if (manual && !job.report_id && now.getTime() >= Date.parse(deadline)) {
     await noRedoComes(runs, d);
     return { status: "skipped", reason: `The manual run was asked for ${MANUAL_RUN_DAYS} days ago and could not start.` };
+  }
+
+  // A strategy-only client gets no report. Nothing was made for this run, so
+  // it ends quietly and unalerted; a redo an earlier held run queued is not
+  // coming. A schedule's occurrence closes as one does when no run finished
+  // in time, and the schedule's next run takes over.
+  //
+  // A client can read as strategy-only for a moment: the accounts step sets
+  // one account aside before it brings another back, and a person can swap a
+  // client's only account. So the job looks again a few minutes later, and
+  // only its last attempt ends it. A next run a person chose is kept.
+  if (!job.report_id && d.strategyOnly && (await d.strategyOnly(client.id))) {
+    if (d.dryRun) return { status: "skipped", reason: `dry run: ${STRATEGY_ONLY_JOB_REASON}` };
+    if (job.attempts < job.max_attempts) {
+      return { status: "queued", reason: STRATEGY_ONLY_JOB_REASON, available_at: new Date(now.getTime() + RETRY_MINUTES * MINUTE).toISOString(), ...(job.result ? { result: job.result } : {}) };
+    }
+    await noRedoComes(runs, d);
+    if (schedule) await d.store.close(schedule, moved ? schedule.next_run_at : deadline);
+    return { status: "skipped", reason: STRATEGY_ONLY_JOB_REASON };
   }
 
   // Between runs, a lease before the next run's time is the alert's: it checks

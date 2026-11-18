@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- Partial query doubles. */
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ClientCalendar from '@/pages/ClientCalendar';
@@ -21,7 +21,13 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: v
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ isMoburstStaff: true, isClient: false }) }));
 vi.mock('@/components/layout/AppLayout', () => ({ AppLayout: ({ children, actions }: any) => <main><div>{actions}</div>{children}</main> }));
 vi.mock('@/components/calendar/NewPostDialog', () => ({ NewPostDialog: (p: any) => <div data-testid="new-post">{p.platforms.join(',')}</div> }));
-vi.mock('@/components/reports/calendar/ContentIdeasTab', () => ({ ContentIdeasTab: (p: any) => <div data-testid="week-board" data-filter={p.availablePlatforms.join(',')} /> }));
+// The board's frame is drawn for every week (design progress lives in it); a week with no posts shows its empty state inside.
+vi.mock('@/components/reports/calendar/ContentIdeasTab', () => ({ ContentIdeasTab: (p: any) => (
+  <div data-testid="board-frame" data-open={p.openPostKey ?? ''} data-tab={p.openPostTab ?? ''}>
+    <button type="button" onClick={() => p.onOpenElsewhere('k-later')}>card for a later post</button>
+    {p.empty ?? <div data-testid="week-board" data-filter={p.availablePlatforms.join(',')} />}
+  </div>
+) }));
 vi.mock('@/components/calendar/CalendarHeaderControls', async (orig) => ({ ...(await orig<any>()), ClientPicker: () => null }));
 vi.mock('@/integrations/supabase/client', () => ({ supabase: {
   auth: { getSession: async () => ({ data: { session: null } }), getUser: async () => ({ data: { user: null } }) },
@@ -125,5 +131,20 @@ describe('the posts read', () => {
     f.posts = Array.from({ length: 2500 }, (_, i) => post({ id: `p${i}`, post_key: `k${i}`, post_date: '2026-12-01' }));
     page();
     await vi.waitFor(() => expect(f.ranges).toEqual([[0, 999], [1000, 1999], [2000, 2999]]));
+  });
+});
+
+describe('a design progress card for a post in another week', () => {
+  it('keeps the board frame on a week with no posts, and Open goes to the post\'s week and its Design tab', async () => {
+    f.posts = [post({ id: 'later', post_key: 'k-later', post_date: '2026-11-18' })];
+    page();
+    expect(await screen.findByText('No posts planned for this week')).toBeInTheDocument();
+    const frame = screen.getByTestId('board-frame');
+    expect(frame.dataset.open).toBe('');
+    fireEvent.click(screen.getByRole('button', { name: 'card for a later post' }));
+    await waitFor(() => expect(screen.getByTestId('board-frame').dataset.open).toBe('k-later'));
+    expect(screen.getByTestId('board-frame').dataset.tab).toBe('design');
+    expect(screen.getByTestId('week-board')).toBeInTheDocument();
+    expect(screen.queryByText('No posts planned for this week')).toBeNull();
   });
 });

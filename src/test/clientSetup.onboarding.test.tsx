@@ -18,7 +18,11 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: v
 vi.mock('@/components/layout/AppLayout', () => ({ AppLayout: ({ children, actions }: any) => <main>{actions}{children}</main> }));
 vi.mock('@/integrations/supabase/client', () => ({ supabase: {
   auth: { getUser: async () => ({ data: { user: { id: 'person-1' } } }) },
-  rpc: async (name: string, args: any) => { f.rpcs.push({ name, ...args }); return { data: null, error: null }; },
+  rpc: async (name: string, args: any) => {
+    // The page's read of the clients with no active account in Sprout (src/lib/strategyOnly.ts): none here, and not one of the calls these tests count.
+    if (name === 'strategy_only_clients') return { data: [], error: null };
+    f.rpcs.push({ name, ...args }); return { data: null, error: null };
+  },
   functions: { invoke: async () => ({ data: { profiles: [] }, error: null }) },
   storage: { from: () => ({ createSignedUrls: async () => ({ data: [] }), getPublicUrl: () => ({ data: { publicUrl: 'https://x/logo.png' } }) }) },
   from: (table: string) => {

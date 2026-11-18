@@ -9,7 +9,7 @@ import type { SendState } from "@/components/reports/SchedulePostModal";
 import { postCopyOf } from "@/lib/postCopy";
 import { useAuth } from "@/hooks/useAuth";
 import { useDesignRequestForPost, useWeekStateForPost } from "./DesignRequestsContext";
-import { isPreparing, stageLine } from "@/lib/designRequests";
+import { endedWithoutDesign, isPreparing, stageLine } from "@/lib/designRequests";
 import { StoryCard } from "./StoryCard";
 
 interface Iteration {
@@ -123,6 +123,9 @@ function FeedPostCard({ post, iteration, status, sendState, onOpen, onToggleAppr
                   <Clock className="h-4 w-4" />
                   <span className="t-label">{weekState === "copy" ? "Designed once its copy is written" : "Queued for design"}</span>
                 </>
+              ) : endedWithoutDesign(designRequest) && designRequest ? (
+                // The last one asked for ended without a design: the card says so, not "No design yet".
+                <span className="t-label">{stageLine(designRequest)}</span>
               ) : (
                 <>
                   <ImagePlus className="h-4 w-4" />
