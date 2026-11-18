@@ -6,6 +6,7 @@ import { AppSidebar } from "./AppSidebar";
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import { PageHeader } from "@/components/ui/page-header";
+import { RolePreviewBand } from "@/components/preview/RolePreviewBand";
 
 function greeting(now = new Date()): string {
   const h = now.getHours();
@@ -57,6 +58,8 @@ export function AppLayout({
           its content's min-content width — so a wide table anywhere below made the
           whole page wider than a 768px screen and it scrolled sideways. */}
       <SidebarInset className="intercept-bg min-w-0">
+        {/* Shown only to a staff member who is previewing as a client. */}
+        <RolePreviewBand />
         <header className="relative z-10 flex h-16 md:h-[80px] items-center gap-4 border-b border-[rgba(255,255,255,0.06)] bg-[rgba(11,12,16,0.5)] backdrop-blur-[60px] px-page">
           <SidebarTrigger className="text-[#b1b7c1] hover:text-white" />
           <Separator orientation="vertical" className="h-5" />

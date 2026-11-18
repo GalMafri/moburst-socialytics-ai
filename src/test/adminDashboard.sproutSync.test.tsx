@@ -15,6 +15,8 @@ const OPEN: Sync = { open: true, slow: false, last: null };
 
 const f = vi.hoisted(() => ({
   staff: true,
+  /** Whether the page holds a real sign-in: the editor's preview holds none. */
+  signedIn: true,
   clients: [] as any[],
   clientReads: 0,
   calls: [] as string[],
@@ -25,6 +27,7 @@ const f = vi.hoisted(() => ({
 vi.mock("@/components/dashboard/ClientOverview", () => ({ ClientOverview: () => null }));
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ canManageClients: f.staff, canRunAnalysis: f.staff, canDelete: false }) }));
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {
+  auth: { getSession: async () => ({ data: { session: f.signedIn ? { access_token: "token" } : null }, error: null }) },
   channel: () => ({ on: () => ({ subscribe: () => ({}) }) }),
   removeChannel: vi.fn(),
   from: () => ({ select: () => ({ order: async () => { f.clientReads++; return { data: f.clients, error: null }; } }) }),
@@ -48,7 +51,7 @@ let client: QueryClient;
 beforeEach(() => {
   vi.useFakeTimers();
   vi.spyOn(console, "warn").mockImplementation(() => {});
-  f.staff = true; f.clientReads = 0; f.calls = []; f.sync = IDLE; f.press = "starts";
+  f.staff = true; f.signedIn = true; f.clientReads = 0; f.calls = []; f.sync = IDLE; f.press = "starts";
   f.clients = [{ id: "a", name: "Alpha Fixture", reports: [], archived_at: null, primary_platforms: [] }];
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
 });
@@ -81,6 +84,17 @@ describe("who sees Sync from Sprout", () => {
     expect(screen.queryByRole("button", { name: /Sync(ing)? from Sprout/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "Add client" })).toBeNull();
     expect(f.calls).toEqual([]);
+  });
+
+  it("without a real sign-in (the editor's preview) the server is never asked, on opening or on a press", async () => {
+    f.signedIn = false;
+    await mount();
+    expect(button().textContent).toBe("Sync from Sprout");
+    expect(button()).toBeEnabled();
+    fireEvent.click(button());
+    await tick();
+    expect(f.calls).toEqual([]);
+    expect(screen.getByRole("status").textContent).toContain("The sync from Sprout did not start. The weekly sync still runs.");
   });
 
   it("is beside both Add client buttons when there are no clients yet", async () => {

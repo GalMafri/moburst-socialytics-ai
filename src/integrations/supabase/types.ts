@@ -3657,6 +3657,56 @@ export type Database = {
           },
         ]
       }
+      role_previews: {
+        Row: {
+          client_id: string | null
+          client_name: string
+          ended_at: string | null
+          ended_reason: string | null
+          id: string
+          previous_allowed_company_slugs: string[] | null
+          previous_client_ids: string[]
+          previous_hub_company_name: string | null
+          previous_role: Database["public"]["Enums"]["app_role"]
+          started_at: string
+          user_id: string
+        }
+        Insert: {
+          client_id?: string | null
+          client_name: string
+          ended_at?: string | null
+          ended_reason?: string | null
+          id?: string
+          previous_allowed_company_slugs?: string[] | null
+          previous_client_ids?: string[]
+          previous_hub_company_name?: string | null
+          previous_role: Database["public"]["Enums"]["app_role"]
+          started_at?: string
+          user_id: string
+        }
+        Update: {
+          client_id?: string | null
+          client_name?: string
+          ended_at?: string | null
+          ended_reason?: string | null
+          id?: string
+          previous_allowed_company_slugs?: string[] | null
+          previous_client_ids?: string[]
+          previous_hub_company_name?: string | null
+          previous_role?: Database["public"]["Enums"]["app_role"]
+          started_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "role_previews_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       scheduled_jobs: {
         Row: {
           attempts: number

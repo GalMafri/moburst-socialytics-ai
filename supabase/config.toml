@@ -188,3 +188,9 @@ verify_jwt = false
 # Staff reject or archive a generated design; the function checks staff access itself.
 [functions.record-design-feedback]
 verify_jwt = false
+
+# Preview as a client: a staff member switches their own session to a client
+# user of one client and back. The function verifies the caller's session
+# itself and acts only on that person.
+[functions.role-preview]
+verify_jwt = false

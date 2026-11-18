@@ -58,8 +58,19 @@ export function syncStateOf(data: unknown): SproutSyncState | null {
   return { open: sync.open, slow: sync.slow === true, last: last && typeof last === "object" ? { finished: last.finished === true, added } : null };
 }
 
+/**
+ * Whether this page holds a real sign-in. The editor's preview shows a
+ * stand-in person with none (src/hooks/useAuth.tsx), and the server is never
+ * asked without one: it could only refuse.
+ */
+async function signedIn(): Promise<boolean> {
+  const { data } = await supabase.auth.getSession();
+  return !!data.session?.access_token;
+}
+
 /** Where the run stands. Throws when the server did not answer, so the page keeps what it last knew and asks again. */
 export async function readSproutSync(): Promise<SproutSyncState> {
+  if (!(await signedIn())) return { open: false, slow: false, last: null };
   const { data, error } = await supabase.functions.invoke("sprout-profiles", { body: { action: "sync_status" } });
   if (error) throw error;
   const state = syncStateOf(data);
@@ -74,6 +85,7 @@ export async function readSproutSync(): Promise<SproutSyncState> {
  * where the run stands, or null when no answer came.
  */
 export async function startSproutSync(): Promise<{ started: boolean; sync: SproutSyncState } | null> {
+  if (!(await signedIn())) return null;
   const reply = await sendQuietly(() => supabase.functions.invoke("sprout-profiles", { body: { action: "sync_now" } }), {
     again: (e) => invokeResendable(e, { idempotent: true }),
   });

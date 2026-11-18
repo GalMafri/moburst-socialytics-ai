@@ -10,6 +10,7 @@ import { AdminOnlyRoute } from "@/components/AdminOnlyRoute";
 import { Telemetry } from "@/components/Telemetry";
 import { ReturnTo } from "@/components/ReturnTo";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { RolePreviewSync } from "@/components/preview/RolePreviewBand";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import AuthHandoff from "./pages/AuthHandoff";
@@ -50,6 +51,7 @@ const App = () => (
           <AuthProvider>
             <Telemetry />
             <ReturnTo />
+            <RolePreviewSync />
             <Routes>
               <Route path="/auth" element={<Auth />} />
               {/* gOS (moburst.ai) integration endpoints */}

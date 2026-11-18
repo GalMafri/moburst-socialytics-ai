@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Home, FileText, Settings, TrendingUp, LogOut, ExternalLink, Gauge, Crosshair, CalendarDays, Compass, KeyRound } from "lucide-react";
 import { portalUrl } from "@/utils/gosAuth";
+import { PreviewAsClient } from "@/components/preview/PreviewAsClient";
 
 // One nav row, written once (the Intercept nav spec: 52px rows, 24px icons).
 const NAV_ITEM = "h-[52px] rounded-[12px] px-[12px] gap-[16px] text-[15px] font-medium tracking-[-0.5px] transition-all";
@@ -118,6 +119,10 @@ export function AppSidebar() {
             </div>
           </div>
         )}
+        {/* Staff can use Socialytics as a client user of one client. While
+            they do, they hold the client role, so this is gone with every
+            other staff item until they exit. */}
+        {user && isMoburstStaff && <PreviewAsClient />}
       </SidebarFooter>
     </Sidebar>
   );

@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef, createContext, useContext, ReactNode } from "react";
+import { useState, useEffect, useRef, useCallback, createContext, useContext, ReactNode } from "react";
 import { initHubToken, clearHubToken } from "@/utils/hubAuth";
 import { getGosHandoffToken, rememberPortal } from "@/utils/gosAuth";
 import { isAuthErrorCode, isRefusal, isTransient, BRIDGE_ERROR_CODES, type AuthErrorCode } from "@/lib/authMessages";
 import { rememberIntendedDestination } from "@/utils/returnTo";
 import { supabase } from "@/integrations/supabase/client";
 import { strongestRole } from "@/lib/roles";
+import { fetchRolePreview } from "@/lib/rolePreview";
 
 const HUB_API_URL = import.meta.env.VITE_HUB_BACKEND_URL || "https://tools-server.moburst.com";
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
@@ -66,6 +67,18 @@ interface AuthContextType {
   // company-NAME filters (which only understand the legacy single-company model)
   // should defer to RLS instead of hiding rows.
   isGosSession: boolean;
+  // Reads the person's identity and role again, in place, with no page
+  // reload. Preview as a client changes a person's role under a session that
+  // stays the same, so the screens must follow at once.
+  //   * Going into a preview: the role is read again from the session and
+  //     the database. No sign-in is run, since a sign-in is what ends one.
+  //   * Coming out of one ({ signIn: true }): sign-in runs again from the
+  //     start. In a tab that holds a portal token the Hub is asked and its
+  //     current role replaces the one the preview had saved; in any other tab
+  //     the role is read from the session and the database.
+  // Rejects when the role could not be read, so the caller never leaves the
+  // tab on the wrong side.
+  refreshIdentity: (opts?: { signIn?: boolean }) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -144,6 +157,32 @@ async function storedSessionIsFor(email: string): Promise<boolean> {
     const { data, error } = await supabase.auth.getUser();
     return !error && String(data?.user?.email ?? "").toLowerCase() === email.toLowerCase();
   } catch {
+    return false;
+  }
+}
+
+const sameText = (a: unknown, b: unknown) => !!a && !!b && String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+
+// Preview as a client: true when a load may leave the bridge alone. All of
+// these must hold, and any doubt is a no:
+//   * the session this browser holds is the person the Hub just named, by
+//     the Hub's own id for them and by email;
+//   * the Hub has them active;
+//   * the role-preview function, asked now, says their preview is open. It
+//     is asked, not just the row read, because asking is what ends a preview
+//     that is over (8 hours passed, or a sign-in or removal replaced it).
+// A person with no open row is never asked about, so a real client and a
+// staff member not in a preview cost one small read and nothing else.
+async function previewHolds(
+  sessionUser: { id?: string; email?: string; user_metadata?: Record<string, unknown> } | null | undefined,
+  hubUser: HubUser,
+): Promise<boolean> {
+  if (hubUser.isActive === false) return false;
+  if (!sessionUser?.id || !sameText(sessionUser.email, hubUser.email) || !sameText(sessionUser.user_metadata?.hub_user_id, hubUser._id)) return false;
+  try {
+    return !!(await fetchRolePreview()).preview;
+  } catch (err) {
+    console.warn("[Auth] preview not read, signing in as usual", err);
     return false;
   }
 }
@@ -246,6 +285,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [authError, setAuthError] = useState<AuthErrorCode | null>(null);
   const [isGosSession, setIsGosSession] = useState(false);
   const userRef = useRef<HubUser | null>(null);
+  const signInAgain = useRef<() => Promise<boolean>>(async () => false);
 
   useEffect(() => {
     let unmounted = false;
@@ -254,14 +294,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let generation = 0;
     let settled = false;
 
+    // Counts every identity applied, so a later run can tell whether it settled one.
+    let applied = 0;
     const apply = (next: HubUser | null, role: UserRole, isGos: boolean) => {
+      applied++;
       userRef.current = next;
       setUser(next);
       setUserRole(role);
       setIsGosSession(isGos);
     };
 
-    async function authenticate() {
+    // `again` is a run after the first: coming out of a preview (refreshIdentity).
+    async function authenticate(again = false) {
       const started = generation;
       const stale = () => unmounted || started !== generation;
       const finish = () => {
@@ -325,13 +369,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // The bridge decides, on every load. The session this browser holds
           // goes with the request, so an unchanged person is answered ok with
           // no new session and a changed or removed one is dealt with there.
-          let presented: string | null = null;
+          let held: Awaited<ReturnType<typeof storedSession>> = null;
           try {
-            presented = (await storedSession())?.access_token ?? null;
+            held = await storedSession();
           } catch (err) {
             console.error("Session check error:", err);
           }
+          const presented = held?.access_token ?? null;
           if (stale()) return;
+
+          // The one load the bridge does not hear from: a person who is
+          // previewing as a client (supabase/functions/role-preview). The
+          // bridge would write their Hub role back and so end the preview on
+          // every reload of a tab opened from this portal. So when
+          // previewHolds says the preview is open (see there), identity is
+          // rebuilt from the stored session, exactly as for a tab with no
+          // portal token, and it is used only if the auth server confirms
+          // the same person and the database has them as a client. It is
+          // read once and applied once, so the staff screens never show
+          // first. The portal token stays, and the bridge is asked again on
+          // the first load after the preview is over.
+          // Everything else goes to the bridge as before: no session or one
+          // that has ended, another person's session, a person the Hub has
+          // made inactive, a real client or a staff member not in a preview,
+          // a preview that cannot be read or has just ended, and a session
+          // that does not rebuild as this person, a client.
+          if (held && (await previewHolds(held.user, hubUser))) {
+            try {
+              const rebuilt = await reconstructSession();
+              if (stale()) return;
+              if (rebuilt?.role === "client" && sameText(rebuilt.user.email, hubUser.email) && sameText(rebuilt.user._id, hubUser._id)) {
+                rememberPortal("hub");
+                apply(rebuilt.user, rebuilt.role, rebuilt.isGos);
+                setAuthError(null);
+                finish();
+                return;
+              }
+            } catch (err) {
+              console.error("Session reconstruction error:", err);
+            }
+            if (stale()) return;
+          }
+
           const { toolRole, error } = await bridgeHubSession(token, presented);
           if (stale()) return;
           if (!error) {
@@ -390,10 +469,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // would surface as a Lovable runtime error toast.
       if (IS_LOVABLE_PREVIEW) {
         if (!stale()) apply(DEV_USER, "admin", false);
+      } else if (again && !failure && !stale()) {
+        // Read again and found no session or no role: signed out, as a fresh load would find.
+        apply(null, null, false);
       }
-      if (failure && !stale()) setAuthError(failure);
+      // On a later run, a read that did not answer leaves the person as they
+      // are and says nothing: the caller loads the page afresh.
+      if (failure && !again && !stale()) setAuthError(failure);
       finish();
     }
+    // Sign-in from the start, for refreshIdentity. True when it settled who the person is.
+    signInAgain.current = async () => {
+      const before = applied;
+      await authenticate(true);
+      return applied !== before;
+    };
 
     // A person whose sign-out event came from another tab signs in again in
     // this one: without a rebuild the tab stays signed out until it is reloaded.
@@ -431,6 +521,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const refreshIdentity = useCallback(async (opts: { signIn?: boolean } = {}) => {
+    if (opts.signIn) {
+      if (!(await signInAgain.current())) throw new Error("The role was not read again.");
+      return;
+    }
+    const rebuilt = await reconstructSession();
+    // Nothing to apply when the session resolves to no role, and a sign-out
+    // that landed while this was reading wins.
+    if (!rebuilt || !userRef.current) return;
+    userRef.current = rebuilt.user;
+    setUser(rebuilt.user);
+    setUserRole(rebuilt.role);
+    setIsGosSession(rebuilt.isGos);
+  }, []);
+
   const isAdmin = userRole === "admin";
   const isMoburstStaff = userRole === "admin" || userRole === "moburst_user";
   const isClient = userRole === "client";
@@ -450,6 +555,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: !!user,
         authError,
         isGosSession,
+        refreshIdentity,
       }}
     >
       {children}
