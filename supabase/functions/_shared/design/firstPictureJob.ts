@@ -13,6 +13,13 @@
 // slot stays where the logo file is stamped). So the worker asks the same way for
 // every design and keeps the reason the service gives.
 //
+// Where the rule can lay no rectangle, the service may still compose (18
+// Nov 2026, night, firstPictureStrokes.ts): the first picture with only the
+// strokes the cleaning took out patched, wherever the model drew them. To
+// the worker that is a composed picture like any other, stored at the same
+// place and read by the same steps; what it keeps says it was made that way
+// (`by`). Nothing here decides differently for it.
+//
 // The worker asks for the composed picture in the call it already makes for
 // the cleaned slot, so no call is added. What the service stored is the
 // picture every later step reads and finish stamps: the reading for marks,
@@ -72,9 +79,12 @@ import { MAX_GENERATIONS } from "./modelSteps.ts";
  * "service" for a service from before the rule, or "check: ..." with the
  * check the composed picture failed. The numbers are the service's, for
  * review; `measured` is what it read against the pair of pictures itself,
- * when it read anything (picture/contract.ts, FirstPictureMeasure).
+ * when it read anything (picture/contract.ts, FirstPictureMeasure). `by`
+ * is "strokes" for a picture the service composed from the strokes the
+ * cleaning took out, where no rectangle could be laid; `join` and `removed`
+ * are then the refused rectangle's own.
  */
-export type ComposedKept = { of: string; path: string | null; why?: string; share?: number; join?: number; removed?: number; measured?: FirstPictureMeasure; box?: Rect };
+export type ComposedKept = { of: string; path: string | null; by?: "strokes"; why?: string; share?: number; join?: number; removed?: number; measured?: FirstPictureMeasure; box?: Rect };
 
 /** The part of a job's state this reads and writes. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -218,7 +228,7 @@ export async function askCleanedSlot<T extends { composed?: FirstPictureFacts }>
   if (!answer.result) return answer;
   const facts = answer.result.composed;
   if (!facts) s.composed = { of, path: null, why: "service" };
-  else if (facts.made) s.composed = { of, path: composedPath(base, s), share: facts.share, join: facts.join, removed: facts.removed, ...measuredOf(facts), box: facts.box };
+  else if (facts.made) s.composed = { of, path: composedPath(base, s), ...(facts.by ? { by: facts.by } : {}), share: facts.share, join: facts.join, removed: facts.removed, ...measuredOf(facts), box: facts.box };
   else s.composed = { of, path: null, why: facts.why, share: facts.share, join: facts.join, removed: facts.removed, ...measuredOf(facts) };
   return answer;
 }

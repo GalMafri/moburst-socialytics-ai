@@ -123,6 +123,29 @@ describe("askCleanedSlot", () => {
     expect(composeRedesign(j)).toBe("logo's place: the first picture could not take the cleaned logo's place (join, join 4.39)");
   });
 
+  it("keeps a picture the service composed from the strokes as a composed picture, and that it was made that way", async () => {
+    // 18 Nov 2026, night (firstPictureStrokes.ts): the rectangle was refused ("join" here), and the answer is a composed picture all the same.
+    const strokes = { instead: "join" as const, agree: 0.0105, cluster: { x: 925, y: 2469, width: 341, height: 111 }, area: 15472, second: 7, fill: 0.442, core: 17897, dilate: 14, shift: { x: 0, y: 0, share: 1 }, gains: [0.86, 0.84], detail: [{ first: 0.38, cleaned: 0.44 }, { first: 0.44, cleaned: 0.63 }], left: 0 };
+    const facts: FirstPictureFacts = { made: true, by: "strokes", share: 0.0089, join: 17.79, removed: 0.5391, measured: { ring: { cells: 904, apart: 25, touching: 10 }, strokes }, box: { x: 899, y: 2443, width: 393, height: 163 } };
+    const s = state({ generations: 1 });
+    await askCleanedSlot(s, BASE, async () => ({ result: answer(facts), ms: 4 }));
+    expect(s.composed).toEqual({ of: `${BASE}/nologo-1-2.png`, path: `${BASE}/composed-1-2.png`, by: "strokes", share: 0.0089, join: 17.79, removed: 0.5391, measured: facts.measured, box: facts.box });
+    // Every later step reads it, and the design is not made again for the join the rectangle was refused for.
+    expect(basePicture(s)).toBe(`${BASE}/composed-1-2.png`);
+    expect(composeRedesign(s)).toBeNull();
+    expect(composeWanted(s)).toBe(true);
+    // A mark the reader finds on it is the model's own drawing, as on any composed picture; a failed check on the last design drops it.
+    expect(afterMark(s, "a monogram").next).toBe("again");
+    const last = state({ generations: MAX_GENERATIONS, composed: { ...s.composed } });
+    expect(afterSlot(last, "ground")).toBe("cleaned");
+    expect(last.composed).toMatchObject({ path: null, by: "strokes", why: "check: ground" });
+    expect(basePicture(last)).toBe(`${BASE}/nologo-1-2.png`);
+    // A service from before that night never says how a picture was made, and nothing is kept about it.
+    const before = state();
+    await askCleanedSlot(before, BASE, async () => ({ result: answer(made), ms: 4 }));
+    expect(before.composed).not.toHaveProperty("by");
+  });
+
   it("asks a service from before the rule again without the two fields, so the design goes on as before", async () => {
     const s = state();
     const call = vi.fn(async (compose: boolean) => {

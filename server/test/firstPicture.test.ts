@@ -12,6 +12,7 @@
 import { describe, expect, it } from "vitest";
 import { PICTURE_CALL_HEADER, type Rect, type Rgb, type SlotFileResult } from "../../supabase/functions/_shared/picture/contract.ts";
 import { composeFirst } from "../../supabase/functions/_shared/design/firstPicture.ts";
+import { composeFirstOrStrokes } from "../../supabase/functions/_shared/design/firstPictureStrokes.ts";
 import { box, copyOf, drawLogo, flat, inked, mark } from "../../supabase/tests/_shared/design/draw.ts";
 import { createApp } from "../src/app.ts";
 import { composeForSlot } from "../src/picture/compose.ts";
@@ -288,5 +289,42 @@ describe("composeForSlot", () => {
     const made = composeForSlot(null, cleaned, rect, [W, H], true);
     expect(made.picture).toBe(cleaned);
     expect(made.facts).toEqual({ made: false, why: "first", share: 0, join: 0 });
+  });
+});
+
+describe("POST /api/picture/slot-file where the rule can lay no rectangle", () => {
+  it("composes from the strokes the cleaning took out, and answers it as a composed picture", async () => {
+    // A larger picture: the model drew a wordmark low on it, away from the slot and wider than a slot's place ever is, so the
+    // rectangle rule answers "removal" (18 Nov 2026, night, firstPictureStrokes.ts).
+    const w = 640, h = 480, slot: Rect = { x: 290, y: 40, width: 60, height: 24 };
+    const plain = (by: Rgb = [0, 0, 0]) => flat(w, h, [52 + by[0], 84 + by[1], 140 + by[2]]);
+    const word = (r: Raster, x: number, y: number) => {
+      for (let k = 0; k < 6; k++) { box(r, x + k * 22, y, x + 4 + k * 22, y + 32, [240, 242, 236]); box(r, x + k * 22, y, x + 16 + k * 22, y + 4, [240, 242, 236]); box(r, x + 12 + k * 22, y, x + 16 + k * 22, y + 32, [240, 242, 236]); }
+      return r;
+    };
+    const drawnLow = () => word(plain(), 120, 300);
+    const request = { ...base, rect: slot, frame: [w, h] as [number, number], first: ask.first, out: ask.out };
+    const { puts, call } = await store({ first: drawnLow(), cleaned: plain(CAST) });
+    const got = await call(request);
+    expect(got.status).toBe(200);
+    expect(composeFirst(drawnLow(), plain(CAST), slot, false).facts).toMatchObject({ made: false, why: "removal" });
+    const expected = composeFirstOrStrokes(drawnLow(), plain(CAST), slot, false);
+    expect(expected.facts).toMatchObject({ made: true, by: "strokes", box: { x: 104, y: 284, width: 158, height: 64 }, measured: { strokes: { instead: "removal", cluster: { x: 120, y: 300, width: 126, height: 32 } } } });
+    // The answer is the one a composed picture always had: the facts, and the slot read on the stored picture.
+    expect(result(got.json)).toEqual({ ...slotFile(expected.picture!, slot, [w, h], "stored", stamps), composed: expected.facts });
+    const stored = await decodeRaster(new Uint8Array(puts["composed.png"]));
+    expect(Buffer.from(stored.data).equals(Buffer.from(expected.picture!.data))).toBe(true);
+    // The stored picture is the first picture with the wordmark gone: its ground everywhere, the cleaned picture's cast nowhere.
+    expect(Buffer.from(stored.data).equals(Buffer.from(plain().data))).toBe(true);
+    expect(result(got.json).ground).toEqual([52, 84, 140]);
+
+    // The same wordmark drawn twice: the step composes nothing, nothing is written, and the answer is the rule's own, read on the cleaned picture.
+    const twice = () => word(drawnLow(), 380, 150);
+    const none = await store({ first: twice(), cleaned: plain(CAST) });
+    const refused = await none.call(request);
+    const was = composeFirst(twice(), plain(CAST), slot, false);
+    expect(was.facts).toMatchObject({ made: false, why: "removal" });
+    expect(result(refused.json)).toEqual({ ...slotFile(plain(CAST), slot, [w, h], "stored", stamps), composed: was.facts });
+    expect(Object.keys(none.puts)).toEqual([]);
   });
 });

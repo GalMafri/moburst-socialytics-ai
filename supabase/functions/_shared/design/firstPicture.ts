@@ -63,6 +63,12 @@
 //                  left outside it, the join is held to the same rule, and
 //                  a join that fails is "removal", as the slot always was.
 //
+// When this rule composes nothing because the slot holds no removal or the
+// join fails, one more step is tried on the same pair (18 Nov 2026, night,
+// firstPictureStrokes.ts): a patch shaped like the strokes the cleaning
+// took out, in place of a rectangle. This file's rule is not changed by it,
+// and what it composes is answered as it always was.
+//
 // Nothing here looks for what else the removal took out. A mark it removed
 // somewhere else is still on the composed picture, and the existing read
 // for marks finds it there. What the design does then is the worker's rule

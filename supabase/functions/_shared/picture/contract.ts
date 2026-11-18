@@ -215,8 +215,19 @@ export type FirstPictureAsk = { first?: string; out?: string };
  * read against the pair of pictures itself, when anything was (absent from
  * a service before 17 Nov 2026, evening, and when the rule's own numbers
  * decided alone).
+ *
+ * `by` is "strokes" for a picture composed by the step that is tried when
+ * no rectangle could be laid (18 Nov 2026, night,
+ * _shared/design/firstPictureStrokes.ts): the patch is then shaped like the
+ * strokes the cleaning took out, wherever they were. It is a composed
+ * picture like any other: `box` is the patch's bounds and `share` its part
+ * of the picture. `join`, `removed` and the rest of `measured` are still
+ * what was read for the rectangle that was refused, and `measured.strokes`
+ * is what the step read. A service from before that night never answers
+ * `by`, and a worker from before it reads such an answer as the composed
+ * picture it is.
  */
-export type FirstPictureFacts = { made: boolean; why?: "first" | "size" | "slot" | "removal" | "join" | "store"; share: number; join: number; removed?: number; measured?: FirstPictureMeasure; box?: Rect };
+export type FirstPictureFacts = { made: boolean; by?: "strokes"; why?: "first" | "size" | "slot" | "removal" | "join" | "store"; share: number; join: number; removed?: number; measured?: FirstPictureMeasure; box?: Rect };
 /**
  * What a cleaned-slot call read against the pair of pictures itself
  * (_shared/design/firstPicture.ts). `floor`: the largest share of cells far
@@ -245,7 +256,7 @@ export type FirstPictureFacts = { made: boolean; why?: "first" | "size" | "slot"
  * each other differ, in levels (the root of the mean square). The place is
  * patched only when at every scale the cleaned picture keeps at least half
  * of the first picture's (of its square), or the first holds under one
- * level there.
+ * level there. `strokes`: only on a picture made `by` "strokes".
  */
 export type FirstPictureMeasure = {
   floor?: number;
@@ -253,7 +264,36 @@ export type FirstPictureMeasure = {
   elsewhere?: { place: Rect; apart: number; floor?: number; detail?: Array<{ apart: number; first: number; cleaned: number }> };
   ring?: { cells: number; apart: number; touching: number };
   rings?: { cells: number; apart: number; rings: number };
+  strokes?: StrokesMeasure;
 };
+/**
+ * What the strokes step read on the pair of pictures when it composed
+ * (_shared/design/firstPictureStrokes.ts, where each number's line is).
+ * `instead`: what the rectangle rule had answered. `agree`: the share of
+ * coarse cells on which the two pictures are far apart (a pair holds at
+ * most one tenth). `cluster`: the rectangle around the pixels the cleaning
+ * took out, in the picture's pixels. `area` and `second`: the taken-out
+ * pixels counted in that cluster and in the next largest on the picture
+ * (the first holds at least twelve times the second). `fill`: `area` as a
+ * share of the cluster's rectangle on the grid it was found on. `core`: the
+ * cluster's pixels with its holes filled, which the patch is drawn from.
+ * `dilate`: how many pixels they were widened by, measured on the pair.
+ * `shift`: the offset of 2 pixels or more, across and down, at which the
+ * cleaned picture best fits the first on the band beside the patch, and
+ * what that offset leaves of the two pictures' difference there as a share
+ * of what no offset leaves (one half or more on a composed picture: the
+ * cleaned picture did not come back moved).
+ * `gains`: what the cleaned pixels' fine and coarse detail were scaled by,
+ * on average over the patch, to match the first picture's around it.
+ * `detail`: for the same two bands, the strength of the two pictures' detail
+ * just around the patch, in levels (the middle size of the band there); what
+ * is laid in the patch holds at least half of the first picture's, and no
+ * more than twice it, in energy, or the band is under one level; and the
+ * first picture's coarse band is under two levels.
+ * `left`: the pixels of the composed picture, in the patch's rectangle,
+ * that still lie outside what the cleaned picture holds near them.
+ */
+export type StrokesMeasure = { instead: "removal" | "join"; agree: number; cluster: Rect; area: number; second: number; fill: number; core: number; dilate: number; shift: { x: number; y: number; share: number }; gains: number[]; detail: Array<{ first: number; cleaned: number }>; left: number };
 export type ReadRequest = PictureMeta & { picture: string; page: Size; band?: Rect; area?: Rect; out: { page: string; band?: string; area?: string } };
 export type ReadResult = { picture: Size; page: Size; band?: Size; area?: Size };
 export type FinishRequest = PictureMeta & { picture: string; logo: string; rect: Rect; frame: [number, number]; output: Size; out: string };
