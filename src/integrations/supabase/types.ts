@@ -4682,6 +4682,7 @@ export type Database = {
           schedules: number
         }[]
       }
+      client_in_sprout: { Args: { p_client: string }; Returns: boolean }
       client_notes_queue_read: {
         Args: { p_client: string }
         Returns: undefined
@@ -4700,6 +4701,7 @@ export type Database = {
         }
         Returns: Json
       }
+      client_strategy_only: { Args: { p_client: string }; Returns: boolean }
       client_value_is_set: {
         Args: { p_field: string; p_value: Json }
         Returns: boolean
@@ -5142,6 +5144,7 @@ export type Database = {
         Returns: Json
       }
       strategy_deck_request: { Args: { p_client: string }; Returns: Json }
+      strategy_only_clients: { Args: never; Returns: string[] }
       strategy_section_save:
         | {
             Args: { p_client: string; p_key: string; p_text: string }
@@ -5277,6 +5280,7 @@ export type Database = {
         Args: { p_client: string; p_ended: string; p_job: string }
         Returns: boolean
       }
+      voice_profile_request: { Args: { p_client: string }; Returns: boolean }
     }
     Enums: {
       app_role: "admin" | "user" | "moburst_user" | "client"
