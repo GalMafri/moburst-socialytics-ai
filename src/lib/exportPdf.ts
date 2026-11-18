@@ -116,6 +116,8 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
   // marks data-print="hide" is dropped from the clone; the surrounding copy
   // (a filter's "showing Instagram only" line, for instance) is kept.
   content.querySelectorAll('[data-print="hide"]').forEach((el) => el.remove());
+  // Rows a screen folds away behind a "Show all" (data-print-show) are printed in full.
+  content.querySelectorAll('[data-print-show]').forEach((el) => el.classList.remove('hidden'));
   content.querySelectorAll('details').forEach(el => el.setAttribute('open', ''));
   // Chromium can ignore keep-with-next across a nested grid boundary. Put a
   // company label and its first example in one print-only fragment instead.

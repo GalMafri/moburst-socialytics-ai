@@ -26,6 +26,8 @@ const FORMAT_LABELS: Record<string, string> = {
 };
 
 const EXCERPT_CHARS = 220;
+/** Example posts listed before "Show all". */
+const POSTS_SHOWN = 5;
 
 /** Every network a theme shows up on: the ones it lists, and the ones its posts are on. */
 function themePlatforms(theme: TrendTheme): string[] {
@@ -63,13 +65,13 @@ const LONG = { happening: 170, body: 210 };
 function Figure({ value, label }: { value: number; label: string }) {
   return value > 0
     ? <span title={`${count(value)} ${label}`}>{compact(value)}</span>
-    : <span className="text-[#b1b7c1]/60" title={`No ${label}`}>0</span>;
+    : <span title={`${label[0].toUpperCase()}${label.slice(1)} not available for this post`} aria-label={`${label} not available`} />;
 }
 
 // Post table columns: the post, views, likes, comments, shares, the key figure, the link.
 const POST_GRID = "grid items-center gap-x-4 grid-cols-[minmax(0,1fr)_72px_20px] md:grid-cols-[minmax(0,1fr)_repeat(4,64px)_96px_20px]";
 
-function PostRow({ post, staff }: { post: TrendPost; staff: boolean }) {
+function PostRow({ post, staff, folded = false }: { post: TrendPost; staff: boolean; folded?: boolean }) {
   // A link comes from the post's own network; only a web address is made one.
   const link = /^https?:\/\//i.test(post.url) ? post.url : null;
   const text = cleanText(post.text).trim();
@@ -79,7 +81,7 @@ function PostRow({ post, staff }: { post: TrendPost; staff: boolean }) {
   const measured = staff ? null : measuredEngagements(post);
   const score = staff && post.engagement != null ? Math.round(Number(post.engagement)) : null;
   return (
-    <li className={`${POST_GRID} py-2.5 -mx-2 px-2 rounded-[8px] hover:bg-[rgba(255,255,255,0.03)] transition-colors`}>
+    <li data-print-show={folded ? "true" : undefined} className={`${POST_GRID} py-2.5 -mx-2 px-2 rounded-[8px] hover:bg-[rgba(255,255,255,0.03)] transition-colors${folded ? " hidden" : ""}`}>
       <div className="min-w-0 flex items-start gap-3">
         <span className="mt-0.5 shrink-0 text-[#b1b7c1]" title={platformName(post.platform)} role="img" aria-label={platformName(post.platform)}>
           <PlatformIcon platform={post.platform} className="h-4 w-4" />
@@ -123,6 +125,7 @@ function PostRow({ post, staff }: { post: TrendPost; staff: boolean }) {
 /** One theme as a ranked row. `onDismiss` is given only on Analytics, where staff may dismiss a theme; a report and a client never see it. */
 function ThemeRow({ theme, rank, staff, onDismiss }: { theme: TrendTheme; rank: number; staff: boolean; onDismiss?: () => void }) {
   const [open, setOpen] = useState(false);
+  const [allPosts, setAllPosts] = useState(false);
   const titleId = `trend-theme-${theme.id}`;
   const formats = [...new Set(theme.posts.map((p) => (p.format ? FORMAT_LABELS[p.format] : "")).filter(Boolean))];
   const long = (theme.happening?.length ?? 0) > LONG.happening || (theme.why_it_matters?.length ?? 0) > LONG.body || (theme.angle?.length ?? 0) > LONG.body;
@@ -186,8 +189,16 @@ function ThemeRow({ theme, rank, staff, onDismiss }: { theme: TrendTheme; rank: 
               <span />
             </div>
             <ul className="divide-y divide-[rgba(255,255,255,0.04)]">
-              {theme.posts.map((post) => <PostRow key={post.url} post={post} staff={staff} />)}
+              {theme.posts.map((post, i) => (
+                // Past the first few, a post stays in the PDF but waits for "Show all" on screen.
+                <PostRow key={post.url} post={post} staff={staff} folded={i >= POSTS_SHOWN && !allPosts} />
+              ))}
             </ul>
+            {theme.posts.length > POSTS_SHOWN && (
+              <button type="button" data-print="hide" aria-expanded={allPosts} onClick={() => setAllPosts((v) => !v)} className="t-link mt-2">
+                {allPosts ? "Show fewer posts" : `Show all ${theme.posts.length} posts`}
+              </button>
+            )}
           </div>
         )}
       </div>
