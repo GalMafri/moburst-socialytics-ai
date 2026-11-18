@@ -17,9 +17,7 @@
 //                  size's own shape and near today's pixel count;
 //   the delivery   the size the finished picture has (checkSize gives the
 //                  page, the picture the model draws and this, together);
-//   the placement  where the client's logo goes on a page that is not 4:5;
-//   wildly         how far a newly read size may be from the size in use
-//                  before it has to be read twice.
+//   the placement  where the client's logo goes on a page that is not 4:5.
 //
 // A request with no row, or a row that fails a check, is designed exactly
 // as before this file existed. Free of Deno and network imports.
@@ -50,10 +48,6 @@ export const PAGE_COUNT_BAND = 0.25;
 export const SHAPE_TOLERANCE = 0.002;
 /** The most pixels the image model is asked for: the Story's picture, the largest the app draws. */
 export const MAX_PICTURE_PIXELS = 2160 * 3840;
-/** A newly read size is far from the size in use when its shape differs by more than this share. */
-export const WILD_SHAPE = 0.1;
-/** Or when either edge differs by more than this share. */
-export const WILD_EDGE = 0.25;
 
 /** The page a still was always planned on: the 4:5 frame the stored placement is defined on. */
 export const STILL_PAGE: Size = { width: FRAME.w, height: FRAME.h };
@@ -215,15 +209,4 @@ export function plannerShape(uploadSize: unknown, story: boolean): string | null
   const shape = story ? null : jobShape(uploadSize, false);
   if (!shape || sameShape(shape.page, STILL_PAGE)) return null;
   return `${shapeWord(shape.page)} frame (${shapeLabel(shape.page)})`;
-}
-
-/**
- * Whether a newly read size is far from the size in use: its shape differs
- * by more than WILD_SHAPE, or either edge by more than WILD_EDGE. Such a
- * size is accepted only when the next read of the row gives it again.
- */
-export function isWild(from: Size, to: Size): boolean {
-  const shape = Math.abs((to.width / to.height) / (from.width / from.height) - 1);
-  const edge = Math.max(Math.abs(to.width / from.width - 1), Math.abs(to.height / from.height - 1));
-  return shape > WILD_SHAPE || edge > WILD_EDGE;
 }

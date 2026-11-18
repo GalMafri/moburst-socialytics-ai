@@ -14,7 +14,7 @@
 // nobody is told or asked anything. Every design goes on reading the last
 // good size.
 
-import { anthropicMessages } from "../anthropic.ts";
+import { anthropicMessages, type AnthropicResult } from "../anthropic.ts";
 import type { JobOutcome, ScheduledJob } from "../scheduled-jobs/types.ts";
 import {
   EXTRACT_TOOL, GUIDE_URL, MIN_GUIDE_CHARS,
@@ -27,6 +27,42 @@ import { UPLOAD_FORMATS, type UploadFormat } from "./platformSize.ts";
 export const SIZES_MODEL = "claude-opus-5-5";
 const FETCH_TIMEOUT_MS = 20_000;
 const MODEL_TIMEOUT_MS = 120_000;
+/** Room for the model's thinking, which counts here, and the answer after it (about 600 tokens for seven rows). */
+const MODEL_MAX_TOKENS = 16_000;
+
+/**
+ * The request the read sends. The model chooses the tool itself: this model
+ * answers a forced tool choice (type "tool" or "any") with a 400 that says
+ * those types "are not supported for this model", which failed every read
+ * until 18 Nov 2026. The instruction asks for the call (extractPrompt), the
+ * tool is strict so the call's input keeps the schema, and what comes back
+ * is checked in code either way (parseExtract). The choice is written out
+ * here in full: the test that reads every function for a forced choice
+ * (supabase/tests/_shared) passes no other way of naming it.
+ */
+export function extractRequest(prompt: string): Record<string, unknown> {
+  return {
+    model: SIZES_MODEL,
+    max_tokens: MODEL_MAX_TOKENS,
+    tools: [EXTRACT_TOOL],
+    tool_choice: { type: "auto" },
+    messages: [{ role: "user", content: prompt }],
+  };
+}
+
+/**
+ * The model's answer out of its reply: the tool's input when it called the
+ * tool, else the JSON it wrote. A reply cut off at the token limit, or one
+ * that ended on a refusal, is no answer, whatever part of one it holds: the
+ * read fails and is tried again.
+ */
+export function extractAnswer(result: AnthropicResult): unknown {
+  if (result.stopReason === "max_tokens") throw new Error("The answer was cut off before it ended.");
+  if (result.stopReason === "refusal") throw new Error("The model declined to read the guide.");
+  const blocks = (result.raw as { content?: Array<{ type?: string; name?: string; input?: unknown }> } | null)?.content ?? [];
+  const call = blocks.find((b) => b?.type === "tool_use" && b.name === EXTRACT_TOOL.name);
+  return call?.input ?? jsonIn(result.text);
+}
 
 export interface SizeDeps {
   /** The guide's HTML, and the HTTP status it came with. */
@@ -153,20 +189,7 @@ export function liveSizeDeps(env: (name: string) => string | undefined): SizeDep
     extract: async (prompt) => {
       const apiKey = env("ANTHROPIC_API_KEY");
       if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
-      const result = await anthropicMessages({
-        apiKey,
-        body: {
-          model: SIZES_MODEL,
-          max_tokens: 4000,
-          tools: [EXTRACT_TOOL],
-          tool_choice: { type: "tool", name: EXTRACT_TOOL.name },
-          messages: [{ role: "user", content: prompt }],
-        },
-        signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
-      });
-      const blocks = (result.raw as { content?: Array<{ type?: string; name?: string; input?: unknown }> } | null)?.content ?? [];
-      const call = blocks.find((b) => b?.type === "tool_use" && b.name === EXTRACT_TOOL.name);
-      return call?.input ?? jsonIn(result.text);
+      return extractAnswer(await anthropicMessages({ apiKey, body: extractRequest(prompt), signal: AbortSignal.timeout(MODEL_TIMEOUT_MS) }));
     },
   };
 }

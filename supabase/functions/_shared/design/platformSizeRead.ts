@@ -14,8 +14,9 @@
 //   on the page  the cheat sheet's cell is read by the code itself; a size
 //                the model names from a section counts only when it is
 //                written in that platform's section;
-//   the outcome  what a row's read changes: nothing, the size, or a
-//                pending size that waits for the same read again.
+//   the outcome  what a row's read changes: nothing, or a pending size
+//                that becomes the size when the next read gives it again.
+//                No size is ever written on one read.
 //
 // The reading rule. For an image or a carousel: first the cheat sheet's
 // "Primary post image" cell for the platform, sizes in the order written,
@@ -28,7 +29,7 @@
 // Free of Deno and network imports.
 
 import { networkKey } from "../sprout/publishRules.ts";
-import { UPLOAD_FORMATS, checkSize, isWild, sameSize, type Size, type UploadFormat } from "./platformSize.ts";
+import { UPLOAD_FORMATS, checkSize, sameSize, type Size, type UploadFormat } from "./platformSize.ts";
 
 /** The guide. Sprout is where this team publishes, so its guide is the source. */
 export const GUIDE_URL = "https://sproutsocial.com/insights/social-media-image-sizes-guide/";
@@ -141,10 +142,16 @@ export function guideParts(text: string): { cheat: Map<string, string>; section:
   return { cheat, section };
 }
 
-/** The tool whose input is the strict structure the model answers in. */
+/**
+ * The tool whose input is the strict structure the model answers in. The
+ * model is asked to call it, never made to (platformSizeRefresh.ts,
+ * extractRequest); `strict` has the API hold the call's input to this
+ * schema, and parseExtract checks the answer again whichever way it came.
+ */
 export const EXTRACT_TOOL = {
   name: "record_sizes",
-  description: "Record the organic post image sizes the guide recommends, for exactly the rows asked for.",
+  description: "Record the organic post image sizes the guide recommends, for exactly the rows asked for. Call it exactly once, with every row.",
+  strict: true,
   input_schema: {
     type: "object", additionalProperties: false, required: ["rows"],
     properties: {
@@ -180,7 +187,7 @@ export function extractPrompt(keys: Key[], text: string): string {
     '2. Then the recommended sizes for that kind of post in the platform\'s own section of the guide, in the order written, each with part "section". For "image": the feed, timeline, shared or in-stream image post. For "carousel": only a part whose heading names carousel posts. For "story": the platform\'s Stories image part, and nothing from the cheat sheet.',
     "Leave out everything else: ads, profile pictures, cover and banner images, thumbnails, video, Reels, link previews with no size of their own, minimum and maximum sizes, safe areas and grid views.",
     "Copy each size exactly as the guide writes it. When the guide gives no size for a row, give that row an empty list. Add no row that was not asked for.",
-    `Call ${EXTRACT_TOOL.name} once with every row.`,
+    `Answer by calling the ${EXTRACT_TOOL.name} tool exactly once, with every row. Do not answer in words.`,
     "",
     "The guide:",
     '"""',
@@ -322,12 +329,21 @@ export function listedSizes(key: Key, read: ReadSize[], parts: ReturnType<typeof
  *              written on the page, or the first listed size fails a
  *              check: nothing changes. The job never falls through to
  *              another shape.
- *   changed    the first listed size differs from the size in use, not
- *              wildly (platformSize.ts, isWild): it is the new size.
- *   held       it differs wildly and is not the pending size: it becomes
- *              the pending size.
- *   confirmed  it differs wildly and is the pending size, so this is the
- *              second read in a row that gave it: it is the new size.
+ *   held       the first listed size differs from the size in use and is
+ *              not the pending size: it becomes the pending size, and the
+ *              size in use stays.
+ *   confirmed  it differs and is the pending size, so this is the second
+ *              read in a row that gave it: it is the new size.
+ *
+ * Every change takes two reads, however near the new size is to the size
+ * in use (since 18 Nov 2026; before, a size within a quarter of each edge
+ * and a tenth of the shape was written on one read). One read is one model's
+ * reading of one fetch of the page: a size that a section mentions for
+ * something else, picked once, must not become the size of every design.
+ * The job is queued once a day at most, so the read that confirms is a
+ * later day's, unless a person queued a second job by hand. `changed` is no
+ * longer an outcome of a read; record_platform_size_read still knows it,
+ * and runs from before this rule hold it.
  *
  * A row no request reads (usable false, its size refused by the image
  * model) is not final: where the size would stay, the outcome is `retried`
@@ -359,7 +375,7 @@ export function decide(row: SizeRow, read: ReadSize[] | undefined, parts: Return
   // A size the image model refused, and has not drawn since, is not drawable. (The row's own size is tried again above.)
   if (word.refused(row, first)) return { ...base, outcome: "refused", reason: "model_refused", to: [first.width, first.height], read: given, listed: shown };
   const to: [number, number] = [first.width, first.height];
-  if (!isWild(row, first)) return { ...base, outcome: "changed", to, read: given, listed: shown };
+  // Every change waits: the size is written only when the read before this one gave it too.
   const pending = row.pending_width === first.width && row.pending_height === first.height;
   return { ...base, outcome: pending ? "confirmed" : "held", to, read: given, listed: shown };
 }

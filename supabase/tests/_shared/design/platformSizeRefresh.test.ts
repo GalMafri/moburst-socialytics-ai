@@ -10,7 +10,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { functionsDir } from "../../paths.ts";
 import { GUIDE_URL, EXTRACT_TOOL } from "../../../functions/_shared/design/platformSizeRead";
-import { SIZES_MODEL, liveSizeDeps, platformSizesDryRun, refreshPlatformSizes, runPlatformSizes, type SizeDeps } from "../../../functions/_shared/design/platformSizeRefresh";
+import { SIZES_MODEL, extractAnswer, extractRequest, liveSizeDeps, platformSizesDryRun, refreshPlatformSizes, runPlatformSizes, type SizeDeps } from "../../../functions/_shared/design/platformSizeRefresh";
 import type { ScheduledJob } from "../../../functions/_shared/scheduled-jobs/types";
 
 const migration = readFileSync(join(functionsDir, "..", "migrations", "20261117150000_platform_sizes.sql"), "utf8");
@@ -101,16 +101,35 @@ describe("the weekly read of the sizes guide", () => {
     expect(prompts[0].match(/^- platform "/gm)).toHaveLength(7);
   });
 
-  it("changes a size at once when the guide's size moved a little", async () => {
+  it("changes a size that moved a little only when two runs in a row read it", async () => {
     // The guide now says 1080x1440 for Facebook, everywhere it said 1080x1350 or 1440x1800.
     const html = guide.replace("<td>1080&#215;1350 px</td>", "<td>1080&#215;1440 px</td>").replace("1440&#215;1800", "1080&#215;1440");
     const answer = faithful();
     answer.rows[0].sizes = [c(1080, 1440), s(1080, 1080), s(1080, 1440)];
-    const run = await refreshPlatformSizes(db, deps({ html, answer }));
-    expect(run.changed).toBe(1);
+    const first = await runPlatformSizes(db, job, deps({ html, answer }));
+    expect(first.reason).toBe("Read the sizes guide: 7 sizes, 6 as they were, 0 changed, 1 held for a second read, 0 refused, 0 taken back, 0 tried again.");
+    expect(await sizeOf("facebook", "image")).toEqual([1080, 1350]);
+    expect((await sizes()).find((r) => r.platform === "facebook" && r.format === "image")).toMatchObject({ source: "seed", pending_width: 1080, pending_height: 1440 });
+    const second = await refreshPlatformSizes(db, deps({ html, answer }));
+    expect(second.changed).toBe(1);
     expect(await sizeOf("facebook", "image")).toEqual([1080, 1440]);
     expect((await sizes()).filter((r) => r.source === "guide").map((r) => `${r.platform}/${r.format}`)).toEqual(["facebook/image"]);
-    expect((await reads())[0].rows.find((r) => r.platform === "facebook" && r.format === "image")).toMatchObject({ outcome: "changed", from: [1080, 1350], to: [1080, 1440] });
+    expect((await reads()).map((r) => r.rows.find((x) => x.platform === "facebook" && x.format === "image"))).toMatchObject([{ outcome: "held", from: [1080, 1350], to: [1080, 1440] }, { outcome: "confirmed", from: [1080, 1350], to: [1080, 1440] }]);
+  });
+
+  it("never writes a size a section mentions for something else on the read that picked it", async () => {
+    // The cheat sheet stops listing X's 1600x900, X's section mentions a 1200x675 link card, and the model picks it.
+    const html = guide.replace("<td>1600&#215;900 px</td>", "<td>N/A</td>").replace(/(<h2[^>]*>X [^<]*<\/h2>)/, "$1<p>Link cards are shown at 1200&#215;675 pixels.</p>");
+    expect(html).toContain("Link cards are shown at 1200&#215;675 pixels.");
+    const answer = faithful();
+    answer.rows[6].sizes = [s(1200, 675)];
+    const run = await refreshPlatformSizes(db, deps({ html, answer }));
+    expect(run.changed).toBe(0);
+    expect(run.rows.find((r) => r.platform === "x")).toMatchObject({ outcome: "held", from: [1600, 900], to: [1200, 675] });
+    expect(await sizeOf("x", "image")).toEqual([1600, 900]);
+    // The next read reads the row another way: the held size is gone and X is as it was.
+    await refreshPlatformSizes(db, deps());
+    expect((await sizes()).find((r) => r.platform === "x")).toMatchObject({ width: 1600, height: 900, source: "seed", pending_width: null, pending_height: null });
   });
 
   it("changes a size that moved far only when two runs in a row read it", async () => {
@@ -295,33 +314,142 @@ describe("a look before the first run", () => {
 describe("the live services", () => {
   afterEach(() => { vi.unstubAllGlobals(); });
 
-  it("fetch the guide with a plain GET and ask the planning model through the tool", async () => {
-    const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const env = (name: string) => (name === "ANTHROPIC_API_KEY" ? "test-key" : undefined);
+  const FORCED_REFUSED = { type: "error", error: { type: "invalid_request_error", message: 'tool_choice: type "tool" and "any" are not supported for this model.' } };
+  /**
+   * The guide's site and the model's API, standing in. The API answers as the
+   * planning model does: a request that forces a tool (tool_choice of type
+   * "tool" or "any") is a 400 with the API's own words; any other request
+   * gets `reply`. Every request made is kept.
+   */
+  const services = (reply: unknown, html = guide) => {
+    const calls: Array<{ url: string; init?: RequestInit; body?: Record<string, unknown> }> = [];
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      calls.push({ url: String(url), init });
-      if (String(url).includes("api.anthropic.com")) {
-        return new Response(JSON.stringify({ content: [{ type: "text", text: "Reading." }, { type: "tool_use", name: EXTRACT_TOOL.name, input: faithful() }], stop_reason: "tool_use" }), { status: 200 });
+      if (!String(url).includes("api.anthropic.com")) {
+        calls.push({ url: String(url), init });
+        return new Response(html, { status: 200 });
       }
-      return new Response(guide, { status: 200 });
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      calls.push({ url: String(url), init, body });
+      const choice = (body.tool_choice as { type?: string } | undefined)?.type;
+      if (choice === "tool" || choice === "any") return new Response(JSON.stringify(FORCED_REFUSED), { status: 400 });
+      return new Response(JSON.stringify(reply), { status: 200 });
     }));
-    const live = liveSizeDeps((name) => (name === "ANTHROPIC_API_KEY" ? "test-key" : undefined));
+    return calls;
+  };
+  const called = (input: unknown) => ({ content: [{ type: "thinking", thinking: "" }, { type: "tool_use", name: EXTRACT_TOOL.name, input }], stop_reason: "tool_use" });
+  const written = (text: string) => ({ content: [{ type: "thinking", thinking: "" }, { type: "text", text }], stop_reason: "end_turn" });
+
+  it("fetch the guide with a plain GET and ask the planning model to call the tool, never forcing it", async () => {
+    const calls = services(called(faithful()));
+    const live = liveSizeDeps(env);
     const page = await live.fetchGuide(GUIDE_URL);
     expect(page.status).toBe(200);
     expect(calls[0].url).toBe(GUIDE_URL);
     expect(calls[0].init?.method ?? "GET").toBe("GET");
     expect(await live.extract("the instruction")).toEqual(faithful());
-    const body = JSON.parse(String(calls[1].init?.body));
+    const body = calls[1].body!;
     expect(calls[1].url).toBe("https://api.anthropic.com/v1/messages");
+    expect(body).toEqual(extractRequest("the instruction"));
     expect(body.model).toBe(SIZES_MODEL);
     expect(SIZES_MODEL).toBe("claude-opus-5-5");
+    // This model answers a forced tool choice with a 400: the model chooses, and the tool is strict.
+    expect(body.tool_choice).toEqual({ type: "auto" });
     expect(body.tools).toEqual([EXTRACT_TOOL]);
-    expect(body.tool_choice).toEqual({ type: "tool", name: EXTRACT_TOOL.name });
+    expect(EXTRACT_TOOL.strict).toBe(true);
+    // Thinking counts toward the limit, so it is far above the answer's own length.
+    expect(body.max_tokens).toBeGreaterThanOrEqual(8000);
     expect(body.messages).toEqual([{ role: "user", content: "the instruction" }]);
+    // Nothing this model refuses outright: a forced tool, thinking switched off or budgeted, sampling settings, a prefilled answer.
+    for (const refused of ["thinking", "temperature", "top_p", "top_k"]) expect(body).not.toHaveProperty(refused);
+  });
+
+  it("the whole job reads the guide against an API that refuses a forced tool, as the planning model does", async () => {
+    const before = await sizes();
+    const calls = services(called(faithful()));
+    const out = await runPlatformSizes(db, job, liveSizeDeps(env));
+    expect(out.status).toBe("done");
+    expect(out.reason).toContain("7 sizes, 7 as they were, 0 changed");
+    expect((await sizes()).map(({ checked: _c, ...r }) => r)).toEqual(before.map(({ checked: _c, ...r }) => r));
+    expect((await reads())[0]).toMatchObject({ ok: true, error: null });
+    // One request to the model, accepted as sent: no retry, nothing dropped.
+    const asked = calls.filter((c) => c.body);
+    expect(asked).toHaveLength(1);
+    expect(asked[0].body!.tool_choice).toEqual({ type: "auto" });
+    // The instruction itself asks for the call, since nothing else makes the model call it.
+    const prompt = String((asked[0].body!.messages as Array<{ content: string }>)[0].content);
+    expect(prompt).toContain(`Answer by calling the ${EXTRACT_TOOL.name} tool exactly once, with every row.`);
+    expect(prompt.match(/^- platform "/gm)).toHaveLength(7);
   });
 
   it("read an answer written as JSON text, and fail without a key", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ content: [{ type: "text", text: `{"rows":[]}` }] }), { status: 200 })));
-    expect(await liveSizeDeps(() => "k").extract("x")).toEqual({ rows: [] });
+    services(written(`Here are the sizes.\n${JSON.stringify(faithful())}`));
+    expect(await liveSizeDeps(env).extract("x")).toEqual(faithful());
+    const out = await runPlatformSizes(db, job, liveSizeDeps(env));
+    expect(out.status).toBe("done");
+    expect((await reads())[0].rows.map((r) => r.outcome)).toEqual(Array(7).fill("same"));
     await expect(liveSizeDeps(() => undefined).extract("x")).rejects.toThrow("ANTHROPIC_API_KEY is not set.");
+  });
+
+  it("a size the answer names is written only when the page holds it and two reads gave it, through the tool as through text", async () => {
+    // Facebook's size moved a little on the page. The answer says so, and also gives X a size the page does not hold.
+    const html = guide.replace("<td>1080&#215;1350 px</td>", "<td>1080&#215;1440 px</td>").replace("1440&#215;1800", "1080&#215;1440");
+    const answer = faithful();
+    answer.rows[0].sizes = [c(1080, 1440), s(1080, 1080), s(1080, 1440)];
+    answer.rows[6].sizes = [c(1200, 1200), s(1200, 1200)];
+    for (const reply of [called(answer), written(JSON.stringify(answer))]) {
+      await pg.exec("delete from public.platform_size_reads; delete from public.platform_sizes;");
+      await pg.exec(migration);
+      const before = await sizes();
+      services(reply, html);
+      // The first read writes no size: Facebook's waits, X's is not on the page.
+      expect((await runPlatformSizes(db, job, liveSizeDeps(env))).status).toBe("done");
+      expect((await sizes()).map((r) => [r.width, r.height, r.source])).toEqual(before.map((r) => [r.width, r.height, r.source]));
+      expect((await sizes()).filter((r) => r.pending_width !== null).map((r) => [r.platform, r.format, r.pending_width, r.pending_height])).toEqual([["facebook", "image", 1080, 1440]]);
+      // The second read gives the same: Facebook's is written, and nothing else.
+      expect((await runPlatformSizes(db, job, liveSizeDeps(env))).status).toBe("done");
+      expect(await sizeOf("facebook", "image")).toEqual([1080, 1440]);
+      expect(await sizeOf("x", "image")).toEqual([1600, 900]);
+      expect((await sizes()).filter((r) => r.source === "guide").map((r) => `${r.platform}/${r.format}`)).toEqual(["facebook/image"]);
+      expect((await sizes()).every((r) => r.pending_width === null)).toBe(true);
+    }
+  });
+
+  const unreadable: Array<[string, unknown, RegExp]> = [
+    ["the tool is called with rows that are not a list", called({ rows: JSON.stringify(faithful().rows) }), /^The answer about the guide was not in the form asked for\.$/],
+    ["the tool is called with nothing", called({}), /^The answer about the guide was not in the form asked for\.$/],
+    ["the model answers in words", written("I could not find a cheat sheet on this page."), /^The answer about the guide was not in the form asked for\.$/],
+    ["the model writes JSON that is not the structure", written(`{"sizes":[{"width":1200,"height":1200}]}`), /^The answer about the guide was not in the form asked for\.$/],
+    // A reply that ended on a refusal, with nothing in it or with a whole answer in hand, is no answer.
+    ["the model declines", { content: [], stop_reason: "refusal" }, /^The sizes could not be read from the guide: The model declined to read the guide\./],
+    ["the model declines after part of an answer", { ...called({ rows: [{ platform: "x", format: "image", sizes: [c(1200, 1200)] }] }), stop_reason: "refusal" }, /^The sizes could not be read from the guide: The model declined to read the guide\./],
+    // Cut off at the token limit with a whole, well-formed part of the answer in hand: X far from its size, which a read would hold.
+    ["the answer is cut off, whatever part of it arrived", { ...called({ rows: [{ platform: "x", format: "image", sizes: [c(1200, 1200)] }] }), stop_reason: "max_tokens" }, /^The sizes could not be read from the guide: The answer was cut off before it ended\./],
+  ];
+  for (const [name, reply, reason] of unreadable) {
+    it(`write no size and record why when ${name}`, async () => {
+      // X's size is gone from the page and a far size read last week is waiting: nothing of either moves.
+      await pg.exec("update public.platform_sizes set pending_width = 1200, pending_height = 1200, pending_at = now() where platform = 'x'");
+      const before = await sizes();
+      services(reply, guide.replace("<td>1600&#215;900 px</td>", "<td>1200&#215;1200 px</td>"));
+      await expect(runPlatformSizes(db, job, liveSizeDeps(env))).rejects.toThrow(reason);
+      expect(await sizes()).toEqual(before);
+      const log = await reads();
+      expect(log).toHaveLength(1);
+      expect(log[0]).toMatchObject({ ok: false, rows: [] });
+      expect(log[0].error).toMatch(reason);
+    });
+  }
+
+  it("say what the model answered out of its reply", () => {
+    const result = (raw: { content: Array<Record<string, unknown>>; stop_reason: string }) => ({ raw, stopReason: raw.stop_reason, text: raw.content.filter((b) => b.type === "text").map((b) => String(b.text)).join("\n") });
+    expect(extractAnswer(result(called({ rows: [] })))).toEqual({ rows: [] });
+    // The tool's input is the answer even with words around it; another tool's input is not.
+    expect(extractAnswer(result({ content: [{ type: "text", text: `{"rows":[1]}` }, { type: "tool_use", name: EXTRACT_TOOL.name, input: { rows: [] } }], stop_reason: "tool_use" }))).toEqual({ rows: [] });
+    expect(extractAnswer(result({ content: [{ type: "tool_use", name: "another_tool", input: { rows: [] } }], stop_reason: "tool_use" }))).toBeNull();
+    expect(extractAnswer(result(written("no sizes")))).toBeNull();
+    expect(() => extractAnswer(result({ ...written(`{"rows":[]}`), stop_reason: "max_tokens" }))).toThrow("cut off");
+    expect(() => extractAnswer(result({ ...called(faithful()), stop_reason: "refusal" }))).toThrow("declined");
+    expect(() => extractAnswer(result({ ...written(JSON.stringify(faithful())), stop_reason: "refusal" }))).toThrow("declined");
   });
 });

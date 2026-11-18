@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_EDGE, MIN_EDGE, SHAPE_TOLERANCE, STILL_PAGE,
-  checkSize, isWild, jobShape, pageFor, pagePlacement, plannerShape, shapeLabel, shapeWord, uploadSizeKey, uploadSizeKeys,
+  checkSize, jobShape, pageFor, pagePlacement, plannerShape, shapeLabel, shapeWord, uploadSizeKey, uploadSizeKeys,
 } from "../../../functions/_shared/design/platformSize";
 import { readUploadSize } from "../../../functions/_shared/design/platformSizeDb";
 import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
@@ -317,19 +317,6 @@ describe("a page's shape in words", () => {
     expect(shapeWord({ width: 1216, height: 1216 })).toBe("square");
     expect(shapeWord({ width: 1536, height: 864 })).toBe("wide");
     expect(shapeWord(STILL_PAGE)).toBe("tall");
-  });
-});
-
-describe("a size far from the size in use", () => {
-  const at = (w: number, h: number) => ({ width: w, height: h });
-  it("is one whose shape differs by more than 10% or an edge by more than 25%", () => {
-    expect(isWild(at(1080, 1350), at(1080, 1440))).toBe(false);
-    expect(isWild(at(1600, 900), at(1200, 675))).toBe(false);
-    expect(isWild(at(1200, 1200), at(1080, 1080))).toBe(false);
-    expect(isWild(at(1080, 1350), at(1080, 1080))).toBe(true);
-    expect(isWild(at(1080, 1350), at(1440, 1800))).toBe(true);
-    expect(isWild(at(1200, 1200), at(1200, 627))).toBe(true);
-    expect(isWild(at(1080, 1350), at(1080, 1350))).toBe(false);
   });
 });
 

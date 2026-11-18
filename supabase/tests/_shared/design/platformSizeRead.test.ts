@@ -102,6 +102,21 @@ describe("what the model is asked and what its answer must be", () => {
     expect(p).toContain("Leave out everything else: ads");
     expect(p).toContain("Instagram | 110×110 px | N/A | 1080×1080 px or 1080×1350 px");
     expect(EXTRACT_TOOL.input_schema.properties.rows.items.properties.sizes.items.required).toEqual(["width", "height", "part"]);
+    // The model is asked for the call in words: no request makes it call the tool (platformSizeRefresh.ts, extractRequest).
+    expect(p).toContain(`Answer by calling the ${EXTRACT_TOOL.name} tool exactly once, with every row. Do not answer in words.`);
+  });
+
+  it("gives the tool a schema the API can hold a call to: strict, every object closed, every property required", () => {
+    expect(EXTRACT_TOOL.strict).toBe(true);
+    const objects: Array<{ properties: Record<string, unknown>; required: readonly string[]; additionalProperties: boolean }> = [
+      EXTRACT_TOOL.input_schema, EXTRACT_TOOL.input_schema.properties.rows.items, EXTRACT_TOOL.input_schema.properties.rows.items.properties.sizes.items,
+    ];
+    for (const o of objects) {
+      expect(o.additionalProperties).toBe(false);
+      expect([...o.required].sort()).toEqual(Object.keys(o.properties).sort());
+    }
+    // Strict schemas take no numeric or length bounds; the sizes are checked in code instead (platformSize.ts, checkSize).
+    expect(JSON.stringify(EXTRACT_TOOL.input_schema)).not.toMatch(/"(minimum|maximum|multipleOf|minLength|maxLength)"/);
   });
 
   it("keeps the rows asked for, the first answer for each, and only sizes that are two whole numbers with a known part", () => {
@@ -167,10 +182,29 @@ describe("what a row's read changes", () => {
     for (const [r, read] of reads) expect(decide(r, read, parts)).toMatchObject({ outcome: "same", from: [r.width, r.height] });
   });
 
-  it("the size, at once, when the first listed size is near the one in use", () => {
-    // The guide's Facebook cell says 1080x1350; a table that held 1080x1440 moves to it.
-    const out = decide(row("facebook", "image", 1080, 1440), [cheat(1080, 1350), section(1080, 1080)], parts);
-    expect(out).toMatchObject({ outcome: "changed", from: [1080, 1440], to: [1080, 1350] });
+  it("no size on one read, however near the first listed size is to the one in use", () => {
+    // The guide's Facebook cell says 1080x1350; a table that held 1080x1440 holds it first and moves on the read after.
+    const read = [cheat(1080, 1350), section(1080, 1080)];
+    expect(decide(row("facebook", "image", 1080, 1440), read, parts)).toMatchObject({ outcome: "held", from: [1080, 1440], to: [1080, 1350] });
+    expect(decide(row("facebook", "image", 1080, 1440, [1080, 1350]), read, parts)).toMatchObject({ outcome: "confirmed", from: [1080, 1440], to: [1080, 1350] });
+    // The same shape, an edge a quarter away or a pixel away: held all the same.
+    expect(decide(row("x", "image", 1200, 675), [cheat(1600, 900)], parts).outcome).toBe("held");
+    expect(decide(row("x", "image", 1600, 901), [cheat(1600, 900)], parts).outcome).toBe("held");
+    // No read of a row gives "changed": that outcome wrote a size at once.
+    const rows = [row("facebook", "image", 1080, 1440), row("x", "image", 1200, 675), row("linkedin", "image", 1200, 1080), row("instagram", "story", 1152, 2048)];
+    for (const r of rows) for (const given of [read, [cheat(1600, 900)], [section(1080, 1920)], [section(1200, 1200), section(1200, 628)]]) expect(decide(r, given, parts).outcome).not.toBe("changed");
+  });
+
+  it("a size a section mentions for something else, picked once, is held and never written by that read", () => {
+    // The cheat sheet stops listing X's 1600x900 and X's section mentions a 1200x675 link card.
+    const page = guideParts(guideText(html.replace("<td>1600&#215;900 px</td>", "<td>N/A</td>")).replace(/^## X .*$/m, (h) => `${h}\nLink cards are shown at 1200×675 pixels.`));
+    expect(page.cheat.get("x")).toBe("N/A");
+    expect(sizesIn(page.section.get("x") ?? "")).toContainEqual({ width: 1200, height: 675 });
+    const picked = decide(row("x", "image", 1600, 900), [section(1200, 675)], page);
+    expect(picked).toMatchObject({ outcome: "held", from: [1600, 900], to: [1200, 675] });
+    // The next read gives the row nothing, or another size: the held size is not confirmed.
+    expect(decide(row("x", "image", 1600, 900, [1200, 675]), [], page)).toMatchObject({ outcome: "refused", reason: "not_read" });
+    expect(decide(row("x", "image", 1600, 900, [1200, 675]), [section(1234, 987)], page)).toMatchObject({ outcome: "refused", reason: "not_on_page" });
   });
 
   it("the cheat sheet's size, not the section's, when both differ from the size in use", () => {
@@ -178,7 +212,7 @@ describe("what a row's read changes", () => {
     expect(out).toMatchObject({ to: [1200, 627], listed: [[1200, 627, "cheat_sheet"], [1200, 1200, "section"], [1200, 628, "section"]] });
   });
 
-  it("a pending size, when the first listed size is far from the one in use, and the size only on the second read", () => {
+  it("a pending size, when the first listed size is not the one in use, and the size only on the second read", () => {
     const first = decide(row("x", "image", 1200, 1200), [cheat(1600, 900)], parts);
     expect(first).toMatchObject({ outcome: "held", from: [1200, 1200], to: [1600, 900] });
     const second = decide(row("x", "image", 1200, 1200, [1600, 900]), [cheat(1600, 900)], parts);
@@ -217,17 +251,17 @@ describe("what a row's read changes", () => {
     expect(decide(x, [cheat(1600, 900)], parts, at(null, "2026-11-20T10:00:00Z"))).toMatchObject({ outcome: "refused", reason: "model_refused", to: [1600, 900] });
     expect(decide(x, [cheat(1600, 900)], parts, at("2026-11-19T10:00:00Z", "2026-11-20T10:00:00Z"))).toMatchObject({ outcome: "refused", reason: "model_refused" });
     // Drawn since the refusal, or refused with no confirmation: drawable.
-    expect(decide(x, [cheat(1600, 900)], parts, at("2026-11-21T10:00:00Z", "2026-11-20T10:00:00Z")).outcome).toBe("changed");
-    expect(decide(x, [cheat(1600, 900)], parts, at(null, null)).outcome).toBe("changed");
+    expect(decide(x, [cheat(1600, 900)], parts, at("2026-11-21T10:00:00Z", "2026-11-20T10:00:00Z")).outcome).toBe("held");
+    expect(decide(x, [cheat(1600, 900)], parts, at(null, null)).outcome).toBe("held");
   });
 
-  it("a row no request reads is read again when the guide still lists its size, and changes when the guide lists another", () => {
+  it("a row no request reads is read again when the guide still lists its size, and holds another size the guide lists instead", () => {
     const off = { ...row("x", "image", 1600, 900), usable: false };
     expect(decide(off, [cheat(1600, 900)], parts)).toMatchObject({ outcome: "retried", from: [1600, 900] });
     expect(decide(off, undefined, parts)).toMatchObject({ outcome: "retried" });
     expect(decide({ ...row("linkedin", "image", 1200, 1200), usable: false }, [cheat(1200, 627)], parts)).toMatchObject({ outcome: "retried" });
     // The guide lists another size and no longer this one: the usual outcomes.
-    expect(decide({ ...row("x", "image", 1500, 844), usable: false }, [cheat(1600, 900)], parts)).toMatchObject({ outcome: "changed", to: [1600, 900] });
+    expect(decide({ ...row("x", "image", 1500, 844), usable: false }, [cheat(1600, 900)], parts)).toMatchObject({ outcome: "held", to: [1600, 900] });
     // A row in use is the same as ever.
     expect(decide({ ...row("x", "image", 1600, 900), usable: true }, [cheat(1600, 900)], parts)).toMatchObject({ outcome: "same" });
   });

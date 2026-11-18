@@ -145,13 +145,12 @@ For each row, with the valid sizes in reading order:
 | the size in use is written in the platform's cheat sheet cell or section, or is among the listed sizes | `same` | `checked_at`; a pending size is cleared |
 | the first listed size is one the image model refused and has not drawn since | `refused` (`model_refused`) | nothing |
 | the model gave nothing for the row, or nothing listed is on the page | `refused` | nothing |
-| the first size differs from the size in use, not wildly | `changed` | the size |
-| it differs wildly and is not the pending size | `held` | the pending size |
-| it differs wildly and is the pending size | `confirmed` | the size |
+| the first size differs from the size in use and is not the pending size | `held` | the pending size |
+| it differs and is the pending size | `confirmed` | the size |
 
 The first size listed is the only candidate. When it fails a check the row is refused: the job never falls through to another shape.
 
-**Wildly**: the shape (width over height) differs by more than 10%, or either edge by more than 25%. 1080x1350 to 1080x1440 is accepted at once. 1080x1350 to 1080x1080, or to 1440x1800, waits for the same read on the next run that reads the row.
+**Every change takes two reads** (since 18 Nov 2026). A size that differs from the size in use, however little, waits as the pending size for the same read on the next run that reads the row. The job is queued once a day at most, so that run is a later day's. As first written, a size within 25% on each edge and 10% in shape was accepted on one read (`changed`); the first review before the job's first successful run found that a size a section mentions for something else could then be written at once. `changed` is no longer an outcome of a read; `record_platform_size_read` still applies it.
 
 A held size lasts one read. It is confirmed only by the next read of the row that gives the same size. A read that gives anything else clears or replaces it. A refused read and a failed run neither confirm nor clear it, and after three runs that read the guide and refused the row it is dropped (`pending_misses`).
 
@@ -257,7 +256,7 @@ Order: the migration, then `design-worker`, `video-worker`, `design-request`, `r
 Built as written. Files:
 
 - `supabase/migrations/20261117150000_platform_sizes.sql`
-- `_shared/design/platformSize.ts` (the key, the checks, the page, the placement, wildly), `shape.ts` (a shape in words), `platformSizeDb.ts` (the read at request time), `platformSizeRead.ts` (the guide's text and parts, the outcome), `platformSizeRefresh.ts` (the job)
+- `_shared/design/platformSize.ts` (the key, the checks, the page, the placement), `shape.ts` (a shape in words), `platformSizeDb.ts` (the read at request time), `platformSizeRead.ts` (the guide's text and parts, the outcome), `platformSizeRefresh.ts` (the job)
 - Small edits: `canva/jobs.ts` (`startOption`), `canva/brief.ts` (the shape in the prompt, `deliver`), `canva/finish.ts` (`deliveredSize`, the quality width), `canva/options.ts` (`shapeLine`), `design-worker/index.ts` (`deliveredOf`), `design-request/index.ts` (the read, the planner's shape), `run-scheduled-jobs/index.ts` and `scheduled-jobs/types.ts` (the job kind)
 - App: `src/lib/naturalRatio.ts`, `src/components/calendar/DesignFrame.tsx`, used by the all-clients week card and the post panel's variant tiles. The calendar card's thumbnail band and the Story card keep their fixed frames: the first fits the whole design inside a band, the second is 9:16 by definition.
 
