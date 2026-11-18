@@ -3,6 +3,18 @@ import { createClient } from "../_shared/supabase.ts";
 import { staffGate } from "../_shared/auth/requireStaff.ts";
 import { listCustomerGroups, listCustomerProfiles, SproutListError } from "../_shared/sprout/profiles.ts";
 import { declinedProfiles, groupBrands, type BrandDecline } from "../_shared/sprout/brands.ts";
+import { sproutSyncStatus, startSproutSync } from "../_shared/sprout/syncNow.ts";
+
+// The agency's Sprout account, for staff only (staffGate, before anything).
+//
+//   POST {}                       every profile on the account, as below.
+//   POST {action:"sync_now"}      "Sync from Sprout": queues the Sprout
+//                                 onboarding run for now, the one the weekly
+//                                 clock queues, unless a run is queued or
+//                                 running (_shared/sprout/syncNow.ts).
+//                                 Answers {started, sync}.
+//   POST {action:"sync_status"}   where that run stands: {sync: {open, slow,
+//                                 last}}. Neither action calls Sprout.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -32,6 +44,27 @@ serve(async (req) => {
   // so an unauthenticated POST returned all 73 of them.
   const denied = await staffGate(req, corsHeaders);
   if (denied) return denied;
+
+  // The Sprout onboarding run, started or looked at by a staff member. The
+  // run itself happens in the scheduled-jobs worker, never in this request.
+  const body = await req.json().catch(() => null);
+  const action = typeof body?.action === "string" ? body.action : "";
+  if (action === "sync_now" || action === "sync_status") {
+    try {
+      const db = serviceDb();
+      const started = action === "sync_now" ? (await startSproutSync(db)).started : undefined;
+      const sync = await sproutSyncStatus(db);
+      return new Response(JSON.stringify(action === "sync_now" ? { started, sync } : { sync }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    } catch (err) {
+      console.error(`Sprout ${action} error:`, err);
+      return new Response(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+  }
 
   try {
     // The same list the client lifecycle matches profiles from (_shared/sprout/profiles.ts).
@@ -82,13 +115,18 @@ serve(async (req) => {
   }
 });
 
+/** The database as the service role, used only once the caller is known to be staff. */
+function serviceDb() {
+  return createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
+}
+
 /**
  * The brands a person chose not to add as clients (sprout_brand_declines),
  * read with the service role once the caller is known to be staff. A read
  * that does not answer marks nothing: the list still shows every profile.
  */
 async function readDeclines(): Promise<BrandDecline[]> {
-  const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
+  const db = serviceDb();
   const { data, error } = await db.from("sprout_brand_declines").select("id, sprout_group_id, profile_ids, brand, declined_at, note");
   if (error) {
     console.warn("[sprout-profiles] declined brands not read:", error.message);

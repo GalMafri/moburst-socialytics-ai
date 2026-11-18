@@ -25,6 +25,8 @@ import { PlatformBadge } from "@/lib/platform-config";
 import { isActiveClient, LOGO_SURFACE_SELECT } from "@/lib/activeClients";
 import { formatDate } from "@/lib/display";
 import { ClientOrigin } from "@/components/clients/ClientOrigin";
+import { SproutSyncButton, SproutSyncLine } from "@/components/dashboard/SproutSync";
+import { useSproutSync } from "@/hooks/useSproutSync";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { invokeResendable, sendQuietly, writeResendable } from "@/lib/quietSend";
@@ -51,6 +53,8 @@ export function AdminDashboard() {
   const [showArchived, setShowArchived] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  // "Sync from Sprout", for the people who can add a client: the run the weekly sync does, now.
+  const sproutSync = useSproutSync(canManageClients);
 
   // Each of these repeats safely, so one that does not get through is sent
   // again quietly. The list is read again either way, so it shows where each
@@ -159,6 +163,7 @@ export function AdminDashboard() {
               <Archive />
               {showArchived ? "Show active" : "Show archived"}
             </Button>
+            {canManageClients && <SproutSyncButton sync={sproutSync} />}
             {canManageClients && (
               <Button onClick={() => navigate("/clients/new/setup")}>
                 <Plus /> Add client
@@ -167,6 +172,8 @@ export function AdminDashboard() {
           </>
         }
       />
+      {/* What the sync from Sprout came to, or that it is taking its time. */}
+      {canManageClients && <SproutSyncLine sync={sproutSync} />}
 
       {/* A failed load leaves `clients` undefined, and every tile below counts
           off it. Rendering them would put four confident zeros on the staff
@@ -326,9 +333,12 @@ export function AdminDashboard() {
           description={canManageClients ? "Add a client to see its reports, competitors and content here." : "No clients have been added yet."}
           action={
             canManageClients ? (
-              <Button onClick={() => navigate("/clients/new/setup")}>
-                <Plus /> Add client
-              </Button>
+              <>
+                <Button onClick={() => navigate("/clients/new/setup")}>
+                  <Plus /> Add client
+                </Button>
+                <SproutSyncButton sync={sproutSync} />
+              </>
             ) : undefined
           }
         />
