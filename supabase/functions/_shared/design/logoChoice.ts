@@ -225,6 +225,7 @@ const hexOf = (c: Rgb) => `#${c.map((v) => Math.round(v).toString(16).padStart(2
 export const REASONS = {
   words: (read: string[]) => `words: read as ${JSON.stringify(read)}`,
   band: (read: string[]) => `words: outside the Story's band, which reads ${JSON.stringify(read)}`,
+  scene: (scene: string[]) => `scene: lettering on an object in the picture is not real words spelled right: ${JSON.stringify(scene)}`,
   ground: (ground: Rgb | null) => `ground: no logo file shows on the picture under the logo (${ground ? hexOf(ground) : "no ground read"})`,
   marks: (where: string) => `marks: could not be cleaned out: ${where}`,
   drawn: (where: string) => `marks: drawn in the picture, away from the logo's place: ${where}`,

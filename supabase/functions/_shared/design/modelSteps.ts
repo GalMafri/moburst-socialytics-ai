@@ -19,7 +19,7 @@
 import { notePicture } from "../picture/client.ts";
 import { jobFolder } from "./coverDesign.ts";
 
-/** Designs made for one option before it fails (a design with wrong words, a ground no logo file shows on, a mark that cannot be cleaned out or something across the logo is made again). */
+/** Designs made for one job before it fails (a design with wrong words, a ground no logo file shows on, a mark that cannot be cleaned out or something across the logo is made again); a carousel's slide after the cover may use more that its option's other slides left (slideAllowance). */
 export const MAX_GENERATIONS = 3;
 /** Removals of the model's logo drawing for one design before the job fails. */
 export const MAX_UNLOGO = 4;
@@ -32,6 +32,8 @@ export const OF_THE_DESIGN = [
   "nologo_path", "unlogos", "final_path", "read", "band_read", "marks_check", "marks_where", "mark_cleans",
   // The composed picture of the design's cleaned picture (firstPictureJob.ts).
   "composed",
+  // The lettering read on objects in the design's picture (pipeline.ts, postReadPrompt).
+  "read_scene",
 ];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -53,11 +55,76 @@ export interface GenerateDeps {
   save(): Promise<void>;
 }
 
-/** generate: the next design made and stored, then on to locate; the job ends once MAX_GENERATIONS designs were made. */
-export function runGenerate<R>(deps: GenerateDeps, job: ModelJob, hold: Hold<R>): R {
+/**
+ * Why a job ended with no design, from the reason its last design was made
+ * again for (logoChoice.ts, REASONS, kept in state.redesigns). Before 18 Nov
+ * 2026 every such job said it was the headline's words, whatever check had
+ * sent its designs back. Plain words, safe for anyone who reads the job.
+ */
+export function endedFor(redesigns: unknown): string {
+  const last = Array.isArray(redesigns) && redesigns.length ? String(redesigns[redesigns.length - 1]) : "";
+  if (last.startsWith("scene:")) return "The design could not be made with clear, correctly spelled lettering in its picture.";
+  if (last.startsWith("words:")) return "The design could not be made with the headline's exact words.";
+  if (last.startsWith("marks:")) return "The design could not be made free of logos and brand marks drawn in the picture.";
+  if (last.startsWith("ground:") || last.startsWith("logo's place:")) return "The design could not be made with the logo in its place.";
+  return "The design could not be made with the headline's exact words and the logo in its place.";
+}
+
+/**
+ * What a carousel's slide after the cover may do once it has made its own
+ * MAX_GENERATIONS designs (18 Nov 2026). The designs belong to the option:
+ * MAX_GENERATIONS for each slide after the cover, for one design of the
+ * cover. A slide that needs more may use what a slide that is done left
+ * unused, so one hard slide no longer ends an option whose other slides
+ * are finished (the option was over, every slide thrown away, and a new
+ * option designed every slide from the start). The facts are the counts on
+ * the option's rows for the same cover design (coverDesign.ts, for_cover):
+ *   more: a design that a finished slide left unused is free;
+ *   wait: none is free yet, and a slide still at work may leave one;
+ *   over: none is free and none can be; the job ends as before.
+ * Two slides that read the same free design at once may both use it, so the
+ * option's designs can pass its share by one for each slide past its own
+ * at that moment, never more.
+ */
+export type Allowance = "more" | "wait" | "over";
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SlideRow = { id: string; status: string; state?: any };
+export function slideAllowance(job: Pick<ModelJob, "id" | "state">, slides: SlideRow[]): Allowance {
+  const cover = (st: unknown) => {
+    const n = (st as Record<string, unknown> | null | undefined)?.for_cover;
+    return typeof n === "number" ? n : null;
+  };
+  const made = (st: unknown) => {
+    const n = (st as Record<string, unknown> | null | undefined)?.generations;
+    return typeof n === "number" && n > 0 ? n : 0;
+  };
+  const mine = cover(job.state);
+  const others = slides.filter((r) => r.id !== job.id && cover(r.state) === mine);
+  // A slide that failed or was stopped ends the option (canva/jobs.ts, settleRequest): nothing is shared with it.
+  if (others.some((r) => r.status !== "done" && r.status !== "queued" && r.status !== "running")) return "over";
+  let free = -Math.max(0, made(job.state) - MAX_GENERATIONS);
+  let mayLeave = false;
+  for (const r of others) {
+    const n = made(r.state);
+    // A finished slide's count is final: what it left is free, and what it used past its share is already spent.
+    if (r.status === "done") free += MAX_GENERATIONS - n;
+    else {
+      free -= Math.max(0, n - MAX_GENERATIONS);
+      if (n < MAX_GENERATIONS) mayLeave = true;
+    }
+  }
+  if (free > 0) return "more";
+  return mayLeave ? "wait" : "over";
+}
+
+/**
+ * generate: the next design made and stored, then on to locate; the job ends once MAX_GENERATIONS designs were made, unless
+ * `more` (a carousel's slide after the cover, slideAllowance) says one more is free.
+ */
+export function runGenerate<R>(deps: GenerateDeps, job: ModelJob, hold: Hold<R>, more = false): R {
   const s = job.state;
   const n = (s.generations ?? 0) + 1;
-  if (n > MAX_GENERATIONS) throw new Error("FINAL: The design could not be made with the headline's exact words and the logo in its place.");
+  if (n > MAX_GENERATIONS && !more) throw new Error(`FINAL: ${endedFor(s.redesigns)}`);
   return hold(async () => {
     const base = baseOf(job);
     const canvasPath = `${base}/canvas-${n}.png`, maskPath = `${base}/mask-${n}.png`;

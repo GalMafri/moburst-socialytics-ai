@@ -42,14 +42,14 @@ import { claimJob, endOverdueRequests, endRequest, renewJobLease, saveJobProgres
 import { MAX_PLAN_ATTEMPTS, NO_PROGRESS_MINUTES, REQUEST_MAX_MINUTES } from "../_shared/design/requestRules.ts";
 import { type GenerateInput, designPrompt } from "../_shared/canva/brief.ts";
 import { deliveredSize, pictureSize } from "../_shared/canva/finish.ts";
-import { copyMatches, logoCheckPrompt, marksPrompt, parseLogoCheck, parseMarks, parseRead, readPrompt, removePrompt } from "../_shared/design/pipeline.ts";
+import { logoCheckPrompt, marksPrompt, parseLogoCheck, parseMarks, parseReading, postReadPrompt, readingFails, removePrompt } from "../_shared/design/pipeline.ts";
 import { LOGO_SCALES } from "../_shared/design/logoMatch.ts";
 import { STORY_SURFACE, storyTextBand } from "../_shared/design/story.ts";
 import { NotEnded, callPicture, notePicture, pictureCheckCount, searchToEnd, signedRead, signedWrite } from "../_shared/picture/client.ts";
 import { PICTURE_WORK_BUDGET_MS, type LogoTemplate, type Placement, type Rect, type SlotFileRequest, type SlotRequest } from "../_shared/picture/contract.ts";
 import { heldWork } from "../_shared/canva/hold.ts";
 import { DESIGN_LIMITS, MAX_DESIGN_ATTEMPTS, type StepResult, Stopped, advanceDesignJob } from "../_shared/design/advance.ts";
-import { type GenerateDeps, OF_THE_DESIGN, runGenerate, runUnlogo } from "../_shared/design/modelSteps.ts";
+import { type GenerateDeps, MAX_GENERATIONS, OF_THE_DESIGN, runGenerate, runUnlogo, slideAllowance } from "../_shared/design/modelSteps.ts";
 import { REASONS, type SlotPlan, type StampPlan, checkInput, slotPlan, slotSearch, slotState, stampFile, stampOutcome, stampPlan } from "../_shared/design/logoChoice.ts";
 import { jobLogos, postSearchPlan } from "../_shared/design/logoTone.ts";
 import { POSTS_PER_CALL, type Reading, askLogoSet, liveIo, readNextPosts } from "../_shared/design/logoSetWork.ts";
@@ -287,8 +287,19 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
         if (!cover.state?.design_path) return "wait";
         s.cover_path = cover.state.design_path;
       }
+      // A carousel's slide after the cover that has made its own designs may use one its option's finished slides left
+      // (_shared/design/modelSteps.ts, slideAllowance), or waits while a slide at work may still leave one.
+      let more = false;
+      if (job.slide_index && job.slide_index > 0 && (job.slide_count ?? 1) > 1 && job.input?.kind !== "video_card" && (s.generations ?? 0) >= MAX_GENERATIONS) {
+        const { data: slides, error } = await admin.from("canva_finish_jobs").select("id, status, state")
+          .eq("design_request_id", job.design_request_id).eq("option_index", job.option_index).gt("slide_index", 0);
+        if (error) return "wait";
+        const allowance = slideAllowance(job, slides ?? []);
+        if (allowance === "wait") return "wait";
+        more = allowance === "more";
+      }
       // The design is counted once the image model has made it (_shared/design/modelSteps.ts).
-      return runGenerate(generateDeps(admin, job), job, (work) => hold(admin, job, work));
+      return runGenerate(generateDeps(admin, job), job, (work) => hold(admin, job, work), more);
     }
     case "locate": {
       await renewLease(admin, job);
@@ -451,21 +462,27 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       });
       notePicture(s, "read", ms);
       const jpeg = base64Encode((await download(admin, `${stem}.jpg`)) as unknown as ArrayBuffer);
-      const lines = await readCheck((wait) => askAbout("image/jpeg", jpeg, readPrompt(g.brand_name), wait), parseRead, "The words on the design");
+      // The post's own words and the lettering on objects in its picture are read apart (_shared/design/pipeline.ts, postReadPrompt).
+      const reading = await readCheck((wait) => askAbout("image/jpeg", jpeg, postReadPrompt(g.brand_name), wait), parseReading, "The words on the design");
+      const lines = reading.lines;
       s.read = lines;
-      if (!copyMatches(lines, job.input.copy)) {
+      s.read_scene = reading.scene;
+      const wrong = readingFails(reading, job.input.copy);
+      if (wrong) {
         // Wrong words are never fixed by hand: the design is made again.
-        console.warn(`[design-worker] job ${job.id}: read ${JSON.stringify(lines)}, wanted ${JSON.stringify(job.input.copy)}`);
-        await designAgain(admin, job, REASONS.words(lines));
+        console.warn(`[design-worker] job ${job.id}: read ${JSON.stringify(lines)} and on objects ${JSON.stringify(reading.scene)}, wanted ${JSON.stringify(job.input.copy)}`);
+        await designAgain(admin, job, wrong === "words" ? REASONS.words(lines) : REASONS.scene(reading.scene));
         return "next";
       }
       // A Story's words all sit in Meta's band (_shared/design/story.ts): the band alone is read, and holds the whole copy.
       if (band) {
         const crop = base64Encode((await download(admin, `${stem}-band.jpg`)) as unknown as ArrayBuffer);
-        s.band_read = await readCheck((wait) => askAbout("image/jpeg", crop, readPrompt(g.brand_name), wait), parseRead, "The words in the Story's band");
-        if (!copyMatches(s.band_read, job.input.copy)) {
+        const inBand = await readCheck((wait) => askAbout("image/jpeg", crop, postReadPrompt(g.brand_name), wait), parseReading, "The words in the Story's band");
+        s.band_read = inBand.lines;
+        const bandWrong = readingFails(inBand, job.input.copy);
+        if (bandWrong) {
           console.warn(`[design-worker] job ${job.id}: the Story's band read ${JSON.stringify(s.band_read)}, wanted ${JSON.stringify(job.input.copy)}`);
-          await designAgain(admin, job, REASONS.band(s.band_read));
+          await designAgain(admin, job, bandWrong === "scene" ? REASONS.scene(inBand.scene) : REASONS.band(s.band_read));
           return "next";
         }
       }

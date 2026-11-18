@@ -25,7 +25,9 @@
 //                the design keeps the room it made for the logo, then brought
 //                down to the delivered size.
 //   5. verify:   the words on the finished post are read back and must be the
-//                headline's words exactly, and nothing may touch or cross the
+//                headline's words exactly (lettering printed on an object in
+//                the picture is read apart, and must be real words spelled
+//                right), and nothing may touch or cross the
 //                logo (seen at full size around its known place); otherwise
 //                the post is designed again. A carousel whose cover is designed
 //                again has its other slides designed again from the new cover.
@@ -67,21 +69,92 @@ export function parseMarks(text: string): { marks: boolean; where: string } | nu
   return { marks: m[1].toLowerCase() === "true", where: where ? where[1] : "" };
 }
 
-/** The instruction for step 5. */
+/** The instruction for reading every piece of text as one group: a video's title layer (video/steps.ts), which has no picture of its own. */
 export function readPrompt(brand: string): string {
   return `Transcribe every piece of text in this image exactly as written, in reading order, keeping spelling, capitalization and punctuation. Leave out the ${brand} logo. Reply with JSON only: {"lines":["..."]}`;
 }
 
-/** The lines a reading returned, or null when it is not the JSON asked for. */
-export function parseRead(text: string): string[] | null {
+/**
+ * The instruction for step 5. The post's own words and the lettering printed
+ * on an object in its picture are read apart (18 Nov 2026). Read as one, a
+ * calendar's weekday names or a form's field labels in the scene counted as
+ * words added to the headline, and a design whose headline was exact was made
+ * again until its option failed (a carousel of 17 Nov: three options, each
+ * ended on one slide). The headline is still compared exactly; the object's
+ * lettering must be real words, spelled right.
+ */
+export function postReadPrompt(brand: string): string {
+  return "Read the text in this social post image in two groups, each exactly as written, in reading order, keeping spelling, capitalization and punctuation. " +
+    `Leave out the ${brand} logo. ` +
+    '"lines": the post\'s own words, set as text on the design wherever they are: headline, other lines, captions, labels, buttons and badges. ' +
+    '"scene": lettering printed on an object shown in the picture as part of that object, such as a calendar\'s days, a form\'s field names, a sign, a screen, a label, a package or a book\'s title. ' +
+    '"scene_spelled": true when every piece of the scene lettering is real words or numbers spelled correctly, false when any is misspelled, half-formed or invented letters; true when there is none. ' +
+    'Reply with JSON only: {"lines":["..."],"scene":["..."],"scene_spelled":true}';
+}
+
+/** What a reading returned: the post's own lines, the lettering on objects in its picture, and whether that lettering is real words spelled right. */
+export type Reading = { lines: string[]; scene: string[]; sceneSpelled: boolean };
+
+/** The reading in a reply, or null when it is not the JSON asked for. */
+export function parseReading(text: string): Reading | null {
   const a = text.indexOf("{"), b = text.lastIndexOf("}");
   if (a < 0 || b <= a) return null;
   try {
-    const lines = JSON.parse(text.slice(a, b + 1))?.lines;
-    return Array.isArray(lines) ? lines.map(String) : null;
+    const v = JSON.parse(text.slice(a, b + 1));
+    if (!Array.isArray(v?.lines)) return null;
+    const scene = Array.isArray(v.scene) ? v.scene.map(String).filter((t: string) => t.trim()) : [];
+    // Lettering whose spelling the reply does not vouch for is taken as not spelled right: the design is made again, as before the two groups.
+    return { lines: v.lines.map(String), scene, sceneSpelled: scene.length === 0 || v.scene_spelled === true };
   } catch {
     return null;
   }
+}
+
+/** The lines a reading returned, or null when it is not the JSON asked for. */
+export function parseRead(text: string): string[] | null {
+  return parseReading(text)?.lines ?? null;
+}
+
+/**
+ * Whether a reading passes: the post's own words are the headline's words
+ * exactly (copyMatches), no lettering on an object in its picture repeats
+ * the headline (repeatsHeadline), and any such lettering is real words
+ * spelled right. "words" is the headline failing, "scene" the lettering;
+ * null passes.
+ */
+export function readingFails(reading: Reading, headline: string[]): "words" | "scene" | null {
+  if (!copyMatches(reading.lines, headline)) return "words";
+  if (reading.scene.some((item) => repeatsHeadline(item, headline))) return "words";
+  return reading.sceneSpelled ? null : "scene";
+}
+
+/** A text's words as a reader compares them (readable), with the punctuation around each word left off. */
+function wordsOf(s: string): string[] {
+  return readable(s).split(" ").map((w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "")).filter(Boolean);
+}
+
+/** Whether `run` sits in `words` as consecutive words. */
+function hasRun(words: string[], run: string[]): boolean {
+  if (!run.length || run.length > words.length) return false;
+  for (let i = 0; i + run.length <= words.length; i++) if (run.every((w, k) => words[i + k] === w)) return true;
+  return false;
+}
+
+/** Words of the headline in a row that, found on an object in the picture, count as the headline drawn there too. */
+export const HEADLINE_RUN = 3;
+
+/**
+ * Whether lettering on an object repeats the headline (18 Nov 2026): it
+ * holds a whole line of the headline, or HEADLINE_RUN of its words in a row
+ * (the headline drawn twice, once as the post's text and once on a
+ * billboard). Such a design is made again for its words.
+ */
+export function repeatsHeadline(item: string, headline: string[]): boolean {
+  const words = wordsOf(item);
+  if (headline.some((line) => hasRun(words, wordsOf(line)))) return true;
+  const all = wordsOf(headline.join(" "));
+  for (let i = 0; i + HEADLINE_RUN <= all.length; i++) if (hasRun(words, all.slice(i, i + HEADLINE_RUN))) return true;
+  return false;
 }
 
 /** The instruction for the logo part of step 5: the image is the area around the logo, at full size. */
