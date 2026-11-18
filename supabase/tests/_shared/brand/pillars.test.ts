@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { briefFromStrategyDoc, checkPostIds, derivePillars, isGenericPillars, trimBrief, type PillarPost } from "../../../functions/_shared/brand/pillars";
 import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { roomFor } from "../../../functions/_shared/anthropicReply";
 
 const asked = vi.hoisted(() => ({ bodies: [] as Array<Record<string, unknown>>, reply: "", stop: "end_turn" }));
 vi.mock("../../../functions/_shared/anthropic.ts", () => ({ anthropicMessages: async (a: { body: Record<string, unknown> }) => { asked.bodies.push(a.body); return { text: asked.reply, stopReason: asked.stop }; } }));
@@ -12,6 +13,19 @@ describe("briefFromStrategyDoc", () => {
     db.uploads.set("brand-books/acme/strategy.md", "# Acme strategy\n\nAcme makes   rec league scheduling simple for captains across North America.\n\n\n\nVoice: confident, direct.");
     // No AI key: a text document never needs one.
     expect(await briefFromStrategyDoc(db, "acme/strategy.md", null)).toEqual({ text: "# Acme strategy\n\nAcme makes rec league scheduling simple for captains across North America.\n\nVoice: confident, direct.", via: "text" });
+  });
+  it("copies a PDF with room for the model to think, and keeps no part of a copy that was cut off", async () => {
+    const db = fakeDb();
+    db.uploads.set("brand-books/acme/strategy.pdf", "%PDF-1.7");
+    const copy = "Acme makes rec league scheduling simple for captains across North America. Voice: confident, direct.";
+    asked.reply = copy;
+    expect(await briefFromStrategyDoc(db, "acme/strategy.pdf", "key")).toEqual({ text: copy, via: "pdf" });
+    expect(asked.bodies[0]).toMatchObject({ model: "claude-sonnet-5", max_tokens: roomFor(3000) });
+    // The same words from a reply that stopped at its limit are half a brief: the step fails as it does for a document with almost no text.
+    asked.stop = "max_tokens";
+    await expect(briefFromStrategyDoc(db, "acme/strategy.pdf", "key")).rejects.toThrow("The strategy document came back with almost no text.");
+    asked.stop = "refusal";
+    await expect(briefFromStrategyDoc(db, "acme/strategy.pdf", "key")).rejects.toThrow("The strategy document came back with almost no text.");
   });
   it("answers null for a document it cannot read here, and needs the AI connection for a PDF", async () => {
     const db = fakeDb();

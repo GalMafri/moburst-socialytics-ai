@@ -34,6 +34,7 @@ import { createClient } from "../_shared/supabase.ts";
 import { AuthzError, requireStaff, requireStaffOrSystem } from "../_shared/auth/requireStaff.ts";
 import { requireMember } from "../_shared/auth/requireMember.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
+import { answerText, replySample, roomFor } from "../_shared/anthropicReply.ts";
 import { BRIEFS_PLANNED, CAROUSEL_SLIDES, OPTIONS_WANTED, type RecentDesign, carouselPlannerPrompt, filmedNeed, parseBriefs, parseShotBrief, shotBriefPrompt, parseCarouselBriefs, parseVideoBriefs, plannerPrompt, recentLines, videoPlannerPrompt, withRefs } from "../_shared/canva/options.ts";
 import { type DesignRequest, type Settings, endRequest, startOption } from "../_shared/canva/jobs.ts";
 import { canFilm, filmingOutcome, postInstant } from "../_shared/design/requestRules.ts";
@@ -304,11 +305,14 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
       apiKey,
       body: {
         model: PLANNER_MODEL,
-        max_tokens: carousel ? 6000 : video ? 4000 : 2000,
+        // The size of the plan itself, and room for the planner to think first (anthropicReply.ts, roomFor).
+        max_tokens: roomFor(carousel ? 6000 : video ? 4000 : 2000),
         messages: [{ role: "user", content: [...content, { type: "text", text: instruction }] }],
       },
     });
-    briefs = video ? parseVideoBriefs(result.text, videoStyle ? [] : library, { filmed: !!filmed, textless: !!videoStyle && videoStyle.profile?.on_screen_text === "none" }) : carousel ? parseCarouselBriefs(result.text, CAROUSEL_SLIDES, library) : parseBriefs(result.text, library);
+    // A plan that was cut off or declined is a try that planned nothing: the next try asks again.
+    const plan = answerText(result);
+    briefs = video ? parseVideoBriefs(plan, videoStyle ? [] : library, { filmed: !!filmed, textless: !!videoStyle && videoStyle.profile?.on_screen_text === "none" }) : carousel ? parseCarouselBriefs(plan, CAROUSEL_SLIDES, library) : parseBriefs(plan, library);
   }
   if (!briefs.length) throw new Error("The options could not be planned.");
   briefs = withRefs(briefs, library, recentList);
@@ -359,7 +363,7 @@ async function personOnCamera(copy: string, visual: string): Promise<string | nu
     const result = await anthropicMessages({
       apiKey,
       body: {
-        model: PLANNER_MODEL, max_tokens: 2000,
+        model: PLANNER_MODEL, max_tokens: roomFor(2000),
         messages: [{ role: "user", content: [{ type: "text", text:
           `A social video post is planned.\nCopy: """${copy.slice(0, 1500)}"""\nPlanned visual: """${visual || "(none given)"}"""\n` +
           "Does the video depend on a real person appearing on camera for the brand: its founder, an executive, a spokesperson, an expert or a team member speaking or presenting, named or not? " +
@@ -367,7 +371,7 @@ async function personOnCamera(copy: string, visual: string): Promise<string | nu
           'Reply with JSON only: {"person": true or false, "who": "the person, as the copy or visual names them (a name when one is given, otherwise a short description such as an executive), or empty"}' }] }],
       },
     });
-    const m = result.text.match(/\{[\s\S]*\}/);
+    const m = answerText(result).match(/\{[\s\S]*\}/);
     const v = m ? JSON.parse(m[0]) : null;
     if (v?.person !== true) return null;
     return String(v.who || "a real person").trim().slice(0, 80) || "a real person";
@@ -431,12 +435,12 @@ async function writeShotBrief(admin: any, requestId: string) {
   const format = profile?.filmed?.what ?? (profile?.generatable === false ? profile?.format : undefined);
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
-  const result = await anthropicMessages({ apiKey, body: { model: "claude-opus-5-5", max_tokens: 2000, messages: [{ role: "user", content: shotBriefPrompt({
+  const result = await anthropicMessages({ apiKey, body: { model: "claude-opus-5-5", max_tokens: roomFor(2000), messages: [{ role: "user", content: shotBriefPrompt({
     brand: client?.name ?? "the brand", platform: request.platform ?? "social", copy: request.post_copy ?? "", visual: request.visual_direction,
     reason: request.on_camera || "it needs footage filmed for it", format, voice: client?.brand_identity?.tone_of_voice ?? null,
   }) }] } });
-  const brief = parseShotBrief(result.text);
-  if (!brief) throw new Error(`The shot brief came back unreadable: ${result.text.slice(0, 200)}`);
+  const brief = parseShotBrief(answerText(result));
+  if (!brief) throw new Error(`The shot brief came back unreadable: ${replySample(result)}`);
   const { error } = await admin.from("design_shot_briefs").upsert({ request_id: request.id, client_id: request.client_id, calendar_post_key: request.calendar_post_key, brief, updated_at: new Date().toISOString() });
   if (error) throw new Error(`Could not keep the shot brief: ${error.message}`);
   return brief;

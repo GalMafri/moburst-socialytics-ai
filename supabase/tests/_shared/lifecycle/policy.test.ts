@@ -55,6 +55,18 @@ describe("rowAfter", () => {
     const ok = rowAfter(failed, base, { status: "done", result: { references: 8 } }, NOW);
     expect(ok).toMatchObject({ status: "done", attempts: 0, error: null, next_attempt_at: null });
   });
+  it("keeps the result a failure hands back, whatever inputs it was made on, and loses it otherwise when the inputs changed", () => {
+    const ok = rowAfter(null, base, { status: "done", result: { references: 8 } }, NOW);
+    const moved = { ...base, inputs_key: "k2" };
+    // The lifecycle's own rule: a failure under changed inputs starts with nothing.
+    expect(rowAfter(ok, moved, { status: "failed", error: "down" }, NOW).result).toBeNull();
+    // A step whose failure came before any work of its own hands the row's work back, and it stays.
+    const kept = rowAfter(ok, moved, { status: "failed", error: "down", result: { references: 8, carried_over: true } }, NOW);
+    expect(kept).toMatchObject({ status: "failed", inputs_key: "k2", attempts: 1, done_at: null, result: { references: 8, carried_over: true } });
+    expect(Date.parse(kept.next_attempt_at!) - NOW.getTime()).toBe(retryAfterMinutes(1) * 60_000);
+    // The count of failures goes on from it as from any failure.
+    expect(rowAfter(kept, moved, { status: "failed", error: "down", result: kept.result! }, NOW)).toMatchObject({ attempts: 2, result: { references: 8 } });
+  });
   it("keeps the last good result while waiting or failing on the same inputs", () => {
     const ok = rowAfter(null, base, { status: "done", result: { references: 8 } }, NOW);
     expect(rowAfter(ok, base, { status: "waiting", reason: "designed_posts", recheckDays: 30 }, NOW).result).toMatchObject({ references: 8, waiting_for: "designed_posts" });

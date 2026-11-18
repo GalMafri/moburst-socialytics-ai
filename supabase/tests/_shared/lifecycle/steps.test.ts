@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { deps, settled, siteKey, STEPS, weeksFor } from "../../../functions/_shared/lifecycle/steps";
 import { fakeDb, writeClientRpc } from "../../../functions/_shared/lifecycle/fakeDb";
-import { rowAfter, type StepRow } from "../../../functions/_shared/lifecycle/policy";
+import { LOGO_READ_RULE } from "../../../functions/_shared/lifecycle/designSettings";
+import { decide, rowAfter, type StepRow } from "../../../functions/_shared/lifecycle/policy";
 import { NotInStorage, PictureError } from "../../../functions/_shared/picture/client";
 import { ResearchError } from "../../../functions/_shared/brand/research";
 import { textHash } from "../../../functions/_shared/lifecycle/names";
@@ -1253,6 +1254,8 @@ describe("design_settings", () => {
     page?: string | null;
     /** What the service answers for one logo file, by its stored path: its facts, and what each post shows of it, or the failure it answers with. */
     byLogo?: Record<string, { facts?: Record<string, unknown>; shows?: Record<string, unknown>; fail?: Error }>;
+    /** What the read of the logo's place on the posts gives: the spot above when not given, and an error is thrown as the read throws it. */
+    spot?: unknown;
     /** How far the service gets in a read of posts within its time: every post sent when not given. `shown` is what a post shows of the file searched for. */
     within?: (body: Record<string, unknown>, carried: { search?: unknown; asks: number } | null, shown: (link: string) => unknown) => unknown;
   } = {}) {
@@ -1276,7 +1279,11 @@ describe("design_settings", () => {
         if (path === undefined) throw new Error("The logo file answered 404.");
         return path ? { path, width: 600, height: 200, ink: null, converted: "kept" as const } : null;
       },
-      readLogoSpot: async () => { seen.spot++; return SPOT; },
+      readLogoSpot: async () => {
+        seen.spot++;
+        if (opts.spot instanceof Error) throw opts.spot;
+        return "spot" in opts ? opts.spot : SPOT;
+      },
       fileHash: async (_db: unknown, path: string) => { seen.hash.push(path); return HASH; },
       postSize: async (_db: unknown, path: string) => { seen.sizes.push(path); return [1000, 1250] as [number, number]; },
     })) as never;
@@ -1307,7 +1314,7 @@ describe("design_settings", () => {
       },
       write: async (bucket: string, path: string) => `put:${bucket}/${path}`,
     })) as never;
-    return { db, seen, row: () => db.tables.design_brand_settings[0] };
+    return { db, seen, row: () => db.tables.design_brand_settings[0], opts };
   }
 
   type Out = { status: string; result?: Record<string, any>; recheckMinutes?: number; reason?: string; error?: string }; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -1400,12 +1407,149 @@ describe("design_settings", () => {
     expect(settings().logo_set).toMatchObject({ of: LOGO, rule: 2, inks: [[255, 255, 255], [60, 100, 160]], canvas: { file: "stored", ground: "#0B0E1A", from: "settings" }, at: T });
   });
 
-  it("reuses a stored read that found no spot", async () => {
-    const { db, seen } = world({ row: stored({ placement: { anchor: "center", width: 0.25, top: 0.04 }, derived: { placement_from: "default", logo_read: null, at: "2026-10-20T08:00:00.000Z" } }) });
-    const outs = await drive(db, c(), before());
-    expect(outs.at(-1)).toMatchObject({ status: "done", result: { placement_from: "default", placement: { anchor: "center", width: 0.25, top: 0.04 } } });
+  // A reply that was cut off used to be stored as a read that found no place (null), and the logo then sat at the default
+  // place in every design. Such a read is asked for again, once, and only for the clients that hold one (18 Nov 2026).
+  const DEFAULT_PLACE = { anchor: "center", width: 0.25, top: 0.04 };
+  const LIVE_KEY = `${INPUTS}${COLORS}|site:|other:|tone:2|pick:1`;
+  /** A settings row whose stored read is null: the default place, as a cut-off reply left it. */
+  const unread = (derived: Record<string, unknown> = {}) => stored({ placement: { ...DEFAULT_PLACE }, derived: { ...stored().derived, placement_from: "default", logo_read: null, logo_read_for: INPUTS, ...derived } });
+  /** The step's rows as the release before left them: done, on the key every lifecycle row has today. */
+  const released = (over: Partial<StepRow> = {}) => before({ inputs_key: LIVE_KEY, ...over });
+
+  it("keeps the key a client with a real read has today, so nothing runs for it", async () => {
+    expect(LOGO_READ_RULE).toBe(2);
+    const NONE = { shown: false, at: null, width: null };
+    // A read with a place, the answer that the posts do not show the logo, a read from before its inputs were recorded,
+    // and a null read stored by the rule (there was no post to load): each is an answer, and the key is today's.
+    for (const row of [stored({ derived: { ...stored().derived, logo_read_for: INPUTS } }), stored(), unread({ logo_read: NONE }), unread({ logo_read_rule: 2 })]) {
+      const { db, seen } = world({ row });
+      const rows = released();
+      expect(await STEPS.design_settings.inputs(db, c(), rows)).toBe(LIVE_KEY);
+      expect(decide(rows.get("design_settings")!, LIVE_KEY, {}, new Date(T))).toMatchObject({ due: false, why: "current" });
+      expect(seen.spot).toBe(0);
+    }
+  });
+
+  it("runs the step once for a client whose stored read is null, asks again, and does not run a second time", async () => {
+    const { db, seen, row: settings } = world({ row: unread() });
+    const rows = released();
+    // The key gains the read's version, so the step runs with nobody doing anything.
+    const key = `${LIVE_KEY}|read:2`;
+    expect(await STEPS.design_settings.inputs(db, c(), rows)).toBe(key);
+    expect(decide(rows.get("design_settings")!, key, {}, new Date(T))).toMatchObject({ due: true, why: "inputs_changed" });
+    const outs = await drive(db, c(), rows);
+    expect(outs.at(-1)).toMatchObject({ status: "done", result: { placement_from: "client_posts", placement: PLACEMENT } });
+    expect(seen.spot).toBe(1);
+    // The client's logo moves from the default place to where its own posts put it, and the read is recorded with its rule.
+    expect(settings()).toMatchObject({ source: "lifecycle", logo_path: LOGO, placement: PLACEMENT, background: "#0C1D2F" });
+    expect(settings().derived).toMatchObject({ placement_from: "client_posts", logo_read: SPOT, logo_read_for: INPUTS, logo_read_rule: 2, at: T });
+    // The read is no longer null, and the key stays where it is: the step is current, and it does not run again.
+    expect(await STEPS.design_settings.inputs(db, c(), rows)).toBe(key);
+    expect(decide(rows.get("design_settings")!, key, {}, new Date(T))).toMatchObject({ due: false, why: "current" });
+    // A later change of the key with the same posts and logo asks nothing.
+    await drive(db, c({ brand_identity: { ...BRAND, secondary_color: "#0c1d2f", accent_color: "#000000" } }), rows);
+    expect(seen.spot).toBe(1);
+  });
+
+  it("keeps the answer that the posts do not show the logo, with the default place, and does not ask again", async () => {
+    const NONE = { shown: false, at: null, width: null };
+    const { db, seen, row: settings } = world({ row: null, spot: NONE });
+    const rows = rowsOf(row("design_refs", { result: { synthesized_at: T } }));
+    const outs = await drive(db, c(), rows);
+    expect(outs.at(-1)).toMatchObject({ status: "done", result: { placement_from: "default", placement: DEFAULT_PLACE } });
+    expect(seen.spot).toBe(1);
+    expect(settings().derived).toMatchObject({ placement_from: "default", logo_read: NONE, logo_read_for: INPUTS, logo_read_rule: 2 });
+    // A new client's key has no version of the read, before its row exists and after: its step does not run twice.
+    expect(await STEPS.design_settings.inputs(db, c(), rows)).toBe(LIVE_KEY);
+    expect(rows.get("design_settings")!.inputs_key).toBe(LIVE_KEY);
+    await drive(db, c({ brand_identity: { ...BRAND, secondary_color: "#0c1d2f", accent_color: "#000000" } }), rows);
+    expect(seen.spot).toBe(1);
+  });
+
+  it("fails without writing when the read's reply was cut off, keeps the work its row held, and asks again on the retry", async () => {
+    // A client as it stands today: its set made and its logo looked at, the step done on today's key.
+    const w = world({ row: stored({ derived: { ...stored().derived, logo_read_for: INPUTS } }), shows: { "c1/social-0.jpg": found("stored"), "c1/social-1.jpg": found("stored") } });
+    const rows = before();
+    expect((await drive(w.db, c(), rows)).at(-1)).toMatchObject({ status: "done" });
+    const work = structuredClone(rows.get("design_settings")!.result!);
+    expect(work).toMatchObject({ tone: { of: LOGO, settled: T }, pick: { of: LOGO } });
+    // Its stored read was a cut-off reply, kept as null: the default place.
+    Object.assign(w.row(), { placement: { ...DEFAULT_PLACE }, derived: { ...w.row().derived, placement_from: "default", logo_read: null, logo_read_rule: undefined } });
+    const untouched = structuredClone(w.row());
+    const calls = w.seen.calls.length, writes = w.db.rpcCalls.length;
+    // The read is asked again, and its reply is cut off again.
+    w.opts.spot = new Error("The logo's place on the client's posts could not be read: the reply was cut off at its limit");
+    const key = await STEPS.design_settings.inputs(w.db, c(), rows);
+    expect(key).toBe(`${LIVE_KEY}|read:2`);
+    const prev = rows.get("design_settings")!;
+    const out = await STEPS.design_settings.run(w.db, c(), { force: false, previous: null, rows }) as Out;
+    expect(out).toMatchObject({ status: "failed", error: "The logo's place on the client's posts could not be read: the reply was cut off at its limit" });
+    // Nothing was written, nothing was asked of the picture service, and the row holds what it held.
+    expect(w.db.rpcCalls).toHaveLength(writes);
+    expect(w.seen.calls).toHaveLength(calls);
+    expect(w.row()).toEqual(untouched);
+    // The failure is stored with the lifecycle's backoff, and the work the row held is still on it, under the new key.
+    rows.set("design_settings", rowAfter(prev, { client_id: "c1", step: "design_settings", inputs_key: key! }, out as never, new Date(T)));
+    expect(rows.get("design_settings")).toMatchObject({ status: "failed", attempts: 1, inputs_key: key, next_attempt_at: new Date(Date.parse(T) + 60 * 60_000).toISOString() });
+    expect(rows.get("design_settings")!.result).toMatchObject({ tone: work.tone, pick: work.pick });
+    // A second failure keeps it too, and waits longer. The runner marks the row running before the step runs again.
+    rows.set("design_settings", { ...rows.get("design_settings")!, status: "running" });
+    const again = await STEPS.design_settings.run(w.db, c(), { force: false, previous: rows.get("design_settings")!, rows }) as Out;
+    rows.set("design_settings", rowAfter(rows.get("design_settings")!, { client_id: "c1", step: "design_settings", inputs_key: key! }, again as never, new Date(T)));
+    expect(rows.get("design_settings")).toMatchObject({ status: "failed", attempts: 2 });
+    expect(rows.get("design_settings")!.result).toMatchObject({ tone: work.tone, pick: work.pick });
+    expect(w.seen.spot).toBe(2);
+    // The retry asks the model again, and a whole answer is kept. The files are not made again: only the posts are read, at the logo's new place.
+    delete w.opts.spot;
+    rows.set("design_settings", { ...rows.get("design_settings")!, status: "running" });
+    const outs = await drive(w.db, c(), rows);
+    expect(outs.at(-1)).toMatchObject({ status: "done", result: { placement_from: "client_posts", placement: PLACEMENT } });
+    expect(w.seen.spot).toBe(3);
+    expect(w.row().derived).toMatchObject({ logo_read: SPOT, logo_read_rule: 2 });
+    expect(picture(w.seen, "logo-set")).toHaveLength(1);
+    expect(rows.get("design_settings")!.result).toMatchObject({ tone: { of: LOGO, settled: T } });
+  });
+
+  it("gives a new client its row at the default place when its first read fails, and asks again on the retry", async () => {
+    const w = world({ row: null, spot: new Error("The logo's place on the client's posts could not be read: the reply did not arrive in time") });
+    const rows = rowsOf(row("design_refs", { result: { synthesized_at: T } }));
+    const key = await STEPS.design_settings.inputs(w.db, c(), rows);
+    const out = await STEPS.design_settings.run(w.db, c(), { force: false, previous: null, rows }) as Out;
+    // The step fails, to be run again: the read is owed.
+    expect(out).toEqual({ status: "failed", error: "The logo's place on the client's posts could not be read: the reply did not arrive in time" });
+    // And the client has its settings, so its designs can start: its logo, at the default place, on its background.
+    expect(w.row()).toMatchObject({ source: "lifecycle", logo_path: LOGO, placement: DEFAULT_PLACE, background: "#0C1D2F", reference_paths: ["c1/social-0.jpg", "c1/social-1.jpg"] });
+    expect(w.row().derived).toMatchObject({ placement_from: "default", logo_file: "from_svg" });
+    // No read is recorded on it, so nothing reads as an answer, and the key is the one the failure is stored under.
+    for (const part of ["logo_read", "logo_read_for", "logo_read_rule"]) expect(w.row().derived).not.toHaveProperty(part);
+    expect(await STEPS.design_settings.inputs(w.db, c(), rows)).toBe(key);
+    rows.set("design_settings", rowAfter(null, { client_id: "c1", step: "design_settings", inputs_key: key! }, out as never, new Date(T)));
+    expect(rows.get("design_settings")).toMatchObject({ status: "failed", attempts: 1 });
+    // A retry that fails again leaves the row as it is.
+    const held = structuredClone(w.row());
+    rows.set("design_settings", { ...rows.get("design_settings")!, status: "running" });
+    expect(await STEPS.design_settings.run(w.db, c(), { force: false, previous: rows.get("design_settings")!, rows })).toMatchObject({ status: "failed" });
+    expect(w.row()).toEqual(held);
+    // A retry that reads moves the logo to where the posts put it.
+    delete w.opts.spot;
+    const outs = await drive(w.db, c(), rows);
+    expect(outs.at(-1)).toMatchObject({ status: "done", result: { placement_from: "client_posts", placement: PLACEMENT } });
+    expect(w.seen.spot).toBe(3);
+    expect(w.row()).toMatchObject({ placement: PLACEMENT });
+    expect(w.row().derived).toMatchObject({ logo_read: SPOT, logo_read_for: INPUTS, logo_read_rule: 2 });
+  });
+
+  it("never asks about, keys on or writes the place of a logo a person set", async () => {
+    const { db, seen, row: settings } = world({ row: theirs() });
+    const untouched = structuredClone(settings());
+    // A person's row has a key of its own, with no version of the read.
+    expect(await STEPS.design_settings.inputs(db, c(), refs)).not.toContain("read:");
+    const outs = await drive(db, c(), rowsOf(row("design_refs", { result: { synthesized_at: T } })));
+    expect(outs.at(-1)).toMatchObject({ status: "done", result: { kept: "person" } });
     expect(seen.spot).toBe(0);
     expect(seen.key).toBe(0);
+    expect(db.rpcCalls.filter((r) => r.name === "lifecycle_write_design_settings")).toEqual([]);
+    expect(settings()).toMatchObject({ source: "person", logo_path: untouched.logo_path, placement: untouched.placement, background: untouched.background, derived: null, confirmed_by: "person-1" });
   });
 
   it("asks the model again when the posts or the logo changed, and records what the read was made for", async () => {

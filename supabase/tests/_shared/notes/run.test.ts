@@ -65,6 +65,8 @@ describe("reading a note", () => {
 
     const call = m.anthropic.mock.calls[0][0];
     expect(call.body.model).toBe(MEMORY_MODEL);
+    // The points of one part, and room for the model to think first.
+    expect(call.body.max_tokens).toBe(22_000);
     const prompt = call.body.messages[0].content as string;
     expect(prompt).toContain(`[P1] avoid, 2026-10-01: Never say "cheap".`);
     expect(prompt).not.toContain("Say cheap.");
@@ -96,6 +98,19 @@ describe("reading a note", () => {
     await runNotesRead(d, job(), deps(), NOW);
     expect(note(d, "n1")).toMatchObject({ note_date: "2026-10-20", date_set_by: "app" });
     expect(note(d, "n2")).toMatchObject({ note_date: "2026-10-25", date_set_by: "person" });
+  });
+
+  it("takes a reply that was cut off, whatever it holds, as a reply it cannot read", async () => {
+    const d = db();
+    d.tables.client_notes.push(noteRow({ id: "n1", text: "Call notes." }));
+    // Whole JSON, and still stopped at the limit: it is not the reading.
+    m.anthropic.mockResolvedValue({ ...reply({ date: null, points: [] }), stopReason: "max_tokens" });
+    const out = await runNotesRead(d, job(), deps(), NOW);
+    expect(out).toMatchObject({ status: "queued" });
+    expect(out.reason).toMatch(/could not be read/);
+    // The call is counted, and nothing is kept from it.
+    expect(note(d, "n1")).toMatchObject({ state: "reading", parts_done: 0, input_tokens: 1200, output_tokens: 300 });
+    expect(notesOf(d, "n1")).toEqual([]);
   });
 
   it("leaves the note Reading after a reply it cannot read, keeps the tokens, and tries again later", async () => {

@@ -74,8 +74,13 @@ export type StepOutcome =
    * until the inputs change.
    */
   | { status: "waiting"; reason: string; recheckDays?: number; recheckMinutes?: number; result?: Record<string, unknown> }
-  /** A passing failure: tried again later with backoff. `soon` retries in minutes. */
-  | { status: "failed"; error: string; soonMinutes?: number };
+  /**
+   * A passing failure: tried again later with backoff. `soon` retries in
+   * minutes. `result`, when given, is kept on the row as it is: a step whose
+   * failure came before any of its own work hands back the work its row
+   * already held, so a failure under changed inputs does not throw it away.
+   */
+  | { status: "failed"; error: string; soonMinutes?: number; result?: Record<string, unknown> };
 
 export function rowAfter(prev: StepRow | null, base: { client_id: string; step: string; inputs_key: string }, outcome: StepOutcome, now: Date): StepRow {
   const at = now.toISOString();
@@ -98,6 +103,6 @@ export function rowAfter(prev: StepRow | null, base: { client_id: string; step: 
   return {
     ...base, status: "failed", attempts, attempted_at: at, done_at: sameInputs ? prev?.done_at ?? null : null,
     next_attempt_at: new Date(now.getTime() + minutes * 60_000).toISOString(),
-    result: sameInputs ? prev?.result ?? null : null, error: outcome.error.slice(0, 500),
+    result: outcome.result ?? (sameInputs ? prev?.result ?? null : null), error: outcome.error.slice(0, 500),
   };
 }

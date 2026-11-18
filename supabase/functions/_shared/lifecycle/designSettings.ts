@@ -313,6 +313,41 @@ export const LOGO_TONE_RULE = 2;
 export const LOGO_TONE_READ_RULES: readonly number[] = [1, LOGO_TONE_RULE];
 
 /**
+ * The version of the read of the logo's place on the client's posts
+ * (imaging.ts, readLogoSpot), written beside each read
+ * (derived.logo_read_rule). Version 2 (18 Nov 2026): a reply that was cut
+ * off or could not be read is a failed read. Before, it was stored as a read
+ * that found no place (null), and the client's logo stayed at the default
+ * place. So a null read without this version is asked for again, once
+ * (staleRead); a read that holds an answer, "the posts do not show the logo"
+ * among them, was a whole reply and is kept.
+ */
+export const LOGO_READ_RULE = 2;
+
+type ReadRow = { source?: string | null; derived?: Record<string, unknown> | null } | null | undefined;
+
+/** A lifecycle row whose stored read is null and was not stored by the current rule: it may be a reply that was cut off. */
+export function staleRead(row: ReadRow): boolean {
+  const derived = row?.derived;
+  return !!row && row.source === "lifecycle" && !!derived && typeof derived === "object" && "logo_read" in derived
+    && (derived.logo_read ?? null) === null && derived.logo_read_rule !== LOGO_READ_RULE;
+}
+
+/**
+ * The read's part of the design_settings step's key, after everything else
+ * in it: "|read:<rule>" for a row whose read is stale, so its step runs once
+ * and asks again, and for a row whose step is keyed on it already
+ * (`stepKey`, the key its row holds), so the key does not move back when the
+ * read is made and the step does not run a second time. "" for every other
+ * row: a client with a real read keeps the key it had before the rule, and
+ * nothing runs for it.
+ */
+export function readKeyTail(row: ReadRow, stepKey: string | null | undefined): string {
+  const tail = `|read:${LOGO_READ_RULE}`;
+  return staleRead(row) || String(stepKey ?? "").endsWith(tail) ? tail : "";
+}
+
+/**
  * The parts of a lifecycle row's key that the read of the logo's spot
  * depends on: the client's posts and its logo, "refs:<x>|logo:<y>". Null for
  * any other key (a person's row has a key of its own).
@@ -323,9 +358,11 @@ export function readInputs(key: string | null | undefined): string | null {
 
 /**
  * The stored read of where the client's posts put the logo, when it is
- * current for these inputs: { read } (read may be null, a read that found no
- * spot and stands for the default placement). Null when the model must be
- * asked.
+ * current for these inputs: { read } (read may be null: there was no post
+ * to load, nothing was asked, and the default placement stands).
+ * Null when the model must be asked: a stale read (staleRead) is never
+ * current, and neither is a row with no read recorded, which is how a new
+ * client's row is written when its first read fails.
  *
  * The read is a paid model call about the client's posts and its logo, and
  * nothing else. It is reused when the settings row is the lifecycle's and
@@ -343,6 +380,7 @@ export function storedSpotRead(
   const derived = row?.derived;
   if (!row || row.source !== "lifecycle" || !derived || typeof derived !== "object" || !("logo_read" in derived)) return null;
   const read = (derived.logo_read ?? null) as LogoSpot | null;
+  if (staleRead(row)) return null;
   if ("logo_read_for" in derived) return derived.logo_read_for === inputs ? { read } : null;
   return step?.done_at && readInputs(step.inputs_key) === inputs ? { read } : null;
 }

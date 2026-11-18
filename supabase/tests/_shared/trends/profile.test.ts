@@ -4,7 +4,8 @@
 // a profile must meet, that a person's changes are never overwritten, that a
 // client with nothing to read gets no profile, and the monthly hashtag refresh.
 import { afterEach, describe, expect, it } from "vitest";
-import { activeTerms, hashtagCounts, parseProfile, profileEvidence, profileProblems, profileRequest, syncLifecycleTerms, TREND_PROFILE_MODEL, writeTrendProfile, type ProfileEvidence, type ProfileIO } from "../../../functions/_shared/trends/profile";
+import { roomFor } from "../../../functions/_shared/anthropicReply";
+import { activeTerms, askTwice, hashtagsRequest, hashtagCounts, parseProfile, profileEvidence, profileProblems, profileRequest, syncLifecycleTerms, TREND_PROFILE_MODEL, writeTrendProfile, type ProfileEvidence, type ProfileIO } from "../../../functions/_shared/trends/profile";
 import type { TrendProfile } from "../../../functions/_shared/trends/types";
 import { deps, STEPS } from "../../../functions/_shared/lifecycle/steps";
 import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
@@ -71,8 +72,11 @@ describe("the evidence a profile is written from", () => {
     // The client's own post in the feed and posts older than 90 days are not competitors' evidence.
     expect(e.hashtags.competitors.map((h) => h.key)).toEqual(["#aso", "#abtesting"]);
     expect(e.competitors).toEqual(["SplitMetrics"]);
-    const body = profileRequest(e) as { model: string; messages: Array<{ content: string }> };
+    const body = profileRequest(e) as { model: string; max_tokens: number; messages: Array<{ content: string }> };
     expect(body.model).toBe(TREND_PROFILE_MODEL);
+    // The profile's own size, and room for the model to think first; the monthly hashtags the same.
+    expect(body.max_tokens).toBe(roomFor(4000));
+    expect(hashtagsRequest({ audience: "a", fit_rubric: "f", topics: [], hashtags: { instagram: [], tiktok: [], linkedin: [] } }, e)).toMatchObject({ model: TREND_PROFILE_MODEL, max_tokens: roomFor(2000) });
     expect(TREND_PROFILE_MODEL).toBe("claude-opus-5-5");
     const prompt = body.messages[0].content;
     for (const part of ["mobile-first growth agency", "App growth", "ASO, paid user acquisition", "SplitMetrics", "#appmarketing", "Instagram", "New York"]) {
@@ -247,5 +251,38 @@ describe("the lifecycle steps", () => {
     const skipped = withOverrides("2026-11-01T05:00:00Z");
     expect((await STEPS.trend_hashtags.run(skipped, client(), { force: false, previous: null, rows })).result).toEqual({ skipped: "this_month" });
     expect(skipped.tables.trend_profiles[0].search_overrides).toEqual(overrides);
+  });
+});
+
+// One request, and one more: with the problems named after an answer that does not parse, and the same request again after
+// an answer that was cut off or declined, which is no answer to correct (18 Nov 2026).
+describe("askTwice", () => {
+  const body = { model: "claude-opus-5-5", max_tokens: roomFor(2000), messages: [{ role: "user", content: "Write the profile." }] };
+  const parse = (text: string) => (text.includes("{") ? { value: JSON.parse(text) as { ok: boolean } } : { error: text ? "The answer is not valid JSON." : "The answer is empty." });
+  const calls = (replies: Array<{ text: string; stopReason?: string }>) => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const call = async (a: { apiKey: string; body: Record<string, unknown> }) => { bodies.push(a.body); return replies.shift()!; };
+    return { bodies, call };
+  };
+
+  it("names the problems of a finished answer that does not parse", async () => {
+    const { bodies, call } = calls([{ text: "Here is the profile.", stopReason: "end_turn" }, { text: '{"ok":true}', stopReason: "end_turn" }]);
+    expect(await askTwice(call, "k", body, parse)).toEqual({ value: { ok: true } });
+    expect((bodies[1].messages as unknown[]).length).toBe(3);
+  });
+
+  it("sends the same request again after an answer that was cut off, never half an answer to correct", async () => {
+    const { bodies, call } = calls([{ text: '{"ok":tr', stopReason: "max_tokens" }, { text: '{"ok":true}', stopReason: "end_turn" }]);
+    expect(await askTwice(call, "k", body, parse)).toEqual({ value: { ok: true } });
+    expect(bodies).toEqual([body, body]);
+  });
+
+  it("fails after two answers that did not finish, and never reads a cut-off answer that happens to parse", async () => {
+    const twice = calls([{ text: "", stopReason: "max_tokens" }, { text: '{"ok":true}', stopReason: "max_tokens" }]);
+    expect(await askTwice(twice.call, "k", body, parse)).toEqual({ error: "The answer is empty." });
+    expect(twice.bodies).toHaveLength(2);
+    const second = calls([{ text: "Not JSON.", stopReason: "end_turn" }, { text: "", stopReason: "refusal" }]);
+    expect(await askTwice(second.call, "k", body, parse)).toEqual({ error: "The answer is empty." });
+    expect(second.bodies).toHaveLength(2);
   });
 });

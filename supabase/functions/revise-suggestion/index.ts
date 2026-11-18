@@ -16,6 +16,7 @@
 import { createClient } from "../_shared/supabase.ts";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
+import { answerText, PERSON_WAIT_MS, roomFor } from "../_shared/anthropicReply.ts";
 import { clipText } from "../_shared/text/clip.ts";
 import { readShownInsights } from "../_shared/reports/shownFields.ts";
 import { revisionContext } from "./context.ts";
@@ -114,9 +115,13 @@ Deno.serve(async (req) => {
     ].filter(Boolean).join("\n\n");
 
     let revision = null;
+    // The two tries share what a person can wait: the first has half of it, the second what is left.
+    const until = Date.now() + PERSON_WAIT_MS;
     for (let attempt = 0; attempt < 2 && !revision; attempt++) {
-      const result = await anthropicMessages({ apiKey, body: { model: MODEL, max_tokens: 1500, messages: [{ role: "user", content: prompt }] } });
-      revision = parseRevision(result.text);
+      const waitMs = attempt === 0 ? PERSON_WAIT_MS / 2 : until - Date.now();
+      const result = await anthropicMessages({ apiKey, body: { model: MODEL, max_tokens: roomFor(1500), messages: [{ role: "user", content: prompt }] }, waitMs });
+      // A rewrite that was cut off, declined or too long in coming is a try that came back unusable.
+      revision = parseRevision(answerText(result));
     }
     if (!revision) return json({ error: "The rewrite did not come back usable. Try again, or edit it by hand." }, 502);
     return json({ revision });
@@ -154,8 +159,8 @@ async function learn(admin: any, apiKey: string, clientId: string, body: any, fe
     "If the edit only fixed wording and teaches nothing lasting, return no rules.",
     'Reply with JSON only: {"rules":[{"kind":"prefer"|"avoid","text":"..."}]}',
   ].filter(Boolean).join("\n\n");
-  const result = await anthropicMessages({ apiKey, body: { model: MODEL, max_tokens: 600, messages: [{ role: "user", content: prompt }] } });
-  const rules = parseLearnings(result.text).filter((r) => !known.some((k) => k.text.toLowerCase() === r.text.toLowerCase()));
+  const result = await anthropicMessages({ apiKey, body: { model: MODEL, max_tokens: roomFor(600), messages: [{ role: "user", content: prompt }] }, waitMs: PERSON_WAIT_MS });
+  const rules = parseLearnings(answerText(result)).filter((r) => !known.some((k) => k.text.toLowerCase() === r.text.toLowerCase()));
   const saved: CompetitiveLearning[] = [];
   for (const r of rules) {
     const { error } = await admin.from("competitive_learnings").insert({

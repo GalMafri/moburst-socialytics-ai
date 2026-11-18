@@ -16,6 +16,7 @@ import { competitiveBrief } from "../_shared/competitive/brief.ts";
 import { AuthzError } from "../_shared/auth/requireStaff.ts";
 import { requireMember } from "../_shared/auth/requireMember.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
+import { answerText, PERSON_WAIT_MS, roomFor } from "../_shared/anthropicReply.ts";
 import { COPY_MODEL, loadClientVoice } from "../_shared/voice/load.ts";
 import { voicePromptBlock } from "../_shared/voice/voice.ts";
 import { isStoryPost } from "../_shared/design/story.ts";
@@ -65,9 +66,11 @@ Deno.serve(async (req) => {
 
     const result = await anthropicMessages({
       apiKey: anthropicKey,
-      body: { model: COPY_MODEL, max_tokens: 2000, messages: [{ role: "user", content: prompt }] },
+      body: { model: COPY_MODEL, max_tokens: roomFor(2000), messages: [{ role: "user", content: prompt }] },
+      waitMs: PERSON_WAIT_MS,
     });
-    const postText = result.text.trim();
+    // A reply that was cut off, declined or too long in coming holds no copy: it ends as a reply that cannot be parsed does.
+    const postText = answerText(result).trim();
 
     // The JSON object in the reply, wherever it sits.
     let post;

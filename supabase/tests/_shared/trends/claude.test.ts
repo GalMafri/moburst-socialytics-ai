@@ -3,6 +3,7 @@
 // keeps or drops every candidate with a reason, and the weekly themes. Proves
 // what is asked, how answers are read, and what is refused.
 import { describe, expect, it } from "vitest";
+import { roomFor } from "../../../functions/_shared/anthropicReply";
 import { filterProblems, filterRequest, KEPT_PER_PLATFORM, MIN_FIT, parseFilter, pickKept, TREND_FILTER_MODEL } from "../../../functions/_shared/trends/filter";
 import { parseThemes, themesRequest, themesWanted, TREND_THEMES_MODEL } from "../../../functions/_shared/trends/themes";
 import type { KeptPost, TrendPost } from "../../../functions/_shared/trends/types";
@@ -76,8 +77,10 @@ describe("the weekly themes", () => {
   it("asks for themes only when 3 or more posts were kept, and rejects a theme citing a post that wasn't kept", () => {
     expect(themesWanted(kept.slice(0, 2))).toBe(false);
     expect(themesWanted(kept.slice(0, 3))).toBe(true);
-    const body = themesRequest(profile, kept) as { model: string; messages: Array<{ content: string }> };
+    const body = themesRequest(profile, kept) as { model: string; max_tokens: number; messages: Array<{ content: string }> };
     expect(body.model).toBe(TREND_THEMES_MODEL);
+    // The themes' own size, and room for the model to think first.
+    expect(body.max_tokens).toBe(roomFor(6000));
     expect(TREND_THEMES_MODEL).toBe("claude-opus-5-5");
     expect(body.messages[0].content).toContain("K4");
     const bad = { themes: [theme("A", ["K1"]), theme("B", ["K2"]), theme("C", ["K7"])] };

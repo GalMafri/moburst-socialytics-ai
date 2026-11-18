@@ -7,6 +7,7 @@
 // statements get one fix and one more check, that a write still failing ends
 // with no strategy, the call counts, model ids and token limits, and what the
 // evidence holds.
+import { roomFor } from "../../../functions/_shared/anthropicReply";
 import { describe, expect, it } from "vitest";
 import {
   CHECK_MAX_TOKENS, CHECK_MODEL, parseStrategy, RELATIVE_DATE, pillarShares, PILLAR_SHARE_MIN_POSTS, platformFigures, readPending, savePending, saveStrategy, startStrategy, STRATEGY_MAX_TOKENS, STRATEGY_MODEL, strategyEvidence,
@@ -358,8 +359,9 @@ describe("writing a strategy, one model call per run", () => {
 
   it("gives the writer room to think and the checker room to list", async () => {
     const { bodies } = await drive(reply(draft()), clean);
-    expect([bodies[0].max_tokens, bodies[1].max_tokens]).toEqual([16000, 4000]);
-    expect([STRATEGY_MAX_TOKENS, CHECK_MAX_TOKENS]).toEqual([16000, 4000]);
+    // The checker thinks before it lists: its limit is its own answer and the room for that (anthropicReply.ts).
+    expect([bodies[0].max_tokens, bodies[1].max_tokens]).toEqual([16000, roomFor(4000)]);
+    expect([STRATEGY_MAX_TOKENS, CHECK_MAX_TOKENS]).toEqual([16000, 20000]);
   });
 
   it("asks once more, in its own run, with the problems named, when the reply breaks a rule", async () => {
@@ -426,6 +428,8 @@ describe("writing a strategy, one model call per run", () => {
     expect((await drive(reply(draft()), { text: "Looks fine to me.", stopReason: "end_turn", raw: {} })).out.kind).toBe("over");
     // A cut-off check that reads as "nothing unsupported" is no pass.
     expect((await drive(reply(draft()), { ...clean, stopReason: "max_tokens" })).out.kind).toBe("over");
+    // Nor is a check that was declined, whatever its text says.
+    expect((await drive(reply(draft()), { ...clean, stopReason: "refusal" })).out.kind).toBe("over");
   });
 
   it("keeps the evidence with the draft, so the runs after the first read nothing again", () => {

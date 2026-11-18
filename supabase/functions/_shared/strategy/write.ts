@@ -30,6 +30,7 @@
 // of sections (content_strategy_edits) are read as fixed context and never
 // written here.
 
+import { answerText, roomFor } from "../anthropicReply.ts";
 import { parseAnswer } from "../pipelines/competitive/analysis.ts";
 import { applyRhythmSetting, numberEvidence, scoreOwnPosts, type EvidenceItem, type OwnPost, type RhythmLine } from "../calendar/evidence.ts";
 import { fmtMultiple } from "../calendar/reasonText.ts";
@@ -58,7 +59,8 @@ export const STRATEGY_MODEL = "claude-opus-5-5";
 export const CHECK_MODEL = "claude-sonnet-5-5";
 /** Room for the reply and Opus's thinking, which counts against it (the calendar's week plan gives the same model 16,000). */
 export const STRATEGY_MAX_TOKENS = 16000;
-export const CHECK_MAX_TOKENS = 4000;
+/** The check's own answer, and room for the checker to think first (anthropicReply.ts, roomFor). */
+export const CHECK_MAX_TOKENS = roomFor(4000);
 // The pillar shares are worked out in ./pillarShares.ts (no Deno imports), so the strategy page computes them the same way.
 export { PILLAR_SHARE_MIN_POSTS, pillarShares, SHARE_DAYS } from "./pillarShares.ts";
 const BRIEF_CHARS = 6000;
@@ -901,7 +903,8 @@ export async function strategyPhase(call: StrategyCall, apiKey: string, pending:
   const r = await call({ apiKey, body: checkRequest(e, written.sections) });
   count(CHECK_MODEL, r.raw);
   if (cutOff(r)) return over("The check's reply was cut off before it ended.");
-  const flagged = parseCheck(r.text);
+  // A check that was declined is read as empty, which is no check: nothing passes on it.
+  const flagged = parseCheck(answerText(r));
   if ("error" in flagged) return over(flagged.error);
   if (!flagged.value.length) return { kind: "passed", value: written, usage, evidence: e, inputs_key: pending.inputs_key };
   if (pending.phase === "recheck") return over(`The strategy still has statements the evidence does not support: ${flagged.value.map((f) => f.statement).join(" | ").slice(0, 300)}`);

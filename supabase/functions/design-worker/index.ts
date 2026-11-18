@@ -35,6 +35,7 @@ import { createClient } from "../_shared/supabase.ts";
 import { encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { secretEquals } from "../_shared/auth/secretEquals.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
+import { answerText, roomFor } from "../_shared/anthropicReply.ts";
 import { imageEdit } from "../_shared/media/imageEdit.ts";
 import { openaiKey } from "../_shared/openai/key.ts";
 import { claimJob, endOverdueRequests, endRequest, renewJobLease, saveJobProgress, settleRequest, BUCKET } from "../_shared/canva/jobs.ts";
@@ -75,13 +76,22 @@ const MAX_MARK_CLEANS = 2;
 const DEFAULT_PAGE = { width: 1088, height: 1360 };
 const READ_MODEL = "claude-opus-5-5";
 /**
- * Room for each check's answer. The model may think before it answers and
- * that counts against the limit: at 300 to 600 tokens, answers came back cut
- * off after a few characters ("{\"marks") and good designs failed.
+ * Each check's answer, and room for the model to think first
+ * (anthropicReply.ts, roomFor). The thinking counts against the limit: at
+ * 300 to 600 tokens, answers came back cut off after a few characters
+ * ("{\"marks") and good designs failed, and 2,000 in all still left a long
+ * think no room.
  */
-const CHECK_TOKENS = 2000;
+const CHECK_TOKENS = roomFor(2000);
 /** Times a check is asked again when its answer comes back unreadable, before the step counts a try. */
 const READ_TRIES = 3;
+/**
+ * The longest one check may wait for its answer, all its tries together. A
+ * step asks up to three checks after a picture call, and the job is held
+ * under MODEL_LEASE_MS meanwhile: three long thinks in a row must end inside
+ * that lease, or the job would be claimed again while its first run lives.
+ */
+const CHECK_WAIT_MS = 100_000;
 const STEPS = new Set(["generate", "locate", "unlogo", "marks", "finish", "verify"]);
 /** A job is only ever moved on while it is active: a canceled design stays canceled. */
 const ACTIVE = ["queued", "running"];
@@ -382,7 +392,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       });
       notePicture(s, "read", ms);
       const image = base64Encode((await download(admin, marksPath)) as unknown as ArrayBuffer);
-      const seen = await readCheck(() => askAbout("image/jpeg", image, marksPrompt(g.brand_name)), parseMarks, "The picture's logos and brand marks");
+      const seen = await readCheck((wait) => askAbout("image/jpeg", image, marksPrompt(g.brand_name), wait), parseMarks, "The picture's logos and brand marks");
       s.marks_check = seen;
       if (!seen.marks) {
         delete s.marks_where;
@@ -441,7 +451,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       });
       notePicture(s, "read", ms);
       const jpeg = base64Encode((await download(admin, `${stem}.jpg`)) as unknown as ArrayBuffer);
-      const lines = await readCheck(() => askAbout("image/jpeg", jpeg, readPrompt(g.brand_name)), parseRead, "The words on the design");
+      const lines = await readCheck((wait) => askAbout("image/jpeg", jpeg, readPrompt(g.brand_name), wait), parseRead, "The words on the design");
       s.read = lines;
       if (!copyMatches(lines, job.input.copy)) {
         // Wrong words are never fixed by hand: the design is made again.
@@ -452,7 +462,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       // A Story's words all sit in Meta's band (_shared/design/story.ts): the band alone is read, and holds the whole copy.
       if (band) {
         const crop = base64Encode((await download(admin, `${stem}-band.jpg`)) as unknown as ArrayBuffer);
-        s.band_read = await readCheck(() => askAbout("image/jpeg", crop, readPrompt(g.brand_name)), parseRead, "The words in the Story's band");
+        s.band_read = await readCheck((wait) => askAbout("image/jpeg", crop, readPrompt(g.brand_name), wait), parseRead, "The words in the Story's band");
         if (!copyMatches(s.band_read, job.input.copy)) {
           console.warn(`[design-worker] job ${job.id}: the Story's band read ${JSON.stringify(s.band_read)}, wanted ${JSON.stringify(job.input.copy)}`);
           await designAgain(admin, job, REASONS.band(s.band_read));
@@ -462,7 +472,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       // Nothing may touch or cross the logo, seen at full size around its known place.
       if (area) {
         const crop = base64Encode((await download(admin, `${stem}-area.png`)) as unknown as ArrayBuffer);
-        const seen = await readCheck(() => askAbout("image/png", crop, logoCheckPrompt(g.brand_name)), parseLogoCheck, "The area around the logo");
+        const seen = await readCheck((wait) => askAbout("image/png", crop, logoCheckPrompt(g.brand_name), wait), parseLogoCheck, "The area around the logo");
         s.logo_check = seen;
         if (!seen.clear) {
           console.warn(`[design-worker] job ${job.id}: the logo is touched by ${seen.touching}; designing again.`);
@@ -571,7 +581,7 @@ async function logoClearAt(admin: any, job: Job, base: string, finalPath: string
   });
   notePicture(s, "read", ms);
   const crop = base64Encode((await download(admin, `${stem}-area.png`)) as unknown as ArrayBuffer);
-  const seen = await readCheck(() => askAbout("image/png", crop, logoCheckPrompt(g.brand_name)), parseLogoCheck, "The area around the logo");
+  const seen = await readCheck((wait) => askAbout("image/png", crop, logoCheckPrompt(g.brand_name), wait), parseLogoCheck, "The area around the logo");
   if (!seen.clear) console.warn(`[design-worker] job ${job.id}: the carousel's logo would be touched by ${seen.touching}; this slide keeps its own.`);
   return seen.clear;
 }
@@ -884,8 +894,8 @@ async function slotFileRequest(admin: any, plan: StampPlan, a: { job: string; st
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-/** One image and one question to the reading model; its answer as text. */
-async function askAbout(mediaType: "image/jpeg" | "image/png", data: string, question: string): Promise<string> {
+/** One image and one question to the reading model, waited for at most `waitMs`; its answer as text ("" for an answer that was cut off, declined or too long in coming, which readCheck asks again). */
+async function askAbout(mediaType: "image/jpeg" | "image/png", data: string, question: string, waitMs: number): Promise<string> {
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
   const result = await anthropicMessages({
@@ -898,8 +908,9 @@ async function askAbout(mediaType: "image/jpeg" | "image/png", data: string, que
         { type: "text", text: question },
       ] }],
     },
+    waitMs,
   });
-  return result.text;
+  return answerText(result);
 }
 
 /**
@@ -908,10 +919,14 @@ async function askAbout(mediaType: "image/jpeg" | "image/png", data: string, que
  * design, so it never costs the design a try (13 Oct: four designs ended on
  * "The area around the logo could not be read").
  */
-async function readCheck<T>(ask: () => Promise<string>, parse: (text: string) => T | null, what: string): Promise<T> {
+async function readCheck<T>(ask: (waitMs: number) => Promise<string>, parse: (text: string) => T | null, what: string): Promise<T> {
+  // The tries share the check's wait: each has what the ones before it left.
+  const until = Date.now() + CHECK_WAIT_MS;
   let last = "";
   for (let i = 0; i < READ_TRIES; i++) {
-    last = await ask();
+    const left = until - Date.now();
+    if (left <= 0) break;
+    last = await ask(left);
     const value = parse(last);
     if (value) return value;
   }

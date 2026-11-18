@@ -27,6 +27,7 @@
 // with growing waits, and the report keeps showing its figures meanwhile.
 
 import { anthropicMessages } from "../anthropic.ts";
+import { answerText, roomFor } from "../anthropicReply.ts";
 import { queueReportInsights } from "./insights.ts";
 import { clientFiguresFromStoredPosts } from "../competitive/storedFigures.ts";
 import {
@@ -211,5 +212,6 @@ async function reportTextOutcome(db: Db, job: ReportTextJob, deps: ReportTextDep
 
 /** The model call the worker binds: Sonnet, through the app's Messages API helper. */
 export function sonnetCompletion(apiKey: string): ReportTextDeps["complete"] {
-  return async (system, message) => (await anthropicMessages({ apiKey, body: { model: REPORT_TEXT_MODEL, max_tokens: 4000, system, messages: [{ role: "user", content: message }] } })).text;
+  // The sentences' own size, and room for the model to think first. A reply that was cut off or declined is read as empty, which the check refuses.
+  return async (system, message) => answerText(await anthropicMessages({ apiKey, body: { model: REPORT_TEXT_MODEL, max_tokens: roomFor(4000), system, messages: [{ role: "user", content: message }] } }));
 }

@@ -50,7 +50,7 @@ import { followerMarkets, pageOf, runSocialRead, socialResult, socialVersionKey,
 import { liveSocialIO } from "./socialIO.ts";
 import { linksTo, siteLinkSet } from "./siteLinks.ts";
 import { matchProfiles, ONE_PER_NETWORK_RULE, ownPerNetwork, parkedReason, parkingNetwork, platformsOf, profileKeyOf, profileListKey, siteProfileLinks, type OwnRow, type ProfileMatch, type SproutProfile } from "./accounts.ts";
-import { libraryPaths, MAX_REFS, personKey, personOther, pickBackground, placementFor, storedSpotRead, toneKeyTail, type LogoSpot, type Placement } from "./designSettings.ts";
+import { libraryPaths, LOGO_READ_RULE, MAX_REFS, personKey, personOther, pickBackground, placementFor, readKeyTail, storedSpotRead, toneKeyTail, type LogoSpot, type Placement } from "./designSettings.ts";
 import { referencesFor } from "../design-prompts/designRefs.ts";
 import { lifecycleMayWrite, setBy, sourceOf, writeClientFields } from "./fields.ts";
 import { parentPageFor, sameSiteClient } from "./parentPage.ts";
@@ -426,6 +426,15 @@ function settingsOf(result: Record<string, unknown> | null | undefined): Record<
  * storedSpotRead), so the model, and its key, are asked for only when a read
  * is needed. The date the settings were derived on moves only when
  * something in them did.
+ *
+ * A read that fails (its reply cut off, unreadable or too long in coming,
+ * imaging.ts readLogoSpot; or the call itself failing) is never kept as an
+ * answer, and the step fails so the lifecycle asks again with its backoff:
+ *   a row that exists keeps what it has, nothing is written, and the work
+ *     the step's row held is handed back with the failure (CARRIED), so the
+ *     retry asks the picture service nothing it already answered;
+ *   a client with no row yet gets its row at the default place, with no read
+ *     recorded on it, so its designs can start and the next run asks again.
  */
 async function writeDesignSettings(db: Db, client: ClientRow, ctx: StepContext, existing: SettingsRow | null): Promise<{ outcome: StepOutcome } | { row: SettingsRow; settings: Record<string, unknown> }> {
   const imaging = await deps.imaging();
@@ -438,11 +447,18 @@ async function writeDesignSettings(db: Db, client: ClientRow, ctx: StepContext, 
   const inputs = spotInputs(client, ctx.rows.get("design_refs"));
   const kept = storedSpotRead(existing, ctx.rows.get("design_settings") ?? null, inputs);
   let spot: LogoSpot | null = null;
+  /** Why the read failed, when it did. */
+  let unread: string | null = null;
   if (kept) spot = kept.read;
   else if (posts.length) {
     const key = await deps.anthropicKey(db);
     if (!key) return { outcome: { status: "failed", error: "The AI connection is not configured." } };
-    spot = await imaging.readLogoSpot(db, client.name, posts, key);
+    try {
+      spot = await imaging.readLogoSpot(db, client.name, posts, key);
+    } catch (e) {
+      unread = e instanceof Error ? e.message : String(e);
+      if (existing) return { outcome: failedRead(unread, ctx) };
+    }
   }
   const { placement, from }: { placement: Placement; from: LogoPick["placement_from"] } = standing
     ? { placement: standing.placement, from: standing.placement_from }
@@ -453,7 +469,9 @@ async function writeDesignSettings(db: Db, client: ClientRow, ctx: StepContext, 
   const paths = libraryPaths(client.design_references, client.harvested_design_references);
   const unchanged = !!kept && existing?.logo_path === logo.path && existing.background === background.hex && samePlacement(existing.placement, placement);
   const at = unchanged && typeof existing?.derived?.at === "string" ? existing.derived.at : deps.now().toISOString();
-  const derived = { logo_from: standing?.from ?? client.logo_url, logo_file: logo.converted, placement_from: from, logo_read: spot, logo_read_for: inputs, background_from: background.from, at, ...(standing ? { logo_pick: standing } : {}) };
+  // A read that failed is not recorded: the row says nothing of a read, and the next run asks.
+  const read = unread === null ? { logo_read: spot, logo_read_for: inputs, logo_read_rule: LOGO_READ_RULE } : {};
+  const derived = { logo_from: standing?.from ?? client.logo_url, logo_file: logo.converted, placement_from: from, ...read, background_from: background.from, at, ...(standing ? { logo_pick: standing } : {}) };
   const { data: wrote, error: writeError } = await db.rpc("lifecycle_write_design_settings", {
     p_client: client.id, p_logo_path: logo.path, p_placement: placement, p_background: background.hex, p_reference_paths: paths, p_derived: derived,
   });
@@ -461,7 +479,29 @@ async function writeDesignSettings(db: Db, client: ClientRow, ctx: StepContext, 
   const settings = { written: wrote === true, logo_path: logo.path, placement, placement_from: from, background: background.hex, background_from: background.from, references: paths.length };
   // A person's row appeared in between: it is theirs, and this run ends as it always did.
   if (wrote !== true) return { outcome: { status: "done", result: settings } };
+  // The new client's row is written at the default place. The read is still owed: the step fails, to be run again.
+  if (unread !== null) return { outcome: { status: "failed", error: unread } };
   return { row: { source: "lifecycle", logo_path: logo.path, placement, background: background.hex, reference_paths: paths.slice(0, MAX_REFS), logo_set: existing?.logo_set ?? null }, settings };
+}
+
+/**
+ * Marks a step result as the work its row held before the step's inputs
+ * changed, handed back by a run whose read of the logo's place failed.
+ */
+const CARRIED = "carried_over";
+
+/**
+ * The failure of a run whose read of the logo's place failed for a row that
+ * exists. The lifecycle keeps a failed step's result only while its inputs
+ * are the same (policy.ts), so under changed inputs the work the row held
+ * (the logo set's files and what every post gave, the candidates read for
+ * the logo) would be thrown away and asked of the picture service again on
+ * the retry. It is handed back instead, marked as the older work it is. A
+ * run on the same inputs has its own row's result kept as always.
+ */
+function failedRead(error: string, ctx: StepContext): StepOutcome {
+  const held = ctx.previous ? null : ctx.rows.get("design_settings")?.result;
+  return { status: "failed", error, ...(held ? { result: { ...held, [CARRIED]: true } } : {}) };
 }
 
 /**
@@ -981,7 +1021,8 @@ async function pickLogo(db: Db, client: ClientRow, ctx: StepContext, base: Recor
   // The read of where the posts carry the logo is about the posts, whichever file is the logo: it stays, with what it was made for.
   const derived = {
     logo_from: chosen.address, logo_file: chosen.file.converted, placement_from: placementFrom, logo_read: old.logo_read ?? null,
-    logo_read_for: old.logo_read_for ?? spotInputs(client, ctx.rows.get("design_refs")), background_from: background.from, at: now, logo_pick: record,
+    logo_read_for: old.logo_read_for ?? spotInputs(client, ctx.rows.get("design_refs")), ...("logo_read_rule" in old ? { logo_read_rule: old.logo_read_rule } : {}),
+    background_from: background.from, at: now, logo_pick: record,
   };
   // The logo that was replaced is a candidate from now on. What its set's work read is the same search, so it is kept as that candidate's work.
   if (!standing && tone && tone.of === settings.logo_path && tone.facts && tone.paths && !tone.paths.site && !tone.paths.person && samePlacement(settings.placement, searchPlace(tone.facts.size.width, tone.facts.size.height))) {
@@ -1972,12 +2013,19 @@ export const STEPS: Record<string, StepDef> = {
   // logo the posts carry stays; one they do not carry gives way to the mark
   // they do, with its place from where it was found. The key of a row the
   // lifecycle wrote ends in that rule's version.
+  //
+  // The read of the logo's place (18 Nov 2026): a read that came back cut
+  // off or unreadable fails the step, which asks again on the lifecycle's
+  // own schedule, and is never kept as an answer. A row that holds such a
+  // read from before (a null read, designSettings.ts staleRead) has the
+  // read's version at the end of its key, so its step runs once and asks
+  // again. Every other row keeps the key it had, and nothing runs for it.
   design_settings: {
     policy: {},
     async inputs(db, client, rows) {
       const refs = rows.get("design_refs");
       const site = rows.get("brand_read")?.result?.logo_files;
-      const { data, error } = await db.from("design_brand_settings").select("source, logo_path, placement, logo_set").eq("client_id", client.id).maybeSingle();
+      const { data, error } = await db.from("design_brand_settings").select("source, logo_path, placement, logo_set, derived").eq("client_id", client.id).maybeSingle();
       if (error) throw new Error(`Could not read the design settings: ${error.message}`);
       // A row a person set has its logo, its place and its posts already: it waits for nothing (owner decision 2).
       if (data?.source === "person") return personKey(data, String(refs?.result?.synthesized_at ?? refs?.done_at ?? ""), site);
@@ -1985,9 +2033,14 @@ export const STEPS: Record<string, StepDef> = {
       if (!str(client.logo_url)) return null;
       if (!libraryPaths(client.design_references, client.harvested_design_references).length) return null;
       const b = client.brand_identity ?? {};
-      return `${spotInputs(client, refs)}|colors:${[b.primary_color, b.secondary_color, b.accent_color].join(",")}${toneKeyTail(site, data)}|pick:${LOGO_PICK_RULE}`;
+      return `${spotInputs(client, refs)}|colors:${[b.primary_color, b.secondary_color, b.accent_color].join(",")}${toneKeyTail(site, data)}|pick:${LOGO_PICK_RULE}${readKeyTail(data, rows.get("design_settings")?.inputs_key)}`;
     },
-    async run(db, client, ctx) {
+    async run(db, client, given) {
+      // A run whose read of the logo's place failed handed back the work its row held from before its inputs changed
+      // (failedRead). It is still that older work: on these inputs the step has done none of its own. The row of a
+      // failed run is the one that holds an error (it is marked running by the time it runs again, policy.ts).
+      const handedBack = !!given.previous?.error && given.previous.result?.[CARRIED] === true;
+      const ctx: StepContext = handedBack ? { ...given, previous: null } : given;
       const { data: existing, error } = await db.from("design_brand_settings").select(SETTINGS_COLUMNS).eq("client_id", client.id).maybeSingle();
       if (error) throw new Error(`Could not read the design settings: ${error.message}`);
       // A row a person set: its logo file, placement, background and date are theirs and are never written.
@@ -2011,7 +2064,8 @@ export const STEPS: Record<string, StepDef> = {
       else {
         const made = await writeDesignSettings(db, client, ctx, (existing ?? null) as SettingsRow | null);
         if ("outcome" in made) return made.outcome;
-        set = await settleLogoSet(db, client, ctx, made.row, { ...made.settings, ...carry });
+        // The read is made: what was handed back is this run's own work from here on.
+        set = await settleLogoSet(db, client, ctx, made.row, { ...made.settings, ...carry, ...(handedBack ? { [CARRIED]: false } : {}) });
       }
       if (set.status !== "done") return set;
       // The set is made. Now the logo itself: is it the mark the client's posts carry (logoPick.ts)?

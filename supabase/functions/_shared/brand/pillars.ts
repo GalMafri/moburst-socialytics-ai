@@ -25,6 +25,7 @@
 // Keywords are kept when no pillar stands.
 
 import { anthropicMessages } from "../anthropic.ts";
+import { answerText, roomFor } from "../anthropicReply.ts";
 import { clipText } from "../text/clip.ts";
 
 export const PILLARS_SYSTEM = `You are a social strategist naming a brand's content pillars.
@@ -376,15 +377,16 @@ export async function briefFromStrategyDoc(db: Db, path: string, apiKey: string 
     return text.length >= 80 ? { text, via: "text" } : null;
   }
   if (!apiKey) throw new PillarsError("model", "The AI connection is not configured.");
-  const { text } = await anthropicMessages({
+  // The copy's own size, and room for the model to think first. A copy that was cut off is no copy: half a brief is never kept.
+  const reply = await anthropicMessages({
     apiKey,
     body: {
-      model: "claude-sonnet-5", max_tokens: 3000,
+      model: "claude-sonnet-5", max_tokens: roomFor(3000),
       messages: [{ role: "user", content: [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: base64(doc.bytes) } }, { type: "text", text: DOC_BRIEF_PROMPT }] }],
     },
     onDropped: (p) => console.log(`[strategy-doc] dropped rejected parameter: ${p}`),
   });
-  const copied = trimBrief(text);
+  const copied = trimBrief(answerText(reply));
   if (copied.length < 80) throw new PillarsError("model", "The strategy document came back with almost no text.");
   return { text: copied, via: "pdf" };
 }

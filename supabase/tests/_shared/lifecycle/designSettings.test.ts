@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  bestNeutral, contrast, generatedMediaPath, groundRank, hidesInk, inkColor, libraryPaths, logoNormalization, logoStorePlan, parseLogoSpot, personKey, personOther, pickBackground, placementFor, pngSize, readInputs,
+  bestNeutral, contrast, generatedMediaPath, groundRank, hidesInk, inkColor, libraryPaths, LOGO_READ_RULE, logoNormalization, logoStorePlan, parseLogoSpot, readKeyTail, staleRead, personKey, personOther, pickBackground, placementFor, pngSize, readInputs,
   referencePaths, storedSpotRead, toneKeyTail, toPlacement, UNSEEN, weakestContrast,
 } from "../../../functions/_shared/lifecycle/designSettings";
 
@@ -209,12 +209,54 @@ describe("the stored read of the logo's spot", () => {
     expect(storedSpotRead({ source: "lifecycle", derived: null }, done(NEW_KEY), INPUTS)).toBeNull();
   });
 
-  it("reuses a stored read that found no spot", () => {
-    // A read that found no logo spot is kept as null: it stands for the default placement and is not asked again.
-    expect(storedSpotRead({ source: "lifecycle", derived: { logo_read: null, logo_read_for: INPUTS } }, null, INPUTS)).toEqual({ read: null });
-    expect(storedSpotRead({ source: "lifecycle", derived: { logo_read: null } }, done(OLD_KEY), INPUTS)).toEqual({ read: null });
+  it("reuses a null read only when it was stored by the rule that fails an unreadable reply", () => {
+    // Stored by the current rule, null says none of the posts could be loaded and nothing was asked: it stands for the default placement.
+    expect(storedSpotRead({ source: "lifecycle", derived: { logo_read: null, logo_read_for: INPUTS, logo_read_rule: LOGO_READ_RULE } }, null, INPUTS)).toEqual({ read: null });
+    // Before that rule a reply that was cut off was stored as null too: such a read is asked for again.
+    expect(storedSpotRead({ source: "lifecycle", derived: { logo_read: null, logo_read_for: INPUTS } }, null, INPUTS)).toBeNull();
+    expect(storedSpotRead({ source: "lifecycle", derived: { logo_read: null, logo_read_for: INPUTS, logo_read_rule: 1 } }, null, INPUTS)).toBeNull();
+    expect(storedSpotRead({ source: "lifecycle", derived: { logo_read: null } }, done(OLD_KEY), INPUTS)).toBeNull();
     // No read was ever stored.
     expect(storedSpotRead({ source: "lifecycle", derived: { placement_from: "default" } }, done(OLD_KEY), INPUTS)).toBeNull();
+  });
+
+  it("calls a read stale only when it is null, on a lifecycle row, and not stored by the rule", () => {
+    const row = (derived: Record<string, unknown> | null, source = "lifecycle") => ({ source, derived });
+    expect(staleRead(row({ logo_read: null, logo_read_for: INPUTS }))).toBe(true);
+    expect(staleRead(row({ logo_read: null }))).toBe(true);
+    expect(staleRead(row({ logo_read: null, logo_read_rule: 1 }))).toBe(true);
+    // Stored by the rule, a real answer, no read recorded (a new client whose first read failed), a person's row, no row.
+    expect(staleRead(row({ logo_read: null, logo_read_rule: LOGO_READ_RULE }))).toBe(false);
+    expect(staleRead(row({ logo_read: READ }))).toBe(false);
+    expect(staleRead(row({ logo_read: { shown: false, at: null, width: null } }))).toBe(false);
+    expect(staleRead(row({ placement_from: "default" }))).toBe(false);
+    expect(staleRead(row({ logo_read: null }, "person"))).toBe(false);
+    expect(staleRead(row(null))).toBe(false);
+    expect(staleRead(null)).toBe(false);
+  });
+
+  it("ends the key in the read's version only for a stale read, and for a step already keyed on it", () => {
+    const stale = { source: "lifecycle", derived: { logo_read: null, logo_read_for: INPUTS } };
+    const real = { source: "lifecycle", derived: { logo_read: READ, logo_read_for: INPUTS } };
+    // A client with a real read: nothing is added, so its key is the one it has today and its step does not run.
+    expect(readKeyTail(real, NEW_KEY)).toBe("");
+    expect(readKeyTail(real, null)).toBe("");
+    expect(readKeyTail(null, null)).toBe("");
+    // A stale read: the version, so the step runs once.
+    expect(readKeyTail(stale, NEW_KEY)).toBe("|read:2");
+    // Once the read is made the row is no longer stale, and the key the step holds keeps the version: no second run.
+    const made = { source: "lifecycle", derived: { logo_read: READ, logo_read_for: INPUTS, logo_read_rule: LOGO_READ_RULE } };
+    expect(readKeyTail(made, `${NEW_KEY}|pick:1|read:2`)).toBe("|read:2");
+    expect(readKeyTail(made, `${NEW_KEY}|pick:1`)).toBe("");
+  });
+
+  it("keeps a read that holds an answer, whichever rule stored it", () => {
+    // A whole reply was parsed to make it. "The posts do not show the logo" is such an answer, and it keeps the default placement.
+    const NONE = { shown: false, at: null, width: null };
+    expect(storedSpotRead({ source: "lifecycle", derived: { logo_read: NONE, logo_read_for: INPUTS } }, null, INPUTS)).toEqual({ read: NONE });
+    expect(storedSpotRead({ source: "lifecycle", derived: { logo_read: NONE, logo_read_for: INPUTS, logo_read_rule: LOGO_READ_RULE } }, null, INPUTS)).toEqual({ read: NONE });
+    expect(storedSpotRead({ source: "lifecycle", derived: { logo_read: READ, logo_read_for: INPUTS } }, null, INPUTS)).toEqual({ read: READ });
+    expect(placementFor(NONE, 3).from).toBe("default");
   });
 
   it("reuses a read from before the record existed only when the step's row is done on the same posts and logo", () => {

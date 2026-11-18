@@ -12,6 +12,7 @@
 // monthly hashtag refresh clears Instagram's (lifecycle step trend_hashtags),
 // since it rewrites exactly what Instagram searches.
 
+import { roomFor } from "../anthropicReply.ts";
 import { parseAnswer } from "../pipelines/competitive/analysis.ts";
 import type { FilterProfile } from "./filter.ts";
 import { HASHTAG } from "./hashtag.ts";
@@ -26,7 +27,8 @@ type Db = any;
 export const TREND_REWRITE_MODEL = "claude-sonnet-5-5";
 /** Fewer kept posts than this on a platform in a week is a coverage gap. */
 export const COVERAGE_FLOOR = 5;
-const MAX_TOKENS = 1000;
+/** A handful of searches, and room for the model to think first (anthropicReply.ts, roomFor). */
+const MAX_TOKENS = roomFor(1000);
 const SEARCH_CHARS = 80;
 
 /** What a week stored for one platform (trend_weeks.platforms). */

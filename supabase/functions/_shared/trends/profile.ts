@@ -8,6 +8,7 @@
 // keeps source 'person', and a row a person removed stays as a tombstone
 // (removed_at set), so a rewrite never brings it back.
 
+import { answerText, replyStopped, roomFor } from "../anthropicReply.ts";
 import { parseAnswer } from "../pipelines/competitive/analysis.ts";
 import { topCounts } from "../competitive/postSample.ts";
 import { textHash } from "../lifecycle/names.ts";
@@ -22,7 +23,8 @@ type Db = any;
 type Any = any;
 
 export const TREND_PROFILE_MODEL = "claude-opus-5-5";
-const MAX_TOKENS = 4000;
+/** The profile's own size, and room for the model to think first (anthropicReply.ts, roomFor). */
+const MAX_TOKENS = roomFor(4000);
 const DAY = 86_400_000;
 /** The best posts the hashtag evidence is counted from, own and competitors' each. */
 const BEST_POSTS = 30;
@@ -309,7 +311,7 @@ export function hashtagsRequest(current: { audience: string; fit_rubric: string;
     ...HASHTAG_PLATFORMS.map((p) => `\nCurrent ${p} hashtags:\n${list(current.hashtags[p] ?? [])}`),
     `\nAnswer in this shape:\n{"hashtags": {"instagram": [{"term": "#...", "reason": "..."}], "tiktok": [], "linkedin": []}}`,
   ].join("\n");
-  return { model: TREND_PROFILE_MODEL, max_tokens: 2000, system: HASHTAGS_SYSTEM, messages: [{ role: "user", content }] };
+  return { model: TREND_PROFILE_MODEL, max_tokens: roomFor(2000), system: HASHTAGS_SYSTEM, messages: [{ role: "user", content }] };
 }
 
 /** The refreshed hashtags in an answer, or what is wrong with them. */
@@ -328,18 +330,24 @@ export function parseHashtags(text: string, e: ProfileEvidence): { value: Record
   return problems.length ? { error: problems.join(" ") } : { value: tags };
 }
 
-export type ClaudeCall = (args: { apiKey: string; body: Record<string, unknown> }) => Promise<{ text: string }>;
+export type ClaudeCall = (args: { apiKey: string; body: Record<string, unknown> }) => Promise<{ text: string; stopReason?: string }>;
 
-/** One request, and one more with the problems named when the first answer does not parse. */
+/**
+ * One request, and one more with the problems named when the first answer
+ * does not parse. A first answer that was cut off or declined is no answer
+ * to correct: the same request is sent once more instead. Two calls at most
+ * either way, and a second answer that did not finish is read as empty.
+ */
 export async function askTwice<T>(call: ClaudeCall, apiKey: string, body: Record<string, unknown>, parse: (text: string) => { value: T } | { error: string }): Promise<{ value: T } | { error: string }> {
   const first = await call({ apiKey, body });
+  if (replyStopped(first)) return parse(answerText(await call({ apiKey, body })));
   const got = parse(first.text);
   if ("value" in got) return got;
   const messages = [...(body.messages as unknown[]), { role: "assistant", content: first.text }, {
     role: "user", content: `That answer has these problems: ${got.error} Send the whole JSON object again with them fixed.`,
   }];
   const second = await call({ apiKey, body: { ...body, messages } });
-  return parse(second.text);
+  return parse(answerText(second));
 }
 
 /** A client's topics, hashtags and exclusions that nobody removed. */

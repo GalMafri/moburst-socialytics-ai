@@ -42,6 +42,7 @@ import { runClip } from "./clipStep.ts";
 import { BUCKET, renewJobLease, saveJobProgress } from "../canva/jobs.ts";
 import { canvasLogoRect } from "../canva/brief.ts";
 import { anthropicMessages } from "../anthropic.ts";
+import { answerText, replySample, roomFor } from "../anthropicReply.ts";
 import { openaiKey } from "../openai/key.ts";
 import { ModelBusy, OPENAI_IMAGE_MODEL, imageEdit } from "../media/imageEdit.ts";
 import { KIT_MAKE_MS, KIT_MAX, KIT_MIN, MAX_KIT_TRIES, parseKitPick, kitCleanPrompt, kitStillCheckPrompt, parseKitStillCheck, kitNext, kitPaths, kitPickPrompt, type KitDone, kitClaimed, kitDoneOf, kitHolderOf, kitKeptFrom, kitState, kitTakenOver, kitWork, postsRouteInput } from "./kit.ts";
@@ -58,8 +59,8 @@ import { runFrame } from "./frame.ts";
 import { FRAME_JPEG_QUALITY, KIT_JPEG_QUALITY } from "../picture/contract.ts";
 import { checkScript, endScript, startScript } from "./sandbox.ts";
 
-/** Room for each check's answer (the model may think first, and that counts against it). */
-const CHECK_TOKENS = 2000;
+/** Each check's answer, and room for the model to think first, which counts against the limit (anthropicReply.ts, roomFor). */
+const CHECK_TOKENS = roomFor(2000);
 /** How often a running clip or join is asked about. */
 export const VIDEO_POLL_MS = 30_000;
 const MAX_COMPOSE = 3;
@@ -200,8 +201,8 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       const content = await jpegBlocks(admin, BUCKET, [s.frame_path]);
       content.push({ type: "text", text: marksPrompt(input.brand_name) });
       const result = await anthropicMessages({ apiKey: anthropicKey(), body: { model: "claude-opus-5-5", max_tokens: CHECK_TOKENS, messages: [{ role: "user", content }] } });
-      const marks = parseMarks(result.text);
-      if (!marks) throw new Error(`The opening frame could not be read for other brands' marks: ${result.text.slice(0, 200)}`);
+      const marks = parseMarks(answerText(result));
+      if (!marks) throw new Error(`The opening frame could not be read for other brands' marks: ${replySample(result)}`);
       s.frame_check = { writing: seen, marks };
       if (seen.writing || marks.marks) {
         console.warn(`[video-worker] job ${job.id}: the opening frame has ${seen.writing ? `writing (${seen.where})` : `other brands' marks (${marks.where})`}; drawing it again.`);
@@ -411,7 +412,7 @@ function titleDeps(admin: any, job: VideoJob): TitleDeps {
           ] }],
         },
       });
-      return parseRead(result.text);
+      return parseRead(answerText(result));
     },
   };
 }
@@ -450,8 +451,8 @@ async function footageWriting(admin: any, paths: string[], bucket = BUCKET): Pro
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
   const result = await anthropicMessages({ apiKey, body: { model: "claude-opus-5-5", max_tokens: CHECK_TOKENS, messages: [{ role: "user", content }] } });
-  const seen = parseFootageText(result.text);
-  if (!seen) throw new Error(`The footage's stills could not be read: ${result.text.slice(0, 200)}`);
+  const seen = parseFootageText(answerText(result));
+  if (!seen) throw new Error(`The footage's stills could not be read: ${replySample(result)}`);
   return seen;
 }
 
@@ -591,9 +592,9 @@ async function makeKit(admin: any, job: VideoJob, videoStyle: any, brand: string
     const content = await jpegBlocks(admin, REFERENCES, frames);
     content.push({ type: "text", text: kitPickPrompt(brand, frames.length, KIT_MAX) });
     const result = await anthropicMessages({ apiKey, body: { model: "claude-opus-5-5", max_tokens: CHECK_TOKENS, messages: [{ role: "user", content }] } });
-    const pick = parseKitPick(result.text, frames.length, KIT_MAX);
-    // An answer that cannot be read is a claim with no progress: the next pass asks again, as a try of the kit.
-    if (pick === null) { keepKitError(s, `The kit's pick could not be read: ${result.text.slice(0, 200)}`); return "wait"; }
+    const pick = parseKitPick(answerText(result), frames.length, KIT_MAX);
+    // An answer that cannot be read, or was cut off, is a claim with no progress: the next pass asks again, as a try of the kit.
+    if (pick === null) { keepKitError(s, `The kit's pick could not be read: ${replySample(result)}`); return "wait"; }
     // [] is an answer too: no still qualifies, and the kit is stored as none (the posts route).
     s.kit_pick = pick.map((i) => frames[i]);
     work = kitWork(s.kit_pick.length, done, s.kit_tries);
@@ -638,8 +639,8 @@ async function kitStillCheck(admin: any, path: string): Promise<{ writing: boole
   const content: unknown[] = await jpegBlocks(admin, REFERENCES, [path]);
   content.push({ type: "text", text: kitStillCheckPrompt() });
   const result = await anthropicMessages({ apiKey: anthropicKey(), body: { model: "claude-opus-5-5", max_tokens: CHECK_TOKENS, messages: [{ role: "user", content }] } });
-  const seen = parseKitStillCheck(result.text);
-  if (!seen) throw new Error(`The kit still could not be read: ${result.text.slice(0, 200)}`);
+  const seen = parseKitStillCheck(answerText(result));
+  if (!seen) throw new Error(`The kit still could not be read: ${replySample(result)}`);
   return seen;
 }
 
@@ -737,9 +738,9 @@ async function runStyleStep(admin: any, job: VideoJob): Promise<VideoStepResult>
       content.push({ type: "text", text: videoStylePrompt(client?.name ?? "the brand", videos.length, STYLE_FRAMES) });
       const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
       if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
-      const result = await anthropicMessages({ apiKey, body: { model: "claude-opus-5-5", max_tokens: 4000, messages: [{ role: "user", content }] } });
-      const style = parseVideoStyle(result.text);
-      if (!style) throw new Error(`The client's videos could not be read: ${result.text.slice(0, 200)}`);
+      const result = await anthropicMessages({ apiKey, body: { model: "claude-opus-5-5", max_tokens: roomFor(4000), messages: [{ role: "user", content }] } });
+      const style = parseVideoStyle(answerText(result));
+      if (!style) throw new Error(`The client's videos could not be read: ${replySample(result)}`);
       // A style learned again gets a new kit, made next from these stills.
       await mergeVideoStyle(admin, job.client_id, { profile: style, frames: s.frames, videos: videos.length, frames_per_video: STYLE_FRAMES, made_at: new Date().toISOString(), kit: null, kit_at: null, kit_started_at: null, kit_job: null });
       s.style = style;

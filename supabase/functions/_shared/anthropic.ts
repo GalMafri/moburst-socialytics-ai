@@ -17,6 +17,7 @@
 // is folded into the user turn as an instruction and the call retried, and
 // every text block is read. None of it depends on which model is current.
 
+import { replyStopped, TIMED_OUT } from "./anthropicReply.ts";
 import { wellFormedBody } from "./text/clip.ts";
 
 export const ANTHROPIC_API = "https://api.anthropic.com";
@@ -94,6 +95,18 @@ export type AnthropicResult = { text: string; stopReason: string; raw: unknown }
  * that names a parameter, that parameter is dropped and the call retried, up
  * to three times, so a model that stops accepting one of them costs a retry
  * rather than an outage.
+ *
+ * A reply that was cut off or declined comes back as it arrived, with what
+ * stopped it in `stopReason`. Read the answer through answerText, and size
+ * `max_tokens` with roomFor (both in anthropicReply.ts), unless the caller
+ * has its own way with such a reply.
+ *
+ * `waitMs` bounds the whole call, its retries included, for a caller that a
+ * person or a leased job is waiting on. When the time runs out the request
+ * is ended and the result is a reply that did not arrive (stopReason
+ * TIMED_OUT, no text), so the caller takes the same path as for a reply that
+ * was cut off: nothing is thrown. A caller's own `signal` still throws, as
+ * it always did.
  */
 export async function anthropicMessages(args: {
   apiKey: string;
@@ -102,7 +115,37 @@ export async function anthropicMessages(args: {
   onDropped?: (param: string) => void;
   /** Ends the call when it fires (a pipeline step's time running out). */
   signal?: AbortSignal;
+  /** The longest the whole call may take, in milliseconds. Past it the result reads as no answer. */
+  waitMs?: number;
 }): Promise<AnthropicResult> {
+  if (args.waitMs === undefined) return await send(args, args.signal);
+  if (!(args.waitMs > 0)) return outOfTime(args.body, args.waitMs);
+  // One signal for the request: ended by the wait running out, or by the caller's own signal.
+  const end = new AbortController();
+  let ranOut = false;
+  const timer = setTimeout(() => { ranOut = true; end.abort(new Error("The wait for the model's reply ran out.")); }, args.waitMs);
+  const stop = () => end.abort(args.signal?.reason);
+  if (args.signal?.aborted) stop();
+  else args.signal?.addEventListener("abort", stop, { once: true });
+  try {
+    return await send(args, end.signal);
+  } catch (e) {
+    // Only the wait running out reads as no answer: the caller's own signal, and every other failure, is thrown as before.
+    if (ranOut) return outOfTime(args.body, args.waitMs);
+    throw e;
+  } finally {
+    clearTimeout(timer);
+    args.signal?.removeEventListener("abort", stop);
+  }
+}
+
+/** The result of a call whose wait ran out, said once in the log like any reply that did not finish. */
+function outOfTime(body: Record<string, unknown>, waitMs: number): AnthropicResult {
+  console.warn(`[anthropic] reply did not arrive in ${Math.round(waitMs / 1000)} s: model ${String(body.model ?? "?")}, max_tokens ${String(body.max_tokens ?? "?")}`);
+  return { text: "", stopReason: TIMED_OUT, raw: null };
+}
+
+async function send(args: { apiKey: string; body: Record<string, unknown>; onDropped?: (param: string) => void }, signal: AbortSignal | undefined): Promise<AnthropicResult> {
   const body: Record<string, unknown> = { ...args.body };
 
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -114,7 +157,7 @@ export async function anthropicMessages(args: {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify(body),
-      ...(args.signal ? { signal: args.signal } : {}),
+      ...(signal ? { signal } : {}),
     });
 
     if (resp.ok) {
@@ -125,7 +168,11 @@ export async function anthropicMessages(args: {
         .filter((b) => b?.type === "text")
         .map((b) => b.text || "")
         .join("\n");
-      return { text, stopReason: String(data.stop_reason || ""), raw: data };
+      const result = { text, stopReason: String(data.stop_reason || ""), raw: data };
+      const stopped = replyStopped(result);
+      // Said once, here, so a reply that did not finish shows in the function's log whatever its caller does with it.
+      if (stopped) console.warn(`[anthropic] reply ${stopped === "refused" ? "declined" : "cut off"} (${result.stopReason}): model ${String(body.model ?? "?")}, max_tokens ${String(body.max_tokens ?? "?")}, output tokens ${String(data.usage?.output_tokens ?? "?")}, answer ${text.length} characters`);
+      return result;
     }
 
     const detail = await resp.text().catch(() => "");

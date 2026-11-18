@@ -7,6 +7,7 @@
 // (src/test/copyWritersUseVoice.test.ts checks this).
 
 import { anthropicMessages } from "../anthropic.ts";
+import { answerText, roomFor } from "../anthropicReply.ts";
 import { consolidatePrompt, mergePrompt, parseConsolidation, parseMergeOps, parseOverallVoice, parseVoiceProfile, voicePlatforms, voiceProfilePrompt, voiceSample, VOICE_RULE, type ClientVoice, type LearnedChange, type MemorySignal, type Preference, type SocialVoice } from "./voice.ts";
 import { bestExamples, rhythmFromPosts, scoreOwnPosts, type OwnPost } from "../calendar/evidence.ts";
 import { pointsInUse, readNoteRows, standingNotes, todayIn } from "../notes/notes.ts";
@@ -76,8 +77,9 @@ export async function learnFromSignal(admin: Db, clientId: string, signal: Memor
     admin.from("clients").select("name").eq("id", clientId).maybeSingle(),
     activePreferences(admin, clientId),
   ]);
-  const result = await anthropicMessages({ apiKey: apiKey(), body: { model: MEMORY_MODEL, max_tokens: 1200, messages: [{ role: "user", content: mergePrompt(String(client?.name ?? "the client"), current, signal) }] } });
-  const ops = parseMergeOps(result.text, current.map((p) => p.id));
+  const result = await anthropicMessages({ apiKey: apiKey(), body: { model: MEMORY_MODEL, max_tokens: roomFor(1200), messages: [{ role: "user", content: mergePrompt(String(client?.name ?? "the client"), current, signal) }] } });
+  // A reply that was cut off or declined teaches nothing, as a reply that cannot be read does.
+  const ops = parseMergeOps(answerText(result), current.map((p) => p.id));
   const source = signal.kind === "copy_edit" ? "copy_edit" : signal.kind;
   const evidence = signal.kind === "copy_edit" ? excerpt(`${signal.before} => ${signal.after}`)
     : signal.kind === "moment_removed" ? excerpt(`Removed the planned post for ${signal.moment}${signal.date ? ` on ${signal.date}` : ""}.`)
@@ -171,8 +173,8 @@ export async function consolidateMemory(admin: Db, clientId: string): Promise<{ 
   const current = (await activePreferences(admin, clientId)).sort((a, b) => a.last_confirmed_at.localeCompare(b.last_confirmed_at));
   if (current.length < 2) return { before: current.length, after: current.length };
   const { data: client } = await admin.from("clients").select("name").eq("id", clientId).maybeSingle();
-  const result = await anthropicMessages({ apiKey: apiKey(), body: { model: MEMORY_MODEL, max_tokens: 3000, messages: [{ role: "user", content: consolidatePrompt(String(client?.name ?? "the client"), current) }] } });
-  const merged = parseConsolidation(result.text, current.map((p) => p.id));
+  const result = await anthropicMessages({ apiKey: apiKey(), body: { model: MEMORY_MODEL, max_tokens: roomFor(3000), messages: [{ role: "user", content: consolidatePrompt(String(client?.name ?? "the client"), current) }] } });
+  const merged = parseConsolidation(answerText(result), current.map((p) => p.id));
   if (!merged.length) throw new Error("The memory merge returned nothing usable; nothing was changed.");
   const byId = new Map(current.map((p) => [p.id, p]));
   const now = new Date().toISOString();
@@ -222,9 +224,10 @@ export async function buildVoiceProfile(admin: Db, clientId: string, posts: OwnP
   let overall: SocialVoice["overall"] | null = null;
   if (Object.keys(sample).length) {
     const byPlatform = Object.fromEntries(Object.entries(sample).map(([p, xs]) => [p, xs.map(({ text, date, format }) => ({ text, date, format }))]));
-    const result = await anthropicMessages({ apiKey: apiKey(), body: { model: COPY_MODEL, max_tokens: 6000, messages: [{ role: "user", content: voiceProfilePrompt(String(client?.name ?? "the client"), byPlatform, own) }] } });
-    profile = parseVoiceProfile(result.text, own, names);
-    overall = parseOverallVoice(result.text, names);
+    const result = await anthropicMessages({ apiKey: apiKey(), body: { model: COPY_MODEL, max_tokens: roomFor(6000), messages: [{ role: "user", content: voiceProfilePrompt(String(client?.name ?? "the client"), byPlatform, own) }] } });
+    const reply = answerText(result);
+    profile = parseVoiceProfile(reply, own, names);
+    overall = parseOverallVoice(reply, names);
     if (!overall || (own.length && !Object.keys(profile).length)) throw new Error("The voice profile reply could not be read.");
   }
   const examples = bestExamples(scoreOwnPosts(posts, now, { top: 30 }).top);

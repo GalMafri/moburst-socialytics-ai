@@ -2,6 +2,7 @@
 // groups the kept posts from every platform into 3 to 6 themes. Themes are
 // what people see first; the posts are the evidence behind them.
 
+import { roomFor } from "../anthropicReply.ts";
 import { parseAnswer } from "../pipelines/competitive/analysis.ts";
 import type { FilterProfile } from "./filter.ts";
 import { fenced, POSTS_ARE_DATA, withoutDashes } from "./text.ts";
@@ -66,7 +67,7 @@ export function themesRequest(profile: Pick<FilterProfile, "audience" | "fit_rub
     `\nThis week's kept posts:\n\n${posts}`,
     `\nAnswer in this shape:\n{"themes": [{"title": "...", "happening": "...", "why_it_matters": "...", "angle": "...", "post_ids": ["K1", "K4"]}]}`,
   ].join("\n");
-  return { model: TREND_THEMES_MODEL, max_tokens: 6000, system: THEMES_SYSTEM, messages: [{ role: "user", content }] };
+  return { model: TREND_THEMES_MODEL, max_tokens: roomFor(6000), system: THEMES_SYSTEM, messages: [{ role: "user", content }] };
 }
 
 /** A theme field as stored: trimmed, with no em or en dash (people and clients read it on the report and its deck). */

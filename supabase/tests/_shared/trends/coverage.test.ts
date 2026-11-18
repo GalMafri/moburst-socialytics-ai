@@ -4,6 +4,7 @@
 // running gets its searches rewritten from the profile. Proves when a
 // platform counts as short, what Claude is asked, and which answers are refused.
 import { describe, expect, it } from "vitest";
+import { roomFor } from "../../../functions/_shared/anthropicReply";
 import { COVERAGE_FLOOR, coverageShort, lastKept, parseRewrite, rewriteRequest, TREND_REWRITE_MODEL, weeksAfter, withoutRemoved, type CoverageWeek } from "../../../functions/_shared/trends/coverage";
 import { MAX_SEARCHES } from "../../../functions/_shared/trends/sources";
 import { TREND_WRITERS } from "../../../functions/_shared/trends/writer";
@@ -81,6 +82,8 @@ describe("the rewrite request", () => {
     const body = rewriteRequest(profile, "tiktok", ["mobile game UA", "app marketing", "marketing tips"], [2, 1], { keep: ["mobile game UA"], avoid: ["growth hacks"] }) as { model: string; max_tokens: number; messages: Array<{ content: string }> };
     expect(TREND_REWRITE_MODEL).toBe("claude-sonnet-5-5");
     expect(body.model).toBe(TREND_REWRITE_MODEL);
+    // A handful of searches, and room for the model to think first.
+    expect(body.max_tokens).toBe(roomFor(1000));
     const prompt = body.messages[0].content;
     for (const part of ["TikTok", "App founders", "Posts that teach app growth.", "app marketing", "marketing tips", "2 posts", "1 post", "Moburst", "SplitMetrics", "he, en", "IL", "fake reviews", "growth hacks", "mobile game UA"]) expect(prompt).toContain(part);
     // A person's search keeps its place, so there is room for 7 more.

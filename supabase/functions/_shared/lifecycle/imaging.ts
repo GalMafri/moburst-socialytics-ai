@@ -10,6 +10,7 @@ import { Image } from "https://deno.land/x/imagescript@1.3.0/mod.ts";
 import { svgToPng } from "../render/resvg.ts";
 import { cutLogo } from "../design-system/logoAsset.ts";
 import { anthropicMessages } from "../anthropic.ts";
+import { answerText, replySample, roomFor } from "../anthropicReply.ts";
 import { imageSize } from "../design/logoPick.ts";
 import { generatedMediaPath, inkColor, logoNormalization, logoSpotPrompt, parseLogoSpot, pngSize, type LogoSpot } from "./designSettings.ts";
 import { wholeInks } from "../design/logoTone.ts";
@@ -22,6 +23,14 @@ const BUCKET = "generated-media";
 /** The read of a logo spot uses the same model as the read of the client's videos. */
 const SPOT_MODEL = "claude-opus-5-5";
 const SPOT_POSTS = 6;
+/** The read's answer is one short JSON object. The model thinks before it writes it, so the call asks for room for that too (anthropicReply.ts, roomFor). */
+const SPOT_ANSWER_TOKENS = 400;
+/**
+ * The longest the read may take. The lifecycle job that runs it holds a
+ * lease of 300 seconds (run-scheduled-jobs/worker.ts, LEASE_SECONDS): a read
+ * that outlived it would be started a second time, and paid for twice.
+ */
+const SPOT_WAIT_MS = 150_000;
 
 export interface LogoFile {
   path: string;
@@ -201,7 +210,15 @@ function base64(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
-/** Where the client's own designed posts put the logo, read from up to six of them. One model call. */
+/**
+ * Where the client's own designed posts put the logo, read from up to six of
+ * them. One model call. Null only when none of the posts could be loaded, so
+ * nothing was asked. A reply that was cut off, declined, too long in coming
+ * (SPOT_WAIT_MS) or not the JSON asked for says nothing about the posts: it throws, so the step fails and
+ * asks again on its own schedule, and nothing is kept as the read (until
+ * 18 Nov 2026 such a reply was stored as "no place found", and the client's
+ * logo stayed at the default place for good).
+ */
 export async function readLogoSpot(db: Db, brand: string, referencePaths: string[], apiKey: string): Promise<LogoSpot | null> {
   // deno-lint-ignore no-explicit-any
   const content: any[] = [];
@@ -219,6 +236,8 @@ export async function readLogoSpot(db: Db, brand: string, referencePaths: string
   }
   if (!content.length) return null;
   content.push({ type: "text", text: logoSpotPrompt(brand, content.length) });
-  const result = await anthropicMessages({ apiKey, body: { model: SPOT_MODEL, max_tokens: 400, messages: [{ role: "user", content }] } });
-  return parseLogoSpot(result.text);
+  const result = await anthropicMessages({ apiKey, body: { model: SPOT_MODEL, max_tokens: roomFor(SPOT_ANSWER_TOKENS), messages: [{ role: "user", content }] }, waitMs: SPOT_WAIT_MS });
+  const spot = parseLogoSpot(answerText(result));
+  if (!spot) throw new Error(`The logo's place on the client's posts could not be read: ${replySample(result)}`);
+  return spot;
 }

@@ -14,6 +14,7 @@
 // wrote for a part is cleared before the part is read again.
 
 import { anthropicMessages } from "../anthropic.ts";
+import { answerText, roomFor } from "../anthropicReply.ts";
 import { MEMORY_MODEL } from "../voice/load.ts";
 import { retryWait } from "../calendar/runWeek.ts";
 import { inheritedLinks, parseReading, pointsInUse, readingPrompt, readNoteRows, todayIn, NOTES_BUCKET, type LinkRow, type NoteFileType } from "./notes.ts";
@@ -44,8 +45,8 @@ export interface NotesDeps {
   parsers(): Promise<Parsers>;
 }
 
-/** Room for the thinking and the points of one part. */
-export const READ_MAX_TOKENS = 6000;
+/** The points of one part, and room for the model to think first (anthropicReply.ts, roomFor). */
+export const READ_MAX_TOKENS = roomFor(6000);
 
 /** The note a rewrite with no person carries (section 9). */
 export const rewriteNote = (brand: string) => `Follow what ${brand} told the team in its newest notes.`;
@@ -173,7 +174,8 @@ async function readOnePart(admin: Db, client: Client, note: WaitingNote, deps: N
   const result = await anthropicMessages({ apiKey: apiKey(), body: { model: MEMORY_MODEL, max_tokens: READ_MAX_TOKENS, messages: [{ role: "user", content }] } });
   const u = usage(result.raw);
   const tokens = { input_tokens: note.input_tokens + u.input, output_tokens: note.output_tokens + u.output };
-  const reading = parseReading(result.text, { aliases, platforms, today });
+  // A reply that was cut off or declined is a reply that could not be read.
+  const reading = parseReading(answerText(result), { aliases, platforms, today });
   if (!reading) {
     // Every call is counted on the note, a reply that could not be read too.
     await must(admin.from("client_notes").update({ ...tokens, updated_at: now.toISOString() }).eq("id", note.id), "Could not count the reading");
