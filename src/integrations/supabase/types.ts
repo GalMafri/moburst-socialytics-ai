@@ -4706,6 +4706,7 @@ export type Database = {
         Args: { p_dry_run?: boolean; p_now?: string }
         Returns: Json
       }
+      enqueue_sprout_onboarding_now: { Args: never; Returns: Json }
       enqueue_trend_refresh_jobs: {
         Args: { p_dry_run?: boolean; p_now?: string }
         Returns: {
