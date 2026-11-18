@@ -69,7 +69,10 @@ function Figure({ value, label }: { value: number; label: string }) {
 }
 
 // Post table columns: the post, views, likes, comments, shares, the key figure, the link.
-const POST_GRID = "grid items-center gap-x-4 grid-cols-[minmax(0,1fr)_72px_20px] md:grid-cols-[minmax(0,1fr)_repeat(4,64px)_96px_20px]";
+// Every row and the header share this one grid, so each figure sits under its heading.
+const POST_GRID = "grid items-center gap-x-6 grid-cols-[minmax(0,1fr)_88px_24px] md:grid-cols-[minmax(0,1fr)_repeat(4,56px)_88px_24px]";
+const HEAD = "text-[13px] leading-5 font-medium text-[#b1b7c1]";
+const FIGURE = "hidden md:block text-[13px] leading-5 text-right tabular-nums text-white";
 
 function PostRow({ post, staff, folded = false }: { post: TrendPost; staff: boolean; folded?: boolean }) {
   // A link comes from the post's own network; only a web address is made one.
@@ -81,24 +84,24 @@ function PostRow({ post, staff, folded = false }: { post: TrendPost; staff: bool
   const measured = staff ? null : measuredEngagements(post);
   const score = staff && post.engagement != null ? Math.round(Number(post.engagement)) : null;
   return (
-    <li data-print-show={folded ? "true" : undefined} className={`${POST_GRID} py-2.5 -mx-2 px-2 rounded-[8px] hover:bg-[rgba(255,255,255,0.03)] transition-colors${folded ? " hidden" : ""}`}>
-      <div className="min-w-0 flex items-start gap-3">
-        <span className="mt-0.5 shrink-0 text-[#b1b7c1]" title={platformName(post.platform)} role="img" aria-label={platformName(post.platform)}>
+    <li data-print-show={folded ? "true" : undefined} className={`${POST_GRID} py-3 border-t border-[rgba(255,255,255,0.05)]${folded ? " hidden" : ""}`}>
+      <div className="min-w-0 flex items-center gap-3">
+        <span className="h-8 w-8 shrink-0 rounded-full bg-[rgba(255,255,255,0.06)] flex items-center justify-center text-white" title={platformName(post.platform)} role="img" aria-label={platformName(post.platform)}>
           <PlatformIcon platform={post.platform} className="h-4 w-4" />
         </span>
         <div className="min-w-0">
-          <p className="t-label truncate">
+          <p className="text-[13px] leading-5 truncate">
             <span className="text-white font-medium">{post.author}</span>
-            {meta.length > 0 && <span> · {meta.join(" · ")}</span>}
+            {meta.length > 0 && <span className="text-[#b1b7c1]"> · {meta.join(" · ")}</span>}
           </p>
-          {shown && <p className="t-label !text-[#b1b7c1] truncate" title={text}>{`"${shown}${shown.length < text.length ? "…" : ""}"`}</p>}
+          {shown && <p className="text-[13px] leading-5 text-[#b1b7c1] truncate" title={text}>{shown}{shown.length < text.length ? "…" : ""}</p>}
         </div>
       </div>
-      <span className="hidden md:block t-label !text-white text-right tabular-nums"><Figure value={post.views} label="views" /></span>
-      <span className="hidden md:block t-label !text-white text-right tabular-nums"><Figure value={post.likes} label="likes" /></span>
-      <span className="hidden md:block t-label !text-white text-right tabular-nums"><Figure value={post.comments} label="comments" /></span>
-      <span className="hidden md:block t-label !text-white text-right tabular-nums"><Figure value={post.shares} label="shares" /></span>
-      <span className="t-h4 text-right tabular-nums">
+      <span className={FIGURE}><Figure value={post.views} label="views" /></span>
+      <span className={FIGURE}><Figure value={post.likes} label="likes" /></span>
+      <span className={FIGURE}><Figure value={post.comments} label="comments" /></span>
+      <span className={FIGURE}><Figure value={post.shares} label="shares" /></span>
+      <span className="text-[15px] leading-5 font-semibold text-right tabular-nums text-white">
         {measured != null && measured > 0 && (
           <span title="Likes, comments and shares on this post">
             <span aria-hidden>{compact(measured)}</span>
@@ -122,7 +125,7 @@ function PostRow({ post, staff, folded = false }: { post: TrendPost; staff: bool
   );
 }
 
-/** One theme as a ranked row. `onDismiss` is given only on Analytics, where staff may dismiss a theme; a report and a client never see it. */
+/** One theme. `onDismiss` is given only on Analytics, where staff may dismiss a theme; a report and a client never see it. */
 function ThemeRow({ theme, rank, staff, onDismiss }: { theme: TrendTheme; rank: number; staff: boolean; onDismiss?: () => void }) {
   const [open, setOpen] = useState(false);
   const [allPosts, setAllPosts] = useState(false);
@@ -131,77 +134,78 @@ function ThemeRow({ theme, rank, staff, onDismiss }: { theme: TrendTheme; rank: 
   const long = (theme.happening?.length ?? 0) > LONG.happening || (theme.why_it_matters?.length ?? 0) > LONG.body || (theme.angle?.length ?? 0) > LONG.body;
   const clamp = (lines: string) => (long && !open ? lines : "");
   return (
-    <article aria-labelledby={titleId} className="grid grid-cols-[28px_minmax(0,1fr)] md:grid-cols-[48px_minmax(0,1fr)] gap-x-3 md:gap-x-5 p-card md:px-6 md:py-6">
-      <span className="t-h3 md:t-h2 !text-[#b1b7c1]/60 tabular-nums leading-[24px] md:leading-[26px]" aria-hidden>{String(rank).padStart(2, "0")}</span>
-      <div className="min-w-0">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 space-y-1">
-            <h3 id={titleId} className="t-h3">{theme.title}</h3>
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 t-label">
-              <span className="flex items-center gap-2 text-[#b1b7c1]">
-                {themePlatforms(theme).map((p) => (
-                  <span key={p} title={platformName(p)} className="inline-flex">
-                    <PlatformIcon platform={p} className="h-3.5 w-3.5" />
-                    <span className="sr-only">{platformName(p)}</span>
-                  </span>
-                ))}
-              </span>
-              {formats.length > 0 && <span>{formats.join(", ")}</span>}
-            </div>
+    <article aria-labelledby={titleId} className="px-6 py-7">
+      {/* Title row: the rank, the theme, where it shows up. */}
+      <div className="flex items-start gap-4">
+        <span className="h-8 w-8 shrink-0 rounded-full bg-[rgba(185,224,69,0.12)] text-[#b9e045] text-[13px] font-semibold tabular-nums flex items-center justify-center" aria-hidden>{rank}</span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-4">
+            <h3 id={titleId} className="t-h3 pt-1">{theme.title}</h3>
+            {staff && onDismiss && <Button size="sm" variant="ghost" className="shrink-0 -mr-2" onClick={onDismiss}>Dismiss</Button>}
           </div>
-          {staff && onDismiss && <Button size="sm" variant="ghost" className="shrink-0 -mr-2 -mt-1" onClick={onDismiss}>Dismiss</Button>}
-        </div>
-
-        {theme.happening && <p className={`t-read mt-3 ${clamp("line-clamp-2")}`}>{theme.happening}</p>}
-
-        {(theme.why_it_matters || theme.angle) && (
-          <div className="mt-4 grid gap-x-8 gap-y-4 lg:grid-cols-2">
-            {theme.why_it_matters && (
-              <div>
-                <p className="t-label mb-1">Why it matters</p>
-                <p className={`t-secondary ${clamp("line-clamp-3")}`}>{theme.why_it_matters}</p>
-              </div>
-            )}
-            {theme.angle && (
-              <div className="border-l-2 border-[#b9e045] pl-4">
-                <p className="t-label !text-[#b9e045] font-medium mb-1">The angle</p>
-                <p className={`t-secondary font-medium ${clamp("line-clamp-3")}`}>{theme.angle}</p>
-              </div>
-            )}
-          </div>
-        )}
-
-        {long && (
-          <button type="button" data-print="hide" aria-expanded={open} onClick={() => setOpen((v) => !v)} className="t-link mt-3">
-            {open ? "Show less" : "Read more"}
-          </button>
-        )}
-
-        {theme.posts.length > 0 && (
-          <div className="mt-5">
-            <div className={`${POST_GRID} pb-1.5 t-label !text-[#b1b7c1]/60 border-b border-[rgba(255,255,255,0.06)]`}>
-              <span>Example posts</span>
-              <span className="hidden md:block text-right">Views</span>
-              <span className="hidden md:block text-right">Likes</span>
-              <span className="hidden md:block text-right">Comments</span>
-              <span className="hidden md:block text-right">Shares</span>
-              <span className="text-right">{staff ? <span data-print="hide">Score</span> : "Engagements"}</span>
-              <span />
-            </div>
-            <ul className="divide-y divide-[rgba(255,255,255,0.04)]">
-              {theme.posts.map((post, i) => (
-                // Past the first few, a post stays in the PDF but waits for "Show all" on screen.
-                <PostRow key={post.url} post={post} staff={staff} folded={i >= POSTS_SHOWN && !allPosts} />
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] leading-5 text-[#b1b7c1]">
+            <span className="flex items-center gap-2 text-white">
+              {themePlatforms(theme).map((p) => (
+                <span key={p} title={platformName(p)} className="inline-flex">
+                  <PlatformIcon platform={p} className="h-4 w-4" />
+                  <span className="sr-only">{platformName(p)}</span>
+                </span>
               ))}
-            </ul>
-            {theme.posts.length > POSTS_SHOWN && (
-              <button type="button" data-print="hide" aria-expanded={allPosts} onClick={() => setAllPosts((v) => !v)} className="t-link mt-2">
-                {allPosts ? "Show fewer posts" : `Show all ${theme.posts.length} posts`}
-              </button>
-            )}
+            </span>
+            {formats.length > 0 && <span>{formats.join(", ")}</span>}
+            <span>{plural(theme.posts.length, "example post")}</span>
           </div>
+        </div>
+      </div>
+
+      {/* Body, aligned under the title: the story on the left, the angle as the takeaway on the right. */}
+      <div className="mt-5 md:pl-12 grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-8">
+        <div className="min-w-0 space-y-4">
+          {theme.happening && <p className={`text-[15px] leading-6 text-white ${clamp("line-clamp-3")}`}>{theme.happening}</p>}
+          {theme.why_it_matters && (
+            <div>
+              <p className={`${HEAD} mb-1.5`}>Why it matters</p>
+              <p className={`text-[15px] leading-6 text-[#b1b7c1] ${clamp("line-clamp-3")}`}>{theme.why_it_matters}</p>
+            </div>
+          )}
+          {long && (
+            <button type="button" data-print="hide" aria-expanded={open} onClick={() => setOpen((v) => !v)} className="t-link">
+              {open ? "Show less" : "Read more"}
+            </button>
+          )}
+        </div>
+        {theme.angle && (
+          <aside className="glass-accent p-5 self-start">
+            <p className={`${HEAD} !text-[#b9e045] mb-2`}>The angle</p>
+            <p className={`text-[15px] leading-6 font-medium text-white ${clamp("line-clamp-5")}`}>{theme.angle}</p>
+          </aside>
         )}
       </div>
+
+      {theme.posts.length > 0 && (
+        <div className="mt-6 md:pl-12">
+          <div className={`${POST_GRID} pb-2`}>
+            <span className={HEAD}>Example posts</span>
+            <span className={`${HEAD} hidden md:block text-right`}>Views</span>
+            <span className={`${HEAD} hidden md:block text-right`}>Likes</span>
+            <span className={`${HEAD} hidden md:block text-right`}>Comments</span>
+            <span className={`${HEAD} hidden md:block text-right`}>Shares</span>
+            <span className={`${HEAD} text-right`}>{staff ? <span data-print="hide">Score</span> : "Engagements"}</span>
+            <span />
+          </div>
+          <ul>
+            {theme.posts.map((post, i) => (
+              // Past the first few, a post stays in the PDF but waits for "Show all" on screen.
+              <PostRow key={post.url} post={post} staff={staff} folded={i >= POSTS_SHOWN && !allPosts} />
+            ))}
+          </ul>
+          {theme.posts.length > POSTS_SHOWN && (
+            <button type="button" data-print="hide" aria-expanded={allPosts} onClick={() => setAllPosts((v) => !v)} className="t-link mt-3">
+              {allPosts ? "Show fewer posts" : `Show all ${theme.posts.length} posts`}
+            </button>
+          )}
+        </div>
+      )}
     </article>
   );
 }
@@ -234,7 +238,7 @@ export function useThemePlatformFilter(themes: TrendTheme[]): { filter: ReactNod
   return { filter, shown, note };
 }
 
-/** The themes, newest week first: a plain heading per week over one panel of ranked rows. */
+/** The themes, newest week first: one panel per week, its heading inside, the themes divided below it. */
 export function ThemeWeeks({ themes, staff, onDismiss }: { themes: TrendTheme[]; staff: boolean; onDismiss?: (theme: TrendTheme) => void }) {
   return (
     <>
@@ -242,14 +246,14 @@ export function ThemeWeeks({ themes, staff, onDismiss }: { themes: TrendTheme[];
         const posts = list.reduce((n, t) => n + t.posts.length, 0);
         const headingId = `trend-week-${week}`;
         return (
-          <section key={week} aria-labelledby={headingId} className="space-y-3">
-            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-1">
-              <h3 id={headingId} className="t-h3">Week of {formatDate(week)}</h3>
-              <p className="t-label">{[plural(list.length, "theme"), plural(posts, "example post")].join(" · ")}</p>
+          <section key={week} aria-labelledby={headingId}>
+          <Card className="divide-y divide-[rgba(255,255,255,0.06)]">
+            <div className="px-6 py-4 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+              <h3 id={headingId} className="t-h2">Week of {formatDate(week)}</h3>
+              <p className="text-[13px] leading-5 text-[#b1b7c1]">{[plural(list.length, "theme"), plural(posts, "example post")].join(" · ")}</p>
             </div>
-            <Card className="divide-y divide-[rgba(255,255,255,0.06)]">
-              {list.map((theme, i) => <ThemeRow key={theme.id} theme={theme} rank={i + 1} staff={staff} onDismiss={onDismiss ? () => onDismiss(theme) : undefined} />)}
-            </Card>
+            {list.map((theme, i) => <ThemeRow key={theme.id} theme={theme} rank={i + 1} staff={staff} onDismiss={onDismiss ? () => onDismiss(theme) : undefined} />)}
+          </Card>
           </section>
         );
       })}

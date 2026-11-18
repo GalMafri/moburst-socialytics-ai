@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- Partial query doubles. */
 import React from "react";
 import { afterEach, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import Analytics from "@/pages/Analytics";
@@ -38,7 +38,8 @@ vi.mock("@/integrations/supabase/client", () => ({
   },
 }));
 
-afterEach(() => cleanup());
+// The Analytics page is a heavy render: each test hands its worker back for a turn before the next one.
+afterEach(async () => { cleanup(); await new Promise((r) => setImmediate(r)); });
 
 it("shows the client's active profile by name in a window no report overlaps, and counts it as 1 profile", async () => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
@@ -49,9 +50,11 @@ it("shows the client's active profile by name in a window no report overlaps, an
       </MemoryRouter>
     </QueryClientProvider>,
   );
-  expect(await screen.findByText("Kitcaster official")).toBeInTheDocument();
-  expect(screen.getByText("Connected profiles")).toBeInTheDocument();
-  expect(screen.getByText("(1 profile)")).toBeInTheDocument();
+  // The section rail names the section too once it finds it on the page (a frame later), so read the card itself.
+  const card = (await screen.findByText("Kitcaster official")).closest("#profiles") as HTMLElement;
+  expect(card).not.toBeNull();
+  expect(within(card).getByText("Connected profiles")).toBeInTheDocument();
+  expect(within(card).getByText("(1 profile)")).toBeInTheDocument();
   expect(screen.queryByText(/1 profiles/)).not.toBeInTheDocument();
 });
 

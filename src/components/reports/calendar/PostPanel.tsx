@@ -29,7 +29,7 @@ import type { ClientContext } from "@/lib/clientContext";
 import { formatLabel, isStoryPost, isTextOnlyFormat, isVideoFormat } from "@/lib/platform";
 import { storyFileName } from "@/lib/story";
 import { StoryLinks } from "./StoryLinks";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { CalendarPost } from "@/lib/calendarRevision";
 import { tileAspectFor } from "@/lib/tileAspect";
@@ -85,7 +85,11 @@ export function PostPanel({
   const notYet = useNotYet();
   const clearNotYet = notYet.clear;
   const [editedPost, setEditedPost] = useState<CalendarPost | null>(null);
-  useEffect(() => { setEditedPost(null); setScheduleOpen(false); setTab(initialTab || "copy"); clearNotYet(); }, [sourcePost?._calendarPostKey, open, initialTab, clearNotYet]);
+  // The panel stays mounted between posts, so a post opened (or opened on a
+  // given tab) arrives with the last one's tab and edits. They are reset before
+  // the browser paints: in a passive effect the panel first showed, for a frame,
+  // the tab it was last left on (a post opened on its Design tab showed Copy).
+  useLayoutEffect(() => { setEditedPost(null); setScheduleOpen(false); setTab(initialTab || "copy"); clearNotYet(); }, [sourcePost?._calendarPostKey, open, initialTab, clearNotYet]);
   const post = editedPost && editedPost._calendarPostKey === sourcePost?._calendarPostKey ? editedPost : sourcePost;
   const designRequest = useDesignRequestForPost(post);
   // Why this post's video is filmed; it stays known after a video from the posts was chosen instead.

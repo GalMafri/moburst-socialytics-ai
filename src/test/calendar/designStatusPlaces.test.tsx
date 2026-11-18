@@ -37,7 +37,7 @@ vi.mock('@/integrations/supabase/client', () => ({ supabase: {
   },
 } }));
 // Each test hands its worker back before the next one.
-afterEach(async () => { cleanup(); localStorage.clear(); f.requests = []; f.session = { user: { id: 'me' } }; f.authListeners = []; f.unsubscribed = 0; await new Promise((r) => setTimeout(r, 0)); });
+afterEach(async () => { cleanup(); localStorage.clear(); f.requests = []; f.session = { user: { id: 'me' } }; f.authListeners = []; f.unsubscribed = 0; await new Promise((r) => setImmediate(r)); });
 
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 const request = (id: string, over: any = {}) => ({
