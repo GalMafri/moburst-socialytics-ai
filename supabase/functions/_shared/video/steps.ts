@@ -50,7 +50,7 @@ import { KIT_MAKE_MS, KIT_MAX, KIT_MIN, MAX_KIT_TRIES, parseKitPick, kitCleanPro
 import { cleanKitStills, keepKitError } from "./kitStep.ts";
 import { marksPrompt, parseMarks, parseRead, readPrompt } from "../design/pipeline.ts";
 import { parseVideoStyle, videoStylePrompt } from "../canva/options.ts";
-import { CARD_SIZE, FOOTAGE_STILLS, STYLE_FRAMES, VIDEO_SIZE, audioScript, captionWeight, captionsAss, framesScript, hookPlacement, parseAudio, videoLogoBox, parseFrames, composeScript, footageTextPrompt, parseComposed, parseFootageText } from "./compose.ts";
+import { FOOTAGE_STILLS, STYLE_FRAMES, audioScript, captionWeight, captionsAss, framesScript, hookPlacement, parseAudio, videoLogoBox, parseFrames, composeScript, footageTextPrompt, parseComposed, parseFootageText } from "./compose.ts";
 import { hookPrompt } from "./hook.ts";
 import { callPicture, notePicture, signedRead, signedWrite } from "../picture/client.ts";
 import { heldWork } from "../canva/hold.ts";
@@ -59,6 +59,8 @@ import { type TitleDeps, runTitle, runTitleCheck } from "./titleStep.ts";
 import { runFrame } from "./frame.ts";
 import { FRAME_JPEG_QUALITY, KIT_JPEG_QUALITY } from "../picture/contract.ts";
 import { checkScript, endScript, startScript } from "./sandbox.ts";
+import { isVertical, jobVideoFrame } from "./videoSize.ts";
+import { pagePlacement } from "../design/platformSize.ts";
 
 /** Each check's answer, and room for the model to think first, which counts against the limit (anthropicReply.ts, roomFor). */
 const CHECK_TOKENS = roomFor(2000);
@@ -167,9 +169,11 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
         if (kitState(client?.video_style) !== "ready") { delete s.kit_checked; delete s.frame_png; job.step = "kit"; return "next"; }
         stills = kitPaths(client.video_style);
       }
-      // Drawn, or taken up again from the PNG already paid for, and made a JPEG (frame.ts).
-      const prompt = framePrompt(input.video.prompt, footageRules(input.people));
-      const size: [number, number] = [CARD_SIZE.width, CARD_SIZE.height];
+      // Drawn, or taken up again from the PNG already paid for, and made a JPEG (frame.ts), in the
+      // video's own frame (videoSize.ts): the clip starts from it, so it has the clip's shape.
+      const frame = jobVideoFrame(input);
+      const prompt = framePrompt(input.video.prompt, footageRules(input.people, frame), frame);
+      const size: [number, number] = [frame.card.width, frame.card.height];
       return runFrame({
         draw: async () => {
           const apiKey = await openaiKey(admin);
@@ -223,7 +227,8 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
           if (error) throw new Error(`Could not read the clip's order: ${error.message}`);
           return clipOrderOf(data?.clip_order);
         },
-        quote: async () => quoteClip(await hf()),
+        // Priced in the aspect the clip is ordered in, as the approved price was.
+        quote: async () => quoteClip(await hf(), jobVideoFrame(input).aspect),
         balance: async () => (await creditBalance(await hf()))?.credits ?? null,
         importImages: async (want) => {
           const out: { frame?: string | null; kit?: string[] } = {};
@@ -307,16 +312,22 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       const { data: signed, error } = await admin.storage.from(BUCKET).createSignedUploadUrl(out, { upsert: true });
       if (error || !signed?.signedUrl) throw new Error(`Could not prepare the video's upload: ${error?.message ?? "no URL"}`);
       const [lw, lh] = input.logo_size;
+      // The frame the video is made in: its platform's upload size, or the vertical frame (videoSize.ts).
+      const frame = jobVideoFrame(input);
+      const F = frame.size;
       // A filmed clip follows the client's filmed videos: their logo spot, captions and end card.
       const filmed = input.footage_upload ? input.filmed : null;
       if (filmed?.logo_at) { input.logo_at = filmed.logo_at; input.logo_width = filmed.logo_width ?? null; }
       // The logo where the client's own videos have it, else where its posts have it.
       // A vertical frame's shorter side is its width. A closing logo is never smaller than the client's posts show it.
+      // The posts' spot is defined on their 4:5 page: on a frame that is not vertical it is moved onto the frame
+      // as a still's is onto its page (platformSize.ts pagePlacement); a vertical frame takes it as it always did.
+      const postSpot = isVertical(frame) ? input.placement : pagePlacement(input.placement, lw, lh, F);
       const box = input.logo_at
-        ? videoLogoBox(input.logo_at, input.logo_at === "end" ? Math.max(input.logo_width ?? 0, input.placement.width) : input.logo_width ?? input.placement.width, lw / lh)
-        : { ...canvasLogoRect(input.placement, lw, lh, VIDEO_SIZE.width, VIDEO_SIZE.height), end: false };
-      const logoBottom = box.end || box.y > VIDEO_SIZE.height / 2 ? 0 : box.y + Math.round(box.width * lh / lw);
-      const at = s.hook_box ? hookPlacement(s.hook_box, s.hook_layer ?? CARD_SIZE, input.text_style ?? "", logoBottom) : null;
+        ? videoLogoBox(input.logo_at, input.logo_at === "end" ? Math.max(input.logo_width ?? 0, input.placement.width) : input.logo_width ?? input.placement.width, lw / lh, F)
+        : { ...canvasLogoRect(postSpot, lw, lh, F.width, F.height), end: false };
+      const logoBottom = box.end || box.y > F.height / 2 ? 0 : box.y + Math.round(box.width * lh / lw);
+      const at = s.hook_box ? hookPlacement(s.hook_box, s.hook_layer ?? frame.card, input.text_style ?? "", logoBottom, F) : null;
       const stills: string[] = [];
       const frameUploads: string[] = [];
       // A filmed clip is used as it is: it is not read for writing.
@@ -339,9 +350,11 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
           uploadUrl: signed.signedUrl,
           frameUploads,
           captions: filmed && filmed.captions !== "none" && Array.isArray(s.words) && s.words.length
-            ? { assB64: base64Encode(new TextEncoder().encode(captionsAss(s.words, filmed, s.sentence_starts ?? [])) as unknown as ArrayBuffer), fontUrl: await captionFontUrl(admin, filmed.caption_font, captionWeight(filmed.caption_style)) }
+            ? { assB64: base64Encode(new TextEncoder().encode(captionsAss(s.words, filmed, s.sentence_starts ?? [], F)) as unknown as ArrayBuffer), fontUrl: await captionFontUrl(admin, filmed.caption_font, captionWeight(filmed.caption_style)) }
             : undefined,
           endCard: filmed && input.end_card?.url ? { url: input.end_card.url, seconds: input.end_card.seconds } : undefined,
+          // Written only when it is not the vertical frame, so a vertical video's script is the one it always was.
+          ...(isVertical(frame) ? {} : { size: F }),
         }),
         `Socialytics video ${job.id}`,
       );
@@ -389,7 +402,11 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
 function titleDeps(admin: any, job: VideoJob): TitleDeps {
   const input = job.input;
   return {
-    draw: async () => generateImage(await openaiKey(admin), hookPrompt(input.brand_name, input.copy, input.text_style), [CARD_SIZE.width, CARD_SIZE.height], true),
+    // The title layer has the video's frame shape (videoSize.ts), so its lettering is laid out for that frame.
+    draw: async () => {
+      const frame = jobVideoFrame(input);
+      return generateImage(await openaiKey(admin), hookPrompt(input.brand_name, input.copy, input.text_style, frame), [frame.card.width, frame.card.height], true);
+    },
     store: async (path, png) => {
       const { error } = await admin.storage.from(BUCKET).upload(path, png, { contentType: "image/png", upsert: true });
       if (error) throw new Error(`Could not store the title: ${error.message}`);

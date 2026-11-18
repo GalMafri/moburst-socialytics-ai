@@ -25,6 +25,7 @@ import { useDesignRequests } from "./DesignRequestsContext";
 import { NOTE_PLACEHOLDER, notStartedLine } from "@/lib/postNotes";
 import { DESIGN_FEEDBACK_REASONS, currentDesign, isVideoMedia, notMadeLine, type DesignRequest, type DesignVersion, type ShotBrief } from "@/lib/designRequests";
 import { STORY_POSTED_BY_HAND, storageDownloadUrl } from "@/lib/story";
+import { useVideoRatio } from "@/lib/naturalRatio";
 
 interface Props {
   versions: DesignVersion[];
@@ -152,7 +153,7 @@ export function PostDesign({ versions, preparing, notMade, isStaff, aspect, file
       {!preparing && notMade && notMade.created_at > design.createdAt && <NotYet>{notMadeLine(notMade, true)}</NotYet>}
 
       {isVideo ? (
-        <VideoViewer key={design.iterationId} url={design.urls[0]} />
+        <VideoViewer key={design.iterationId} url={design.urls[0]} aspect={aspect} />
       ) : (
         <SlideViewer
           key={design.iterationId}
@@ -334,11 +335,23 @@ export function FeedbackDialog({ open, isCurrent, noun, line, onOpenChange, onSu
   );
 }
 
-/** A video design: footage in the client's own video style with its hook and logo, played in place at its own 9:16 shape, with sound. */
-function VideoViewer({ url }: { url: string }) {
+/**
+ * A video design: footage in the client's own video style with its hook and logo, played in place at its own shape
+ * (its platform's upload size: tall for a Reel, wide for a YouTube video), with sound. Until it loads, the frame has
+ * the shape the post's platform is uploaded in (`aspect`).
+ */
+function VideoViewer({ url, aspect }: { url: string; aspect: string }) {
+  const { ratio: measured, onLoadedMetadata } = useVideoRatio();
+  // A vertical video keeps the frame it always had; only a landscape one takes its own shape.
+  const ratio = measured !== null && measured > 1 ? measured : null;
+  const wide = ratio !== null || (measured === null && aspect === "aspect-video");
   return (
-    <div className="relative mx-auto w-full max-w-[320px] aspect-[9/16] rounded-[12px] overflow-hidden bg-black border border-white/[0.06]">
-      <video src={url} controls playsInline loop preload="metadata" className="w-full h-full object-contain" aria-label="Post video" />
+    <div
+      className={`relative mx-auto w-full ${wide ? "max-w-[560px]" : "max-w-[320px]"} ${ratio ? "" : aspect} rounded-[12px] overflow-hidden bg-black border border-white/[0.06]`}
+      style={ratio ? { aspectRatio: String(ratio) } : undefined}
+      data-video-viewer
+    >
+      <video src={url} controls playsInline loop preload="metadata" className="w-full h-full object-contain" aria-label="Post video" onLoadedMetadata={onLoadedMetadata} />
     </div>
   );
 }

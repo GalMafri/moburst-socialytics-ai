@@ -474,10 +474,20 @@ export interface ShotBrief {
   notes: string;
 }
 
+/**
+ * The shape a video post is made in, as the planner and the shot brief name
+ * it (18 Nov 2026, _shared/video/videoSize.ts): its word and its ratio. With
+ * none given it is "vertical" and "9:16", the words every video was planned
+ * with before; only these words change for a video of another shape.
+ */
+export interface VideoShape { word: string; label: string }
+const videoShape = (f?: VideoShape) => f?.word ?? "vertical";
+const videoLabel = (f?: VideoShape) => f?.label ?? "9:16";
+
 /** The instruction for a post's shot brief, in the client's filmed format. */
-export function shotBriefPrompt(args: { brand: string; platform: string; copy: string; visual?: string | null; reason: string; format?: string; voice?: string | null }): string {
+export function shotBriefPrompt(args: { brand: string; platform: string; copy: string; visual?: string | null; reason: string; format?: string; voice?: string | null; frame?: VideoShape }): string {
   return [
-    `Write a shot brief for ${args.brand}'s team to film a new ${args.platform} vertical video (9:16) on a phone. It is filmed because ${args.reason}.`,
+    `Write a shot brief for ${args.brand}'s team to film a new ${args.platform} ${videoShape(args.frame)} video (${videoLabel(args.frame)}) on a phone. It is filmed because ${args.reason}.`,
     args.format ? `${args.brand}'s filmed videos are: ${args.format}. Match them.` : "",
     `The post's copy:`,
     `"""${args.copy}"""`,
@@ -541,7 +551,7 @@ export function styleLines(brand: string, s: VideoStyle): string {
  * type of the client's posts, with the client's logo file (13 Oct: video must
  * follow the client's own videos, carry the exact copy and logo, and have sound).
  */
-export function videoPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; visual?: string | null; count: number; postCount: number; recent: string; guidance?: string; filmed?: string | null; style?: VideoStyle | null; videos?: number; framesPer?: number; otherPlatforms?: boolean; note?: string | null }): string {
+export function videoPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; visual?: string | null; count: number; postCount: number; recent: string; guidance?: string; filmed?: string | null; style?: VideoStyle | null; videos?: number; framesPer?: number; otherPlatforms?: boolean; note?: string | null; frame?: VideoShape }): string {
   if (args.style && !args.filmed) {
     // Planned from the client's own videos (14 Oct: "make videos in a similar
     // style to their VIDEOS, not statics"): the images are stills from them.
@@ -553,7 +563,7 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
       `The images are stills from ${args.brand}'s own published videos, ${args.framesPer ?? 8} per video in time order${args.videos ? ` (${args.videos} videos)` : ""}.`,
       styleLines(args.brand, s),
       args.guidance ?? "",
-      `Plan ${args.count} different options for a new ${args.platform} vertical video post (9:16) with this copy:`,
+      `Plan ${args.count} different options for a new ${args.platform} ${videoShape(args.frame)} video post (${videoLabel(args.frame)}) with this copy:`,
       `"""${args.copy}"""`,
       args.visual ? `The post's planned visual: ${args.visual}` : "",
       args.voice ? `${args.brand}'s voice: ${args.voice}` : "",
@@ -578,7 +588,7 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
     return [
       `The images are ${args.brand}'s own published posts, numbered Post 1 to Post ${args.postCount}.`,
       otherPlatformsLine(args),
-      `Plan ${args.count} different hooks for a new ${args.platform} vertical video post (9:16) with this copy:`,
+      `Plan ${args.count} different hooks for a new ${args.platform} ${videoShape(args.frame)} video post (${videoLabel(args.frame)}) with this copy:`,
       `"""${args.copy}"""`,
       args.visual ? `The post's planned visual: ${args.visual}` : "",
       args.voice ? `${args.brand}'s voice: ${args.voice}` : "",
@@ -597,7 +607,7 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
     otherPlatformsLine(args),
     args.recent,
     args.guidance ?? "",
-    `Plan ${args.count} different options for a new ${args.platform} vertical video post (9:16) with this copy:`,
+    `Plan ${args.count} different options for a new ${args.platform} ${videoShape(args.frame)} video post (${videoLabel(args.frame)}) with this copy:`,
     `"""${args.copy}"""`,
     args.visual ? `The post's planned visual: ${args.visual}` : "",
     args.voice ? `${args.brand}'s voice: ${args.voice}` : "",

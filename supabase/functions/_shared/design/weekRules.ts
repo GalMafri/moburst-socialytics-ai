@@ -156,6 +156,13 @@ export interface RunPost {
   started_at?: string | null;
   /** A video's Higgsfield price for its one clip, read at the press that added it: the price its request is approved at. */
   approved_credits?: number | null;
+  /**
+   * A video's: the platform_sizes row its price was read for at the press
+   * (_shared/video/videoSize.ts), null when it had none and was priced
+   * vertical. It is made in exactly this size; a run queued before this was
+   * kept has none, and its video is priced again at the next press.
+   */
+  priced_size?: { platform: string; format: string; width: number; height: number } | null;
 }
 
 /**
@@ -163,23 +170,25 @@ export interface RunPost {
  * named for whoever pressed. A second press, by anyone, adds only what has
  * become eligible since (a post added to the calendar, or one of the run's
  * that ended without a design). A video joins at the Higgsfield price read
- * at this press (videoPrice); when that price could not be read, the video
+ * at this press (price: one for every video, or each video's own, read in its clip's aspect); when that price could not be read, the video
  * is left out (no_price) and the next press counts it again. A queued video
  * keeps the price it was approved at.
  */
-export function mergeIntoRun(posts: RunPost[], eligible: Array<{ post_key: string; kind: DesignKind; postAt: Date | null }>, by: string, now: Date, videoPrice: number | null): { posts: RunPost[]; added: string[]; noPrice: string[] } {
+export function mergeIntoRun(posts: RunPost[], eligible: Array<{ post_key: string; kind: DesignKind; postAt: Date | null }>, by: string, now: Date, price: number | null | ((postKey: string) => number | null), sizeOf?: (postKey: string) => RunPost["priced_size"]): { posts: RunPost[]; added: string[]; noPrice: string[] } {
   const out = [...posts];
   const added: string[] = [];
   const noPrice: string[] = [];
   for (const e of eligible) {
     const i = out.findIndex((p) => p.post_key === e.post_key);
     if (i >= 0 && out[i].state === "queued") continue;
+    // One price for every video, or each video's own (its clip's aspect, _shared/video/videoSize.ts).
+    const videoPrice = typeof price === "function" ? price(e.post_key) : price;
     const unpriced = e.kind === "video" && videoPrice === null;
     const entry: RunPost = {
       post_key: e.post_key, kind: e.kind, post_at: e.postAt ? e.postAt.toISOString() : null,
       state: unpriced ? "left_out" : "queued", why: unpriced ? "no_price" : null, waits_for: null,
       added_by: by, added_at: now.toISOString(), request_id: null, started_at: null,
-      ...(e.kind === "video" ? { approved_credits: videoPrice } : {}),
+      ...(e.kind === "video" ? { approved_credits: videoPrice, ...(sizeOf ? { priced_size: sizeOf(e.post_key) ?? null } : {}) } : {}),
     };
     if (i >= 0) out[i] = entry; else out.push(entry);
     (unpriced ? noPrice : added).push(e.post_key);

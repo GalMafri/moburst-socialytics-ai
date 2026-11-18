@@ -13,6 +13,7 @@ import { pngSize } from "../picture/headers.ts";
 import { settleLogo } from "../design/logoFit.ts";
 import { jobLogos, restGround, stampList, type JobLogos, type LogoSet, type StampEntry } from "../design/logoTone.ts";
 import { jobShape, pagePlacement } from "../design/platformSize.ts";
+import { isVertical, videoFrameOf } from "../video/videoSize.ts";
 import { type CoverJob, forSameCover } from "../design/coverDesign.ts";
 
 export const BUCKET = "generated-media";
@@ -245,6 +246,9 @@ async function startVideoOption(admin: any, req: DesignRequest, settings: Settin
   const route = videoRouteFor(client?.video_style, req.video_route ?? null);
   const style = route === "posts" ? undefined : client?.video_style?.profile as { logo?: string; logo_at?: string; logo_width?: number; people?: string } | undefined;
   const title = `${brandName} ${req.platform ?? ""} video ${optionIndex + 1}`.replace(/\s+/g, " ");
+  // The size the request read for its platform (18 Nov 2026, _shared/video/videoSize.ts): the clip's aspect, the
+  // pictures drawn for it and the MP4's size. A vertical video carries none and is made exactly as before.
+  const frame = videoFrameOf(req.upload_size);
   const row = {
     client_id: req.client_id,
     created_by: req.requested_by,
@@ -276,6 +280,7 @@ async function startVideoOption(admin: any, req: DesignRequest, settings: Settin
       people: style?.people ?? "none",
       filmed,
       end_card: endCard,
+      ...(isVertical(frame) ? {} : { video_frame: frame }),
     },
   };
   await insertJobs(admin, req.id, optionIndex, [{ ...row, slide_index: null }], "the video");

@@ -55,6 +55,8 @@ import { creditBalance } from "../_shared/higgsfield/generate.ts";
 import { McpClient } from "../_shared/higgsfield/mcp.ts";
 import { MCP_URL, accessTokenFor } from "../_shared/higgsfield/oauth.ts";
 import { needsClipPrice, quoteClip } from "../_shared/video/clip.ts";
+import { readVideoSize } from "../_shared/video/videoSizeDb.ts";
+import { videoFrameOf, type VideoUploadSize } from "../_shared/video/videoSize.ts";
 import { type WeekDeps, weekContinue, weekPreview, weekStart, weekStop } from "./week.ts";
 import { designStory } from "./story.ts";
 import { plannerLibrary } from "./library.ts";
@@ -307,7 +309,8 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
   const filmed = video && request.footage_path ? (request.on_camera || "the speaker") : null;
   // A still whose platform is uploaded in another shape than 4:5 is planned for that shape (the request's own size).
   const shape = video ? null : plannerShape(request.upload_size, isStoryPost(request));
-  const instruction = video ? videoPlannerPrompt({ ...common, visual: (request as any).visual_direction ?? null, filmed, style: videoStyle?.profile ?? null, videos: videoStyle?.videos, framesPer: videoStyle?.frames_per_video }) : carousel ? carouselPlannerPrompt({ ...common, shape, slides: CAROUSEL_SLIDES }) : plannerPrompt({ ...common, shape, story: isStoryPost(request) });
+  // A video is planned in the shape its platform is uploaded in (the request's own size; vertical when it has none).
+  const instruction = video ? videoPlannerPrompt({ ...common, visual: (request as any).visual_direction ?? null, filmed, style: videoStyle?.profile ?? null, videos: videoStyle?.videos, framesPer: videoStyle?.frames_per_video, frame: videoFrameOf(request.upload_size) }) : carousel ? carouselPlannerPrompt({ ...common, shape, slides: CAROUSEL_SLIDES }) : plannerPrompt({ ...common, shape, story: isStoryPost(request) });
   let briefs = [] as ReturnType<typeof parseBriefs>;
   for (let attempt = 0; attempt < 2 && briefs.length < OPTIONS_WANTED; attempt++) {
     const result = await anthropicMessages({
@@ -437,8 +440,10 @@ async function recordFilming(admin: any, p: { clientId: string; postKey: string;
  * post's copy. Stored where only Moburst staff can read it.
  */
 async function writeShotBrief(admin: any, requestId: string) {
-  const { data: request } = await admin.from("design_requests").select("id, client_id, calendar_post_key, platform, post_copy, visual_direction, on_camera").eq("id", requestId).maybeSingle();
+  const { data: request } = await admin.from("design_requests").select("id, client_id, calendar_post_key, platform, format, post_copy, visual_direction, on_camera").eq("id", requestId).maybeSingle();
   if (!request) throw new Error("No such request.");
+  // Filmed in the shape the post's platform is uploaded in (vertical when it has no stored size).
+  const frame = videoFrameOf(await readVideoSize(admin, { platform: request.platform, format: request.format }));
   const { data: client } = await admin.from("clients").select("name, brand_identity, video_style").eq("id", request.client_id).maybeSingle();
   const profile = client?.video_style?.profile;
   const format = profile?.filmed?.what ?? (profile?.generatable === false ? profile?.format : undefined);
@@ -446,7 +451,7 @@ async function writeShotBrief(admin: any, requestId: string) {
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
   const result = await anthropicMessages({ apiKey, body: { model: "claude-opus-5-5", max_tokens: roomFor(2000), messages: [{ role: "user", content: shotBriefPrompt({
     brand: client?.name ?? "the brand", platform: request.platform ?? "social", copy: request.post_copy ?? "", visual: request.visual_direction,
-    reason: request.on_camera || "it needs footage filmed for it", format, voice: client?.brand_identity?.tone_of_voice ?? null,
+    reason: request.on_camera || "it needs footage filmed for it", format, voice: client?.brand_identity?.tone_of_voice ?? null, frame,
   }) }] } });
   const brief = parseShotBrief(answerText(result));
   if (!brief) throw new Error(`The shot brief came back unreadable: ${replySample(result)}`);
@@ -474,17 +479,21 @@ async function ensureStyleJob(admin: any, clientId: string, brand: string): Prom
  * holds to: the week's press hands it in (approvedCredits); any other start
  * reads Higgsfield's live price here, at its own click.
  */
-async function startRequest(admin: any, settings: Settings, p: { clientId: string; postKey: string; copy: string; reportId: string | null; platform: string | null; format: string | null; requestedBy: string; visual?: string | null; footagePath?: string | null; onCamera?: string | null; route?: string | null; batchId?: string | null; note?: string | null; learnNote?: boolean; noteLearned?: NoteLearned | null; approvedCredits?: number | null }): Promise<DesignRequest> {
+async function startRequest(admin: any, settings: Settings, p: { clientId: string; postKey: string; copy: string; reportId: string | null; platform: string | null; format: string | null; requestedBy: string; visual?: string | null; footagePath?: string | null; onCamera?: string | null; route?: string | null; batchId?: string | null; note?: string | null; learnNote?: boolean; noteLearned?: NoteLearned | null; approvedCredits?: number | null; uploadSize?: VideoUploadSize | null }): Promise<DesignRequest> {
   const { data: open } = await admin.from("design_requests").select("*").eq("client_id", p.clientId).eq("calendar_post_key", p.postKey).eq("status", "preparing").maybeSingle();
   if (open) return open;
 
-  // A generated video is approved at Higgsfield's live price for its one clip, read at its own click
-  // unless the week's press handed one in; a still and a filmed clip have none.
   const kind = designKind(p.format, p.platform);
-  const approvedCredits = needsClipPrice(kind, p.footagePath, p.approvedCredits) ? await clipPrice(admin) : (kind === "video" && !p.footagePath ? p.approvedCredits ?? null : null);
   // The size the post's platform is uploaded in, read now and kept on the request (17 Nov 2026,
-  // _shared/design/platformSize.ts). A video has none, and neither has a post with no row: those are made as before.
-  const uploadSize = kind === "video" ? null : await readUploadSize(admin, { platform: p.platform, format: p.format });
+  // _shared/design/platformSize.ts; a video's since 18 Nov 2026, _shared/video/videoSize.ts). A post with no row
+  // has none and is made as before: a still on the 4:5 page, a video vertical.
+  // A week's video is made in exactly the size its price was read for at the press (p.uploadSize).
+  const uploadSize = kind === "video"
+    ? (p.uploadSize !== undefined ? p.uploadSize : await readVideoSize(admin, { platform: p.platform, format: p.format }))
+    : await readUploadSize(admin, { platform: p.platform, format: p.format });
+  // A generated video is approved at Higgsfield's live price for its one clip in the aspect it is made in, read at
+  // its own click unless the week's press handed one in (priced in the same aspect); a still and a filmed clip have none.
+  const approvedCredits = needsClipPrice(kind, p.footagePath, p.approvedCredits) ? await clipPrice(admin, videoFrameOf(uploadSize).aspect) : (kind === "video" && !p.footagePath ? p.approvedCredits ?? null : null);
 
   const { data: created, error } = await admin.from("design_requests").insert({
     client_id: p.clientId, report_id: p.reportId, calendar_post_key: p.postKey,
@@ -570,14 +579,15 @@ async function closeFilming(admin: any, now: Date): Promise<number> {
  * person on camera is filmed (while there is still a day to film it), and
  * one too close to film is made from the client's posts.
  */
-async function startWeekPost(admin: any, s: PassStart & { batchId: string; settings: Settings; post: any; approvedCredits?: number | null }): Promise<{ requestId: string | null; filming: boolean }> {
+async function startWeekPost(admin: any, s: PassStart & { batchId: string; settings: Settings; post: any; approvedCredits?: number | null; uploadSize?: VideoUploadSize | null }): Promise<{ requestId: string | null; filming: boolean }> {
   const now = new Date();
   const video = s.kind === "video";
   const p = {
     clientId: s.client_id, postKey: s.post_key, copy: s.copy, reportId: s.post.report_id ?? null, platform: s.post.platform ?? null, format: s.post.format ?? null,
     requestedBy: s.added_by, visual: s.post.visual_direction || null, route: video ? s.route : null, batchId: s.batchId,
-    // The clip's price approved at the press that added the post.
+    // The clip's price approved at the press that added the post, and the size it was priced for.
     approvedCredits: video ? s.approvedCredits ?? null : null,
+    ...(video && s.uploadSize !== undefined ? { uploadSize: s.uploadSize } : {}),
   };
   if (video && s.askFilming && filmingOutcome(s.postAt, now, false) === "keep") {
     const filmed = await filmedReason(admin, s.client_id, s.copy, s.post.visual_direction || "");
@@ -593,10 +603,10 @@ async function startWeekPost(admin: any, s: PassStart & { batchId: string; setti
  * is spent), or null when it could not be read. Failing to read it never
  * stops a press or a request: the price is then unknown.
  */
-async function clipPrice(admin: any): Promise<number | null> {
+async function clipPrice(admin: any, aspect?: string): Promise<number | null> {
   try {
     const mcp = new McpClient({ url: MCP_URL, accessToken: await accessTokenFor(admin), timeoutMs: 30_000 });
-    return await quoteClip(mcp);
+    return await quoteClip(mcp, aspect);
   } catch {
     return null;
   }
@@ -619,8 +629,8 @@ function weekDeps(admin: any, req: Request): WeekDeps {
         return null;
       }
     },
-    quoteClip: () => clipPrice(admin),
-    startPost: (s) => startWeekPost(admin, s as PassStart & { batchId: string; settings: Settings; post: any; approvedCredits: number | null }),
+    quoteClip: (aspect) => clipPrice(admin, aspect),
+    startPost: (s) => startWeekPost(admin, s as PassStart & { batchId: string; settings: Settings; post: any; approvedCredits: number | null; uploadSize?: VideoUploadSize | null }),
     // A press starts the first posts at once, as the system would on its next pass.
     wake: () => background(weekContinue({ ...deps, isSystem: async () => true })),
   };

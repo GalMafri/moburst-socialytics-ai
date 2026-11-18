@@ -7,15 +7,20 @@
 
 import { quoteVideo, VIDEO_MODEL, type ToolCaller, type VideoRequest } from "../higgsfield/generate.ts";
 import { CLIP_CREDIT_FLOOR } from "./credits.ts";
+import { VERTICAL, type VideoFrame } from "./videoSize.ts";
 
-/** The settings of every clip: vertical, 8 seconds, 1080p, with sound. */
+/**
+ * The settings of every clip: 8 seconds, 1080p, with sound, and vertical
+ * unless the post's platform is uploaded in another shape (18 Nov 2026,
+ * videoSize.ts): the aspect is then the frame's, given to clipRequest.
+ */
 export const CLIP = { aspect: "9:16", seconds: 8, resolution: "1080p", withAudio: true } as const;
 
-/** The clip's request: the fixed settings, an optional opening frame, and the brand's references (never videos). */
-export function clipRequest(prompt: string, startImageId: string | null, referenceIds: string[]): VideoRequest {
+/** The clip's request: the fixed settings in the frame's aspect (vertical when not given), an optional opening frame, and the brand's references (never videos). */
+export function clipRequest(prompt: string, startImageId: string | null, referenceIds: string[], aspect: string = CLIP.aspect): VideoRequest {
   return {
     prompt,
-    aspect: CLIP.aspect,
+    aspect,
     seconds: CLIP.seconds,
     resolution: CLIP.resolution,
     withAudio: CLIP.withAudio,
@@ -28,9 +33,14 @@ export function clipRequest(prompt: string, startImageId: string | null, referen
 /** The prompt a price is read with; the clip's settings are what set the price. */
 export const QUOTE_PROMPT = "A short brand clip.";
 
-/** Higgsfield's live price for one clip, or null when it could not be read. */
-export function quoteClip(mcp: ToolCaller): Promise<number | null> {
-  return quoteVideo(mcp, clipRequest(QUOTE_PROMPT, null, []));
+/**
+ * Higgsfield's live price for one clip in the aspect it will be made in
+ * (vertical when not given), or null when it could not be read. The quote is
+ * read with every setting the clip is ordered with, its aspect included, so
+ * the price a person approves is the price of the clip that is ordered.
+ */
+export function quoteClip(mcp: ToolCaller, aspect: string = CLIP.aspect): Promise<number | null> {
+  return quoteVideo(mcp, clipRequest(QUOTE_PROMPT, null, [], aspect));
 }
 
 /**
@@ -139,9 +149,9 @@ export function clipOutcome(
  * kept to the footage's rules (no writing, no marks, people as the client's
  * videos have them). The clip starts from this frame.
  */
-export function framePrompt(brief: string, rules: string): string {
+export function framePrompt(brief: string, rules: string, frame: VideoFrame = VERTICAL): string {
   return [
-    "Draw the opening frame of a vertical 9:16 social video: the very first moment of this video, as one photograph.",
+    `Draw the opening frame of a ${frame.word} ${frame.label} social video: the very first moment of this video, as one photograph.`,
     `The video: ${brief.trim()}`,
     "When reference images are given, they are stills from the brand's own videos (no people in them): match their places, products, materials, light, color and grade, without copying any one of them.",
     "The frame is a whole scene that fills the picture edge to edge, with no border, band, panel or empty area.",
@@ -150,9 +160,10 @@ export function framePrompt(brief: string, rules: string): string {
 }
 
 /** What all footage keeps to, the opening frame and the clip alike; people as the client's own videos show them (made-up characters, or nobody). */
-export function footageRules(people: string | undefined): string {
+export function footageRules(people: string | undefined, frame: VideoFrame = VERTICAL): string {
+  const word = frame.word[0].toUpperCase() + frame.word.slice(1);
   // No allow-list of words: naming words in a prompt gets them painted (11 Nov 2026). The title layer is the only text.
-  return " Vertical 9:16, every part in sharp focus. No text, letters, numbers, captions, subtitles, logos or watermarks anywhere in frame; nothing that carries writing (no signs, labels, scoreboards, banners, packaging text, pills or buttons, however small or far in the background); and no screens, dashboards, charts, documents or interfaces. " +
+  return ` ${word} ${frame.label}, every part in sharp focus. No text, letters, numbers, captions, subtitles, logos or watermarks anywhere in frame; nothing that carries writing (no signs, labels, scoreboards, banners, packaging text, pills or buttons, however small or far in the background); and no screens, dashboards, charts, documents or interfaces. ` +
     // Sportswear marks are what the video model adds most often, and the hardest to clean off moving feet.
     "Boots, shoes, socks and balls are plain; shirts, jerseys and kits are plain, with no numbers, names or crests; and no clothing carries a maker's mark: no swooshes, stripes or makers' logos. " +
     (people === "fictional" ? "Any people are made-up characters, never real or famous people." : "No real or identifiable people.");

@@ -22,6 +22,8 @@ import {
   type Key, type ModelWord, type RowResult, type SizeOutcomeRow, type SizeRow,
 } from "./platformSizeRead.ts";
 import { UPLOAD_FORMATS, type UploadFormat } from "./platformSize.ts";
+import { VIDEO_FORMATS, type VideoFormat } from "../video/videoSize.ts";
+import { VIDEO_GUIDE_URL, decideVideo, videoGuideParts, type VideoRowResult, type VideoSizeRow } from "../video/videoSizeRead.ts";
 
 /** The planning model (design-request's PLANNER_MODEL). */
 export const SIZES_MODEL = "claude-opus-5-5";
@@ -83,11 +85,15 @@ export interface SizeRun {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
 
-/** The table's rows, in a fixed order. */
-async function sizeRows(db: Db): Promise<SizeRow[]> {
-  const { data, error } = await db.from("platform_sizes").select("platform, format, width, height, pending_width, pending_height, previous_width, previous_height, usable").order("platform").order("format");
+/** The table's rows, in a fixed order: the stills' (read from the image sizes guide) and the videos' (from the video specs guide, since 18 Nov 2026). */
+async function allRows(db: Db): Promise<{ stills: SizeRow[]; videos: VideoSizeRow[] }> {
+  const { data, error } = await db.from("platform_sizes").select("platform, format, width, height, pending_width, pending_height, pending_at, previous_width, previous_height, usable").order("platform").order("format");
   if (error) throw new Error(`Could not read the sizes: ${error.message}`);
-  return ((data ?? []) as SizeRow[]).filter((r) => UPLOAD_FORMATS.includes(r.format as UploadFormat));
+  const rows = (data ?? []) as Array<SizeRow & { pending_at?: string | null }>;
+  return {
+    stills: rows.filter((r) => UPLOAD_FORMATS.includes(r.format as UploadFormat)),
+    videos: rows.filter((r) => VIDEO_FORMATS.includes(r.format as unknown as VideoFormat)) as unknown as VideoSizeRow[],
+  };
 }
 
 /** What the image model did with each size (platform_size_outcomes). A read that fails says nothing: no size is taken back on it. */
@@ -105,7 +111,7 @@ async function modelWords(db: Db): Promise<ModelWord> {
  * to, with nothing written. A read that fails as a whole says why and has
  * no rows.
  */
-export async function readGuide(rows: SizeRow[], deps: SizeDeps, word: ModelWord = NO_WORD): Promise<SizeRun> {
+export async function readGuide(rows: SizeRow[], deps: SizeDeps, word: ModelWord = NO_WORD, now: Date = new Date()): Promise<SizeRun> {
   const run = (over: Partial<SizeRun>): SizeRun => ({ ok: false, source: GUIDE_URL, source_updated: null, error: null, rows: [], ...over });
   let page: { status: number; html: string };
   try {
@@ -131,51 +137,116 @@ export async function readGuide(rows: SizeRow[], deps: SizeDeps, word: ModelWord
   }
   const read = parseExtract(answer, keys);
   if (!read) return run({ source_updated: updated, error: "The answer about the guide was not in the form asked for." });
-  return run({ ok: true, source_updated: updated, rows: rows.map((r) => decide(r, read.get(`${r.platform}/${r.format}`), parts, word)) });
+  return run({ ok: true, source_updated: updated, rows: rows.map((r) => decide(r, read.get(`${r.platform}/${r.format}`), parts, word, now)) });
+}
+
+/** A read of the video specs guide against the video rows: one run of its own, recorded on its own. */
+export interface VideoSizeRun extends Omit<SizeRun, "rows"> { rows: VideoRowResult[] }
+
+/**
+ * One read of the video specs guide against the video rows given: what each
+ * row's read comes to, with nothing written (videoSizeRead.ts). A read that
+ * fails as a whole says why and has no rows.
+ */
+export async function readVideoGuide(rows: VideoSizeRow[], deps: SizeDeps, now: Date = new Date()): Promise<VideoSizeRun> {
+  const run = (over: Partial<VideoSizeRun>): VideoSizeRun => ({ ok: false, source: VIDEO_GUIDE_URL, source_updated: null, error: null, rows: [], ...over });
+  let page: { status: number; html: string };
+  try {
+    page = await deps.fetchGuide(VIDEO_GUIDE_URL);
+  } catch (e) {
+    return run({ error: `The video guide could not be fetched: ${e instanceof Error ? e.message : String(e)}`.slice(0, 500) });
+  }
+  if (page.status !== 200) return run({ error: `The video guide answered ${page.status}.` });
+  const updated = guideUpdated(page.html);
+  const text = guideText(page.html);
+  const parts = videoGuideParts(text, rows);
+  if (text.length < MIN_GUIDE_CHARS || !parts.table.length || !parts.known) {
+    return run({ source_updated: updated, error: `The page is not the video specs guide: ${text.length} characters, ${parts.table.length} table rows, ${parts.sections.size} sections.` });
+  }
+  return run({ ok: true, source_updated: updated, rows: rows.map((r) => decideVideo(r, parts.table, now)) });
 }
 
 /**
  * A run, with nothing written. First the rows whose size in use the image
  * model refuses: they go back to a drawn size or to none, whatever the
  * guide says and whether or not it can be read. Then the guide, for every
- * other row.
+ * other row. The video rows are read from the video specs guide, as a run
+ * of their own (null when the table has none).
  */
-async function sizeRun(db: Db, deps: SizeDeps): Promise<SizeRun> {
-  const rows = await sizeRows(db);
+async function sizeRun(db: Db, deps: SizeDeps): Promise<SizeRun & { video: VideoSizeRun | null }> {
+  const { stills: rows, videos } = await allRows(db);
   const word = await modelWords(db);
   const back = rows.map((r) => refusedRow(r, word)).filter((r): r is RowResult => !!r);
   const taken = new Set(back.map((r) => `${r.platform}/${r.format}`));
   const run = await readGuide(rows.filter((r) => !taken.has(`${r.platform}/${r.format}`)), deps, word);
-  return { ...run, rows: [...back, ...run.rows] };
+  const video = videos.length ? await readVideoGuide(videos, deps) : null;
+  return { ...run, rows: [...back, ...run.rows], video };
 }
 
-/** One run: read, then record the run and apply what it changes (record_platform_size_read). */
-export async function refreshPlatformSizes(db: Db, deps: SizeDeps): Promise<SizeRun & { changed: number }> {
-  const run = await sizeRun(db, deps);
+/** One recorded read (record_platform_size_read): how many rows it changed. */
+async function record(db: Db, run: SizeRun | VideoSizeRun): Promise<number> {
   const { data, error } = await db.rpc("record_platform_size_read", { p_read: run });
   if (error) throw new Error(`Could not record the read of the sizes guide: ${error.message}`);
-  return { ...run, changed: Number((data as { changed?: number } | null)?.changed) || 0 };
+  return Number((data as { changed?: number } | null)?.changed) || 0;
+}
+
+/**
+ * One run: read, then record each guide's read and apply what it changes
+ * (record_platform_size_read), the video guide's on its own, so a failure
+ * of either guide changes nothing the other read.
+ */
+export async function refreshPlatformSizes(db: Db, deps: SizeDeps): Promise<SizeRun & { changed: number; video: (VideoSizeRun & { changed: number }) | null }> {
+  const { video, ...run } = await sizeRun(db, deps);
+  const changed = await record(db, run);
+  return { ...run, changed, video: video ? await recordVideo(db, video) : null };
+}
+
+/**
+ * The video guide's read, recorded. A write that fails is logged and the
+ * read counts as not made: it never fails the job, whose image read is
+ * already recorded, so the queue never tries the job again for it the same
+ * day. The video rows are read again the next day.
+ */
+async function recordVideo(db: Db, video: VideoSizeRun): Promise<VideoSizeRun & { changed: number }> {
+  try {
+    return { ...video, changed: await record(db, video) };
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e);
+    console.error("[platform-sizes] could not record the read of the video specs guide:", error);
+    return { ...video, ok: false, error: error.slice(0, 500), changed: 0 };
+  }
 }
 
 const count = (rows: RowResult[], ...outcomes: RowResult["outcome"][]) => rows.filter((r) => outcomes.includes(r.outcome)).length;
 
+/** What the video guide's read came to, in the job's reason. */
+function videoLine(video: VideoSizeRun | null): string {
+  if (!video) return "";
+  if (!video.ok) return ` The video specs guide could not be read (${video.error ?? "no reason given"}); the video sizes stand and it is read again tomorrow.`;
+  const rows = video.rows as unknown as RowResult[];
+  return ` Read the video specs guide: ${rows.length} sizes, ${count(rows, "same")} as they were, ${count(rows, "confirmed")} changed, ${count(rows, "held")} held for a read on a later day, ${count(rows, "refused")} refused.`;
+}
+
 /**
- * The job. A read that worked is done, whatever it changed or refused. A
- * read that failed as a whole is recorded and thrown, so the queue tries it
- * again (its usual three tries) and the next morning queues another.
+ * The job. A read of the image guide that worked is done, whatever it
+ * changed or refused. A read that failed as a whole is recorded and thrown,
+ * so the queue tries it again (its usual three tries) and the next morning
+ * queues another. The video guide's read is recorded either way and never
+ * fails the job: its rows stand until a later read, and a retry of the job
+ * on the same day never confirms a size it held (videoSizeRead.ts).
  */
 export async function runPlatformSizes(db: Db, _job: ScheduledJob, deps: SizeDeps): Promise<JobOutcome> {
   const run = await refreshPlatformSizes(db, deps);
   if (!run.ok) throw new Error(run.error ?? "The sizes guide could not be read.");
   return {
     status: "done",
-    reason: `Read the sizes guide: ${run.rows.length} sizes, ${count(run.rows, "same")} as they were, ${count(run.rows, "changed", "confirmed")} changed, ${count(run.rows, "held")} held for a second read, ${count(run.rows, "refused")} refused, ${count(run.rows, "reverted", "unusable")} taken back, ${count(run.rows, "retried")} tried again.`,
-    result: { source_updated: run.source_updated, rows: run.rows } as unknown as Record<string, unknown>,
+    reason: `Read the sizes guide: ${run.rows.length} sizes, ${count(run.rows, "same")} as they were, ${count(run.rows, "changed", "confirmed")} changed, ${count(run.rows, "held")} held for a second read, ${count(run.rows, "refused")} refused, ${count(run.rows, "reverted", "unusable")} taken back, ${count(run.rows, "retried")} tried again.${videoLine(run.video)}`,
+    result: { source_updated: run.source_updated, rows: run.rows, ...(run.video ? { video: { ok: run.video.ok, error: run.video.error, rows: run.video.rows } } : {}) } as unknown as Record<string, unknown>,
   };
 }
 
 /** What the job would do now, with nothing written: for a look before the first scheduled run. */
-export async function platformSizesDryRun(db: Db, deps: SizeDeps): Promise<SizeRun> {
+export async function platformSizesDryRun(db: Db, deps: SizeDeps): Promise<SizeRun & { video: VideoSizeRun | null }> {
   return sizeRun(db, deps);
 }
 

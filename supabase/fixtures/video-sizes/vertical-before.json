@@ -1,0 +1,216 @@
+{
+  "composeFull": "set -euo pipefail\ncommand -v ffmpeg >/dev/null || (apt-get update -qq && apt-get install -y -qq ffmpeg >/dev/null)\nW=$(mktemp -d) && cd \"$W\"\ncurl -fsSL --retry 3 -o clip.mp4 'https://s/f.mp4'\ncurl -fsSL --retry 3 -o hook.png 'https://s/hook.png'\ncurl -fsSL --retry 3 -o logo.png 'https://s/logo.png'\nmkdir -p fonts\ncurl -fsSL --retry 3 -o fonts/caption.ttf 'https://s/font.ttf'\nprintf '%s' 'QUJD' | base64 -d > captions.ass\ncurl -fsSL --retry 3 -o endsrc.mp4 'https://s/end.mp4'\nEC_W=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of csv=p=0 endsrc.mp4); EC_H=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 endsrc.mp4)\nif [ \"$EC_H\" -gt \"$EC_W\" ]; then ffmpeg -hide_banner -loglevel error -y -sseof -2.5 -i endsrc.mp4 -t 2.5 -c:v libx264 -preset veryfast -crf 16 -c:a aac endcard.mp4 && EC=1; else EC=0; fi\nif [ \"${EC:-0}\" = 1 ] && [ \"$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 endcard.mp4 | wc -l)\" -lt 1 ]; then EC_SILENT=1; fi\nT=$(ffprobe -v error -show_entries format=duration -of csv=p=0 clip.mp4 | awk '{ printf \"%.2f\", $1 * 0.250 }')\nffmpeg -hide_banner -loglevel error -y -ss \"$T\" -i clip.mp4 -frames:v 1 -vf scale=720:-2 -q:v 3 still0.jpg\ncurl -fsS --retry 3 -X PUT -H 'Content-Type: image/jpeg' -H 'x-upsert: true' --data-binary @still0.jpg 'https://s/s0' >/dev/null\nT=$(ffprobe -v error -show_entries format=duration -of csv=p=0 clip.mp4 | awk '{ printf \"%.2f\", $1 * 0.750 }')\nffmpeg -hide_banner -loglevel error -y -ss \"$T\" -i clip.mp4 -frames:v 1 -vf scale=720:-2 -q:v 3 still1.jpg\ncurl -fsS --retry 3 -X PUT -H 'Content-Type: image/jpeg' -H 'x-upsert: true' --data-binary @still1.jpg 'https://s/s1' >/dev/null\nEND=$(ffprobe -v error -show_entries format=duration -of csv=p=0 clip.mp4 | awk '{ s = $1 - 1.6; printf \"%.2f\", (s < 0 ? 0 : s) }')\nFILTER='[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30,ass=captions.ass:fontsdir=fonts,format=yuv420p[base];[1:v]crop=1000:300:40:1200,scale=900:-1:flags=lanczos,format=rgba,fade=t=in:st=0:d=0.4:alpha=1[hook];[base][hook]overlay=90:1100:shortest=1:enable='\"'\"'lt(t,@END@)'\"'\"'[v1];[2:v]scale=349:-1:flags=lanczos,format=rgba,fade=t=in:st=@END@:d=0.5:alpha=1[logo];[v1][logo]overlay=365:92:shortest=1:enable='\"'\"'gte(t,@END@)'\"'\"'[v2];[v2]format=yuv420p[v]'\nFILTER=\"${FILTER//@END@/$END}\"\nif [ \"${EC:-0}\" = 1 ]; then ECIN=\"-i endcard.mp4\"; ECN=3; if [ \"${EC_SILENT:-0}\" = 1 ]; then ECIN=\"$ECIN -f lavfi -t 2.5 -i anullsrc=r=48000:cl=stereo\"; ECA=\"$((ECN + 1)):a\"; else ECA=\"$ECN:a\"; fi; END_F=';[v]setsar=1[vm];[0:a]aformat=sample_rates=48000:channel_layouts=stereo[am];[@EC@:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30,format=yuv420p[ecv];[@ECA@]aformat=sample_rates=48000:channel_layouts=stereo[eca];[vm][am][ecv][eca]concat=n=2:v=1:a=1[vout][aout]'; END_F=\"${END_F//@EC@/$ECN}\"; FILTER=\"$FILTER${END_F//@ECA@/$ECA}\"; MAPS='-map [vout] -map [aout]'; else ECIN=\"\"; MAPS='-map [v] -map 0:a?'; fi\nset -f\nffmpeg -hide_banner -loglevel error -y -i clip.mp4 -loop 1 -i hook.png -loop 1 -i logo.png $ECIN -filter_complex \"$FILTER\" $MAPS -c:v libx264 -preset medium -crf 18 -pix_fmt yuv420p -r 30 -c:a aac -b:a 160k -movflags +faststart out.mp4\ncurl -fsS --retry 3 -X PUT -H 'Content-Type: video/mp4' -H 'x-upsert: true' --data-binary @out.mp4 'https://s/up?t=a'\"'\"'b' >/dev/null\necho \"COMPOSED $(stat -c %s out.mp4) $(ffprobe -v error -show_entries format=duration -of csv=p=0 out.mp4) $(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 out.mp4 | wc -l)\"",
+  "composeBare": "set -euo pipefail\ncommand -v ffmpeg >/dev/null || (apt-get update -qq && apt-get install -y -qq ffmpeg >/dev/null)\nW=$(mktemp -d) && cd \"$W\"\ncurl -fsSL --retry 3 -o clip.mp4 'https://s/f.mp4'\ncurl -fsSL --retry 3 -o hook.png 'https://s/hook.png'\ncurl -fsSL --retry 3 -o logo.png 'https://s/logo.png'\nFILTER='[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30,format=yuv420p[base];[1:v]scale=1080:1920,format=rgba,fade=t=in:st=0:d=0.4:alpha=1[hook];[base][hook]overlay=0:0:shortest=1[v1];[2:v]scale=349:-1:flags=lanczos,format=rgba[logo];[v1][logo]overlay=365:92:shortest=1[v2];[v2]format=yuv420p[v]'\nECIN=\"\"; MAPS='-map [v] -map 0:a?'\nset -f\nffmpeg -hide_banner -loglevel error -y -i clip.mp4 -loop 1 -i hook.png -loop 1 -i logo.png $ECIN -filter_complex \"$FILTER\" $MAPS -c:v libx264 -preset medium -crf 18 -pix_fmt yuv420p -r 30 -c:a aac -b:a 160k -shortest -movflags +faststart out.mp4\ncurl -fsS --retry 3 -X PUT -H 'Content-Type: video/mp4' -H 'x-upsert: true' --data-binary @out.mp4 'https://s/up' >/dev/null\necho \"COMPOSED $(stat -c %s out.mp4) $(ffprobe -v error -show_entries format=duration -of csv=p=0 out.mp4) $(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 out.mp4 | wc -l)\"",
+  "logoBoxes": [
+    {
+      "x": 497,
+      "y": 943,
+      "width": 86,
+      "end": true
+    },
+    {
+      "x": 432,
+      "y": 917,
+      "width": 216,
+      "end": true
+    },
+    {
+      "x": 216,
+      "y": 831,
+      "width": 648,
+      "end": true
+    },
+    {
+      "x": 65,
+      "y": 115,
+      "width": 86,
+      "end": false
+    },
+    {
+      "x": 65,
+      "y": 115,
+      "width": 216,
+      "end": false
+    },
+    {
+      "x": 65,
+      "y": 115,
+      "width": 648,
+      "end": false
+    },
+    {
+      "x": 929,
+      "y": 115,
+      "width": 86,
+      "end": false
+    },
+    {
+      "x": 799,
+      "y": 115,
+      "width": 216,
+      "end": false
+    },
+    {
+      "x": 367,
+      "y": 115,
+      "width": 648,
+      "end": false
+    },
+    {
+      "x": 497,
+      "y": 1579,
+      "width": 86,
+      "end": false
+    },
+    {
+      "x": 432,
+      "y": 1527,
+      "width": 216,
+      "end": false
+    },
+    {
+      "x": 216,
+      "y": 1354,
+      "width": 648,
+      "end": false
+    },
+    {
+      "x": 497,
+      "y": 115,
+      "width": 86,
+      "end": false
+    },
+    {
+      "x": 432,
+      "y": 115,
+      "width": 216,
+      "end": false
+    },
+    {
+      "x": 216,
+      "y": 115,
+      "width": 648,
+      "end": false
+    },
+    {
+      "x": 65,
+      "y": 1579,
+      "width": 86,
+      "end": false
+    },
+    {
+      "x": 65,
+      "y": 1527,
+      "width": 216,
+      "end": false
+    },
+    {
+      "x": 65,
+      "y": 1354,
+      "width": 648,
+      "end": false
+    }
+  ],
+  "hookPlacements": [
+    {
+      "x": 54,
+      "y": 1245,
+      "width": 972,
+      "height": 253
+    },
+    {
+      "x": 54,
+      "y": 1245,
+      "width": 972,
+      "height": 253
+    },
+    {
+      "x": 54,
+      "y": 230,
+      "width": 972,
+      "height": 253
+    },
+    {
+      "x": 54,
+      "y": 358,
+      "width": 972,
+      "height": 253
+    },
+    {
+      "x": 54,
+      "y": 834,
+      "width": 972,
+      "height": 253
+    },
+    {
+      "x": 54,
+      "y": 834,
+      "width": 972,
+      "height": 253
+    },
+    {
+      "x": 54,
+      "y": 230,
+      "width": 972,
+      "height": 253
+    },
+    {
+      "x": 54,
+      "y": 358,
+      "width": 972,
+      "height": 253
+    }
+  ],
+  "hookPlacementWide": {
+    "x": 54,
+    "y": 1266,
+    "width": 972,
+    "height": 232
+  },
+  "captionsA": "[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 0\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Cap,Montserrat ExtraBold,78,&H00FFFFFF,&H00FFFFFF,&H00000000,&H78000000,0,0,0,0,100,100,0,0,1,4,3,2,90,90,330,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.10,0:00:00.60,Cap,,0,0,0,,{\\c&H0000CCFF&}HELLO{\\c&H00FFFFFF&} THERE.\nDialogue: 0,0:00:00.60,0:00:01.00,Cap,,0,0,0,,HELLO {\\c&H0000CCFF&}THERE.{\\c&H00FFFFFF&}\nDialogue: 0,0:00:01.90,0:00:02.30,Cap,,0,0,0,,{\\c&H0000CCFF&}NEXT{\\c&H00FFFFFF&} LINE\nDialogue: 0,0:00:02.30,0:00:02.60,Cap,,0,0,0,,NEXT {\\c&H0000CCFF&}LINE{\\c&H00FFFFFF&}\n",
+  "captionsB": "[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 0\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Cap,Inter,62,&H00000000,&H00000000,&H00000000,&H78000000,-1,0,0,0,100,100,0,0,1,4,1,2,90,90,539,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.10,0:00:01.00,Cap,,0,0,0,,Hello there.\nDialogue: 0,0:00:01.90,0:00:02.60,Cap,,0,0,0,,Next line\n",
+  "captionsC": "[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 0\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Cap,Inter,62,&H00000000,&H00000000,&H00000000,&H78000000,-1,0,0,0,100,100,0,0,1,4,1,8,90,90,300,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.10,0:00:01.00,Cap,,0,0,0,,Hello there.\nDialogue: 0,0:00:01.90,0:00:02.60,Cap,,0,0,0,,Next line\n",
+  "captionsD": "[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 0\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Cap,Inter,62,&H00000000,&H00000000,&H00000000,&H78000000,-1,0,0,0,100,100,0,0,1,4,1,2,90,90,420,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.10,0:00:01.00,Cap,,0,0,0,,Hello there.\nDialogue: 0,0:00:01.90,0:00:02.60,Cap,,0,0,0,,Next line\n",
+  "framePrompt": "Draw the opening frame of a vertical 9:16 social video: the very first moment of this video, as one photograph. The video: A brief. When reference images are given, they are stills from the brand's own videos (no people in them): match their places, products, materials, light, color and grade, without copying any one of them. The frame is a whole scene that fills the picture edge to edge, with no border, band, panel or empty area. Vertical 9:16, every part in sharp focus. No text, letters, numbers, captions, subtitles, logos or watermarks anywhere in frame; nothing that carries writing (no signs, labels, scoreboards, banners, packaging text, pills or buttons, however small or far in the background); and no screens, dashboards, charts, documents or interfaces. Boots, shoes, socks and balls are plain; shirts, jerseys and kits are plain, with no numbers, names or crests; and no clothing carries a maker's mark: no swooshes, stripes or makers' logos. Any people are made-up characters, never real or famous people.",
+  "footageRulesNone": " Vertical 9:16, every part in sharp focus. No text, letters, numbers, captions, subtitles, logos or watermarks anywhere in frame; nothing that carries writing (no signs, labels, scoreboards, banners, packaging text, pills or buttons, however small or far in the background); and no screens, dashboards, charts, documents or interfaces. Boots, shoes, socks and balls are plain; shirts, jerseys and kits are plain, with no numbers, names or crests; and no clothing carries a maker's mark: no swooshes, stripes or makers' logos. No real or identifiable people.",
+  "clipRequest": {
+    "prompt": "p",
+    "aspect": "9:16",
+    "seconds": 8,
+    "resolution": "1080p",
+    "withAudio": true,
+    "model": "seedance_2_5",
+    "startImageId": "frame-1",
+    "referenceIds": [
+      "k1"
+    ]
+  },
+  "clipRequestQuote": {
+    "prompt": "A short brand clip.",
+    "aspect": "9:16",
+    "seconds": 8,
+    "resolution": "1080p",
+    "withAudio": true,
+    "model": "seedance_2_5",
+    "referenceIds": []
+  },
+  "hookPrompt": "The on-screen title of a vertical (9:16) social video by Brand, drawn alone on a fully transparent background. First line, spelled exactly: \"One\". Second line, spelled exactly: \"Two\". bold white. The letters are crisp and in sharp focus, with enough glow or shadow to read over moving footage. Nothing else in the image: no logo, no other text, no shapes, panels or background.",
+  "plannerPosts": "The images are Brand's own published posts, numbered Post 1 to Post 5.\nr\nPlan 3 different options for a new Instagram vertical video post (9:16) with this copy:\n\"\"\"c\"\"\"\nThe post's planned visual: x\nBrand's voice: v\nThe video is one continuous 8-second shot of footage with sound, made by a video model from an opening frame drawn in the world of Brand's posts. Over it the hook is set as on-screen text, with Brand's logo.\nFor each option give:\n- posts: the numbers of one or two of Brand's posts whose layout suits what this post says (a quote suits a quote layout, a comparison or list a comparison or list layout, a product or feature a product layout, a statement a statement layout). When the recent designs were built on a post and another suits the content as well, choose the other.\n- layout: a few words naming the layout of the posts you chose.\n- headline: the hook set on screen, written in Brand's voice from the copy, in the copy's language. One line of at most 8 words, optionally a second, shorter line.\n- text: one sentence on how the hook looks on screen, taken from the type in the posts you chose (weight, case, color, glow or shadow) and where on the frame it sits (top, center or lower third), so it reads clearly over moving footage.\n- footage: one shot, described for the video model in two or three sentences: what is in frame, how it moves, how the camera moves, the light and the palette, in the world of Brand's posts and videos, all of it in sharp focus. It holds no lettering, numbers, signs, logos or brand marks, and no screens, dashboards, charts, documents or interfaces (the video model fills those with garbled writing), and names no brand. It shows no real or identifiable person: use objects, materials, places, hands or abstract motion instead. It is one whole scene: it holds no band, panel or empty area kept for the hook, which is laid over it as it is.\nThe options differ from each other in footage and wording. Put the strongest first: it is the one that will be made, so it should be the one you would publish.\nReply with JSON only: {\"options\":[{\"posts\":[2],\"layout\":\"...\",\"headline\":[\"line one\",\"optional line two\"],\"text\":\"...\",\"footage\":\"...\"}]}",
+  "plannerFilmed": "The images are Brand's own published posts, numbered Post 1 to Post 5.\nPlan 2 different hooks for a new TikTok vertical video post (9:16) with this copy:\n\"\"\"c\"\"\"\nThe footage is Brand's own filmed clip (this post was filmed because the founder speaks), used as it is with its sound. Over it the hook is set as on-screen text, with Brand's logo.\nFor each option give:\n- posts: the numbers of one or two of Brand's posts whose layout suits what this post says (a quote suits a quote layout, a comparison or list a comparison or list layout, a product or feature a product layout, a statement a statement layout). When the recent designs were built on a post and another suits the content as well, choose the other.\n- layout: a few words naming the layout of the posts you chose.\n- headline: the hook set on screen, written in Brand's voice from the copy, in the copy's language. One line of at most 8 words, optionally a second, shorter line.\n- text: one sentence on how the hook looks on screen, taken from the type in the posts you chose (weight, case, color, glow or shadow), set at the top of the frame or in the lower third so faces and the main subject stay clear.\nThe options differ in wording. Put the strongest first: it is the one that will be made.\nReply with JSON only: {\"options\":[{\"posts\":[2],\"layout\":\"...\",\"headline\":[\"line one\",\"optional line two\"],\"text\":\"...\"}]}",
+  "plannerStyle": "The images are stills from Brand's own published videos, 8 per video in time order (3 videos).\nHow Brand's own videos look and move:\n- format: undefined\n- text over the footage: words, bold\n- logo: closes the video, laid over the last moments\nPlan 2 different options for a new YouTube vertical video post (9:16) with this copy:\n\"\"\"c\"\"\"\nA video model makes the footage as one 8-second clip with sound, starting from an opening frame drawn in the look of these videos; it can cut between shots. The new video looks and moves like Brand's own videos: the same kind of subjects, shots, cuts, camera, light and grade.\nFor each option give:\n- footage: the video for the video model in three to five sentences, shot by shot (two to four shots, each with its seconds), in the style of Brand's videos, all in sharp focus. It holds no lettering, numbers, logos or brand marks, and names no brand. Nothing in it carries writing: no signs, labels, scoreboards, banners, packaging text, pills or buttons, however small or far in the background; shirts, jerseys and kits are plain, with no numbers, names or crests. It shows no screens, dashboards, charts, documents or interfaces (the video model fills those with garbled writing). People in it are made-up characters like the ones in the videos, never real or famous people or the brand's staff. It is whole scenes: no band, panel or empty area kept for text. Brand's videos close on their logo, which is laid over the last moments afterwards: the last shot ends the way their videos end before the logo.\n- headline: the text over the footage, written in Brand's voice from the copy, in the copy's language, the way Brand's videos put text on screen. One line of at most 8 words, optionally a second, shorter line.\n- text: one sentence on how it looks and where it sits, taken from the text in Brand's videos (bold). Keep their treatment as it is: no box, band, panel or overlay behind the text unless their videos have one.\nThe options differ from each other in footage. Put the strongest first: it is the one that will be made.\nReply with JSON only: {\"options\":[{\"footage\":\"...\",\"headline\":[\"line one\",\"optional line two\"],\"text\":\"...\"}]}",
+  "shotBrief": "Write a shot brief for Brand's team to film a new TikTok vertical video (9:16) on a phone. It is filmed because the founder speaks.\nBrand's filmed videos are: talking head. Match them.\nThe post's copy:\n\"\"\"c\"\"\"\nBrand's voice: warm\nKeep it short and practical: who is on camera, where, how it is framed, how long, the shots in order with their seconds, and the lines to say, written from the copy in the brand's voice, spoken naturally. Captions, title, logo and end card are added afterwards, so leave them out.\nReply with JSON only: {\"who\":\"...\",\"where\":\"...\",\"framing\":\"...\",\"seconds\":20,\"shots\":[{\"seconds\":5,\"what\":\"...\"}],\"say\":\"the lines to say\",\"notes\":\"one or two tips, or empty\"}",
+  "VIDEO_SIZE": {
+    "width": 1080,
+    "height": 1920
+  },
+  "CARD_SIZE": {
+    "width": 1088,
+    "height": 1936
+  },
+  "CLIP": {
+    "aspect": "9:16",
+    "seconds": 8,
+    "resolution": "1080p",
+    "withAudio": true
+  }
+}

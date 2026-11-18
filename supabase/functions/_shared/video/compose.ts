@@ -10,10 +10,19 @@
 // ffmpeg joins them at the platform's size in an Anthropic-hosted sandbox
 // (sandbox.ts), never on a laptop. This file only writes the script; it is
 // free of Deno and network imports so it can be tested.
+//
+// Since 18 Nov 2026 a video is made in its platform's upload size
+// (videoSize.ts): every function here that places something on the frame
+// takes the frame's size, and is given VIDEO_SIZE, the vertical frame every
+// video had before, when it is not told another.
 
+/** The vertical frame: every video before 18 Nov 2026, and every video with no stored size (videoSize.ts VERTICAL). */
 export const VIDEO_SIZE = { width: 1080, height: 1920 } as const;
 /** The hook layer is drawn at this size (multiples of 16, nearest to 9:16) and scaled to VIDEO_SIZE. */
 export const CARD_SIZE = { width: 1088, height: 1936 } as const;
+
+/** A frame's size in pixels. */
+export interface FrameSize { width: number; height: number }
 
 export const TIMING = {
   /** The hook fades in over this long at the start. */
@@ -28,11 +37,13 @@ export const LOGO_END = { fade: 0.5, lead: 1.6 } as const;
 /**
  * Where the logo file sits in a new video, as in the client's own videos: at
  * one spot of the frame throughout, or centered over the close. Margins keep
- * it clear of the platform's own buttons and captions.
+ * it clear of the platform's own buttons and captions. The width share is of
+ * the frame's shorter side (a vertical frame's width), so a logo is the same
+ * size on a landscape frame as on a vertical one.
  */
-export function videoLogoBox(at: string, widthShare: number, logoAspect: number): LogoBox & { end: boolean } {
-  const W = VIDEO_SIZE.width, H = VIDEO_SIZE.height;
-  const width = Math.round(W * Math.min(0.6, Math.max(0.08, widthShare)));
+export function videoLogoBox(at: string, widthShare: number, logoAspect: number, frame: FrameSize = VIDEO_SIZE): LogoBox & { end: boolean } {
+  const W = frame.width, H = frame.height;
+  const width = Math.round(Math.min(W, H) * Math.min(0.6, Math.max(0.08, widthShare)));
   const height = Math.round(width / Math.max(0.2, logoAspect));
   if (at === "end") return { x: Math.round((W - width) / 2), y: Math.round((H - height) / 2), width, end: true };
   const [v, h] = at.split("-");
@@ -45,25 +56,25 @@ export function videoLogoBox(at: string, widthShare: number, logoAspect: number)
 export interface HookBox { x: number; y: number; width: number; height: number }
 
 /**
- * Where the hook goes on the frame (VIDEO_SIZE pixels): the planned place,
+ * Where the hook goes on the frame (the frame's pixels): the planned place,
  * read from the plan's description of how the hook looks. The lettering is
  * placed exactly, like the logo file, rather than wherever the image model
  * drew it on its layer (it drew a "lower third" hook across a speaker's face).
  * The bottom fifth of the frame is left to the platform's own captions and
  * buttons; a hook at the top sits below the logo.
  */
-export function hookPlacement(box: HookBox, layer: { width: number; height: number }, textStyle: string, logoBottom: number): { x: number; y: number; width: number; height: number } {
-  const k = VIDEO_SIZE.width / layer.width;
+export function hookPlacement(box: HookBox, layer: { width: number; height: number }, textStyle: string, logoBottom: number, frame: FrameSize = VIDEO_SIZE): { x: number; y: number; width: number; height: number } {
+  const k = frame.width / layer.width;
   let width = Math.round(box.width * k), height = Math.round(box.height * k);
-  const maxWidth = Math.round(VIDEO_SIZE.width * 0.9);
+  const maxWidth = Math.round(frame.width * 0.9);
   if (width > maxWidth) { height = Math.round((height * maxWidth) / width); width = maxWidth; }
-  const x = Math.round((VIDEO_SIZE.width - width) / 2);
+  const x = Math.round((frame.width - width) / 2);
   const style = textStyle.toLowerCase();
   const y = /lower third|bottom|lower part|lower half/.test(style)
-    ? Math.round(VIDEO_SIZE.height * 0.78) - height
+    ? Math.round(frame.height * 0.78) - height
     : /\btop\b|upper/.test(style)
-      ? Math.max(Math.round(logoBottom + VIDEO_SIZE.height * 0.03), Math.round(VIDEO_SIZE.height * 0.12))
-      : Math.round((VIDEO_SIZE.height - height) / 2);
+      ? Math.max(Math.round(logoBottom + frame.height * 0.03), Math.round(frame.height * 0.12))
+      : Math.round((frame.height - height) / 2);
   return { x, y, width, height };
 }
 
@@ -75,7 +86,7 @@ export interface ComposeInput {
   hook?: { crop: HookBox; at: { x: number; y: number; width: number } };
   /** The client's logo file; none when the client's videos show no logo over the footage. */
   logoUrl?: string;
-  /** Where the logo file sits, in VIDEO_SIZE pixels; with end, only over the close. */
+  /** Where the logo file sits, in the frame's pixels; with end, only over the close. */
   logo?: LogoBox & { end?: boolean };
   /** A signed upload URL for the finished MP4 (Supabase Storage, PUT). */
   uploadUrl: string;
@@ -85,6 +96,8 @@ export interface ComposeInput {
   captions?: { assB64: string; fontUrl: string };
   /** The client's own end card, cut from the end of one of its published videos and played after the clip. */
   endCard?: { url: string; seconds: number };
+  /** The frame the video is made in (videoSize.ts); VIDEO_SIZE, the vertical frame, when not given. */
+  size?: FrameSize;
 }
 
 /** Single-quote a value for bash. */
@@ -92,7 +105,13 @@ export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'"'"'`)}'`;
 }
 
-const FIT = `scale=${VIDEO_SIZE.width}:${VIDEO_SIZE.height}:force_original_aspect_ratio=increase,crop=${VIDEO_SIZE.width}:${VIDEO_SIZE.height},setsar=1,fps=30`;
+/** Footage filled into the frame: scaled to cover it, centered and cut to it. */
+const fitTo = (f: FrameSize) => `scale=${f.width}:${f.height}:force_original_aspect_ratio=increase,crop=${f.width}:${f.height},setsar=1,fps=30`;
+
+/** The shell test that the end card's source (EC_W by EC_H) has the frame's orientation: tall for a vertical frame, as always. */
+function sameOrientation(f: FrameSize): string {
+  return f.height > f.width ? `[ "$EC_H" -gt "$EC_W" ]` : f.width > f.height ? `[ "$EC_W" -gt "$EC_H" ]` : `[ "$EC_W" -eq "$EC_H" ]`;
+}
 
 /**
  * The bash script that downloads the parts, joins them and uploads the result.
@@ -100,6 +119,8 @@ const FIT = `scale=${VIDEO_SIZE.width}:${VIDEO_SIZE.height}:force_original_aspec
  * any failing command stops it (set -e) with a non-zero exit.
  */
 export function composeScript(input: ComposeInput): string {
+  const frame = input.size ?? VIDEO_SIZE;
+  const FIT = fitTo(frame);
   const inputs = ["-i clip.mp4"];
   let next = 1;
   const hookIn = input.overlayUrl ? next++ : -1;
@@ -112,7 +133,7 @@ export function composeScript(input: ComposeInput): string {
   if (hookIn >= 0) {
     filter.push(input.hook
       ? `[${hookIn}:v]crop=${input.hook.crop.width}:${input.hook.crop.height}:${input.hook.crop.x}:${input.hook.crop.y},scale=${input.hook.at.width}:-1:flags=lanczos,format=rgba,fade=t=in:st=0:d=${TIMING.fadeIn}:alpha=1[hook]`
-      : `[${hookIn}:v]scale=${VIDEO_SIZE.width}:${VIDEO_SIZE.height},format=rgba,fade=t=in:st=0:d=${TIMING.fadeIn}:alpha=1[hook]`);
+      : `[${hookIn}:v]scale=${frame.width}:${frame.height},format=rgba,fade=t=in:st=0:d=${TIMING.fadeIn}:alpha=1[hook]`);
     // The text leaves as a closing logo arrives.
     filter.push(`[${last}][hook]overlay=${input.hook ? `${input.hook.at.x}:${input.hook.at.y}` : "0:0"}:shortest=1${input.logo?.end && input.logoUrl ? ":enable='lt(t,@END@)'" : ""}[v1]`);
     last = "v1";
@@ -124,7 +145,7 @@ export function composeScript(input: ComposeInput): string {
     last = "v2";
   }
   filter.push(`[${last}]format=yuv420p[v]`);
-  // The end card follows the clip, with its own sound (or silence); added by the script only when it is vertical.
+  // The end card follows the clip, with its own sound (or silence); added by the script only when it has the frame's orientation.
   const endFilter = input.endCard
     ? `;[v]setsar=1[vm];[0:a]aformat=sample_rates=48000:channel_layouts=stereo[am];[@EC@:v]${FIT},format=yuv420p[ecv];[@ECA@]aformat=sample_rates=48000:channel_layouts=stereo[eca];[vm][am][ecv][eca]concat=n=2:v=1:a=1[vout][aout]`
     : "";
@@ -142,11 +163,11 @@ export function composeScript(input: ComposeInput): string {
       `curl -fsSL --retry 3 -o fonts/caption.ttf ${shellQuote(input.captions.fontUrl)}`,
       `printf '%s' ${shellQuote(input.captions.assB64)} | base64 -d > captions.ass`,
     ] : []),
-    // The end card: the last seconds of one of the client's own videos, used only when that video is vertical.
+    // The end card: the last seconds of one of the client's own videos, used only when that video has the frame's orientation (vertical for a vertical frame).
     ...(input.endCard ? [
       `curl -fsSL --retry 3 -o endsrc.mp4 ${shellQuote(input.endCard.url)}`,
       `EC_W=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of csv=p=0 endsrc.mp4); EC_H=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 endsrc.mp4)`,
-      `if [ "$EC_H" -gt "$EC_W" ]; then ffmpeg -hide_banner -loglevel error -y -sseof -${input.endCard.seconds.toFixed(1)} -i endsrc.mp4 -t ${input.endCard.seconds.toFixed(1)} -c:v libx264 -preset veryfast -crf 16 -c:a aac endcard.mp4 && EC=1; else EC=0; fi`,
+      `if ${sameOrientation(frame)}; then ffmpeg -hide_banner -loglevel error -y -sseof -${input.endCard.seconds.toFixed(1)} -i endsrc.mp4 -t ${input.endCard.seconds.toFixed(1)} -c:v libx264 -preset veryfast -crf 16 -c:a aac endcard.mp4 && EC=1; else EC=0; fi`,
       `if [ "\${EC:-0}" = 1 ] && [ "$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 endcard.mp4 | wc -l)" -lt 1 ]; then EC_SILENT=1; fi`,
     ] : []),
     // Stills of the footage alone, before anything is laid over it.
@@ -160,7 +181,7 @@ export function composeScript(input: ComposeInput): string {
     `FILTER=${shellQuote(filter.join(";"))}`,
     ...(input.logo?.end ? ['FILTER="${FILTER//@END@/$END}"'] : []),
     ...(input.endCard ? [
-      // With a vertical end card, the clip and the card are joined; otherwise the clip stands alone.
+      // With an end card of the frame's orientation, the clip and the card are joined; otherwise the clip stands alone.
       `if [ "\${EC:-0}" = 1 ]; then ECIN="-i endcard.mp4"; ECN=${inputs.length}; if [ "\${EC_SILENT:-0}" = 1 ]; then ECIN="$ECIN -f lavfi -t ${input.endCard.seconds.toFixed(1)} -i anullsrc=r=48000:cl=stereo"; ECA="$((ECN + 1)):a"; else ECA="$ECN:a"; fi; END_F=${shellQuote(endFilter)}; END_F="\${END_F//@EC@/$ECN}"; FILTER="$FILTER\${END_F//@ECA@/$ECA}"; MAPS='-map [vout] -map [aout]'; else ECIN=""; MAPS='-map [v] -map 0:a?'; fi`,
     ] : [`ECIN=""; MAPS='-map [v] -map 0:a?'`]),
     // The maps hold brackets; no file name may stand in for them.
@@ -317,7 +338,7 @@ export function captionWeight(style: string): number {
 }
 
 /**
- * Captions of a filmed clip's speech, as an ASS file for a 1080x1920 frame,
+ * Captions of a filmed clip's speech, as an ASS file for the video's frame (1080x1920 unless given),
  * typeset the way the client's own videos caption speech: a few words at a
  * time (or a line), in its caption colour, the spoken word lit in its
  * highlight colour when its videos do that.
@@ -332,7 +353,10 @@ export function captionFontName(family: string, weight: number): { name: string;
   return weight === 700 ? { name: family, bold: true } : weight === 400 ? { name: family, bold: false } : { name: `${family} ${named[weight] ?? "Bold"}`, bold: false };
 }
 
-export function captionsAss(words: SpokenWord[], f: { captions: "none" | "words" | "lines"; caption_style: string; caption_font: string; caption_color: string; highlight_color: string; caption_position: string; caption_y?: number }, breaks: number[] = []): string {
+export function captionsAss(words: SpokenWord[], f: { captions: "none" | "words" | "lines"; caption_style: string; caption_font: string; caption_color: string; highlight_color: string; caption_position: string; caption_y?: number }, breaks: number[] = [], frame: FrameSize = VIDEO_SIZE): string {
+  // Sizes and margins are set for the vertical frame and scaled to the frame's own: by its shorter side, its height and its width.
+  const H = frame.height, W = frame.width;
+  const across = Math.min(W, H) / VIDEO_SIZE.width, down = H / VIDEO_SIZE.height, side = W / VIDEO_SIZE.width;
   const style = f.caption_style.toLowerCase();
   const upper = /upper ?case|all caps|capitals/.test(style);
   const perChunk = f.captions === "lines" ? 6 : 3;
@@ -346,11 +370,12 @@ export function captionsAss(words: SpokenWord[], f: { captions: "none" | "words"
     current.push(w);
   }
   if (current.length) chunks.push(current);
-  const size = f.captions === "lines" ? 62 : 78;
+  const size = Math.round((f.captions === "lines" ? 62 : 78) * across);
   // Where the client's own captions sit, when measured; else from where they are said to sit.
   const [alignment, marginV] = typeof f.caption_y === "number"
-    ? [2, Math.max(60, Math.round((1 - f.caption_y) * 1920 - size * 0.6))]
-    : f.caption_position === "top" ? [8, 300] : f.caption_position === "middle" ? [5, 0] : f.caption_position === "bottom" ? [2, 330] : [2, 420];
+    ? [2, Math.max(Math.round(60 * down), Math.round((1 - f.caption_y) * H - size * 0.6))]
+    : f.caption_position === "top" ? [8, Math.round(300 * down)] : f.caption_position === "middle" ? [5, 0] : f.caption_position === "bottom" ? [2, Math.round(330 * down)] : [2, Math.round(420 * down)];
+  const marginSide = Math.round(90 * side);
   const font = captionFontName(f.caption_font, captionWeight(f.caption_style));
   const t = (x: number) => {
     const cs = Math.max(0, Math.round(x * 100));
@@ -375,14 +400,14 @@ export function captionsAss(words: SpokenWord[], f: { captions: "none" | "words"
   return [
     "[Script Info]",
     "ScriptType: v4.00+",
-    "PlayResX: 1080",
-    "PlayResY: 1920",
+    `PlayResX: ${W}`,
+    `PlayResY: ${H}`,
     "WrapStyle: 0",
     "ScaledBorderAndShadow: yes",
     "",
     "[V4+ Styles]",
     "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-    `Style: Cap,${font.name},${size},${assColor(f.caption_color)},${assColor(f.caption_color)},&H00000000,&H78000000,${font.bold ? -1 : 0},0,0,0,100,100,0,0,1,${/no (outline|stroke|shadow)/.test(style) ? 0 : 4},${/shadow/.test(style) ? 3 : 1},${alignment},90,90,${marginV},1`,
+    `Style: Cap,${font.name},${size},${assColor(f.caption_color)},${assColor(f.caption_color)},&H00000000,&H78000000,${font.bold ? -1 : 0},0,0,0,100,100,0,0,1,${/no (outline|stroke|shadow)/.test(style) ? 0 : 4},${/shadow/.test(style) ? 3 : 1},${alignment},${marginSide},${marginSide},${marginV},1`,
     "",
     "[Events]",
     "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",

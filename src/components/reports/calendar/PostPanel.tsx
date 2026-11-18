@@ -33,7 +33,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { CalendarPost } from "@/lib/calendarRevision";
 import { tileAspectFor } from "@/lib/tileAspect";
-import { useNaturalRatio } from "@/lib/naturalRatio";
+import { useNaturalRatio, useVideoRatio, videoAspectClass } from "@/lib/naturalRatio";
 import { mediaInUse, tilesFromIterations, type Iteration, type MediaTile } from "@/lib/postMediaTiles";
 import { supabase } from "@/integrations/supabase/client";
 import { postCopyOf } from "@/lib/postCopy";
@@ -369,7 +369,8 @@ export function PostPanel({
                     onUploadClip={uploadClip}
                     uploadingClip={uploadingClip}
                     isStaff={isMoburstStaff}
-                    aspect={videoDesigns ? "aspect-[9/16]" : tileAspectFor(post) || "aspect-[4/5]"}
+                    // A video is made in its platform's upload size (the request's own): its frame has that shape until it loads.
+                    aspect={videoDesigns ? videoAspectClass(designRequest?.upload_size) : tileAspectFor(post) || "aspect-[4/5]"}
                     filenameStub={`design-${post.platform || "post"}`}
                     onCreate={() => void startFromButton()}
                     onRegenerate={(note) => startDesigns(undefined, note)}
@@ -583,9 +584,12 @@ function MediaTileCard({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const noun = isVideo ? "video" : "design";
-  // A still's tile takes the design's own shape once it has loaded: a design is drawn in its platform's upload size.
+  // A tile takes the design's own shape once it has loaded: a design or a video is made in its platform's upload size.
   const { ratio, onLoad } = useNaturalRatio();
-  const shaped = !isVideo && ratio !== null;
+  const { ratio: videoShape, onLoadedMetadata } = useVideoRatio();
+  // A vertical video keeps the tile it always had; only a landscape one takes its own shape.
+  const shown = isVideo ? (videoShape !== null && videoShape > 1 ? videoShape : null) : ratio;
+  const shaped = shown !== null;
   // The same words as the post's own design: Not right and Delete.
   const submit = async (verdict: "rejected" | "archived", reason?: string, note?: string): Promise<boolean> => {
     if (!tile.iterationId || !onFeedback) return false;
@@ -606,10 +610,10 @@ function MediaTileCard({
         type="button"
         onClick={onPreview}
         className={`block w-full bg-black relative group ${shaped ? "" : tileAspect || (isVideo ? "aspect-[9/16]" : "aspect-square")}`}
-        style={shaped ? { aspectRatio: String(ratio) } : undefined}
+        style={shaped ? { aspectRatio: String(shown) } : undefined}
       >
         {isVideo ? (
-          <video src={tile.url} className="w-full h-full object-contain" muted loop preload="metadata" />
+          <video src={tile.url} className="w-full h-full object-contain" muted loop preload="metadata" onLoadedMetadata={onLoadedMetadata} />
         ) : (
           <img src={tile.url} alt={`Variant ${index + 1}`} className="w-full h-full object-contain" onLoad={onLoad} />
         )}

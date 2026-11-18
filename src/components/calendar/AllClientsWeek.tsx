@@ -18,6 +18,7 @@ import { readAll } from "@/lib/readAll";
 import { byPostingTime, postingTimeText } from "@/lib/calendarDate";
 import { DAYS, addDays, shortDate, storiesAfterTheirPosts, type CalendarPostRow } from "@/lib/calendarPosts";
 import { DesignFrame } from "./DesignFrame";
+import { VideoFrame } from "./VideoFrame";
 
 export type ClientPost = CalendarPostRow & { client_name: string; /** The client's timezone, shown beside a post's time. */ client_timezone: string | null };
 
@@ -94,9 +95,8 @@ export function AllClientsWeek({ posts, week }: { posts: ClientPost[]; week: str
               >
                 {designs[p.post_key] ? (
                   isVideoMedia(designs[p.post_key]) ? (
-                    <div className={`${story ? "aspect-[9/16] w-2/3 mx-auto" : "aspect-[4/5]"} rounded-[8px] overflow-hidden bg-black/60`}>
-                      <video src={designs[p.post_key]} muted playsInline preload="metadata" className="w-full h-full object-contain" />
-                    </div>
+                    // The whole video in a frame of its own shape (its platform's upload size), never cropped.
+                    <VideoFrame src={designs[p.post_key]} fallback={story ? "aspect-[9/16]" : "aspect-[4/5]"} className={`${story ? "w-2/3 mx-auto " : ""}rounded-[8px] overflow-hidden bg-black/60`} video={{ muted: true, playsInline: true, preload: "metadata" }} />
                   ) : (
                     // The whole design in a frame of its own shape (its platform's upload size), never cropped.
                     <DesignFrame src={designs[p.post_key]} lazy fallback={story ? "aspect-[9/16]" : "aspect-[4/5]"} className={`${story ? "w-2/3 mx-auto " : ""}rounded-[8px] overflow-hidden bg-black/60`} />

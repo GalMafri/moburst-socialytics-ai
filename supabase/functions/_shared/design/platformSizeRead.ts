@@ -44,6 +44,8 @@ export interface ReadSize extends Size { part: Part }
 /** A row of platform_sizes as the job reads it. */
 export interface SizeRow extends Key, Size {
   pending_width: number | null; pending_height: number | null;
+  /** When the pending size was held (platform_sizes.pending_at); a size held today is not confirmed today. */
+  pending_at?: string | Date | null;
   previous_width?: number | null; previous_height?: number | null;
   /** False: the image model refused the size and there was no drawn size to go back to. */
   usable?: boolean | null;
@@ -198,6 +200,22 @@ export function extractPrompt(keys: Key[], text: string): string {
 
 const keyOf = (k: Key) => `${k.platform}/${k.format}`;
 
+/** A day in Israel time, as YYYY-MM-DD: a held size is confirmed only by a read on a later day. */
+export function israelDay(at: Date | string): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jerusalem", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(at));
+}
+
+/**
+ * Whether a read now may confirm a row's held size: the size was held on an
+ * earlier day (Israel time). A retry of the job on the day a size was held
+ * (the queue tries a failed run again at once) holds it again instead, so a
+ * size is never written on one day's reading of the page. A held size with no
+ * time recorded counts as earlier, as it did before the rule.
+ */
+export function heldEarlier(row: { pending_at?: string | Date | null }, now: Date): boolean {
+  return !row.pending_at || israelDay(row.pending_at) < israelDay(now);
+}
+
 /**
  * The model's answer as the strict structure, or null when it is not one
  * (the read then fails as a whole). Rows that were not asked for are
@@ -332,8 +350,10 @@ export function listedSizes(key: Key, read: ReadSize[], parts: ReturnType<typeof
  *   held       the first listed size differs from the size in use and is
  *              not the pending size: it becomes the pending size, and the
  *              size in use stays.
- *   confirmed  it differs and is the pending size, so this is the second
- *              read in a row that gave it: it is the new size.
+ *   confirmed  it differs and is the pending size, held on an earlier day
+ *              (Israel time), so this is the second read in a row that gave
+ *              it: it is the new size. Read again on the day it was held, it
+ *              is held again (18 Nov 2026, heldEarlier).
  *
  * Every change takes two reads, however near the new size is to the size
  * in use (since 18 Nov 2026; before, a size within a quarter of each edge
@@ -354,7 +374,7 @@ export function listedSizes(key: Key, read: ReadSize[], parts: ReturnType<typeof
  * size clears or replaces it, and after three reads that refuse the row it
  * is dropped (record_platform_size_read).
  */
-export function decide(row: SizeRow, read: ReadSize[] | undefined, parts: ReturnType<typeof guideParts>, word: ModelWord = NO_WORD): RowResult {
+export function decide(row: SizeRow, read: ReadSize[] | undefined, parts: ReturnType<typeof guideParts>, word: ModelWord = NO_WORD, now: Date = new Date()): RowResult {
   const base = { platform: row.platform, format: row.format, from: [row.width, row.height] as [number, number] };
   const given = (read ?? []).map((s) => [s.width, s.height, s.part] as [number, number, Part]);
   // The cheat sheet cell still names the size in use: it stays, whatever the reading model answered.
@@ -375,7 +395,7 @@ export function decide(row: SizeRow, read: ReadSize[] | undefined, parts: Return
   // A size the image model refused, and has not drawn since, is not drawable. (The row's own size is tried again above.)
   if (word.refused(row, first)) return { ...base, outcome: "refused", reason: "model_refused", to: [first.width, first.height], read: given, listed: shown };
   const to: [number, number] = [first.width, first.height];
-  // Every change waits: the size is written only when the read before this one gave it too.
-  const pending = row.pending_width === first.width && row.pending_height === first.height;
+  // Every change waits: the size is written only when a read on an earlier day gave it too (heldEarlier).
+  const pending = row.pending_width === first.width && row.pending_height === first.height && heldEarlier(row, now);
   return { ...base, outcome: pending ? "confirmed" : "held", to, read: given, listed: shown };
 }

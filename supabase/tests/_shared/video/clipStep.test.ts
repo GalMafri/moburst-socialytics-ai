@@ -311,3 +311,21 @@ describe("two passes on one job", () => {
     expect(r.clip_order).toMatchObject({ job_id: "hf-a" });
   });
 });
+
+describe("runClip in the job's own frame (18 Nov 2026, videoSize.ts)", () => {
+  it("orders a landscape job's clip at 16:9 with landscape footage rules, and a job with no frame vertical as before", async () => {
+    const wide = { size: { width: 1920, height: 1080 }, card: { width: 1936, height: 1088 }, aspect: "16:9", label: "16:9", word: "landscape" };
+    const sent: Array<{ aspect: string; prompt: string }> = [];
+    const submit = async (req: { aspect: string; prompt: string }) => { sent.push(req); return { index: 0, job_id: "hf-1" }; };
+    const r1 = row();
+    const j1 = job(r1);
+    (j1.input as Record<string, unknown>).video_frame = wide;
+    await runClip(fakes(r1, { submit }).deps, j1);
+    const r2 = row();
+    await runClip(fakes(r2, { submit }).deps, job(r2));
+    expect(sent[0].aspect).toBe("16:9");
+    expect(sent[0].prompt).toContain(" Landscape 16:9, every part in sharp focus.");
+    expect(sent[1].aspect).toBe("9:16");
+    expect(sent[1].prompt).toContain(" Vertical 9:16, every part in sharp focus.");
+  });
+});

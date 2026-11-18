@@ -25,11 +25,12 @@
 import type { JobRef } from "../higgsfield/generate.ts";
 import { type ClipOrder, QUOTE_WAIT_MS, REASONS, clipOrderDecision, clipRequest, footageRules } from "./clip.ts";
 import type { VideoJob, VideoStepResult } from "./steps.ts";
+import { jobVideoFrame } from "./videoSize.ts";
 
 export interface ClipDeps {
   /** The job's order column, read fresh from the database (null when it holds none). */
   readOrder(jobId: string): Promise<ClipOrder | null>;
-  /** Higgsfield's live price for the clip, or null when it could not be read. */
+  /** Higgsfield's live price for the clip in the job's aspect (videoSize.ts, jobVideoFrame), or null when it could not be read. */
   quote(): Promise<number | null>;
   /** The account's credits, or null when they could not be read. */
   balance(): Promise<number | null>;
@@ -129,10 +130,12 @@ export async function runClip(deps: ClipDeps, job: VideoJob): Promise<VideoStepR
   if (!(await deps.saveOrder(order))) return "held";
   job.clip_order = order;
 
-  const prompt = `${input.video.prompt}${footageRules(input.people)}`;
+  // In the job's own frame: vertical for every job from before 18 Nov 2026 (videoSize.ts).
+  const frame = jobVideoFrame(input);
+  const prompt = `${input.video.prompt}${footageRules(input.people, frame)}`;
   // A failure from here on leaves the order without a job id: later passes
   // wait out ORDER_GRACE_MS and then end the video, never ordering again.
-  const first = await deps.submit(clipRequest(prompt, s.frame_ref_id, s.kit_ref_ids));
+  const first = await deps.submit(clipRequest(prompt, s.frame_ref_id, s.kit_ref_ids, frame.aspect));
   if (!first?.job_id) throw new Error("The video service did not start the clip.");
   await recordOrdered(deps, job, first.job_id, live);
   job.clip_order = { ...order, job_id: first.job_id, credits: live };

@@ -35,6 +35,8 @@ export interface DesignRequest {
   video_route?: string | null;
   stage: DesignStage;
   kind?: "single" | "carousel" | "video";
+  /** The platform_sizes row the request read: the size its design or video is made in; null when it read none. */
+  upload_size?: { platform?: string; format?: string; width: number; height: number } | null;
   options_wanted: number;
   options_ready: number;
   /** Who asked (every request since 2 Nov names someone; older automatic ones did not). */

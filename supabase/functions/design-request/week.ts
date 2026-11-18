@@ -25,6 +25,8 @@ import { type PassRun, type PassStart, type PostFacts, type RunPost, WEEK_AT_ONC
 import { planningStalled } from "../_shared/design/requestRules.ts";
 import { DESIGN_SETUP_STEPS, designWaitingFor, type DesignStepRow, type DesignWaitingFor } from "../_shared/design/setup.ts";
 import { CLIP_CREDIT_FLOOR, creditsUsed } from "../_shared/video/credits.ts";
+import { readVideoSize } from "../_shared/video/videoSizeDb.ts";
+import { videoFrameOf, type VideoUploadSize } from "../_shared/video/videoSize.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -41,14 +43,18 @@ export interface WeekDeps {
   isSystem(): Promise<boolean>;
   /** Higgsfield credits on the account, or null when unknown. A read: nothing is spent. */
   balance(): Promise<number | null>;
-  /** Higgsfield's live price for a video's one clip (get_cost), or null when it could not be read. A read: nothing is spent. */
-  quoteClip(): Promise<number | null>;
+  /**
+   * Higgsfield's live price for a video's one clip (get_cost) in the aspect it
+   * is made in (vertical when not given), or null when it could not be read.
+   * A read: nothing is spent.
+   */
+  quoteClip(aspect?: string): Promise<number | null>;
   /**
    * Start one post the way a single post's button does: its request's id, or
    * filming when its video is filmed instead. approvedCredits is the clip's
    * price approved at the press that added a video; null for a still.
    */
-  startPost(start: PassStart & { batchId: string; settings: Row; post: Row; approvedCredits: number | null }): Promise<{ requestId: string | null; filming: boolean }>;
+  startPost(start: PassStart & { batchId: string; settings: Row; post: Row; approvedCredits: number | null; uploadSize?: VideoUploadSize | null }): Promise<{ requestId: string | null; filming: boolean }>;
   /** Start the week's next posts now, in the background (after a press). */
   wake(): void;
 }
@@ -108,6 +114,34 @@ async function runningRun(db: Db, clientId: string, week: string): Promise<Row |
   return data ?? null;
 }
 
+/** One video post's price as the press reads it: the live price of its clip, and the stored size it was read for (null: none, priced vertical). */
+interface ClipPrice { price: number | null; size: VideoUploadSize | null }
+
+/** Two stored sizes are the same row: both none, or the same platform, format and size. */
+export function sameSize(a: VideoUploadSize | null | undefined, b: VideoUploadSize | null | undefined): boolean {
+  if (!a || !b) return !a && !b;
+  return a.platform === b.platform && a.format === b.format && a.width === b.width && a.height === b.height;
+}
+
+/**
+ * The live price of each video post's clip, by post key, read once per
+ * aspect the week's videos are made in (18 Nov 2026, _shared/video/videoSize.ts:
+ * a YouTube video is landscape), with the stored size it was read for: each
+ * video is priced in the aspect its clip is ordered in, and made in exactly
+ * that size (weekContinue), so the price approved is the price spent. A
+ * null price: its aspect's price could not be read.
+ */
+async function clipPrices(d: WeekDeps, posts: Row[]): Promise<Map<string, ClipPrice>> {
+  const sizes = new Map<string, VideoUploadSize | null>();
+  for (const post of posts) sizes.set(String(post.post_key), await readVideoSize(d.db, { platform: post.platform ?? null, format: post.format ?? null }));
+  const quotes = new Map<string, number | null>();
+  for (const size of sizes.values()) {
+    const aspect = videoFrameOf(size).aspect;
+    if (!quotes.has(aspect)) quotes.set(aspect, await d.quoteClip(aspect));
+  }
+  return new Map([...sizes].map(([key, size]) => [key, { price: quotes.get(videoFrameOf(size).aspect) ?? null, size }]));
+}
+
 /** Credits quoted on every clip and cleaning of the run's videos. */
 async function creditsOfRun(db: Db, runId: string): Promise<number> {
   const { data: requests } = await db.from("design_requests").select("id").eq("batch_id", runId);
@@ -160,18 +194,29 @@ export async function weekPreview(d: WeekDeps, body: Row): Promise<Answer> {
   const queued = new Set(((running?.posts ?? []) as RunPost[]).filter((p) => p.state === "queued").map((p) => p.post_key));
   const posts = (await readWeek(d.db, client, week, d.now())).filter((p) => !queued.has(p.post.post_key));
   const counts = weekCounts(posts.map((p) => ({ post_key: p.post.post_key, copy: p.facts.copy, result: p.result, platform: p.post.platform })));
-  // The price is Higgsfield's own, read only when the week has videos; unread, the screen says so and prices nothing.
-  const perClip = counts.video ? await d.quoteClip() : null;
-  const unpriced = counts.video > 0 && perClip === null;
+  // The price is Higgsfield's own, read only when the week has videos, in the aspect each is made in; unread, the
+  // screen says so and prices nothing.
+  const videos = posts.filter((p) => p.result.in && !p.result.story && p.result.kind === "video").map((p) => p.post);
+  const prices = counts.video ? await clipPrices(d, videos) : new Map<string, ClipPrice>();
+  // As the press queues them: a video whose aspect could not be priced is left out, the others are counted and summed.
+  const known = [...prices.values()].map((p) => p.price).filter((v): v is number => v !== null);
+  const left = [...prices.values()].length - known.length;
+  const unpriced = counts.video > 0 && !known.length;
+  if (!unpriced && left > 0) counts.video = known.length;
+  // One price for every clip of the week (every video in one aspect, or priced the same): that price; otherwise none.
+  const distinct = [...new Set(known)];
+  const perClip = !unpriced && distinct.length === 1 ? distinct[0] : null;
   const { data: latest } = await d.db.from("design_week_runs").select("id").eq("client_id", clientId).eq("week_start", week).order("created_at", { ascending: false }).limit(1).maybeSingle();
   return {
     body: {
       client_name: client.name ?? null,
       week_start: week,
       counts,
-      credits: unpriced ? null : counts.video * (perClip ?? 0),
+      credits: unpriced ? null : known.reduce<number>((sum, v) => sum + v, 0),
       credits_per_clip: perClip,
       ...(unpriced ? { price_unavailable: true } : {}),
+      // Videos left out of a press now because their aspect's price could not be read; the others go ahead.
+      ...(!unpriced && left > 0 ? { videos_unpriced: left } : {}),
       run_id: latest?.id ?? null,
       credits_used: latest ? await creditsOfRun(d.db, latest.id) : null,
     },
@@ -204,16 +249,19 @@ export async function weekStart(d: WeekDeps, body: Row): Promise<Answer> {
   if (!(await setUp(d.db, clientId))) return notSetUp(d.db, client);
 
   const now = d.now();
-  const eligible = (await readWeek(d.db, client, week, now))
-    .flatMap((p) => (p.result.in ? [{ post_key: p.post.post_key, kind: p.result.kind, postAt: p.result.postAt }] : []));
-  // Each video joins at Higgsfield's live price, read once for the press; unread, the videos wait for the next press.
-  const price = eligible.some((e) => e.kind === "video") ? await d.quoteClip() : null;
+  const inWeek = (await readWeek(d.db, client, week, now)).filter((p) => p.result.in);
+  const eligible = inWeek.flatMap((p) => (p.result.in ? [{ post_key: p.post.post_key, kind: p.result.kind, postAt: p.result.postAt }] : []));
+  // Each video joins at Higgsfield's live price for its clip in the aspect it is made in, read once per aspect for
+  // the press; unread, the videos wait for the next press.
+  const prices = await clipPrices(d, inWeek.filter((p) => p.result.in && p.result.kind === "video").map((p) => p.post));
+  const price = (key: string) => prices.get(key)?.price ?? null;
+  const sizeOf = (key: string) => prices.get(key)?.size ?? null;
 
   const addTo = async (run: Row): Promise<Answer> => {
     const merged = await withLease(d, run.id, async () => {
       const current = await runningRun(d.db, clientId, week);
       if (!current) return null;
-      const { posts, added, noPrice } = mergeIntoRun((current.posts ?? []) as RunPost[], eligible, userId, now, price);
+      const { posts, added, noPrice } = mergeIntoRun((current.posts ?? []) as RunPost[], eligible, userId, now, price, sizeOf);
       if (!added.length && !noPrice.length) return { run: current, added, left_out_no_price: 0 };
       const { data: written } = await d.db.from("design_week_runs").update({ posts, updated_at: now.toISOString() })
         .eq("id", current.id).eq("status", "running").select(RUN_COLUMNS);
@@ -227,7 +275,7 @@ export async function weekStart(d: WeekDeps, body: Row): Promise<Answer> {
 
   const running = await runningRun(d.db, clientId, week);
   if (running) return addTo(running);
-  const { posts, added, noPrice } = mergeIntoRun([], eligible, userId, now, price);
+  const { posts, added, noPrice } = mergeIntoRun([], eligible, userId, now, price, sizeOf);
   // Nothing to design now (or only videos that could not be priced): no run is made.
   if (!added.length) return { body: { run: null, added: [], left_out_no_price: noPrice.length } };
 
@@ -343,7 +391,21 @@ export async function weekContinue(d: WeekDeps): Promise<Answer> {
       try {
         // A video carries the price approved at the press that added it; the clip step orders at that price or less.
         const approvedCredits = s.kind === "video" ? entry?.approved_credits ?? null : null;
-        const out = await d.startPost({ ...s, batchId: s.runId, settings: settings.get(s.client_id)!, post: rows.get(`${s.client_id}|${s.post_key}`)!, approvedCredits });
+        const post = rows.get(`${s.client_id}|${s.post_key}`)!;
+        // And it is made in exactly the size it was priced for. A size that changed since (or a post queued
+        // before sizes were kept, unless it is still vertical, as it was priced) is priced again at the next press.
+        let uploadSize: VideoUploadSize | null | undefined;
+        if (s.kind === "video") {
+          const current = await readVideoSize(d.db, { platform: post?.platform ?? null, format: post?.format ?? null });
+          const priced = entry?.priced_size;
+          const same = priced === undefined ? videoFrameOf(current).aspect === videoFrameOf(null).aspect : sameSize(priced as VideoUploadSize | null, current);
+          if (!same) {
+            if (entry) Object.assign(entry, { state: "left_out", why: "no_price", waits_for: null });
+            continue;
+          }
+          uploadSize = priced === undefined ? current : (priced as VideoUploadSize | null);
+        }
+        const out = await d.startPost({ ...s, batchId: s.runId, settings: settings.get(s.client_id)!, post, approvedCredits, ...(uploadSize !== undefined ? { uploadSize } : {}) });
         if (entry) Object.assign(entry, { state: out.filming ? "filming" : "started", request_id: out.requestId, started_at: now.toISOString(), waits_for: null, why: null });
         started++;
       } catch (e) {

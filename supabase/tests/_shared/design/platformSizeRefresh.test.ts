@@ -64,6 +64,8 @@ const sizes = async () => (await pg.query<Row>("select platform, format, width, 
 const sizeOf = async (platform: string, format: string) => { const r = (await sizes()).find((x) => x.platform === platform && x.format === format)!; return [r.width, r.height]; };
 const reads = async () => (await pg.query<{ ok: boolean; error: string | null; source: string; source_updated: string | null; rows: Array<{ platform: string; format: string; outcome: string; reason?: string }> }>("select ok, error, source, source_updated, rows from public.platform_size_reads order by read_at, id")).rows;
 
+/** The next day: every held size was held the day before (a held size is confirmed only by a read on a later day). */
+const nextDay = () => pg.exec("update public.platform_sizes set pending_at = pending_at - interval '1 day' where pending_at is not null");
 const c = (width: number, height: number) => ({ width, height, part: "cheat_sheet" });
 const s = (width: number, height: number) => ({ width, height, part: "section" });
 /** What a model that follows the reading rule answers for the stand-in page. */
@@ -110,6 +112,7 @@ describe("the weekly read of the sizes guide", () => {
     expect(first.reason).toBe("Read the sizes guide: 7 sizes, 6 as they were, 0 changed, 1 held for a second read, 0 refused, 0 taken back, 0 tried again.");
     expect(await sizeOf("facebook", "image")).toEqual([1080, 1350]);
     expect((await sizes()).find((r) => r.platform === "facebook" && r.format === "image")).toMatchObject({ source: "seed", pending_width: 1080, pending_height: 1440 });
+    await nextDay();
     const second = await refreshPlatformSizes(db, deps({ html, answer }));
     expect(second.changed).toBe(1);
     expect(await sizeOf("facebook", "image")).toEqual([1080, 1440]);
@@ -141,11 +144,26 @@ describe("the weekly read of the sizes guide", () => {
     expect(first.changed).toBe(0);
     expect(await sizeOf("x", "image")).toEqual([1600, 900]);
     expect((await sizes()).find((r) => r.platform === "x")).toMatchObject({ pending_width: 1200, pending_height: 1200 });
+    await nextDay();
     const second = await refreshPlatformSizes(db, deps({ html, answer }));
     expect(second.changed).toBe(1);
     expect(await sizeOf("x", "image")).toEqual([1200, 1200]);
     expect((await sizes()).find((r) => r.platform === "x")).toMatchObject({ pending_width: null, source: "guide" });
     expect((await reads()).map((r) => r.rows.find((x) => x.platform === "x")!.outcome)).toEqual(["held", "confirmed"]);
+  });
+
+  it("never confirms a size on the day it was held: a retry the same day holds it again (18 Nov 2026)", async () => {
+    const html = guide.replace("<td>1600&#215;900 px</td>", "<td>1200&#215;1200 px</td>");
+    const answer = faithful();
+    answer.rows[6].sizes = [c(1200, 1200)];
+    await refreshPlatformSizes(db, deps({ html, answer }));
+    const retry = await refreshPlatformSizes(db, deps({ html, answer }));
+    expect(retry.changed).toBe(0);
+    expect(retry.rows.find((r) => r.platform === "x")).toMatchObject({ outcome: "held", to: [1200, 1200] });
+    expect(await sizeOf("x", "image")).toEqual([1600, 900]);
+    await nextDay();
+    expect((await refreshPlatformSizes(db, deps({ html, answer }))).changed).toBe(1);
+    expect(await sizeOf("x", "image")).toEqual([1200, 1200]);
   });
 
   it("drops a far size read once when the next run reads the size in use again", async () => {
@@ -406,7 +424,8 @@ describe("the live services", () => {
       expect((await runPlatformSizes(db, job, liveSizeDeps(env))).status).toBe("done");
       expect((await sizes()).map((r) => [r.width, r.height, r.source])).toEqual(before.map((r) => [r.width, r.height, r.source]));
       expect((await sizes()).filter((r) => r.pending_width !== null).map((r) => [r.platform, r.format, r.pending_width, r.pending_height])).toEqual([["facebook", "image", 1080, 1440]]);
-      // The second read gives the same: Facebook's is written, and nothing else.
+      // The next day's read gives the same: Facebook's is written, and nothing else.
+      await nextDay();
       expect((await runPlatformSizes(db, job, liveSizeDeps(env))).status).toBe("done");
       expect(await sizeOf("facebook", "image")).toEqual([1080, 1440]);
       expect(await sizeOf("x", "image")).toEqual([1600, 900]);

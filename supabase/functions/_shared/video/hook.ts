@@ -10,11 +10,12 @@
 // the lettering's box and its layer's size (the pixel scan moved to the service).
 
 import type { Rect, Size, TitleReadResult } from "../picture/contract.ts";
+import { VERTICAL, type VideoFrame } from "./videoSize.ts";
 
-/** The instruction for the hook layer. */
-export function hookPrompt(brand: string, headline: string[], textStyle: string): string {
+/** The instruction for the hook layer, in the video's shape (vertical when not given, videoSize.ts). */
+export function hookPrompt(brand: string, headline: string[], textStyle: string, frame: VideoFrame = VERTICAL): string {
   const lines = headline.map((l, i) => `${i === 0 ? "First line" : "Second line"}, spelled exactly: "${l}"`).join(". ");
-  return `The on-screen title of a vertical (9:16) social video by ${brand}, drawn alone on a fully transparent background. ` +
+  return `The on-screen title of a ${frame.word} (${frame.label}) social video by ${brand}, drawn alone on a fully transparent background. ` +
     `${lines}. ${textStyle}. The letters are crisp and in sharp focus, with enough glow or shadow to read over moving footage. ` +
     "Nothing else in the image: no logo, no other text, no shapes, panels or background.";
 }

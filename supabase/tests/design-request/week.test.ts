@@ -344,3 +344,91 @@ describe("week_stop", () => {
     expect(db.tables.design_week_runs[0].status).toBe("running");
   });
 });
+
+describe("each video priced in the aspect its clip is made in (18 Nov 2026)", () => {
+  const sizes = [
+    { platform: "youtube", format: "video", width: 1920, height: 1080 },
+    { platform: "instagram", format: "short_video", width: 1080, height: 1920 },
+  ];
+  const posts = () => [
+    calendarPost("yt", { platform: "YouTube", format: "long_video" }),
+    calendarPost("reel", { platform: "Instagram", format: "Reel" }),
+    calendarPost("reel2", { platform: "Instagram", format: "Reel", post_date: "2026-11-06" }),
+  ];
+  const byAspect = () => vi.fn(async (aspect?: string): Promise<number | null> => (aspect === "16:9" ? 140 : 128));
+
+  it("reads one quote per aspect, and adds each video's own price to the estimate", async () => {
+    const db = world({ calendar_posts: posts(), platform_sizes: sizes });
+    const d = deps(db, { quoteClip: byAspect() });
+    const r = await weekPreview(d, { client_id: "c1", week_start: WEEK });
+    expect(d.quoteClip).toHaveBeenCalledTimes(2);
+    expect(new Set((d.quoteClip as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]))).toEqual(new Set(["16:9", "9:16"]));
+    expect(r.body).toMatchObject({ counts: { video: 3 }, credits: 140 + 128 * 2, credits_per_clip: null });
+  });
+
+  it("approves each video at its own aspect's price at the press", async () => {
+    const db = world({ calendar_posts: posts(), platform_sizes: sizes });
+    await weekStart(deps(db, { quoteClip: byAspect() }), { client_id: "c1", week_start: WEEK });
+    const run = db.tables.design_week_runs[0].posts as Row[];
+    expect(run.find((p) => p.post_key === "yt")).toMatchObject({ state: "queued", approved_credits: 140 });
+    expect(run.find((p) => p.post_key === "reel")).toMatchObject({ state: "queued", approved_credits: 128 });
+  });
+
+  it("leaves out only the videos whose aspect could not be priced", async () => {
+    const db = world({ calendar_posts: posts(), platform_sizes: sizes });
+    const r = await weekStart(deps(db, { quoteClip: vi.fn(async (aspect?: string) => (aspect === "16:9" ? null : 128)) }), { client_id: "c1", week_start: WEEK });
+    expect(r.body.left_out_no_price).toBe(1);
+    expect((db.tables.design_week_runs[0].posts as Row[]).find((p) => p.post_key === "yt")).toMatchObject({ state: "left_out", why: "no_price" });
+  });
+
+  it("counts and sums only the videos whose aspect could be priced, as the press queues them", async () => {
+    const db = world({ calendar_posts: posts(), platform_sizes: sizes });
+    const r = await weekPreview(deps(db, { quoteClip: vi.fn(async (aspect?: string) => (aspect === "16:9" ? null : 128)) }), { client_id: "c1", week_start: WEEK });
+    expect(r.body).toMatchObject({ counts: { video: 2 }, credits: 256, credits_per_clip: 128, videos_unpriced: 1 });
+    expect(r.body.price_unavailable).toBeUndefined();
+  });
+
+  it("keeps the size each video was priced for, and makes it in exactly that size", async () => {
+    const db = world({ calendar_posts: posts(), platform_sizes: sizes });
+    await weekStart(deps(db, { quoteClip: byAspect() }), { client_id: "c1", week_start: WEEK });
+    const run = db.tables.design_week_runs[0].posts as Row[];
+    expect(run.find((p) => p.post_key === "yt")!.priced_size).toEqual({ platform: "youtube", format: "video", width: 1920, height: 1080 });
+    const d = deps(db);
+    await weekContinue(d);
+    expect(d.started).toHaveLength(1);
+    expect(d.started[0]).toMatchObject({ post_key: "yt", approvedCredits: 140, uploadSize: { platform: "youtube", format: "video", width: 1920, height: 1080 } });
+  });
+
+  it("asks again for a video whose size changed since its price was read, never ordering it at another aspect's price", async () => {
+    const db = world({ calendar_posts: [posts()[0]], platform_sizes: sizes.map((s) => ({ ...s })) });
+    await weekStart(deps(db, { quoteClip: byAspect() }), { client_id: "c1", week_start: WEEK });
+    db.tables.platform_sizes.find((s: Row) => s.platform === "youtube")!.width = 1080;
+    db.tables.platform_sizes.find((s: Row) => s.platform === "youtube")!.height = 1920;
+    const d = deps(db);
+    await weekContinue(d);
+    expect(d.started).toEqual([]);
+    expect(db.tables.design_week_runs[0].posts[0]).toMatchObject({ post_key: "yt", state: "left_out", why: "no_price" });
+  });
+
+  it("starts a video queued before sizes were kept only while it is still vertical, as it was priced", async () => {
+    const queued = (key: string) => ({ post_key: key, kind: "video", post_at: "2026-11-05T09:00:00.000Z", state: "queued", why: null, waits_for: null, added_by: STAFF, added_at: NOW.toISOString(), request_id: null, started_at: null, approved_credits: 128 });
+    const run = (key: string) => ({ id: `run-${key}`, client_id: "c1", week_start: WEEK, status: "running", posts: [queued(key)], created_at: NOW.toISOString() });
+    const reel = world({ calendar_posts: [posts()[1]], platform_sizes: sizes, design_week_runs: [run("reel")] });
+    const d1 = deps(reel);
+    await weekContinue(d1);
+    expect(d1.started[0]).toMatchObject({ post_key: "reel", approvedCredits: 128, uploadSize: { width: 1080, height: 1920 } });
+    const yt = world({ calendar_posts: [posts()[0]], platform_sizes: sizes, design_week_runs: [run("yt")] });
+    const d2 = deps(yt);
+    await weekContinue(d2);
+    expect(d2.started).toEqual([]);
+    expect(yt.tables.design_week_runs[0].posts[0]).toMatchObject({ state: "left_out", why: "no_price" });
+  });
+
+  it("prices every video vertical, once, with no stored sizes", async () => {
+    const db = world({ calendar_posts: posts() });
+    const d = deps(db);
+    const r = await weekPreview(d, { client_id: "c1", week_start: WEEK });
+    expect(d.quoteClip).toHaveBeenCalledTimes(1);
+    expect(r.body).toMatchObject({ credits: 128 * 3, credits_per_clip: 128 });
+  });
+});
