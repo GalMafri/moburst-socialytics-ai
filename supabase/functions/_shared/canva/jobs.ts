@@ -14,6 +14,7 @@ import { settleLogo } from "../design/logoFit.ts";
 import { jobLogos, restGround, stampList, type JobLogos, type LogoSet, type StampEntry } from "../design/logoTone.ts";
 import { jobShape, pagePlacement } from "../design/platformSize.ts";
 import { isVertical, videoFrameOf } from "../video/videoSize.ts";
+import { stampFor } from "../video/logoGround.ts";
 import { type CoverJob, forSameCover } from "../design/coverDesign.ts";
 
 export const BUCKET = "generated-media";
@@ -170,7 +171,8 @@ async function insertJobs(admin: any, requestId: string, optionIndex: number, ro
  * since, as when it was trimmed at this very start) the job has the one
  * file, and nothing waits. Either way the color behind the file is one the
  * file shows on (stillStart). The settings handed back are never changed by
- * this, and a video keeps the stored file.
+ * this. A video carries the stored file and its set's copies, and the one that
+ * shows on its footage is chosen when it is put together (video/logoGround.ts).
  */
 export async function startOption(admin: any, req: DesignRequest, given: Settings, brandName: string, briefIndex: number, optionIndex: number): Promise<Settings> {
   const brief = req.briefs[briefIndex % req.briefs.length];
@@ -265,6 +267,9 @@ async function startVideoOption(admin: any, req: DesignRequest, settings: Settin
       text_style: brief.text_style ?? "bold white sans-serif with a soft shadow, centered in the lower third",
       logo_path: settings.logo_path,
       logo_size: logo,
+      // The client's files the video may carry, in stamp order: the one that shows on the footage under the
+      // logo's place is chosen when the video is put together (_shared/video/logoGround.ts).
+      stamp: stampFor(settings.logo_path, settings) ?? [{ file: "stored", path: settings.logo_path }],
       placement: settings.placement,
       // The one clip's prompt; its length and every other setting are fixed (_shared/video/clip.ts CLIP).
       video: { prompt: brief.footage ?? brief.picture },

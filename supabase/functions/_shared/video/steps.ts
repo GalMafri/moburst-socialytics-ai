@@ -61,6 +61,9 @@ import { FRAME_JPEG_QUALITY, KIT_JPEG_QUALITY } from "../picture/contract.ts";
 import { checkScript, endScript, startScript } from "./sandbox.ts";
 import { isVertical, jobVideoFrame } from "./videoSize.ts";
 import { pagePlacement } from "../design/platformSize.ts";
+import { type GroundDeps, type VideoLogoPick, centeredIn, pickVideoLogo } from "./logoGround.ts";
+import { pngSize } from "../picture/headers.ts";
+import type { Rgb } from "../picture/contract.ts";
 
 /** Each check's answer, and room for the model to think first, which counts against the limit (anthropicReply.ts, roomFor). */
 const CHECK_TOKENS = roomFor(2000);
@@ -305,13 +308,7 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       }
     }
     case "assemble": {
-      s.composes = (s.composes ?? 0) + 1;
-      if (s.composes > MAX_COMPOSE) throw new Error("FINAL: The video could not be put together.");
-      // Each finished file has a name of its own, so a video made again is never shown from a cached copy.
-      const out = `${base}/video-${Date.now().toString(36)}.mp4`;
-      const { data: signed, error } = await admin.storage.from(BUCKET).createSignedUploadUrl(out, { upsert: true });
-      if (error || !signed?.signedUrl) throw new Error(`Could not prepare the video's upload: ${error?.message ?? "no URL"}`);
-      const [lw, lh] = input.logo_size;
+      const [sw, sh] = input.logo_size;
       // The frame the video is made in: its platform's upload size, or the vertical frame (videoSize.ts).
       const frame = jobVideoFrame(input);
       const F = frame.size;
@@ -322,10 +319,31 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       // A vertical frame's shorter side is its width. A closing logo is never smaller than the client's posts show it.
       // The posts' spot is defined on their 4:5 page: on a frame that is not vertical it is moved onto the frame
       // as a still's is onto its page (platformSize.ts pagePlacement); a vertical frame takes it as it always did.
-      const postSpot = isVertical(frame) ? input.placement : pagePlacement(input.placement, lw, lh, F);
-      const box = input.logo_at
-        ? videoLogoBox(input.logo_at, input.logo_at === "end" ? Math.max(input.logo_width ?? 0, input.placement.width) : input.logo_width ?? input.placement.width, lw / lh, F)
-        : { ...canvasLogoRect(postSpot, lw, lh, F.width, F.height), end: false };
+      const placeLogo = (lw: number, lh: number) => {
+        const postSpot = isVertical(frame) ? input.placement : pagePlacement(input.placement, lw, lh, F);
+        return input.logo_at
+          ? videoLogoBox(input.logo_at, input.logo_at === "end" ? Math.max(input.logo_width ?? 0, input.placement.width) : input.logo_width ?? input.placement.width, lw / lh, F)
+          : { ...canvasLogoRect(postSpot, lw, lh, F.width, F.height), end: false };
+      };
+      // The logo file is chosen by the footage's ground under the logo's place (logoGround.ts), read on
+      // frames of the footage at the stored file's place, as a still's file is chosen by the ground under its slot.
+      const slot = placeLogo(sw, sh);
+      if (input.show_logo !== false && !s.logo_pick) {
+        const picked = await pickVideoLogo(groundDeps(admin, job), s, input, slot, F);
+        if (!picked) return "wait";
+        s.logo_pick = picked;
+      }
+      const pick = s.logo_pick as VideoLogoPick | undefined;
+      const logoPath = pick?.path ?? input.logo_path;
+      const [lw, lh] = pick?.size ?? [sw, sh];
+      // A file of another shape keeps the slot's middle (logoGround.ts, centeredIn).
+      const box = centeredIn(placeLogo(lw, lh), [lw, lh], slot, [sw, sh]);
+      s.composes = (s.composes ?? 0) + 1;
+      if (s.composes > MAX_COMPOSE) throw new Error("FINAL: The video could not be put together.");
+      // Each finished file has a name of its own, so a video made again is never shown from a cached copy.
+      const out = `${base}/video-${Date.now().toString(36)}.mp4`;
+      const { data: signed, error } = await admin.storage.from(BUCKET).createSignedUploadUrl(out, { upsert: true });
+      if (error || !signed?.signedUrl) throw new Error(`Could not prepare the video's upload: ${error?.message ?? "no URL"}`);
       const logoBottom = box.end || box.y > F.height / 2 ? 0 : box.y + Math.round(box.width * lh / lw);
       const at = s.hook_box ? hookPlacement(s.hook_box, s.hook_layer ?? frame.card, input.text_style ?? "", logoBottom, F) : null;
       const stills: string[] = [];
@@ -345,7 +363,7 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
           overlayUrl: s.hook_path ? publicUrl(admin, BUCKET, s.hook_path) : undefined,
           hook: at && s.hook_box ? { crop: s.hook_box, at: { x: at.x, y: at.y, width: at.width } } : undefined,
           // The logo goes over the footage only when the client's own videos show it.
-          logoUrl: input.show_logo === false ? undefined : publicUrl(admin, BUCKET, input.logo_path),
+          logoUrl: input.show_logo === false ? undefined : publicUrl(admin, BUCKET, logoPath),
           logo: input.show_logo === false ? undefined : { x: box.x, y: box.y, width: box.width, end: box.end },
           uploadUrl: signed.signedUrl,
           frameUploads,
@@ -396,6 +414,50 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
     }
   }
   throw new Error(`FINAL: Unknown video step '${job.step}'`);
+}
+
+/** The pick's services (logoGround.ts, pickVideoLogo): the settings row, storage, the sandbox and the clock. */
+function groundDeps(admin: any, job: VideoJob): GroundDeps {
+  const input = job.input, s = job.state;
+  return {
+    liveRow: async () => {
+      const { data, error } = await admin.from("design_brand_settings").select("logo_path, logo_set").eq("client_id", job.client_id).maybeSingle();
+      if (error) throw new Error(`Could not read the logo settings: ${error.message}`);
+      return data ?? null;
+    },
+    footageUrl: async () => input.footage_upload ? await signedUrl(admin, FOOTAGE_BUCKET, input.footage_upload) : publicUrl(admin, BUCKET, s.footage_path),
+    prepareUploads: async (count) => {
+      const paths: string[] = [], uploads: string[] = [];
+      for (let i = 0; i < count; i++) {
+        const path = `${job.client_id}/canva-finish/${job.id}/ground-${i}.png`;
+        const { data: up, error } = await admin.storage.from(BUCKET).createSignedUploadUrl(path, { upsert: true });
+        if (error || !up?.signedUrl) throw new Error(`Could not prepare a frame's upload: ${error?.message ?? "no URL"}`);
+        paths.push(path); uploads.push(up.signedUrl);
+      }
+      return { paths, uploads };
+    },
+    start: (script) => startScript(script, `Socialytics video logo ground ${job.id}`),
+    check: (session) => checkScript(session),
+    end: (session) => endScript(session),
+    save: () => saveJobProgress(admin, job),
+    readFrame: async (path) => {
+      const { data, error } = await admin.storage.from(BUCKET).download(path);
+      if (error || !data) throw new Error(`Could not read a frame of the footage: ${error?.message ?? "missing"}`);
+      const { Image } = await import("https://deno.land/x/imagescript@1.3.0/mod.ts");
+      const img = await Image.decode(new Uint8Array(await data.arrayBuffer()));
+      return { width: img.width, height: img.height, data: img.bitmap as unknown as Uint8ClampedArray };
+    },
+    readLogo: async (path) => {
+      const { data, error } = await admin.storage.from(BUCKET).download(path);
+      if (error || !data) throw new Error(`Could not read the logo file: ${error?.message ?? "missing"}`);
+      const bytes = new Uint8Array(await data.arrayBuffer());
+      const { logoWhole } = await import("../lifecycle/imaging.ts");
+      // A file with no whole part has nothing to test and shows anywhere.
+      return { inks: ((await logoWhole(bytes))?.inks ?? []) as Rgb[], size: pngSize(bytes) };
+    },
+    now: () => Date.now(),
+    log: (m) => console.log(`[video-worker] job ${job.id}: ${m}`),
+  };
 }
 
 /** The title steps' services (titleStep.ts): the image model, storage, the picture service and the vision model. */

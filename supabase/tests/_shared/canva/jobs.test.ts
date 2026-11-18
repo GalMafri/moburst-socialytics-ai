@@ -420,7 +420,7 @@ describe("startOption and the client's logo set", () => {
     expect("stamp" in one.tables.canva_finish_jobs[0].input).toBe(false);
   });
 
-  it("leaves the settings it returns unchanged and gives a video job the stored file", async () => {
+  it("leaves the settings it returns unchanged and gives a video job the stored file with its set's files", async () => {
     const row: Settings = { ...settings, logo_set: set() };
     const before = structuredClone(row);
     const db = world(row);
@@ -436,7 +436,8 @@ describe("startOption and the client's logo set", () => {
     expect(job.input.logo_path).toBe("c1/logo.png");
     expect(job.input.logo_size).toEqual([701, 251]);
     expect("logos" in job.input).toBe(false);
-    expect("stamp" in job.input).toBe(false);
+    // The files the video may carry; the one that shows on its footage is chosen when it is put together (video/logoGround.ts).
+    expect(job.input.stamp).toEqual([{ file: "stored", path: "c1/logo.png" }, { file: "other", path: OTHER }, { file: "white", path: WHITE }]);
   });
 
   it("starts a job with the one file when there is no set or the set belongs to another logo", async () => {

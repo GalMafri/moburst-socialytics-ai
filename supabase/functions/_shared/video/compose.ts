@@ -106,7 +106,7 @@ export function shellQuote(value: string): string {
 }
 
 /** Footage filled into the frame: scaled to cover it, centered and cut to it. */
-const fitTo = (f: FrameSize) => `scale=${f.width}:${f.height}:force_original_aspect_ratio=increase,crop=${f.width}:${f.height},setsar=1,fps=30`;
+export const fitTo = (f: FrameSize) => `scale=${f.width}:${f.height}:force_original_aspect_ratio=increase,crop=${f.width}:${f.height},setsar=1,fps=30`;
 
 /** The shell test that the end card's source (EC_W by EC_H) has the frame's orientation: tall for a vertical frame, as always. */
 function sameOrientation(f: FrameSize): string {
