@@ -5025,6 +5025,18 @@ export type Database = {
         }
         Returns: undefined
       }
+      role_preview_begin: {
+        Args: { p_client: string; p_user: string }
+        Returns: Json
+      }
+      role_preview_end: {
+        Args: { p_id: string; p_reason: string }
+        Returns: Json
+      }
+      role_preview_holds: {
+        Args: { p_client: string; p_user: string }
+        Returns: boolean
+      }
       scheduled_jobs_close_exhausted: { Args: never; Returns: number }
       scheduled_jobs_lease: {
         Args: { p_lease_seconds?: number }
