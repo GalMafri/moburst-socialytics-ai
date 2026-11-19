@@ -55,22 +55,20 @@ export function copyLearnedLine(learned: { changes?: LearnedChange[] } | null | 
   return { text: `${lead} Used for this post only.`, undo: false };
 }
 
-/** Words that already say "don't" at the start of a rule. */
-const SAYS_NO = /^(avoid|avoiding|don['’]t|do not|never|no|not)\b/i;
+/** Words that already say "don't" at the start of a rule: whole words only, so "No-code …" is not one. */
+const SAYS_NO = /^(avoid|avoiding|don['’]t|do not|never|no|not)(?![\w'’-])/i;
 
 /**
  * A learned rule as the person reads it. A rule to avoid is often written as
  * the thing itself ("Place logos where they obscure the subject"), which on
  * its own reads as an instruction to do it (QA, 19 Nov 2026); it is marked
- * "Avoid:" unless its own words already say no. The first word is lowered
- * only when it is an ordinary capitalized word, so a name keeps its case.
+ * "Avoid:" unless its own words already say no. The rule's words are kept as
+ * written, so a name at the start ("Instagram …") keeps its case.
  */
 function ruleText(r: { type: string; text: string }): string {
   const text = String(r.text ?? "").trim();
-  if (r.type !== "avoid" || SAYS_NO.test(text)) return text;
-  const first = text.split(/[\s-]/, 1)[0];
-  const ordinary = /^[A-Z][a-z']*$/.test(first);
-  return `Avoid: ${ordinary ? text.charAt(0).toLowerCase() + text.slice(1) : text}`;
+  if (!text || r.type !== "avoid" || SAYS_NO.test(text)) return text;
+  return `Avoid: ${text}`;
 }
 
 /** The line under a design asked for with a note: null while nothing was learned yet. */

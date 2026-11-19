@@ -80,7 +80,13 @@ describe('the lines', () => {
       { id: 'a', type: 'avoid', text: 'Place logos in positions that compete with or obscure the main subject.' },
       { id: 'p', type: 'prefer', text: 'Position logos in corners or margins.' },
     ] };
-    expect(designLearnedLine(learned, 'Bader Law')).toEqual({ text: 'Learned for Bader Law: "Avoid: place logos in positions that compete with or obscure the main subject" and "Position logos in corners or margins".', undo: true });
+    expect(designLearnedLine(learned, 'Bader Law')).toEqual({ text: 'Learned for Bader Law: "Avoid: Place logos in positions that compete with or obscure the main subject" and "Position logos in corners or margins".', undo: true });
+  });
+
+  it('marks a rule that only starts with a no-word inside a longer word', () => {
+    for (const text of ['No-code builder screenshots.', 'Nobody in frame.', 'Notebook flat lays.']) {
+      expect(designLearnedLine({ rules: [{ id: 'a', type: 'avoid', text }] }, 'Olo')?.text).toBe(`Learned for Olo: "Avoid: ${text.replace(/\.$/, '')}".`);
+    }
   });
 
   it('leaves a rule to avoid as written when its own words already say no', () => {
@@ -91,6 +97,7 @@ describe('the lines', () => {
 
   it('keeps a leading name in its own case when it marks a rule to avoid', () => {
     expect(designLearnedLine({ rules: [{ id: 'a', type: 'avoid', text: 'TikTok-style captions over faces.' }] }, 'Olo')?.text).toBe('Learned for Olo: "Avoid: TikTok-style captions over faces".');
+    expect(designLearnedLine({ rules: [{ id: 'a', type: 'avoid', text: 'Instagram Reels with text over faces.' }] }, 'Olo')?.text).toBe('Learned for Olo: "Avoid: Instagram Reels with text over faces".');
   });
 });
 
