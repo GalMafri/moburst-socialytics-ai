@@ -73,6 +73,25 @@ describe('the lines', () => {
     expect(designLearnedLine(null, 'Pay The Pyper')).toBeNull();
     expect(designLearnedLine({ rules: [{ id: 'd', type: 'avoid', text: 'x' }], undone_at: '2026-11-03' }, 'Pay The Pyper')?.undo).toBe(false);
   });
+
+  it('marks a rule to avoid that is written as a plain instruction, so it never reads as the thing to do', () => {
+    // QA 19 Nov 2026: Bader Law's panel read "Place logos in positions that compete with or obscure the main subject", stored as type avoid.
+    const learned = { rules: [
+      { id: 'a', type: 'avoid', text: 'Place logos in positions that compete with or obscure the main subject.' },
+      { id: 'p', type: 'prefer', text: 'Position logos in corners or margins.' },
+    ] };
+    expect(designLearnedLine(learned, 'Bader Law')).toEqual({ text: 'Learned for Bader Law: "Avoid: place logos in positions that compete with or obscure the main subject" and "Position logos in corners or margins".', undo: true });
+  });
+
+  it('leaves a rule to avoid as written when its own words already say no', () => {
+    for (const text of ['Avoid busy backgrounds.', "Don't crop the logo.", 'Do not use stock photos.', 'No red text.', 'Never show people.']) {
+      expect(designLearnedLine({ rules: [{ id: 'a', type: 'avoid', text }] }, 'Olo')?.text).toBe(`Learned for Olo: "${text.replace(/\.$/, '')}".`);
+    }
+  });
+
+  it('keeps a leading name in its own case when it marks a rule to avoid', () => {
+    expect(designLearnedLine({ rules: [{ id: 'a', type: 'avoid', text: 'TikTok-style captions over faces.' }] }, 'Olo')?.text).toBe('Learned for Olo: "Avoid: TikTok-style captions over faces".');
+  });
 });
 
 describe("the Copy tab's Regenerate", () => {
