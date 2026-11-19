@@ -49,15 +49,39 @@ export function reportHeadline(reportData: unknown): { metrics: HeadlineMetric[]
 
 export interface Standing { shareOfVoice: number | null; competitors: string[]; ahead: string[]; behind: string[] }
 
-/** Where the client stands against its competitors, from the competitive context (buildCompetitiveContext). */
-export function competitiveStanding(ctx: { share_of_voice_pct?: number | null; competitors?: Array<{ name: string }>; benchmark_dimensions?: Array<{ dimension: string; client: number; competitor_avg: number }> } | null): Standing | null {
+/**
+ * How a dimension reads in "Ahead on … / Behind on …". The scorecard's
+ * "Engagement" is the period's total engagements (factualDimensions); the
+ * reports lead with the engagement rate, so the total is named as a total
+ * (QA, 19 Nov 2026: Bader Law read "Behind on engagement" beside a report
+ * whose rate led its peers).
+ */
+const dimensionWords = (dimension: string) => (dimension === "Engagement" ? "total engagement" : dimension.toLowerCase());
+
+/**
+ * Where the client stands against its competitors, from the competitive
+ * context (buildCompetitiveContext). The engagement rate is compared too,
+ * against the average of the competitors that have one, as the report's rate
+ * tile does (CompetitiveSnapshot).
+ */
+export function competitiveStanding(ctx: {
+  share_of_voice_pct?: number | null;
+  competitors?: Array<{ name: string; engagement_rate_avg?: number | null }>;
+  client?: { engagement_rate_avg?: number | null } | null;
+  benchmark_dimensions?: Array<{ dimension: string; client: number; competitor_avg: number }>;
+} | null): Standing | null {
   if (!ctx) return null;
-  const dims = (ctx.benchmark_dimensions || []).filter((d) => finite(d.client) && finite(d.competitor_avg));
+  const dims = (ctx.benchmark_dimensions || [])
+    .filter((d) => finite(d.client) && finite(d.competitor_avg))
+    .map((d) => ({ name: dimensionWords(d.dimension), client: d.client, competitor_avg: d.competitor_avg }));
+  const rates = (ctx.competitors || []).map((c) => c.engagement_rate_avg).filter(finite);
+  const own = ctx.client?.engagement_rate_avg;
+  if (finite(own) && rates.length) dims.unshift({ name: "engagement rate", client: own, competitor_avg: rates.reduce((a, b) => a + b, 0) / rates.length });
   return {
     shareOfVoice: finite(ctx.share_of_voice_pct) ? ctx.share_of_voice_pct : null,
     competitors: (ctx.competitors || []).map((c) => c.name).filter(Boolean),
-    ahead: dims.filter((d) => d.client > d.competitor_avg).map((d) => d.dimension.toLowerCase()),
-    behind: dims.filter((d) => d.client < d.competitor_avg).map((d) => d.dimension.toLowerCase()),
+    ahead: dims.filter((d) => d.client > d.competitor_avg).map((d) => d.name),
+    behind: dims.filter((d) => d.client < d.competitor_avg).map((d) => d.name),
   };
 }
 

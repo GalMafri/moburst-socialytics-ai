@@ -42,6 +42,25 @@ describe('client overview', () => {
     const s = competitiveStanding({ share_of_voice_pct: 19, competitors: [{ name: 'A' }, { name: 'B' }], benchmark_dimensions: [{ dimension: 'Audience', client: 10, competitor_avg: 5 }, { dimension: 'Cadence', client: 2, competitor_avg: 4 }] })!;
     expect(s).toEqual({ shareOfVoice: 19, competitors: ['A', 'B'], ahead: ['audience'], behind: ['cadence'] });
   });
+  it('names total engagement apart from the engagement rate, so the card agrees with the report (QA 19 Nov 2026, Bader Law)', () => {
+    const s = competitiveStanding({
+      share_of_voice_pct: 25,
+      competitors: [{ name: 'TopDog Law', engagement_rate_avg: 0.012 }, { name: 'Reyes Law', engagement_rate_avg: 0.0092 }, { name: 'Quiet Co', engagement_rate_avg: null }],
+      client: { engagement_rate_avg: 0.0164 },
+      benchmark_dimensions: [
+        { dimension: 'Audience', client: 14175, competitor_avg: 90000 },
+        { dimension: 'Engagement', client: 232, competitor_avg: 8700 },
+        { dimension: 'Impressions', client: 14000, competitor_avg: 500000 },
+      ],
+    })!;
+    expect(s.ahead).toEqual(['engagement rate']);
+    expect(s.behind).toEqual(['audience', 'total engagement', 'impressions']);
+  });
+  it('leaves the rate out when the client or every competitor has none', () => {
+    const dims = [{ dimension: 'Engagement', client: 5, competitor_avg: 9 }];
+    expect(competitiveStanding({ competitors: [{ name: 'A', engagement_rate_avg: 0.02 }], client: { engagement_rate_avg: null }, benchmark_dimensions: dims })!.ahead).toEqual([]);
+    expect(competitiveStanding({ competitors: [{ name: 'A', engagement_rate_avg: null }], client: { engagement_rate_avg: 0.01 }, benchmark_dimensions: dims })).toMatchObject({ ahead: [], behind: ['total engagement'] });
+  });
   it('counts this week Monday to Sunday, as the calendar does, and finds posts without a design or approval', () => {
     const posts = [
       { id: '0', post_key: 'k0', post_date: '2026-10-12', platform: 'Instagram', source: 'plan', copy: 'past day this week' },
