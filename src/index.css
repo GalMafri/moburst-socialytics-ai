@@ -1,4 +1,14 @@
-@import url("https://cdn.jsdelivr.net/npm/geist@1.3.1/dist/fonts/geist-sans/style.min.css");
+/* Geist, the app's font. The geist package ships font files and no stylesheet,
+   so the face is declared here (QA 19 Nov 2026: the old import of
+   dist/fonts/geist-sans/style.min.css was a 404 and every page fell back to
+   Inter). One variable file covers every weight the app uses. */
+@font-face {
+  font-family: "Geist";
+  src: url("https://cdn.jsdelivr.net/npm/geist@1.3.1/dist/fonts/geist-sans/Geist-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
 
 @tailwind base;
 @tailwind components;
