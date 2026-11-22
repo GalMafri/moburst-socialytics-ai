@@ -112,14 +112,16 @@ export function ContentIdeasTab({
     enabled: !!clientId,
   });
 
-  // The flip is worked out once from the stored row; the read and the write
-  // each repeat safely, so either one that does not get through is sent
-  // again quietly. The board is read again either way, so the chip shows the
-  // approval as it is stored.
+  // QA 22 Nov 2026: the chip asks for the state it showed the opposite of
+  // ("Mark as approved" approves), and the board shows that state at once.
+  // A blind flip of whatever the server held, with a chip that did not change
+  // for up to 13 s of quiet resends, let a second press of "Mark as approved"
+  // undo the first. The read and the write each repeat safely, so either one
+  // that does not get through is sent again quietly; the board is read again
+  // either way, so the chip ends on the approval as it is stored.
   const toggleApproved = useMutation({
-    mutationFn: async (iterationId: string) => {
+    mutationFn: async ({ iterationId, approve }: { iterationId: string; approve: boolean }) => {
       if (!clientId) return;
-      // Read current state
       const { data: current, error: readErr } = await sendQuietly(() => supabase
         .from("post_iterations")
         .select("variant_group_id, is_approved")
@@ -129,7 +131,7 @@ export function ContentIdeasTab({
       if (!current) throw new Error(`post_iterations ${iterationId} is no longer on the board`);
 
       const variantGroupId = (current as any).variant_group_id;
-      const newApproved = !((current as any).is_approved);
+      const newApproved = approve;
       // Column defaults only apply on insert, so record the approver here.
       const { data: auth } = await supabase.auth.getUser();
       const update: any = {
@@ -146,6 +148,15 @@ export function ContentIdeasTab({
         ? supabase.from("post_iterations").update(update).eq("variant_group_id", variantGroupId)
         : supabase.from("post_iterations").update(update).eq("id", iterationId), { again: writeResendable });
       if (writeErr) throw writeErr;
+    },
+    onMutate: async ({ iterationId, approve }) => {
+      // A board read already on its way would draw the old approval over this one.
+      await qc.cancelQueries({ queryKey: ["post-iterations", clientId] });
+      qc.setQueryData<any[]>(["post-iterations", clientId], (rows) => {
+        if (!rows) return rows;
+        const group = rows.find((r) => r.id === iterationId)?.variant_group_id ?? null;
+        return rows.map((r) => (r.id === iterationId || (group && r.variant_group_id === group) ? { ...r, is_approved: approve } : r));
+      });
     },
     onError: (err: any) => console.warn("[approval] not changed yet", err),
     onSettled: () => {
@@ -252,7 +263,7 @@ export function ContentIdeasTab({
               setActivePost(post);
               setPanelTab(undefined);
             }}
-            onToggleApproved={(iterationId) => toggleApproved.mutate(iterationId)}
+            onToggleApproved={(iterationId, approve) => toggleApproved.mutate({ iterationId, approve })}
           />}
         </div>
         </>}

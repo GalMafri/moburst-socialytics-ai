@@ -33,7 +33,8 @@ interface Props {
   scheduledPosts: ScheduledPostRef[];
   filters: CalendarFilterState;
   onCardClick: (post: any) => void;
-  onToggleApproved: (iterationId: string) => void;
+  /** approve: the state the chip asks for, from what it showed when pressed (true for "Mark as approved"). */
+  onToggleApproved: (iterationId: string, approve: boolean) => void;
 }
 
 /**
@@ -151,7 +152,7 @@ export function CalendarKanban({
                   status={status}
                   sendState={sendState}
                   onOpen={() => onCardClick(post)}
-                  onToggleApproved={iteration?.id ? () => onToggleApproved(iteration.id) : undefined}
+                  onToggleApproved={iteration?.id ? () => onToggleApproved(iteration.id, status !== "approved") : undefined}
                 />
               ))}
             </div>
