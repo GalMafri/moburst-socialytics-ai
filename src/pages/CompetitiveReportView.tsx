@@ -95,6 +95,8 @@ const EMPTY: Bucket = { post_count: 0, cadence_per_week: 0, engagement_avg: 0, e
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 /** How often a run past the watch limit is checked: it should be closed by now, so once a minute is plenty. */
 const LATE_RUN_CHECK_MS = 60_000;
+/** Quick tries (5 s apart) of a held report's period read before the page shows the held state from the report's own row. */
+const PERIOD_QUICK_TRIES = 6;
 const HOURS = Array.from({ length: 24 }, (_, i) => String(i));
 /** Heat and bar colors come from the theme tokens: the lime accent, and the second chart color for recommendations. */
 const ACCENT = "--primary";
@@ -294,7 +296,7 @@ export default function CompetitiveReportView() {
   // The runs of this report's period: a newer complete row means its redo came; a row with no redo decision (made before the dispatch wrote one) is read by its period's held count, as the history list reads it.
   const periodReadable = !!clientId && !!report?.id && !!report?.date_range_start && !!report?.date_range_end;
   const heldReport = !!report && ["complete", "completed", "done"].includes(String(report.status ?? "").toLowerCase()) && !competitiveReportQuality(report.report_data).ready;
-  const { data: periodRuns, isSuccess: periodAnswered } = useQuery({
+  const { data: periodRuns, isSuccess: periodRead, isError: periodFailed, errorUpdateCount: periodTries } = useQuery({
     queryKey: ["competitive-report-period-runs", clientId, report?.date_range_start, report?.date_range_end],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -311,9 +313,14 @@ export default function CompetitiveReportView() {
     },
     // Only a held report needs its period's runs; a ready one says everything on its own row.
     enabled: periodReadable && heldReport,
-    // A read that did not answer keeps trying; the held label waits for it.
-    refetchInterval: (q) => (q.state.status === "error" ? 5000 : false),
+    // A read that did not answer keeps trying; the held label waits for it,
+    // for PERIOD_QUICK_TRIES tries, then reads again once a minute.
+    refetchInterval: (q) => (q.state.status !== "error" ? false : q.state.errorUpdateCount < PERIOD_QUICK_TRIES ? 5000 : 60_000),
   });
+  // QA 22 Nov 2026 (P19-1): a period read that kept failing left the page on
+  // "Loading report" for good, read every 5 s. After the quick tries the held
+  // state is shown from the report's own row (heldRunsOfPeriod counts it alone).
+  const periodAnswered = periodRead || (periodFailed && periodTries >= PERIOD_QUICK_TRIES);
 
   // The report's insights, worked out from its figures (report_insights), in place of the model-written summary and gaps.
   const { data: insightsRow } = useReportInsights("competitive_reports", report?.id);
@@ -684,8 +691,10 @@ export default function CompetitiveReportView() {
                   <button
                     key={r.company_id}
                     type="button"
-                    title={`${r.name}: jump to its top posts`}
-                    onClick={() => document.getElementById(`company-posts-${r.company_id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                    title={`${r.name}: jump to it`}
+                    // QA 22 Nov 2026 (P19-2): a rival with no top posts (none at all, or none on the platform
+                    // filtered to) has no posts section; the chip goes to its card in Company comparison then.
+                    onClick={() => (document.getElementById(`company-posts-${r.company_id}`) ?? document.getElementById(`company-card-${r.company_id}`))?.scrollIntoView({ behavior: "smooth", block: "start" })}
                     className="rounded-full border border-white/15 bg-white/[0.04] px-3 py-1 t-body font-semibold text-white hover:border-[#b9e045]/50"
                   >
                     {displayCompanyName(r.name)}
@@ -844,7 +853,7 @@ export default function CompetitiveReportView() {
                 const b = bucketFor(c, effectivePlat);
                 const platformNote = platformNoteFor(c.name);
                 return (
-                  <Card key={c.company_id} className={c.is_client ? "glass-accent" : ""}>
+                  <Card key={c.company_id} id={`company-card-${c.company_id}`} className={c.is_client ? "glass-accent scroll-mt-[156px]" : "scroll-mt-[156px]"}>
                     <CardHeader className="pb-3">
                       <CardTitle className="t-h3 flex items-center gap-2 flex-wrap" title={c.name}>
                         {displayCompanyName(c.name)}
@@ -871,10 +880,12 @@ export default function CompetitiveReportView() {
                           {b.views_total != null && <TileStat value={compactNumber(b.views_total)} exact={fmt(b.views_total)} label="Reported video views" />}
                         </div>
                       )}
-                      {effectivePlat === "all" && (c.channel_mix || []).length > 0 && (
+                      {/* QA 22 Nov 2026 (P19-3): only platforms the filter knows (from by_channel); on a report
+                          made before per-platform figures every button here did nothing. */}
+                      {effectivePlat === "all" && (c.channel_mix || []).some((m) => platforms.includes(normalizePlatform(m.key))) && (
                         <div data-print="hide" className="space-y-2">
                           <p className="t-label">Filter report by platform</p>
-                          <div className="flex flex-wrap gap-2">{(c.channel_mix || []).map((m) => <Button key={m.key} variant="outline" size="sm" onClick={() => setPlat(normalizePlatform(m.key))}>{platformLabel(m.key)} · {m.count} analyzed</Button>)}</div>
+                          <div className="flex flex-wrap gap-2">{(c.channel_mix || []).filter((m) => platforms.includes(normalizePlatform(m.key))).map((m) => <Button key={m.key} variant="outline" size="sm" onClick={() => setPlat(normalizePlatform(m.key))}>{platformLabel(m.key)} · {m.count} analyzed</Button>)}</div>
                         </div>
                       )}
                       {(b.media_type_mix || []).length > 0 && (
