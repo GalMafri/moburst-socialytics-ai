@@ -81,18 +81,30 @@ export default function AllReports() {
   const { data: competitive, isLoading: competitiveLoading, isError: competitiveFailed, error: competitiveError, refetch: refetchCompetitive } = useQuery({
     queryKey: ["all-competitive-reports", clientFilter, competitiveLimit, hidden.join(",")],
     enabled: !strategyOnly.isLoading && !closedClient,
+    // QA 22 Nov 2026: a page is cut from the listed runs, as the monthly tab's
+    // is, never from raw rows. Cut from raw rows, 50 runs that did not finish
+    // (left out of the list) made page 1 say "No competitive analyses yet"
+    // with a ready analysis on page 2, and held runs of one period split
+    // across pages.
     queryFn: async () => {
-      let query = supabase
-        .from("competitive_reports")
-        .select("id, client_id, status, created_at, date_range_start, date_range_end, duration_minutes, gamma_url, report_data, clients(id, name)")
-        .order("created_at", { ascending: false })
-        .order("id", { ascending: false })
-        .range(competitiveLimit - 50, competitiveLimit);
-      if (clientFilter !== "all") query = query.eq("client_id", clientFilter);
-      else if (hidden.length) query = query.not("client_id", "in", `(${hidden.join(",")})`);
-      const { data, error } = await query;
-      if (error) throw error;
-      return data;
+      const CHUNK = 200;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const all: any[] = [];
+      for (let from = 0; ; from += CHUNK) {
+        let query = supabase
+          .from("competitive_reports")
+          .select("id, client_id, status, created_at, date_range_start, date_range_end, duration_minutes, gamma_url, report_data, clients(id, name)")
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: false })
+          .range(from, from + CHUNK - 1);
+        if (clientFilter !== "all") query = query.eq("client_id", clientFilter);
+        else if (hidden.length) query = query.not("client_id", "in", `(${hidden.join(",")})`);
+        const { data, error } = await query;
+        if (error) throw error;
+        all.push(...(data ?? []));
+        const listed = listedRuns("competitive", all, viewer);
+        if (listed.length > competitiveLimit || (data?.length ?? 0) < CHUNK) return listed.slice(competitiveLimit - 50, competitiveLimit + 1);
+      }
     },
   });
 
@@ -206,7 +218,7 @@ export default function AllReports() {
                   <Loading label="Loading competitive analyses" />
                 ) : competitiveFailed ? (
                   <LoadRetry context="competitive analyses" error={competitiveError} onRetry={() => refetchCompetitive()} />
-                ) : listedRuns("competitive", competitive?.slice(0, 50), viewer).length > 0 ? (
+                ) : competitive?.length ? (
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -219,7 +231,7 @@ export default function AllReports() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {listedRuns("competitive", competitive?.slice(0, 50), viewer).map((r: any) => {
+                      {competitive.slice(0, 50).map((r: any) => {
                         const rd = (r.report_data || {}) as any;
                         const period = formatRange(rd.period) || formatRange({ start: r.date_range_start, end: r.date_range_end });
                         return (
