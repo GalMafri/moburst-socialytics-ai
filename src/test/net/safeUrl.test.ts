@@ -195,3 +195,32 @@ describe("fetchPublic", () => {
     }
   });
 });
+
+// QA 22 Nov 2026 (P41-02): a fully qualified name keeps its trailing dot in
+// URL.hostname, so "localhost." skipped the blocked-name and suffix checks.
+// IPv4-compatible, NAT64 and site-local IPv6 forms reach private IPv4 or
+// internal networks too.
+describe("isPubliclyFetchable with a trailing-dot host or an embedded IPv4", () => {
+  it("refuses localhost. and metadata.google.internal. like their dotless spellings", () => {
+    expect(isPubliclyFetchable("http://localhost/")).toBe(false);
+    expect(isPubliclyFetchable("http://localhost./")).toBe(false);
+    expect(isPubliclyFetchable("http://LOCALHOST./")).toBe(false);
+    expect(isPubliclyFetchable("http://metadata.google.internal./computeMetadata/v1/")).toBe(false);
+    expect(isPubliclyFetchable("http://api.localhost./")).toBe(false);
+    expect(isPubliclyFetchable("http://printer.local./")).toBe(false);
+    expect(isPubliclyFetchable("https://www.instagram.com./p/abc/")).toBe(true);
+  });
+
+  it("refuses IPv4-compatible, NAT64 and site-local IPv6 addresses", () => {
+    expect(isPubliclyFetchable("http://[::7f00:1]/")).toBe(false);
+    expect(isPubliclyFetchable("http://[64:ff9b::a9fe:a9fe]/")).toBe(false);
+    expect(isPubliclyFetchable("http://[fec0::1]/")).toBe(false);
+    expect(isPubliclyFetchable("http://[2606:4700::1111]/")).toBe(true);
+  });
+
+  it("fetchPublic sends nothing to a redirect hop at localhost. (DNS lookup answers nothing, as for a hosts-file name)", async () => {
+    const send = vi.fn(async (u: string) => (u.startsWith("https://public.example") ? new Response(null, { status: 302, headers: { location: "http://localhost.:8080/admin" } }) : new Response("secret")));
+    await fetchPublic("https://public.example/", {}, send as unknown as typeof fetch, 5, async () => []).catch(() => null);
+    expect(send.mock.calls.map(([u]) => u)).not.toContain("http://localhost.:8080/admin");
+  });
+});
