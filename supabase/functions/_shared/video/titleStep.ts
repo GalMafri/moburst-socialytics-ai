@@ -26,6 +26,25 @@ import type { VideoJob, VideoStepResult } from "./steps.ts";
 /** Titles drawn for one video before it ends. */
 export const MAX_HOOKS = 3;
 
+/**
+ * A title's lines as one text, set the way a reader takes them, for the
+ * exact-words check (copyMatches): a word hyphenated over a line end is one
+ * word, an ellipsis is three dots, a dash reads the same tight or spaced, and
+ * an emoji (with or without its selector) is a picture, no word. The brand
+ * marks ©, ® and ™ are text and stay. (QA 22 Nov 2026, P54-03: titles that
+ * showed the copy's words were drawn again, each a paid draw, until the
+ * video ended.)
+ */
+export function titleWords(lines: string[]): string {
+  const joined = lines.map((l) => l.trim()).filter(Boolean)
+    .reduce((text, line) => (!text ? line : /\p{L}-$/u.test(text) ? text + line : `${text} ${line}`), "");
+  return joined
+    .replace(/\p{Extended_Pictographic}/gu, (c) => ("©®™".includes(c) ? c : " "))
+    .replace(/[︎️‍⃣]/g, "")
+    .replace(/…/g, "...")
+    .replace(/\s*([-–—])\s*/g, "$1");
+}
+
 export interface TitleDeps {
   /** The image model draws the title layer; a ModelBusy at its rate limit. */
   draw(): Promise<Uint8Array>;
@@ -90,7 +109,7 @@ export async function runTitleCheck(deps: TitleDeps, job: VideoJob, after: strin
   const lines = await deps.read(readPath);
   if (!lines) throw new Error("The title's words could not be read.");
   s.hook_read = lines;
-  if (!copyMatches(lines, job.input.copy)) return again(`title read ${JSON.stringify(lines)}, wanted ${JSON.stringify(job.input.copy)}`);
+  if (!copyMatches([titleWords(lines)], [titleWords(job.input.copy)])) return again(`title read ${JSON.stringify(lines)}, wanted ${JSON.stringify(job.input.copy)}`);
   s.title_ok = true;
   job.step = after;
   return "next";
