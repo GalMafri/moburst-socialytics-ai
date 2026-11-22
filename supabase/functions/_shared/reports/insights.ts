@@ -126,7 +126,8 @@ export function insightsPrompt(input: InsightsInput, problems: string[] = []): s
   ];
   if (input.kind === "social") {
     lines.push("", "Write:",
-      "- summary: two or three sentences on what moved most this period and why it matters, citing the facts it rests on;",
+      // QA 22 Nov 2026 (P47-07): never "what moved most": "most" compares, and the check refuses it without a ranking, share or outlier fact.
+      "- summary: two or three sentences on what changed this period and why it matters, citing the facts it rests on;",
       "- insights: three to six insights, each one or two sentences, each citing at least one fact;",
       "- recommendations: two to four things to do next on social media, each citing at least one fact it acts on.");
   } else {
