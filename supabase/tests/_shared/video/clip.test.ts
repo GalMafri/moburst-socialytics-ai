@@ -69,7 +69,12 @@ describe("clipOutcome", () => {
   const HOUR = 60 * 60_000;
   it("is ready only with a finished clip's file", () => {
     expect(clipOutcome({ status: "completed", result_url: "u" }, 0, 1)).toBe("ready");
-    expect(clipOutcome({ status: "completed", result_url: null }, 0, 1)).toBe("failed");
+  });
+  it("asks again about a completed clip whose file is not given yet, until CLIP_LOST_MS", () => {
+    // QA 22 Nov 2026 (P53-07): it was taken as a failure, giving up a paid clip.
+    expect(clipOutcome({ status: "completed", result_url: null }, 0, 1)).toBe("running");
+    expect(clipOutcome({ status: "completed" }, 0, 4 * HOUR)).toBe("lost");
+    expect(clipOutcome({ status: "completed", error: "no file" }, 0, 1)).toBe("failed");
   });
   it("is failed when the video service ends the clip any other way", () => {
     expect(clipOutcome({ status: "failed" }, 0, 1)).toBe("failed");
