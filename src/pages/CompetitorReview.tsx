@@ -215,7 +215,18 @@ export default function CompetitorReview() {
     },
     enabled: !!clientId,
   });
-  const [selectionParams] = useSearchParams();
+  const [selectionParams, setSelectionParams] = useSearchParams();
+  // QA 22 Nov 2026 (P20-1): opened on a set (the run page's "Open this
+  // selection"), the page stayed on it after Re-identify or an import made a
+  // new draft. A new draft is the newest set, so the page goes back to it.
+  const showNewestSet = () => {
+    if (!selectionParams.has('set')) return;
+    setSelectionParams((params) => {
+      const next = new URLSearchParams(params);
+      next.delete('set');
+      return next;
+    }, { replace: true });
+  };
   const requestedSet = selectionParams.get('set');
   const currentSet = (requestedSet ? sets?.find(s => s.id === requestedSet) : sets?.[0]) ?? null;
   const { runnable: runnableSet } = pickRunSelection((sets || []) as SetRow[]);
@@ -259,6 +270,9 @@ export default function CompetitorReview() {
       return data as HandleRow[];
     },
     enabled: !!competitors && competitors.length > 0,
+    // QA 22 Nov 2026 (P20-4): a read that did not answer is read again while
+    // the page is open; until then the rows say the profiles are not read yet.
+    refetchInterval: (query) => (query.state.status === "error" ? 10_000 : false),
   });
 
   const handlesByCompetitor = useMemo(() => {
@@ -274,6 +288,17 @@ export default function CompetitorReview() {
     () => (competitors || []).filter((c) => c.is_selected).sort((a, b) => (a.selected_rank || 9) - (b.selected_rank || 9)),
     [competitors],
   );
+  // QA 22 Nov 2026 (P20-2): a rank given by a Select whose write landed but
+  // which the list has not re-read yet. A second Select pressed meanwhile
+  // read the old list and took the same rank, and Confirm was then refused.
+  // A claim goes once the list shows that rank on that row.
+  const claimedRanks = useRef(new Map<string, number>());
+  useEffect(() => {
+    for (const [id, rank] of claimedRanks.current) {
+      const row = (competitors || []).find((c) => c.id === id);
+      if (!row || (row.is_selected && row.selected_rank === rank)) claimedRanks.current.delete(id);
+    }
+  }, [competitors]);
 
 
   const isDraft = currentSet?.status === "draft";
@@ -334,6 +359,7 @@ export default function CompetitorReview() {
       setNotSaved("That landscape has not been imported yet.");
       return;
     }
+    showNewestSet();
     toast({
       title: "Imported as a new draft",
       description: `${countOf(data.competitors, "competitor")} and ${countOf(data.handles, "profile")} from RivalIQ, with the top ${data.preselected} selected.`,
@@ -360,6 +386,7 @@ export default function CompetitorReview() {
         props: { proposed: data.competitors?.length },
       });
       refreshAll();
+      showNewestSet();
 
       // Detect handles ONE COMPETITOR PER CALL. A whole-set call scrapes up
       // to 12 third-party sites serially inside one edge request, and the
@@ -534,27 +561,36 @@ export default function CompetitorReview() {
   const toggleSelect = useMutation({
     mutationFn: async (row: CompetitorRow) => {
       if (row.is_selected) {
+        claimedRanks.current.delete(row.id);
         const { error } = await sendQuietly(() => supabase
           .from("competitors")
           .update({ is_selected: false, selected_rank: null })
           .eq("id", row.id), { again: writeResendable });
         if (error) throw error;
       } else {
-        const used = new Set(selected.map((s) => s.selected_rank));
+        const used = new Set<number | null>([
+          ...selected.filter((s) => s.id !== row.id).map((s) => s.selected_rank),
+          ...claimedRanks.current.values(),
+        ]);
         const free = [1, 2, 3].find((r) => !used.has(r));
         // Select is not offered with three selected.
         if (!free) return;
+        claimedRanks.current.set(row.id, free);
         const { error } = await sendQuietly(() => supabase
           .from("competitors")
           .update({ is_selected: true, selected_rank: free })
           .eq("id", row.id), { again: writeResendable });
-        if (error) throw error;
+        if (error) {
+          claimedRanks.current.delete(row.id);
+          throw error;
+        }
       }
     },
     onSettled: refreshAll,
   });
 
   const confirmSet = useMutation({
+    onMutate: () => setNotSaved(null),
     mutationFn: async () => {
       // Confirming a draft twice confirms it once (it is guarded on 'draft').
       const { data, error } = await sendQuietly(() => supabase.functions.invoke("confirm-competitor-set", {
@@ -566,6 +602,9 @@ export default function CompetitorReview() {
       track("competitor_set_confirmed", { client_id: clientId, entity_id: currentSet?.id, ok: true });
       toast({ title: "Competitors confirmed", description: "Tracking for these three is connected automatically." });
     },
+    // QA 22 Nov 2026 (P20-2): a refusal re-enabled the button with nothing
+    // else changing on screen; the page says the true state.
+    onError: () => setNotSaved("These three are not confirmed yet."),
     // The page shows the set as the database has it: still a draft, or confirmed.
     onSettled: refreshAll,
   });
@@ -656,6 +695,8 @@ export default function CompetitorReview() {
                 for you to adjust.
               </DialogDescription>
             </DialogHeader>
+            {/* QA 22 Nov 2026 (P20-3): said where the person is looking, not only on the page behind the dialog. */}
+            {notSaved && <p role="status" className="t-secondary">{notSaved}</p>}
             {landscapesUnavailable ? (
               <p className="t-secondary">The RivalIQ landscapes are not available right now.</p>
             ) : landscapes === null ? (
@@ -982,7 +1023,8 @@ export default function CompetitorReview() {
                       {compHandles.length === 0 && (
                         <span className="t-label inline-flex items-center gap-1.5">
                           {profileCheck?.state === "searching" || handlesLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Search className="h-3 w-3" />}
-                          {handlesLoading || handlesFailed ? "Loading saved profiles…" :
+                          {handlesFailed ? "Saved profiles not read yet" :
+                            handlesLoading ? "Loading saved profiles…" :
                             profileCheck?.state === "session_required" ? "Waiting for portal sign-in" :
                             profileCheck?.state === "queued" ? "Profile search queued" :
                             profileCheck?.state === "searching" ? "Searching company pages…" :
