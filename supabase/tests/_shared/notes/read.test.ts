@@ -74,6 +74,15 @@ describe("readNoteFile", () => {
     expect(await readNoteFile(new Uint8Array(IMAGE_MAX_BYTES + 1), "png", parsers())).toMatchObject({ kind: "nothing" });
   });
 
+  // QA 22 Nov 2026 (P41-05): the Messages API's 5 MB image limit counts the
+  // base64 data, a third larger than the file, so a 4.5 MB screenshot was
+  // refused on every call.
+  it("never hands the model an image whose base64 data is over 5 MB", async () => {
+    const out = await readNoteFile(new Uint8Array(4.5 * 1024 * 1024), "png", parsers());
+    if (out.kind === "image") expect(out.data.length).toBeLessThanOrEqual(5 * 1024 * 1024);
+    expect(Math.ceil(IMAGE_MAX_BYTES / 3) * 4).toBeLessThanOrEqual(5 * 1024 * 1024);
+  });
+
   it("finds nothing in a file its parser cannot open, or one with no text", async () => {
     // A .docx that is not a zip: the real reader cannot open it.
     expect(await readNoteFile(new TextEncoder().encode("not a zip"), "docx", parsers())).toMatchObject({ kind: "nothing" });

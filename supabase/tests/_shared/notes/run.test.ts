@@ -9,7 +9,7 @@ const m = vi.hoisted(() => ({ anthropic: vi.fn() }));
 vi.mock("../../../functions/_shared/anthropic.ts", () => ({ anthropicMessages: m.anthropic }));
 
 import { fakeDb, type FakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
-import { runNotesRead, type NotesJob } from "../../../functions/_shared/notes/run";
+import { runNotesRead, NOTE_READ_MAX_TRIES, type NotesJob } from "../../../functions/_shared/notes/run";
 import type { Parsers } from "../../../functions/_shared/notes/read";
 import { MEMORY_MODEL } from "../../../functions/_shared/voice/load";
 
@@ -187,6 +187,61 @@ describe("reading a note", () => {
     await runNotesRead(d, job(), deps({ ...noParsers, docxText: async () => { throw new Error("Corrupted zip"); } }), NOW);
     expect(m.anthropic).not.toHaveBeenCalled();
     expect(note(d, "n1")).toMatchObject({ state: "nothing" });
+  });
+
+  // QA 22 Nov 2026 (P41-06): a file that could not be opened looked read and empty.
+  it("keeps why a file could not be read, so the screen can say so", async () => {
+    const d = db();
+    d.tables.client_notes.push(noteRow({ id: "n1", kind: "file", title: "broken.docx", file_path: "c1/1-3.docx", file_type: "docx" }));
+    d.uploads.set("client-notes/c1/1-3.docx", "not a zip");
+    await runNotesRead(d, job(), deps({ ...noParsers, docxText: async () => { throw new Error("Corrupted zip"); } }), NOW);
+    expect(note(d, "n1")).toMatchObject({ state: "nothing", unread_reason: "The file could not be opened." });
+  });
+
+  it("keeps no reason on a note that was read and held nothing for the copy", async () => {
+    const d = db();
+    d.tables.client_notes.push(noteRow({ id: "n1", text: "Invoice for October." }));
+    m.anthropic.mockResolvedValue(reply({ note_date: null, points: [] }));
+    await runNotesRead(d, job(), deps(), NOW);
+    expect(note(d, "n1").state).toBe("nothing");
+    expect(note(d, "n1").unread_reason ?? null).toBeNull();
+  });
+});
+
+// QA 22 Nov 2026 (P41-01): a note the model never reads was picked first on
+// every run (oldest first), so every later note of the client stayed Reading.
+describe("a note that is never read", () => {
+  const poisonReply = async ({ body }: any) => (String(body.messages[0].content).includes("POISON")
+    ? reply("I can't help with that.")
+    : reply({ note_date: null, points: [] }));
+
+  it("is given up after NOTE_READ_MAX_TRIES runs, says why, and the later notes are read", async () => {
+    const d = db();
+    d.tables.client_notes.push(
+      noteRow({ id: "poison", text: "POISON note", created_at: "2026-11-02T13:00:00Z" }),
+      noteRow({ id: "later", text: "Never say cheap.", created_at: "2026-11-02T14:00:00Z" }),
+    );
+    m.anthropic.mockImplementation(poisonReply);
+    for (let attempt = 1; attempt <= NOTE_READ_MAX_TRIES + 2; attempt++) {
+      await runNotesRead(d, job({ attempts: Math.min(attempt, 3) }), deps(), NOW);
+    }
+    const poisonCalls = m.anthropic.mock.calls.filter(([a]: any) => String(a.body.messages[0].content).includes("POISON"));
+    expect(poisonCalls).toHaveLength(NOTE_READ_MAX_TRIES);
+    expect(note(d, "poison")).toMatchObject({ state: "nothing", unread_reason: expect.stringMatching(/could not be read/) });
+    expect(note(d, "later").state).not.toBe("reading");
+  });
+
+  it("counts a try before the call, so a run stopped at the wall clock counts too, and a part read clears the count", async () => {
+    const d = db();
+    d.tables.client_notes.push(noteRow({ id: "n1", text: "Call notes.", read_tries: 2 }));
+    let triesSeen = -1;
+    m.anthropic.mockImplementation(async () => {
+      triesSeen = Number(note(d, "n1").read_tries);
+      return reply({ note_date: null, points: [] });
+    });
+    await runNotesRead(d, job(), deps(), NOW);
+    expect(triesSeen).toBe(3);
+    expect(note(d, "n1")).toMatchObject({ state: "nothing", read_tries: 0 });
   });
 });
 
