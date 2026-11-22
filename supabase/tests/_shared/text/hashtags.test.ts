@@ -19,3 +19,10 @@ describe("hashtagList", () => {
     for (const v of [undefined, null, 3, {}, true]) expect(hashtagList(v)).toEqual([]);
   });
 });
+
+describe("hashtagList, from review", () => {
+  it("splits a list entry that holds several tags, and drops repeats", () => {
+    expect(hashtagList(["#a #b", "#a", "#c,#b"])).toEqual(["#a", "#b", "#c"]);
+    expect(hashtagList("#a #a")).toEqual(["#a"]);
+  });
+});

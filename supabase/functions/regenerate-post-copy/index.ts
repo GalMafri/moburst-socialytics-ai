@@ -93,7 +93,12 @@ Deno.serve(async (req) => {
     }
     // Hashtags answer as a list, the shape every calendar post holds; the
     // prompt asks the model for one string (QA 22 Nov 2026). A Story has none.
-    post.hashtags = story ? [] : hashtagList(post.hashtags);
+    // When the model gave none, the answer leaves them out, so the post keeps
+    // its own and a save never clears them.
+    const tags = hashtagList(post.hashtags);
+    if (story) post.hashtags = [];
+    else if (tags.length) post.hashtags = tags;
+    else delete post.hashtags;
 
     return jsonResp({ post });
   } catch (err: any) {

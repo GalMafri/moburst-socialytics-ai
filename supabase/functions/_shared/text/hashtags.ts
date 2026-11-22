@@ -11,8 +11,10 @@
  * the screens, so both read the same list.
  */
 export function hashtagList(value: unknown): string[] {
-  const parts = Array.isArray(value)
+  const entries = Array.isArray(value)
     ? value.filter((h) => typeof h === "string" || typeof h === "number").map(String)
-    : typeof value === "string" ? value.split(/[\s,]+/) : [];
-  return parts.map((h) => h.trim()).filter(Boolean);
+    : typeof value === "string" ? [value] : [];
+  // An entry can hold several tags ("#a #b"); a tag listed twice is kept once.
+  const tags = entries.flatMap((e) => e.split(/[\s,]+/)).map((h) => h.trim()).filter(Boolean);
+  return [...new Set(tags)];
 }

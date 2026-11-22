@@ -41,3 +41,14 @@ describe("regenerate-post-copy hashtags for a Story", () => {
     expect(post.hashtags).toEqual([]);
   });
 });
+
+describe("regenerate-post-copy when the model gives no hashtags", () => {
+  it("leaves hashtags out of the answer, so the post keeps its own and a save never clears them", async () => {
+    for (const given of [undefined, null, "", []]) {
+      model.mockImplementation(async () => ({ text: JSON.stringify({ caption_angle: "A new caption.", CTA: "Visit us", ...(given === undefined ? {} : { hashtags: given }) }), stopReason: "end_turn", raw: {} }));
+      const res = await handler(new Request("https://f/regenerate-post-copy", { method: "POST", body: JSON.stringify({ client_id: "c1", platform: "Instagram", format: "Image", concept: "The new office.", current_copy: "We moved." }) }));
+      const { post } = await res.json();
+      expect("hashtags" in post, `given ${JSON.stringify(given)}`).toBe(false);
+    }
+  });
+});
