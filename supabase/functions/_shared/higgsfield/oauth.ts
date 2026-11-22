@@ -193,6 +193,9 @@ export async function saveTokens(db: Db, tokens: { refresh_token: string; access
 const LEASE_MS = 30_000;
 const WAIT_MS = 1_500;
 const WAIT_TRIES = 12;
+/** Tries of keeping a rotated pair, and the pause between them. */
+const SAVE_TRIES = 3;
+const SAVE_PAUSE_MS = 500;
 
 /**
  * Claim the right to refresh, the way the Canva path does with
@@ -265,7 +268,22 @@ export async function accessTokenFor(
         }
         throw e;
       }
-      await saveTokens(supabase, { refresh_token: grant.refresh_token ?? (current.refresh_token as string), access_token: grant.access_token });
+      // The provider has already rotated the token: a save that fails once is
+      // tried again, since the old token is spent and a lost new one stops
+      // every video until an admin links Higgsfield again (QA 22 Nov 2026, P53-09).
+      const pair = { refresh_token: grant.refresh_token ?? (current.refresh_token as string), access_token: grant.access_token };
+      for (let save = 1; ; save++) {
+        try {
+          await saveTokens(supabase, pair);
+          break;
+        } catch (e) {
+          if (save >= SAVE_TRIES) {
+            console.error("[higgsfield] the rotated tokens could not be kept; the team account may need linking again:", e instanceof Error ? e.message : e);
+            throw e;
+          }
+          await sleep(SAVE_PAUSE_MS);
+        }
+      }
       const now = new Date().toISOString();
       await supabase.from("integration_tokens").update({ expires_at: expiryFrom(grant.expires_in), last_refresh_ok_at: now, updated_at: now }).eq("provider", PROVIDER);
       return grant.access_token;

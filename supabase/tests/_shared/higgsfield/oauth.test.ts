@@ -68,6 +68,32 @@ function beforeMigration(row: Row = {}): FakeDb {
   );
 }
 
+describe("keeping a rotated token", () => {
+  it("tries again when keeping the new pair fails once, so the rotated refresh token is not lost", async () => {
+    // QA 22 Nov 2026 (P53-09): the provider has already rotated the token when it is kept; one failed save lost it, and every video stopped until an admin linked Higgsfield again.
+    const db = world({ refresh_token: "refresh-1", access_token: "access-1" });
+    const save = (db as unknown as { rpc: FakeDb["rpc"] }).rpc.bind(db);
+    let fails = 1;
+    db.rpc = async (name, args) => {
+      if (name === "higgsfield_tokens_save" && fails-- > 0) { db.rpcCalls.push({ name, args }); return { data: null, error: { message: "connection reset" } }; }
+      return save(name, args);
+    };
+    expect(await accessTokenFor(db, grantOk)).toBe("access-2");
+    expect(db.vault).toEqual({ refresh_token: "refresh-2", access_token: "access-2" });
+    expect(db.rpcCalls.filter((c) => c.name === "higgsfield_tokens_save")).toHaveLength(2);
+  });
+
+  it("says loudly in the log when the new pair could not be kept at all", async () => {
+    const db = world({ refresh_token: "refresh-1", access_token: "access-1" });
+    const save = db.rpc.bind(db);
+    db.rpc = async (name, args) => (name === "higgsfield_tokens_save" ? { data: null, error: { message: "down" } } : save(name, args));
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await expect(accessTokenFor(db, grantOk)).rejects.toThrow("Could not keep the Higgsfield tokens");
+    expect(logged.mock.calls.some((c) => String(c[0]).includes("rotated"))).toBe(true);
+    logged.mockRestore();
+  });
+});
+
 describe("a release in either order", () => {
   it("serves the token from the columns while the Vault functions do not exist yet", async () => {
     const db = beforeMigration({ expires_at: new Date(Date.now() + HOUR).toISOString() });
