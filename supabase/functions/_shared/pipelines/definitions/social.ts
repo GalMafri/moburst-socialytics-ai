@@ -49,6 +49,7 @@
 // (social/replay.ts KEPT), so the run can be replayed from what it really read.
 
 import { claudeBatchStep } from "../claude.ts";
+import { replyStopped } from "../../anthropicReply.ts";
 import { ANTHROPIC_API_KEY, GAMMA_API_KEY, SPROUT_CLIENT_ID, SPROUT_CLIENT_SECRET } from "../secrets.ts";
 import type { PipelineDefinition, StepContext, StepResult } from "../types.ts";
 import { analysisExemptions, briefAnswer, briefRequest, parseAnswer, repairRequest, synthesisProblems, synthesisRequest } from "../social/analysis.ts";
@@ -75,6 +76,15 @@ export const SOCIAL_PIPELINE = "social_v1";
 export const BRIEF_TRIES = 2;
 /** Fresh analyses asked for after a repaired answer still did not match its format. */
 export const ANALYSIS_ROUNDS = 1;
+
+/** A fresh analysis, once: its batch is submitted anew. After it, the run stops with what went wrong. */
+function freshSynthesis(ctx: StepContext, problems: string[]): StepResult {
+  const rounds = Number(ctx.state.analysis_rounds ?? 0);
+  if (rounds < ANALYSIS_ROUNDS) {
+    return { type: "next", step: "synthesis", state: { ...ctx.state, analysis_rounds: rounds + 1, repair_error: null }, detail: { problems: problems.slice(0, 10), fresh_analysis: true } };
+  }
+  throw new Error(`The analysis did not match its format after a repair and a fresh analysis: ${problems.slice(0, 5).join("; ")}`);
+}
 /** Time the insights step keeps for itself after its model call must have ended, inside the step's own limit. */
 export const INSIGHTS_MARGIN_MS = 15_000;
 /** Tries of the insights step before the deck goes on with the analysis. */
@@ -280,6 +290,11 @@ export function socialPipeline(deps: SocialDeps = {}): PipelineDefinition {
 
       async parse(ctx) {
         const answer = await need<{ text: string; stop_reason: string }>(ctx, "synthesis.answer");
+        // QA 22 Nov 2026: an answer cut off at its length limit, or declined, is no
+        // answer (anthropicReply.ts replyStopped); sent to the format repair, half an
+        // analysis could come back as a whole report. A fresh analysis is asked for.
+        const stopped = replyStopped({ stopReason: answer.stop_reason });
+        if (stopped) return freshSynthesis(ctx, [`The analysis was ${stopped === "cut_off" ? "cut off at its length limit" : stopped}.`]);
         const parsed = parseAnswer(answer.text);
         const problems = "value" in parsed ? synthesisProblems(parsed.value, analysisExemptions(await need(ctx, "normalized"))) : [parsed.error];
         if (!problems.length && "value" in parsed) return accept(ctx, parsed.value, { stop_reason: answer.stop_reason });
@@ -297,15 +312,12 @@ export function socialPipeline(deps: SocialDeps = {}): PipelineDefinition {
       }),
 
       async parse_repair(ctx) {
-        const answer = await need<{ text: string }>(ctx, "synthesis.repaired");
-        const parsed = parseAnswer(answer.text);
-        const problems = "value" in parsed ? synthesisProblems(parsed.value, analysisExemptions(await need(ctx, "normalized"))) : [parsed.error];
+        const answer = await need<{ text: string; stop_reason?: string }>(ctx, "synthesis.repaired");
+        const stopped = replyStopped({ stopReason: answer.stop_reason });
+        const parsed = parseAnswer(stopped ? "" : answer.text);
+        const problems = stopped ? [`The repair was ${stopped === "cut_off" ? "cut off at its length limit" : stopped}.`] : "value" in parsed ? synthesisProblems(parsed.value, analysisExemptions(await need(ctx, "normalized"))) : [parsed.error];
         if (!problems.length && "value" in parsed) return accept(ctx, parsed.value, { repaired: true });
-        const rounds = Number(ctx.state.analysis_rounds ?? 0);
-        if (rounds < ANALYSIS_ROUNDS) {
-          return { type: "next", step: "synthesis", state: { ...ctx.state, analysis_rounds: rounds + 1, repair_error: null }, detail: { problems: problems.slice(0, 10), fresh_analysis: true } };
-        }
-        throw new Error(`The analysis did not match its format after a repair and a fresh analysis: ${problems.slice(0, 5).join("; ")}`);
+        return freshSynthesis(ctx, problems);
       },
 
       async insights(ctx) {

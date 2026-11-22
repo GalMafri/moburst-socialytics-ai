@@ -46,6 +46,7 @@
 
 import { runActorStep, type ApifyFactory } from "../apifyStep.ts";
 import { claudeBatchStep } from "../claude.ts";
+import { replyStopped } from "../../anthropicReply.ts";
 import { MAX_STEP_ATTEMPTS, runHoursHorizon } from "../runner.ts";
 import { ANTHROPIC_API_KEY, APIFY_API_TOKEN, RIVALIQ_API_KEY } from "../secrets.ts";
 import type { PipelineDefinition, StepContext, StepResult } from "../types.ts";
@@ -71,6 +72,15 @@ export const POST_WINDOW_SPACING_SECONDS = 125;
 export const READINESS_POLL_SECONDS = 60;
 /** Fresh analyses asked for after a repaired answer still did not match its format. */
 export const ANALYSIS_ROUNDS = 1;
+
+/** A fresh analysis, once: its batch is submitted anew. After it, the run stops with what went wrong. */
+function freshAnalysis(ctx: StepContext, problems: string[]): StepResult {
+  const rounds = Number(ctx.state.analysis_rounds ?? 0);
+  if (rounds < ANALYSIS_ROUNDS) {
+    return { type: "next", step: "analysis", state: { ...ctx.state, analysis_rounds: rounds + 1, repair_error: null }, detail: { problems: problems.slice(0, 10), fresh_analysis: true } };
+  }
+  throw new Error(`The analysis did not match its format after a repair and a fresh analysis: ${problems.slice(0, 5).join("; ")}`);
+}
 
 export interface CompetitiveDeps {
   rivaliq?: (apiKey: string) => RivalIqRead;
@@ -313,6 +323,11 @@ export function competitivePipeline(deps: CompetitiveDeps = {}): PipelineDefinit
 
       async parse(ctx) {
         const answer = await need<{ text: string; stop_reason: string }>(ctx, "analysis.answer");
+        // QA 22 Nov 2026: an answer cut off at its length limit, or declined, is no
+        // answer (anthropicReply.ts replyStopped); sent to the format repair, half an
+        // analysis could come back as a whole report. A fresh analysis is asked for.
+        const stopped = replyStopped({ stopReason: answer.stop_reason });
+        if (stopped) return freshAnalysis(ctx, [`The analysis was ${stopped === "cut_off" ? "cut off at its length limit" : stopped}.`]);
         const parsed = parseAnswer(answer.text);
         const problems = "value" in parsed ? analysisProblems(parsed.value) : [parsed.error];
         if (!problems.length && "value" in parsed) {
@@ -334,18 +349,14 @@ export function competitivePipeline(deps: CompetitiveDeps = {}): PipelineDefinit
 
       async parse_repair(ctx) {
         const answer = await need<{ text: string; stop_reason: string }>(ctx, "analysis.repaired");
-        const parsed = parseAnswer(answer.text);
-        const problems = "value" in parsed ? analysisProblems(parsed.value) : [parsed.error];
+        const stopped = replyStopped({ stopReason: answer.stop_reason });
+        const parsed = parseAnswer(stopped ? "" : answer.text);
+        const problems = stopped ? [`The repair was ${stopped === "cut_off" ? "cut off at its length limit" : stopped}.`] : "value" in parsed ? analysisProblems(parsed.value) : [parsed.error];
         if (!problems.length && "value" in parsed) {
           await ctx.payloads.put("analysis.parsed", answerWithoutVendors(parsed.value, await need(ctx, "aggregates")));
           return { type: "next", step: "assemble", detail: { repaired: true } };
         }
-        const rounds = Number(ctx.state.analysis_rounds ?? 0);
-        if (rounds < ANALYSIS_ROUNDS) {
-          // A fresh analysis, once: its batch is submitted anew.
-          return { type: "next", step: "analysis", state: { ...ctx.state, analysis_rounds: rounds + 1, repair_error: null }, detail: { problems: problems.slice(0, 10), fresh_analysis: true } };
-        }
-        throw new Error(`The analysis did not match its format after a repair and a fresh analysis: ${problems.slice(0, 5).join("; ")}`);
+        return freshAnalysis(ctx, problems);
       },
 
       async assemble(ctx) {
