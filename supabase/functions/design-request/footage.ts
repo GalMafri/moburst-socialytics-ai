@@ -59,11 +59,23 @@ export async function footageFor(d: FootageDeps, body: Row): Promise<Answer> {
 
   const { data: filmed } = await d.db.from("design_requests").select("on_camera").eq("client_id", clientId).eq("calendar_post_key", postKey).in("status", ["needs_filming", "closed"]).not("on_camera", "is", null).order("updated_at", { ascending: false }).limit(1).maybeSingle();
   const visual = typeof body.visual_direction === "string" ? body.visual_direction.trim().slice(0, 600) : "";
+  // QA 22 Nov 2026 (P56-04): a video being made without footage (from the
+  // client's posts, say) was answered in place of the clip's, so the clip was
+  // used by nothing. The clip the person filmed wins: that video stops, the
+  // way Stop stops it (cancel.ts), and one is made from the clip.
+  const { data: open } = await d.db.from("design_requests").select("id, footage_path").eq("client_id", clientId).eq("calendar_post_key", postKey).eq("status", "preparing").maybeSingle();
+  if (open && !open.footage_path) {
+    const at = new Date().toISOString();
+    await d.db.from("canva_finish_jobs").update({ status: "canceled", lease_until: null, updated_at: at })
+      .eq("design_request_id", open.id).in("status", ["queued", "running"]);
+    await d.db.from("design_requests").update({ status: "canceled", updated_at: at }).eq("id", open.id).eq("status", "preparing");
+  }
   const request = await d.start(settings, {
     clientId, postKey, copy, reportId: body.report_id || null, platform: body.platform || null, format: body.format || "Video", requestedBy: userId,
     visual: visual || null, footagePath: path, onCamera: filmed?.on_camera ?? "the speaker",
   });
-  // The footage came: the post no longer waits to be filmed.
-  for (const w of waiting ?? []) await endRequest(d.db, w.id, "filmed");
+  // The footage came: the post no longer waits to be filmed. Only when the
+  // request answered is the one made from this clip.
+  if (request?.footage_path === path) for (const w of waiting ?? []) await endRequest(d.db, w.id, "filmed");
   return { body: { request } };
 }

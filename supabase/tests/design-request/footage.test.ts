@@ -21,7 +21,8 @@ function setup(over: { posts?: Row[]; exists?: boolean; waiting?: boolean } = {}
     db,
     requireMember: vi.fn(async () => "person-1"),
     clipExists: vi.fn(async () => over.exists ?? true),
-    start: vi.fn(async (_s: Row, p: Row) => ({ id: "req-new", ...p })),
+    // As startRequest answers: the request row, which carries its footage.
+    start: vi.fn(async (_s: Row, p: Row) => ({ id: "req-new", footage_path: p.footagePath ?? null, ...p })),
   } satisfies FootageDeps;
   return { db, d };
 }
