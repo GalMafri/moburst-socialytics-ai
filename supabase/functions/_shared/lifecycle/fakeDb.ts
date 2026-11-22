@@ -22,6 +22,62 @@ export interface FakeDb {
 }
 
 const same = (a: unknown, b: unknown) => a === b || (a != null && b != null && String(a) === String(b));
+
+/** A PostgREST filter list split at its top-level commas (none inside parentheses or quotes). */
+function splitTop(s: string): string[] {
+  const parts: string[] = [];
+  let depth = 0, quoted = false, start = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === '"') quoted = !quoted;
+    else if (!quoted && c === "(") depth++;
+    else if (!quoted && c === ")") depth--;
+    else if (!quoted && depth === 0 && c === ",") { parts.push(s.slice(start, i)); start = i + 1; }
+  }
+  parts.push(s.slice(start));
+  return parts.map((p) => p.trim()).filter(Boolean);
+}
+
+/** One PostgREST condition ("col.op.value", or an and(…)/or(…) group) as a row test; null when the form is not read here. */
+function condition(s: string): ((r: Row) => boolean) | null {
+  const group = /^(and|or)\((.*)\)$/.exec(s);
+  if (group) {
+    const parts = splitTop(group[2]).map(condition);
+    if (parts.some((p) => !p)) return null;
+    const fs = parts as Array<(r: Row) => boolean>;
+    return group[1] === "and" ? (r) => fs.every((f) => f(r)) : (r) => fs.some((f) => f(r));
+  }
+  const m = /^([^.]+)\.(eq|neq|lt|lte|gt|gte|is|in)\.(.*)$/.exec(s);
+  if (!m) return null;
+  const [, col, op, raw] = m;
+  const unquote = (v: string) => v.replace(/^"(.*)"$/, "$1");
+  const value = unquote(raw);
+  const cell = (r: Row) => field(r, col);
+  switch (op) {
+    case "eq": return (r) => same(cell(r), value);
+    case "neq": return (r) => !same(cell(r), value);
+    case "lt": return (r) => cell(r) != null && String(cell(r)) < value;
+    case "lte": return (r) => cell(r) != null && String(cell(r)) <= value;
+    case "gt": return (r) => cell(r) != null && String(cell(r)) > value;
+    case "gte": return (r) => cell(r) != null && String(cell(r)) >= value;
+    case "is": return (r) => (value === "null" ? (cell(r) ?? null) === null : String(cell(r)) === value);
+    case "in": {
+      const list = /^\((.*)\)$/.exec(raw)?.[1];
+      if (list === undefined) return null;
+      const vs = splitTop(list).map(unquote);
+      return (r) => vs.some((v) => same(cell(r), v));
+    }
+  }
+  return null;
+}
+
+/** A PostgREST or filter as one row test, or null when any part of it is not read here. */
+function orFilter(expr: string): ((r: Row) => boolean) | null {
+  return condition(`or(${expr})`);
+}
+
+/** A row as a caller holds it: a copy, as PostgREST answers, so a later write never changes what was read. */
+const copy = (r: Row): Row => structuredClone(r);
 /** A column, or a JSON field of one as PostgREST names it ("input->>kind"). */
 const field = (r: Row, c: string) => {
   const [col, key] = c.split("->>");
@@ -178,7 +234,9 @@ export function fakeDb(tables: Record<string, Row[]> = {}, given: Record<string,
     in(c: string, vs: unknown[]) { this.filters.push((r) => vs.some((v) => same(r[c], v))); return this; }
     is(c: string, v: unknown) { this.filters.push((r) => (r[c] ?? null) === v); return this; }
     not(c: string, op: string, v: unknown) { if (op === "is") this.filters.push((r) => (r[c] ?? null) !== v); return this; }
-    or() { return this; }
+    // PostgREST's or filter ("status.neq.running,attempted_at.lt.\"…\"", and(…) groups), so a
+    // claim's guard is tested (QA 22 Nov 2026, P38-3: it was ignored). A form not read here filters nothing, as before.
+    or(expr: string) { const f = orFilter(expr); if (f) this.filters.push(f); return this; }
     lt(c: string, v: string) { this.filters.push((r) => String(r[c]) < v); return this; }
     gte(c: string, v: string) { this.filters.push((r) => String(r[c]) >= v); return this; }
     lte(c: string, v: string) { this.filters.push((r) => String(r[c]) <= v); return this; }
@@ -223,6 +281,8 @@ export function fakeDb(tables: Record<string, Row[]> = {}, given: Record<string,
         out = this.matching();
         db.tables[this.table] = this.rows().filter((r) => !out.includes(r));
       }
+      // Copies, as PostgREST answers: a row a caller read never changes under it (QA 22 Nov 2026, P38-3).
+      out = out.map(copy);
       if (this.one) {
         if (this.one === "single" && out.length !== 1) return { data: null, error: { message: `expected one row from ${this.table}` } };
         return { data: out[0] ?? null, error: null };
