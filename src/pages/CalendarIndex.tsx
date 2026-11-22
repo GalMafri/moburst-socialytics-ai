@@ -55,7 +55,6 @@ export default function CalendarIndex() {
 
   // A strategy-only client's posts stay where they are and are not shown; they are there again once it has an account.
   const strategyOnly = useStrategyOnlyClients();
-  const hidden = [...strategyOnly.ids].sort();
   const posts = useQuery({
     queryKey: ["calendar-all-posts", week],
     enabled: isMoburstStaff,
@@ -65,22 +64,27 @@ export default function CalendarIndex() {
       (supabase.from("calendar_posts" as never) as any)
         .select("*").gte("post_date", week).lte("post_date", addDays(week, 6)).order("post_date").order("id").range(from, to)),
   });
+  const active = useMemo(() => new Map((clients.data || []).filter(isActiveClient).map((c) => [c.id, c] as const)), [clients.data]);
+  const closed = [...active.values()].filter((c) => strategyOnly.has(c.id));
+  // The clients whose posts this page shows: active, and not strategy-only.
+  const shown = [...active.keys()].filter((id) => !strategyOnly.has(id)).sort();
+  const weekPosts: ClientPost[] = (posts.data || []).filter((p) => active.has(p.client_id) && !strategyOnly.has(p.client_id)).map((p) => ({ ...p, client_name: active.get(p.client_id)!.name, client_timezone: active.get(p.client_id)!.timezone }));
+  // QA 22 Nov 2026: the pointer and the week list use one rule for "a post
+  // this page shows" (shown above). Before, the pointer ran only when every
+  // post of the week was strategy-only and skipped only those, so a week
+  // holding only an archived client's posts had no way on, and the pointer
+  // could land on such a week.
   const nextPlanned = useQuery({
-    queryKey: ["calendar-all-next", week, hidden.join(",")],
-    enabled: isMoburstStaff && !strategyOnly.isLoading && !!posts.data && posts.data.every((p) => strategyOnly.has(p.client_id)),
+    queryKey: ["calendar-all-next", week, shown.join(",")],
+    enabled: isMoburstStaff && !strategyOnly.isLoading && !!clients.data && !!posts.data && weekPosts.length === 0,
     queryFn: async () => {
+      if (!shown.length) return null;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let later = (supabase.from("calendar_posts" as never) as any).select("post_date").gt("post_date", addDays(week, 6));
-      // The next week that has posts to show: never one that holds only a strategy-only client's.
-      if (hidden.length) later = later.not("client_id", "in", `(${hidden.join(",")})`);
-      const { data } = await later.order("post_date").limit(1);
+      const later = (supabase.from("calendar_posts" as never) as any).select("post_date").gt("post_date", addDays(week, 6));
+      const { data } = await later.in("client_id", shown).order("post_date").limit(1);
       return (data?.[0]?.post_date as string | undefined) ?? null;
     },
   });
-
-  const active = useMemo(() => new Map((clients.data || []).filter(isActiveClient).map((c) => [c.id, c] as const)), [clients.data]);
-  const closed = [...active.values()].filter((c) => strategyOnly.has(c.id));
-  const weekPosts: ClientPost[] = (posts.data || []).filter((p) => active.has(p.client_id) && !strategyOnly.has(p.client_id)).map((p) => ({ ...p, client_name: active.get(p.client_id)!.name, client_timezone: active.get(p.client_id)!.timezone }));
 
   if (isClient) {
     return (
