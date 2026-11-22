@@ -22,6 +22,7 @@ import { voicePromptBlock } from "../_shared/voice/voice.ts";
 import { isStoryPost } from "../_shared/design/story.ts";
 import { cleanNote } from "../_shared/notes/regenerateNote.ts";
 import { rewritePrompt } from "./prompt.ts";
+import { hashtagList } from "../_shared/text/hashtags.ts";
 import { strategyOnlyRefusal } from "../_shared/sprout/strategyOnly.ts";
 
 Deno.serve(async (req) => {
@@ -90,8 +91,9 @@ Deno.serve(async (req) => {
     if (!post || typeof post.caption_angle !== "string" || !post.caption_angle.trim()) {
       return jsonResp({ error: "Failed to parse copy from AI response" }, 500);
     }
-    // A Story has no hashtags.
-    if (story) post.hashtags = "";
+    // Hashtags answer as a list, the shape every calendar post holds; the
+    // prompt asks the model for one string (QA 22 Nov 2026). A Story has none.
+    post.hashtags = story ? [] : hashtagList(post.hashtags);
 
     return jsonResp({ post });
   } catch (err: any) {

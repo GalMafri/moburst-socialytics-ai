@@ -9,6 +9,7 @@
 // Pure: no Deno, no network.
 
 import { STORY_FORMAT, canBeStory, isStoryFormat } from "../_shared/design/story.ts";
+import { hashtagList } from "../_shared/text/hashtags.ts";
 
 export interface AdHocFormat {
   /** The person chose Story. */
@@ -44,9 +45,14 @@ export function adHocFormat(creativeType: unknown, platform: unknown): AdHocForm
   };
 }
 
-/** The model's post as it is saved: a chosen Story is a Story with no hashtags; a Story nobody chose is an image. */
+/**
+ * The model's post as it is saved: a chosen Story is a Story with no hashtags;
+ * a Story nobody chose is an image. Hashtags answer as a list, the shape every
+ * calendar post holds; the prompt asks for one string (QA 22 Nov 2026).
+ */
 export function settleFormat<T extends { format?: unknown; hashtags?: unknown }>(post: T, f: AdHocFormat): T {
   if (f.story) return { ...post, format: STORY_FORMAT, hashtags: [] };
-  if (isStoryFormat(typeof post.format === "string" ? post.format : "")) return { ...post, format: "Image" };
-  return post;
+  const hashtags = hashtagList(post.hashtags);
+  if (isStoryFormat(typeof post.format === "string" ? post.format : "")) return { ...post, format: "Image", hashtags };
+  return { ...post, hashtags };
 }

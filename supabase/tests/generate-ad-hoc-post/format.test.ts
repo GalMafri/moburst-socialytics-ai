@@ -47,8 +47,16 @@ describe("settleFormat", () => {
     for (const choice of [undefined, "Carousel"]) {
       const f = adHocFormat(choice, "Instagram");
       if ("refused" in f) throw new Error("refused");
-      expect(settleFormat({ format: "Story", hashtags: "#x" }, f)).toEqual({ format: "Image", hashtags: "#x" });
-      expect(settleFormat({ format: "Carousel" }, f)).toEqual({ format: "Carousel" });
+      expect(settleFormat({ format: "Story", hashtags: "#x" }, f)).toEqual({ format: "Image", hashtags: ["#x"] });
+      expect(settleFormat({ format: "Carousel" }, f)).toEqual({ format: "Carousel", hashtags: [] });
     }
+  });
+});
+
+describe("settleFormat hashtags (QA 22 Nov 2026)", () => {
+  it("answers a feed post's hashtags as a list, as every calendar post holds them", () => {
+    const f = adHocFormat("Carousel", "Instagram");
+    if ("refused" in f) throw new Error("refused");
+    expect(settleFormat({ format: "Carousel", hashtags: "#fall #sale" }, f)).toEqual({ format: "Carousel", hashtags: ["#fall", "#sale"] });
   });
 });

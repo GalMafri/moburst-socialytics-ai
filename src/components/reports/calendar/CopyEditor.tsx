@@ -13,6 +13,7 @@ import type { PostReason as Reason } from "@/lib/calendarPosts";
 import { isStoryPost } from "@/lib/platform";
 import { NOTE_PLACEHOLDER, cleanNote, copyLearnedLine, notStartedLine, undoCopyNote, type LearnedChange } from "@/lib/postNotes";
 import { LearnedNote, NoteBox } from "./NoteBox";
+import { hashtagList } from "../../../../supabase/functions/_shared/text/hashtags";
 
 interface Props {
   post: any;
@@ -65,7 +66,8 @@ export function CopyEditor({ post, clientId, reportId, brand, onCopySaved }: Pro
       ...post, copy, _originalCopy: post._originalCopy ?? initialCopy,
       _copyVersion: (post._copyVersion || 0) + 1,
       _copyHistory: [...(post._copyHistory || [initialCopy]), copy],
-      hashtags: generated?.hashtags ?? post.hashtags,
+      // A list, the shape every calendar post holds: a regenerate's answer may be one string (QA 22 Nov 2026).
+      hashtags: generated?.hashtags !== undefined ? hashtagList(generated.hashtags) : post.hashtags,
       CTA: generated?.CTA ?? generated?.cta ?? post.CTA ?? post.cta,
     };
     // Saved through calendar-posts, which checks the caller belongs to the
@@ -275,9 +277,9 @@ export function CopyEditor({ post, clientId, reportId, brand, onCopySaved }: Pro
           <div className="bg-background rounded-md p-4 border">
             <p className="text-base leading-relaxed whitespace-pre-line">{displayCopy}</p>
             {/* Hashtags the copy does not already end with; most copy carries its own. */}
-            {post.hashtags?.length > 0 && post.hashtags.some((h: string) => !String(displayCopy || "").toLowerCase().includes((h.startsWith("#") ? h : `#${h}`).toLowerCase())) && (
+            {hashtagList(post.hashtags).some((h) => !String(displayCopy || "").toLowerCase().includes((h.startsWith("#") ? h : `#${h}`).toLowerCase())) && (
               <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t">
-                {post.hashtags.filter((h: string) => !String(displayCopy || "").toLowerCase().includes((h.startsWith("#") ? h : `#${h}`).toLowerCase())).map((h: string) => (
+                {hashtagList(post.hashtags).filter((h) => !String(displayCopy || "").toLowerCase().includes((h.startsWith("#") ? h : `#${h}`).toLowerCase())).map((h) => (
                   <span key={h} className="text-sm text-primary">
                     {h.startsWith("#") ? h : `#${h}`}
                   </span>

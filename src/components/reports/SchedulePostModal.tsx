@@ -18,6 +18,7 @@ import { invokeErrorCode } from "@/lib/invokeError";
 import { postCopyOf } from "@/lib/postCopy";
 import { publishProblems } from "../../../supabase/functions/_shared/sprout/publishRules";
 import { SEND_RUN_LIMIT_MS, sendCanStillBeRunning } from "../../../supabase/functions/_shared/sprout/sendWindow";
+import { hashtagList } from "../../../supabase/functions/_shared/text/hashtags";
 
 interface SchedulePostModalProps {
   open: boolean;
@@ -239,8 +240,10 @@ export function SchedulePostModal({
     if (open && post) {
       // Copy and hashtags, without repeating a hashtag the copy already has.
       let content = postCopyOf(post).trim();
-      if (post.hashtags?.length) {
-        const tags = post.hashtags.map((h: string) => h.startsWith('#') ? h : `#${h}`);
+      // A list whatever shape the post carries: a regenerated post may hold one string (QA 22 Nov 2026).
+      const listed = hashtagList(post.hashtags);
+      if (listed.length) {
+        const tags = listed.map((h) => h.startsWith('#') ? h : `#${h}`);
         const existingTags = new Set((content.match(/#[\p{L}\p{N}_]+/gu) || []).map(tag => tag.toLowerCase()));
         const missingTags = [...new Set(tags)].filter((tag: string) => !existingTags.has(tag.toLowerCase()));
         if (missingTags.length) content += "\n\n" + missingTags.join(" ");
