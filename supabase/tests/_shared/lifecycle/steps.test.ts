@@ -3485,7 +3485,7 @@ describe("voice", () => {
     for (const place of places) {
       const db = world(voice(place));
       const out = await STEPS.voice.run(db, harbor(), ctx({ rows: accounts() }));
-      expect(out).toEqual({ status: "done", result: { conforms: false, rule: 1, built_at: BUILT, why: ["names"], names: 1, queued: key, at: "2026-11-17T10:00:00.000Z" } });
+      expect(out).toEqual({ status: "waiting", reason: "in_progress", recheckMinutes: 60, result: { conforms: false, rule: 1, built_at: BUILT, why: ["names"], names: 1, queued: key, at: "2026-11-17T10:00:00.000Z" } });
       expect(jobs(db)).toEqual([expect.objectContaining({ kind: "voice_profile", client_id: "c1", dedupe_key: key, priority: 39, available_at: "2026-11-17T10:00:00.000Z" })]);
       // The step itself changes nothing in the voice: the job does.
       expect((db.tables.clients[0].social_voice as { built_at: string }).built_at).toBe(BUILT);
@@ -3497,7 +3497,7 @@ describe("voice", () => {
     const parked = "2026-11-17T09:00:00.000Z";
     const db = world(voice());
     const out = await STEPS.voice.run(db, harbor(), ctx({ rows: accounts({}, { own_dropped_at: parked }) }));
-    expect(out).toMatchObject({ status: "done", result: { conforms: false, why: ["accounts"], names: 0, queued: jobKey(parked) } });
+    expect(out).toMatchObject({ status: "waiting", result: { conforms: false, why: ["accounts"], names: 0, queued: jobKey(parked) } });
     expect(jobs(db)).toHaveLength(1);
     // Both facts at once are one rebuild.
     const both = world(voice({ overall: { summary: STARS, phrases: [] } }));
@@ -3512,7 +3512,7 @@ describe("voice", () => {
     db.tables.scheduled_jobs.push({ kind: "voice_profile", client_id: "c1", dedupe_key: today, status: "done" });
     await STEPS.voice.run(db, harbor(), ctx({ rows: accounts() }));
     // Still queued, or running: looked at again, nothing more is asked.
-    expect(await STEPS.voice.run(db, harbor(), ctx({ rows: accounts() }))).toMatchObject({ status: "done", result: { conforms: false, queued: jobKey() } });
+    expect(await STEPS.voice.run(db, harbor(), ctx({ rows: accounts() }))).toMatchObject({ status: "waiting", result: { conforms: false, queued: jobKey() } });
     db.tables.scheduled_jobs.find((j) => j.dedupe_key === jobKey())!.status = "running";
     await STEPS.voice.run(db, harbor(), ctx({ rows: accounts() }));
     expect(jobs(db).map((j) => j.dedupe_key)).toEqual([today, jobKey()]);
