@@ -37,7 +37,8 @@ Deno.serve(async (req) => {
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const { data: it, error: itErr } = await supabase
       .from("post_iterations")
-      .select("id, client_id, platform, format, post_copy, visual_direction, variant_angle")
+      // concept: the rule-writing prompt says what the turned-down picture showed (QA 22 Nov 2026, P58-02).
+      .select("id, client_id, platform, format, post_copy, visual_direction, variant_angle, concept")
       .eq("id", iteration_id)
       .maybeSingle();
     if (itErr) throw new Error(itErr.message);
