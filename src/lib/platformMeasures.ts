@@ -56,7 +56,9 @@ export function coverageLine(networks: ReadonlyArray<string | null | undefined>,
 
 /** The one way this page writes a count in a tile or a sentence: 8,323 reads 8.3K, 1,250,000 reads 1.3M. */
 export function formatCount(v: number): string {
-  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+  // QA 22 Nov 2026: from 999,950 the thousands round to 1000.0, so the unit
+  // is chosen on the rounded figure: those read 1.0M, never 1000.0K.
+  if (v >= 999_950) return `${(v / 1_000_000).toFixed(1)}M`;
   if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
   return v.toLocaleString();
 }

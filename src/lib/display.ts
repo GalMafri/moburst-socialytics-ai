@@ -437,7 +437,9 @@ export function formatNumbersInText(text: string): string {
  */
 export function compactNumber(v: number): string {
   if (!Number.isFinite(v)) return "0";
-  if (Math.abs(v) >= 1_000_000) return `${(v / 1_000_000).toFixed(2).replace(/\.?0+$/, "")}M`;
+  // QA 22 Nov 2026: from 999,950 the thousands round to 1000.0, so the unit
+  // is chosen on the rounded figure: those read 1M, never 1000K.
+  if (Math.abs(v) >= 999_950) return `${(v / 1_000_000).toFixed(2).replace(/\.?0+$/, "")}M`;
   if (Math.abs(v) >= 10_000) return `${(v / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
   // Below 100 one decimal is enough ("5.4 engagements / post", not "5.357"); above it, whole numbers.
   return v.toLocaleString("en-US", { maximumFractionDigits: Math.abs(v) < 100 ? 1 : 0 });
