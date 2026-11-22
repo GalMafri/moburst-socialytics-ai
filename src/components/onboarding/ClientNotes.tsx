@@ -303,7 +303,10 @@ export function ClientNotes({ clientId, clientName, brandNotes, timeZone }: {
                         {readLine && <p className="t-label">{readLine}</p>}
                       </div>
                       <Input type="date" key={note.note_date} aria-label={`Date of ${note.title}`} className="w-auto" defaultValue={note.note_date} max={tomorrowOf(today)}
-                        onChange={(e) => { if (e.target.value && e.target.value !== note.note_date) void send({ action: "set_date", note_id: note.id, date: e.target.value }); }} />
+                        // QA 22 Nov 2026: a year typed digit by digit fires a change for each partial year
+                        // (0002, 0020, 0202), each sent and each remounting the field mid-typing. A typed
+                        // year reaches four digits only with its last keystroke, so only that date is sent.
+                        onChange={(e) => { const v = e.target.value; if (v && v !== note.note_date && Number(v.slice(0, 4)) >= 1000) void send({ action: "set_date", note_id: note.id, date: v }); }} />
                       <Button variant="ghost" size="icon-sm" aria-label={`Remove ${note.title}`} onClick={() => setRemoving(note)}>
                         <X />
                       </Button>
