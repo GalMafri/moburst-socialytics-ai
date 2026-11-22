@@ -476,11 +476,16 @@ function SlideLightbox({ state, onClose }: { state: { urls: string[]; index: num
 
 function DownloadButton({ urls, filenameStub }: { urls: string[]; filenameStub: string }) {
   const [busy, setBusy] = useState(false);
+  /** QA 22 Nov 2026: a download that did not happen says so; before, a failed fetch left the screen as it was and a refused one saved the error page as the picture. */
+  const [notDownloaded, setNotDownloaded] = useState(false);
   const download = async () => {
     setBusy(true);
+    setNotDownloaded(false);
     try {
       for (let i = 0; i < urls.length; i++) {
-        const blob = await (await fetch(urls[i])).blob();
+        const res = await fetch(urls[i]);
+        if (!res.ok) throw new Error(`download answered ${res.status}`);
+        const blob = await res.blob();
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
         const ext = isVideoMedia(urls[i]) ? "mp4" : "png";
@@ -488,15 +493,21 @@ function DownloadButton({ urls, filenameStub }: { urls: string[]; filenameStub: 
         a.click();
         URL.revokeObjectURL(a.href);
       }
+    } catch (e) {
+      console.warn("[design] not downloaded yet", e);
+      setNotDownloaded(true);
     } finally {
       setBusy(false);
     }
   };
   return (
-    <Button size="sm" variant="ghost" className="h-9" onClick={download} disabled={busy}>
-      {busy ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1.5" />}
-      {urls.length > 1 ? "Download slides" : "Download"}
-    </Button>
+    <>
+      <Button size="sm" variant="ghost" className="h-9" onClick={download} disabled={busy}>
+        {busy ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1.5" />}
+        {urls.length > 1 ? "Download slides" : "Download"}
+      </Button>
+      {notDownloaded && <span role="status" className="t-secondary">Not downloaded yet.</span>}
+    </>
   );
 }
 
