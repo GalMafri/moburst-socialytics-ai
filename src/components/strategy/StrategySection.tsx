@@ -66,6 +66,9 @@ function useCompetitorSet(clientId: string, wanted: boolean): string[] {
   return names;
 }
 
+/** The text of a card a person emptied: the server keeps a version only with some text. */
+export const EMPTIED_SECTION_TEXT = "Nothing listed.";
+
 /** Editing one section: what is shown, the sheet's form, the save. */
 export function useSectionEdit({ clientId, sectionKey, product, edit, competitorNames, platformNames, onSaved }: SectionProps) {
   const [open, setOpen] = useState(false);
@@ -131,7 +134,10 @@ export function useSectionEdit({ clientId, sectionKey, product, edit, competitor
       // A save of the written version as it is (no earlier goals kept) hands the card back: no person's version is made.
       if (savedAsWritten(sectionKey, value, product)) return send("", null);
       // The text is the goals as shown; the earlier goals stay in the value only.
-      return send(sectionLines(sectionKey, fromForm(sectionKey, form, base)), value);
+      // QA 22 Nov 2026: a card with every line removed has no lines, and strategy_section_save refuses a
+      // version with fields and no text ("A section needs its text."), a refusal never resent, so Save said
+      // "not saved yet" on every press. The emptied card is saved as the person left it, with a short text.
+      return send(sectionLines(sectionKey, fromForm(sectionKey, form, base)) || EMPTIED_SECTION_TEXT, value);
     },
     handBack: () => send("", null),
   };
