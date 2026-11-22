@@ -5,7 +5,9 @@
 // neither order again, nor fail it, nor erase its order.
 import { describe, it, expect } from "vitest";
 import { type ClipDeps, ORDERED_TRIES, runClip } from "../../../functions/_shared/video/clipStep";
-import { type ClipOrder, ORDER_GRACE_MS, REASONS } from "../../../functions/_shared/video/clip";
+import { type ClipOrder, ORDER_GRACE_MS, QUOTE_WAIT_MS, REASONS } from "../../../functions/_shared/video/clip";
+import { HiggsfieldError } from "../../../functions/_shared/higgsfield/generate";
+import { McpError } from "../../../functions/_shared/higgsfield/mcp";
 
 const T0 = Date.parse("2026-11-11T10:00:00.000Z");
 
@@ -51,6 +53,12 @@ function fakes(r: Row, over: Partial<ClipDeps> & { clock?: { t: number } } = {})
       calls.push("saveOrdered");
       if (!r.clip_order || r.clip_order.job_id) return false;
       r.clip_order = { ...r.clip_order, job_id: id, credits };
+      return true;
+    },
+    clearOrder: async (at) => {
+      calls.push("clearOrder");
+      if (!active() || !r.clip_order || r.clip_order.job_id || r.clip_order.at !== at) return false;
+      r.clip_order = null;
       return true;
     },
     stopJob: async (reason) => {
@@ -111,11 +119,12 @@ describe("runClip", () => {
     expect(j.state.kit_ref_ids).toEqual(["k0"]);
   });
 
-  it("keeps the imports' ids when the step fails before its order, and orders nothing", async () => {
+  it("keeps the imports' ids when the frame cannot be handed over, waits, and orders nothing", async () => {
     const r = row();
     const { deps, calls } = fakes(r, { importImages: async () => ({ frame: null, kit: ["k1"] }) });
     const j = job(r);
-    await expect(runClip(deps, j)).rejects.toThrow("Could not hand the opening frame");
+    // QA 22 Nov 2026 (P53-03): a passing import failure is waited out, as an unreadable price is.
+    expect(await runClip(deps, j)).toBe("wait");
     expect(calls).not.toContain("saveOrder");
     expect(j.state.kit_ref_ids).toEqual(["k1"]);
     expect(r.clip_order).toBeNull();
@@ -125,6 +134,57 @@ describe("runClip", () => {
     await runClip(next.deps, job(r));
     expect(next.calls).toEqual(["readOrder", "balance", "quote", "renewLease", "import:frame", "saveOrder", "submit", "saveOrdered", "saveJob"]);
   });
+
+  it("waits out a frame that cannot be handed over for QUOTE_WAIT_MS, then spends the step's tries", async () => {
+    const r = row();
+    const clock = { t: T0 };
+    const failing = () => fakes(r, { clock, importImages: async () => ({ frame: null, kit: [] }) });
+    for (let i = 0; i < 4; i++) {
+      clock.t = T0 + i * 60_000;
+      const j = job(r);
+      expect(await runClip(failing().deps, j)).toBe("wait");
+      workerSave(r, j, "wait");
+    }
+    clock.t = T0 + QUOTE_WAIT_MS + 60_000;
+    await expect(runClip(failing().deps, job(r))).rejects.toThrow("Could not hand the opening frame");
+    expect(r.clip_order).toBeNull();
+  });
+
+  for (const refusal of [
+    new HiggsfieldError("Higgsfield generate_video_batch failed: rate limited, try again"),
+    new HiggsfieldError("Higgsfield did not start the generation: queue full"),
+    new McpError("Higgsfield rejected the session. The team account needs linking again.", 401),
+    new McpError("MCP tools/call: Invalid params", -32602),
+  ]) {
+    it(`clears the order after a submit Higgsfield refused outright, so the clip can be ordered again (${refusal.message.slice(0, 30)})`, async () => {
+      // QA 22 Nov 2026 (P53-02): a refusal created and charged nothing; ending the video as a lost order lost a paid title and frame.
+      const r = row();
+      const clock = { t: T0 };
+      const first = fakes(r, { clock, submit: async () => { throw refusal; } });
+      const j = job(r);
+      await expect(runClip(first.deps, j)).rejects.toThrow(refusal.message);
+      expect(first.calls.slice(-2)).toEqual(["saveOrder", "clearOrder"]);
+      expect(r.clip_order).toBeNull();
+      workerSave(r, j, "wait");
+      clock.t = T0 + ORDER_GRACE_MS + 60_000;
+      const later = fakes(r, { clock });
+      const k = job(r);
+      expect(await runClip(later.deps, k)).toBe("wait");
+      expect(later.calls).not.toContain("stopJob");
+      expect(later.calls).toContain("submit");
+      expect(k.step).toBe("clip_wait");
+    });
+  }
+
+  for (const unknown of [new Error("Higgsfield timed out"), new McpError("MCP tools/call failed (502): bad gateway", 502), new HiggsfieldError("Higgsfield generate_video_batch accepted the request but returned no job.")]) {
+    it(`keeps the order after a submit whose outcome is unknown (${unknown.message.slice(0, 30)})`, async () => {
+      const r = row();
+      const first = fakes(r, { submit: async () => { throw unknown; } });
+      await expect(runClip(first.deps, job(r))).rejects.toThrow(unknown.message);
+      expect(first.calls).not.toContain("clearOrder");
+      expect(r.clip_order).toEqual({ price: 128, at: new Date(T0).toISOString() });
+    });
+  }
 
   it("never orders again after a submit that failed: it waits out the grace, then ends the video", async () => {
     const r = row();

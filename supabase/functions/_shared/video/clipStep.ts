@@ -21,6 +21,11 @@
 // A pass that finds an order waits for it (clip_wait), or, when the order has
 // no job id after ORDER_GRACE_MS, ends the video (REASONS.lostOrder, fenced
 // the same way). No pass ever returns "next": the clip step ends its pass.
+// A submit Higgsfield refused outright (submitRefused) made and charged
+// nothing: its order is cleared (video_clip_unorder, fenced the same way) and
+// the error spends one of the step's tries, so a later pass orders again
+// (QA 22 Nov 2026, P53-02: such a refusal ended the video as a lost order
+// after its title and frame were paid for).
 
 import type { JobRef } from "../higgsfield/generate.ts";
 import { type ClipOrder, QUOTE_WAIT_MS, REASONS, clipOrderDecision, clipRequest, footageRules } from "./clip.ts";
@@ -42,6 +47,8 @@ export interface ClipDeps {
   saveOrder(order: ClipOrder): Promise<boolean>;
   /** Adds the job id and credits to an order that has none (video_clip_ordered). */
   saveOrdered(jobId: string, credits: number | null): Promise<boolean>;
+  /** Clears the order placed at this time, only while it has no job id and the job is active (video_clip_unorder). */
+  clearOrder(at: string): Promise<boolean>;
   /** Fails the job with the reason only while it holds no live order (video_clip_stop). */
   stopJob(reason: string): Promise<boolean>;
   /** Saves the job's step and state. */
@@ -75,6 +82,25 @@ async function recordOrdered(deps: ClipDeps, job: VideoJob, jobId: string, credi
   }
   const why = last instanceof Error ? last.message : String(last);
   throw new Error(`The clip was ordered as video job ${jobId}, but its id could not be recorded: ${why}`);
+}
+
+/**
+ * True when Higgsfield plainly refused the submit, so nothing was made or
+ * charged: the tool answered with an error (HiggsfieldError, except an
+ * accepted request that named no job), or the call was turned away before it
+ * ran (McpError with a 4xx status, a 401 among them, or a JSON-RPC error).
+ * A timeout, a network error or a 5xx may have come after the clip was made,
+ * and is never taken as a refusal. Told apart by name, so this file needs no
+ * network import.
+ */
+export function submitRefused(e: unknown): boolean {
+  if (!(e instanceof Error)) return false;
+  if (e.name === "HiggsfieldError") return !/accepted the request but returned no job/.test(e.message);
+  if (e.name === "McpError") {
+    const code = (e as Error & { code?: unknown }).code;
+    return typeof code === "number" && (code < 0 || (code >= 400 && code < 500));
+  }
+  return false;
 }
 
 /** The job ended with the reason, unless an order stands in the way: then the row is left to the pass that placed it. */
@@ -120,8 +146,16 @@ export async function runClip(deps: ClipDeps, job: VideoJob): Promise<VideoStepR
     const got = await deps.importImages(want);
     if (want.kit) s.kit_ref_ids = got.kit ?? [];
     if (want.frame) {
-      if (!got.frame) throw new Error("Could not hand the opening frame to the video service.");
+      if (!got.frame) {
+        // QA 22 Nov 2026 (P53-03): a passing import failure (Higgsfield down,
+        // a token refused, a timeout) is waited out like an unreadable price,
+        // for QUOTE_WAIT_MS; only then does it spend the step's tries.
+        if (typeof s.import_waiting_since !== "number") s.import_waiting_since = now;
+        if (now - s.import_waiting_since <= QUOTE_WAIT_MS) return "wait";
+        throw new Error("Could not hand the opening frame to the video service.");
+      }
       s.frame_ref_id = got.frame;
+      delete s.import_waiting_since;
     }
   }
 
@@ -135,7 +169,14 @@ export async function runClip(deps: ClipDeps, job: VideoJob): Promise<VideoStepR
   const prompt = `${input.video.prompt}${footageRules(input.people, frame)}`;
   // A failure from here on leaves the order without a job id: later passes
   // wait out ORDER_GRACE_MS and then end the video, never ordering again.
-  const first = await deps.submit(clipRequest(prompt, s.frame_ref_id, s.kit_ref_ids, frame.aspect));
+  let first: Awaited<ReturnType<ClipDeps["submit"]>>;
+  try {
+    first = await deps.submit(clipRequest(prompt, s.frame_ref_id, s.kit_ref_ids, frame.aspect));
+  } catch (e) {
+    // Refused outright: nothing was made, so the order is cleared and a later pass orders again.
+    if (submitRefused(e) && (await deps.clearOrder(order.at).catch(() => false))) job.clip_order = null;
+    throw e;
+  }
   if (!first?.job_id) throw new Error("The video service did not start the clip.");
   await recordOrdered(deps, job, first.job_id, live);
   job.clip_order = { ...order, job_id: first.job_id, credits: live };

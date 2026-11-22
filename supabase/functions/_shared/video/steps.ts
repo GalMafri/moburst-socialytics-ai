@@ -254,6 +254,11 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
           if (error) throw new Error(`Could not record the clip's job: ${error.message}`);
           return data === true;
         },
+        clearOrder: async (at) => {
+          const { data, error } = await admin.rpc("video_clip_unorder", { p_job: job.id, p_at: at });
+          if (error) throw new Error(`Could not clear the clip's order: ${error.message}`);
+          return data === true;
+        },
         stopJob: async (reason) => {
           const { data, error } = await admin.rpc("video_clip_stop", { p_job: job.id, p_reason: reason });
           if (error) throw new Error(`Could not stop the video: ${error.message}`);
