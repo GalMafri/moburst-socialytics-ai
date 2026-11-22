@@ -9,7 +9,6 @@
 // file shares one scope with the node's own code.
 
 import { isPublishedReportPost, postEngagementRate } from "./reportMetrics.ts";
-import { HASHTAG_IN_TEXT } from "../trends/hashtag.ts";
 
 // deno-lint-ignore no-explicit-any
 type AnyPost = any;
@@ -117,7 +116,8 @@ export function addPostToSample(agg: AnySample, p: AnyPost, timeZone?: string | 
     }
   }
   const caption = text(p.message || p.text || p.caption || p.content || "");
-  for (const t of (caption.match(HASHTAG_IN_TEXT) || [])) agg.hashtags[t.toLowerCase()] = (agg.hashtags[t.toLowerCase()] || 0) + 1;
+  // The Trends rule (trends/hashtag.ts, HASHTAG_IN_TEXT), written out here: in the n8n node this file has no imports.
+  for (const t of (caption.match(/#[\p{L}0-9_][\p{L}\p{M}0-9_]*/gu) || [])) agg.hashtags[t.toLowerCase()] = (agg.hashtags[t.toLowerCase()] || 0) + 1;
   const mtype = p.type || p.post_type || p.media_type || "unknown";
   agg.media_types[mtype] = (agg.media_types[mtype] || 0) + 1;
   const channel = p.channel || p.network || p.platform || "unknown";
