@@ -120,7 +120,11 @@ export default function ClientCalendar() {
   const platforms = calendarPlatforms({ primary: clientContext.primary_platforms, profiles: profiles.data, posted: all.map((p) => p.platform) });
   const filterPlatforms = postedPlatforms(inWeek);
   const languages = [...new Set(all.map((p) => p.language).filter(Boolean))] as string[];
-  const goTo = (monday: string) => setParams((prev) => { const next = new URLSearchParams(prev); next.set("week", monday); return next; }, { replace: false });
+  // QA 22 Nov 2026: `post` and `tab` say which post to open on arriving from a
+  // link, once. Carried along to another week, they reopened that post's
+  // panel every time its week came back (the board is mounted per week), so
+  // moving to a week leaves them behind.
+  const goTo = (monday: string) => setParams((prev) => { const next = new URLSearchParams(prev); next.set("week", monday); next.delete("post"); next.delete("tab"); return next; }, { replace: false });
 
   // Opened from the all-clients view: the post to open, by id.
   const openPostId = params.get("post");

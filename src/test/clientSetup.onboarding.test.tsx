@@ -152,7 +152,10 @@ it('shows no chosen competitors while no set can run yet', async () => {
   f.sets = [f.sets[0]];
   mount('competitors');
   expect(await screen.findByText('Competitor notes')).toBeInTheDocument();
-  expect(screen.queryByText('Competitors chosen')).toBeNull();
+  // The page now opens once the client is read, with the onboarding steps in:
+  // the tracking line can stand under "Competitors chosen", but no names do.
+  await new Promise((r) => setTimeout(r, 50));
+  expect(screen.queryByText(/Toast|ChowNow|Square|Open draft only/)).toBeNull();
 });
 
 it('keeps loading the chosen competitors when the read does not answer, with no failure on screen', async () => {

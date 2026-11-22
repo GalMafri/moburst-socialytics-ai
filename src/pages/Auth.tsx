@@ -27,9 +27,13 @@ export default function Auth() {
         if (error && isTransient(error)) { if (!cancelled) setFound("unreachable"); return; }
         const su = data.session?.user;
         if (!su) { if (!cancelled) setFound("none"); return; }
-        const { data: roles } = await supabase
+        const { data: roles, error: rolesError } = await supabase
           .from("user_roles").select("role").eq("user_id", su.id);
-        if (!cancelled) setFound(roles && roles.length ? "restore_failed" : "no_access");
+        if (cancelled) return;
+        // QA 22 Nov 2026: a roles read that did not answer says nothing about
+        // access. "No access" is said only when the read answered with no role.
+        if (rolesError) setFound(isTransient(rolesError) ? "unreachable" : "restore_failed");
+        else setFound(roles && roles.length ? "restore_failed" : "no_access");
       } catch {
         if (!cancelled) setFound("none");
       }

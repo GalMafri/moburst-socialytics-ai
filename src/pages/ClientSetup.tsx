@@ -158,9 +158,18 @@ export default function ClientSetup() {
   const [newKeyword, setNewKeyword] = useState("");
   const [newPillarName, setNewPillarName] = useState("");
   const [savedVersion, setSavedVersion] = useState(0);
-  const [notSaved, setNotSaved] = useState(false);
+  // What is not saved yet after a Save that did not get through: everything,
+  // or only the Sprout accounts when the client's details were written first
+  // (QA 22 Nov 2026: a partial save was told as nothing saved).
+  const [notSaved, setNotSaved] = useState<"all" | "accounts" | null>(null);
+  // A new client's id, made once for the life of the form: a second Save
+  // after a reply that never came sends the same insert, never a second client
+  // (QA 22 Nov 2026).
+  const newClientId = useRef<string | null>(null);
+  const [notRelearned, setNotRelearned] = useState(false);
+  const relearnOwed = useRef(false);
 
-  const { data: client, refetch: refetchClient } = useQuery({
+  const { data: client, refetch: refetchClient, isLoading: clientLoading, isError: clientFailed, error: clientError } = useQuery({
     queryKey: ["client", id],
     queryFn: async () => {
       const { data, error } = await supabase.from("clients").select("*").eq("id", id!).maybeSingle();
@@ -269,14 +278,19 @@ export default function ClientSetup() {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      setNotSaved(false);
-      const changes = isNew ? changedColumns(EMPTY_FORM, form) : changedColumns(loaded.current ?? form, form);
+      setNotSaved(null);
+      // QA 22 Nov 2026: what this save sends, read once. The form can change
+      // while the save is on its way; those later edits are not part of it
+      // and must stay in the form, unsaved, after it lands.
+      const sent = form;
+      const sentProfiles = selectedProfiles;
+      const changes = isNew ? changedColumns(EMPTY_FORM, sent) : changedColumns(loaded.current ?? sent, sent);
       let savedId = id!;
       if (isNew) {
         // clients.created_by references auth.users(id): the Supabase session's id.
         const { data: { user: supabaseUser } } = await supabase.auth.getUser();
-        // The id is made here, so sending the insert again can never make a second client.
-        savedId = crypto.randomUUID();
+        // The id is made once for this form, so sending the insert again can never make a second client.
+        savedId = newClientId.current ??= crypto.randomUUID();
         const { error } = await sendQuietly(() => supabase.from("clients").insert({ id: savedId, ...changes, created_by: supabaseUser?.id ?? null } as never), { again: writeResendable });
         // The client's own id taken: an earlier try of this same insert landed.
         const landed = (error as { code?: string; message?: string } | null)?.code === "23505" && /clients_pkey/.test(String((error as { message?: string }).message));
@@ -285,37 +299,52 @@ export default function ClientSetup() {
         const { error } = await sendQuietly(() => supabase.from("clients").update(changes as never).eq("id", savedId), { again: writeResendable });
         if (error) throw error;
       }
+      // The client's details are saved from here on, whatever happens to the accounts.
+      if (!isNew) {
+        loaded.current = sent;
+        void queryClient.invalidateQueries({ queryKey: ["client", id] });
+      }
 
       // Sprout accounts: only what the person added or removed. A removal is
       // recorded (sprout_profile_removals) so the matcher never adds it back.
-      if (!isNew && selectedProfiles && profilesChanged) {
-        const chosen = new Set(selectedProfiles.map((p) => String(p.id)));
-        const added = selectedProfiles.filter((p) => !assignedIds.has(String(p.id))).map((p) => ({
+      if (!isNew && sentProfiles && profilesChanged) {
+        const chosen = new Set(sentProfiles.map((p) => String(p.id)));
+        const added = sentProfiles.filter((p) => !assignedIds.has(String(p.id))).map((p) => ({
           client_id: savedId, sprout_profile_id: Number(p.id), profile_name: p.name, native_name: p.native_name,
           network_type: p.network_type, native_link: p.native_link, is_active: true,
         }));
         const removed = [...assignedIds].filter((pid) => !chosen.has(pid)).map(Number).filter(Number.isFinite);
         if (added.length) {
           const { error } = await sendQuietly(() => supabase.from("sprout_profiles").upsert(added as never, { onConflict: "client_id,sprout_profile_id" }), { again: writeResendable });
-          if (error) throw error;
+          if (error) throw Object.assign(new Error("The Sprout accounts are not saved yet."), { part: "accounts", cause: error });
         }
         if (removed.length) {
           const { error } = await sendQuietly(() => supabase.from("sprout_profiles").delete().eq("client_id", savedId).in("sprout_profile_id", removed), { again: writeResendable });
-          if (error) throw error;
+          if (error) throw Object.assign(new Error("The Sprout accounts are not saved yet."), { part: "accounts", cause: error });
         }
       }
 
       // References and the brand book are what the design language is learned
       // from: a person changing them asks the lifecycle to learn it again.
-      if (!isNew && ("design_references" in changes || "brand_book_file_path" in changes)) {
+      if (!isNew && ("design_references" in changes || "brand_book_file_path" in changes || relearnOwed.current)) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await sendQuietly(() => (supabase.rpc as any)("lifecycle_request", { p_client: savedId, p_step: "design_refs" }), { again: writeResendable });
+        const { error } = await sendQuietly(() => (supabase.rpc as any)("lifecycle_request", { p_client: savedId, p_step: "design_refs" }), { again: writeResendable });
+        // QA 22 Nov 2026: the answer was dropped, so a request that never got
+        // through still read "Saved" and the style stayed learned from the old
+        // references. The references are saved; the line under the title says
+        // the style is not set to be learned again yet, and the next save asks.
+        if (error) console.warn("[client setup] design style not asked to be learned again yet", error);
+        relearnOwed.current = !!error;
+        return { id: savedId, sent, sentProfiles, relearnAsked: !error };
       }
-      return { id: savedId };
+      return { id: savedId, sent, sentProfiles, relearnAsked: true };
     },
     onSuccess: (data) => {
-      loaded.current = form;
-      setSelectedProfiles(null);
+      // The form as it was sent is what the database now holds; edits made
+      // while the save was on its way stay in the form as unsaved changes.
+      loaded.current = data.sent;
+      setSelectedProfiles((now) => (now === data.sentProfiles ? null : now));
+      setNotRelearned(!data.relearnAsked);
       setSavedVersion((v) => v + 1);
       void queryClient.invalidateQueries({ queryKey: ["clients"] });
       void queryClient.invalidateQueries({ queryKey: ["client", isNew ? data.id : id] });
@@ -328,7 +357,7 @@ export default function ClientSetup() {
     // The person's changes stay in the form.
     onError: (err) => {
       console.warn("[client setup] not saved yet", err);
-      setNotSaved(true);
+      setNotSaved((err as { part?: string })?.part === "accounts" ? "accounts" : "all");
     },
   });
 
@@ -352,6 +381,20 @@ export default function ClientSetup() {
 
   const fs = client?.field_sources;
   const by = (field: string) => setByOf(fs, field);
+  // QA 22 Nov 2026: a client whose row did not load showed as a blank form
+  // whose Save never turned on (nothing loaded to compare with). Until the
+  // row is read the page says so, and a read that did not answer offers to
+  // try again.
+  if (clientId && (clientFailed || clientLoading)) {
+    return (
+      <AppLayout title="Client setup">
+        {clientFailed
+          ? <LoadRetry context="client setup" error={clientError} onRetry={() => void refetchClient()} />
+          : <Loading label="Loading the client" />}
+      </AppLayout>
+    );
+  }
+
   const location = (client?.location ?? null) as { source?: string | null; via?: string | null; locality?: string | null } | null;
   const facts = onboardingFacts(client, onboardingSteps);
   const competitorNames = chosenCompetitors ?? [];
@@ -367,11 +410,13 @@ export default function ClientSetup() {
       description={isNew
         ? "A name and a website are all a new client needs. The rest is read from the website once the client is created, and every value can be changed here."
         : "Client details, social profiles, brand assets, competitors and report schedules."}
-      meta={notSaved || clientOriginLine(client?.origin) ? (
+      meta={notSaved || notRelearned || clientOriginLine(client?.origin) ? (
         <>
           {/* A client the weekly Sprout onboarding added says so under its name. */}
           <ClientOrigin origin={client?.origin} />
-          {notSaved && <p role="status" className="t-label">Your changes are kept here and are not saved yet.</p>}
+          {notSaved === "all" && <p role="status" className="t-label">Your changes are kept here and are not saved yet.</p>}
+          {notSaved === "accounts" && <p role="status" className="t-label">The client details are saved. The Sprout account changes are kept here and are not saved yet.</p>}
+          {notRelearned && !notSaved && <p role="status" className="t-label">Saved. The design style is not set to be learned again from the new references yet.</p>}
         </>
       ) : undefined}
       actions={
@@ -926,16 +971,21 @@ function SproutProfileSelector({ assigned, parked, selected, onChange }: {
   const [allProfiles, setAllProfiles] = useState<SproutProfile[] | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
 
-  const fetchProfiles = useCallback(async () => {
-    const { data, error } = await sendQuietly(() => supabase.functions.invoke("sprout-profiles", { body: {} }), { again: (e) => invokeResendable(e, { idempotent: true }) });
+  const fetchProfiles = useCallback(async (gone: () => boolean = () => false) => {
+    const { data, error } = await sendQuietly(() => supabase.functions.invoke("sprout-profiles", { body: {} }), { again: (e) => !gone() && invokeResendable(e, { idempotent: true }) });
+    if (gone()) return true;
     if (!error && Array.isArray(data?.profiles)) setAllProfiles(data.profiles);
     return !error;
   }, []);
   useEffect(() => {
+    // QA 22 Nov 2026: an ask still out when the person left set its next
+    // minute's timer after this cleanup ran, so the list was asked for every
+    // minute with no page open. Nothing is scheduled once the page is gone.
+    let left = false;
     let timer: number | undefined;
-    const load = async () => { if (!(await fetchProfiles())) timer = window.setTimeout(load, 60_000); };
+    const load = async () => { if (!(await fetchProfiles(() => left)) && !left) timer = window.setTimeout(load, 60_000); };
     void load();
-    return () => window.clearTimeout(timer);
+    return () => { left = true; window.clearTimeout(timer); };
   }, [fetchProfiles]);
 
   // What is assigned, as Sprout lists it when it does; an assigned profile Sprout no longer lists is kept.

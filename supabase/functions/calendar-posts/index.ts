@@ -4,8 +4,9 @@
 // are made once per week by the scheduled jobs (_shared/calendar/runWeek.ts):
 // every Monday for the following week, or when someone asks here.
 //
-//   POST {action:"plan_next_week", client_id}
-//        a member of the client or staff: plan the earliest week without a
+//   POST {action:"plan_next_week", client_id, week?}
+//        a member of the client or staff: plan the week named (the one the
+//        button shows), or with none named the earliest week without a
 //        plan (or whose plan a person stopped or removed), from this week up
 //        to four weeks ahead
 //   POST {action:"stop_plan", plan_id}
@@ -98,7 +99,13 @@ Deno.serve(async (req) => {
       const weeks = Array.from({ length: WEEKS_AHEAD + 1 }, (_, i) => addDays(thisWeek, i * 7)).filter((w) => addDays(w, 6) >= tomorrow);
       const { data: plans } = await admin.from("calendar_plans").select("week_start, status").eq("client_id", clientId).in("week_start", weeks);
       const held = new Map((plans ?? []).map((p: { week_start: string; status: string }) => [p.week_start, p.status]));
-      const week = weeks.find((w) => plannable(held.get(w)));
+      // QA 22 Nov 2026: the button names its week, and a request sent again
+      // after a lost reply must plan that same week. Picking the first free
+      // week again found it already queued and planned the week after it too.
+      // calendar_request_week answers a week already on its way with its plan,
+      // so asking for it twice plans it once.
+      const named = typeof body.week === "string" && weeks.includes(body.week) ? body.week : null;
+      const week = named ?? weeks.find((w) => plannable(held.get(w)));
       if (!week) return json({ error: "The next four weeks are already planned." }, 409);
       const { data: plan, error } = await admin.rpc("calendar_request_week", { p_client: clientId, p_week: week, p_trigger: "button", p_user: userId });
       if (error) return json({ error: error.message }, 409);
@@ -129,7 +136,14 @@ Deno.serve(async (req) => {
       // Writing the posts that have no copy yet is the daily run's job (enqueue_scheduled_report_jobs), not a button.
       const scope = viaSecret && body.scope === "empty" ? "empty" : "untouched";
       const { data: plan, error } = await admin.rpc("calendar_request_revision", { p_plan: planId, p_note: note, p_user: viaSecret ? null : userId, p_scope: scope });
-      if (error) return json({ error: error.message }, 409);
+      if (error) {
+        // QA 22 Nov 2026: the screen sends a revision again when no reply came,
+        // and a reply can be lost after the revision was queued. The same note
+        // already under way is that revision: answered as queued, not refused.
+        const { data: current } = await admin.from("calendar_plans").select("*").eq("id", planId).maybeSingle();
+        if (current?.pending_revision?.note === note.slice(0, 2000)) return json({ plan: current }, 202);
+        return json({ error: error.message }, 409);
+      }
       return json({ plan }, 202);
     }
 

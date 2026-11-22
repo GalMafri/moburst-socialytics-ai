@@ -15,7 +15,14 @@ export function frameIndexFor(plan: ProductionPlan, row: { variant_angle?: strin
   const angle = String(row.variant_angle || '');
   const exact = /^Reference creative [0-9a-f-]{36}$/.test(angle);
   if (exact) return position;
-  const found = plan.frames.findIndex(f => angle.endsWith(f.subject.slice(0, 80)));
+  // QA 22 Nov 2026: the angle is "Reference creative <id>: <subject>" cut at
+  // 500 characters (advance-creative-plan, agent-brief), and subjects run to
+  // 700. Matching the angle's end against a subject's first 80 characters
+  // missed every subject longer than that, so each design took frame 0's
+  // headline. The subject the angle carries is the frame's, or its start.
+  const told = angle.replace(/^Reference creative [^:]*: /, '');
+  const exactly = plan.frames.findIndex(f => f.subject === told);
+  const found = exactly >= 0 ? exactly : told ? plan.frames.findIndex(f => f.subject.startsWith(told)) : -1;
   return found >= 0 ? found : position;
 }
 

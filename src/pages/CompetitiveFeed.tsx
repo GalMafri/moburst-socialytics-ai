@@ -3,7 +3,7 @@
 // them converged on, and a one-click way to draft the client's own take, which
 // lands in the content planner as an ad-hoc post.
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -25,6 +25,8 @@ import { displayCompanyName } from "@/lib/companyName";
 import { useToast } from "@/hooks/use-toast";
 import { PostVisual, usePostPreviews, normalizePlatform, platformLabel } from "@/components/competitive/PostVisual";
 import { sendQuietly, writeResendable } from "@/lib/quietSend";
+import { codeSentence, invokeErrorCode } from "@/lib/invokeError";
+import { NotYet } from "@/components/ui/not-yet";
 import { cleanText, formatDate, formatDateTime, formatRange, NO_DATA } from "@/lib/display";
 import { fetchOpenTopics } from "@/lib/openTopics";
 import { ChangeCards } from "@/components/competitive/ChangeCards";
@@ -63,6 +65,15 @@ export default function CompetitiveFeed() {
   const [pendingDraft, setPendingDraft] = useState<{ topic: string; reason: string; platform: string; alertId?: string; about: string } | null>(null);
   /** A draft that has not reached the calendar yet; the dialog stays up with it. */
   const [notDrafted, setNotDrafted] = useState(false);
+  // The draft dialog open now. QA 22 Nov 2026: a draft that ends after its
+  // dialog was closed (Escape while it writes) says nothing, and closes
+  // nothing, in a dialog opened since.
+  const openDraft = useRef<typeof pendingDraft>(null);
+  openDraft.current = pendingDraft;
+  // QA 22 Nov 2026: a refresh the server turned down left the page exactly as
+  // it was. The true state stays on screen until the next press: not
+  // refreshed yet, and why when the reason is one a person can read.
+  const [notRefreshed, setNotRefreshed] = useState<string | null>(null);
 
   // Its own key: other screens cache this client with fewer columns under ["client", id].
   const loadClient = async () => {
@@ -115,7 +126,12 @@ export default function CompetitiveFeed() {
       const pending = d.linkedin_not_collected ? "LinkedIn posts and shared topics are still coming in." : d.topics_not_detected ? "Shared topics are still being found." : null;
       toast({ title: "Feed refreshed", description: pending ? `${d.posts} posts from the last week. ${pending}` : `${d.posts} posts from the last week, ${d.alerts} shared topic${d.alerts === 1 ? "" : "s"} detected.` });
     },
-    onError: (e: any) => console.warn("[feed refresh] not refreshed yet", e),
+    onMutate: () => setNotRefreshed(null),
+    onError: async (e: any) => {
+      console.warn("[feed refresh] not refreshed yet", e);
+      const why = codeSentence(await invokeErrorCode(e));
+      setNotRefreshed(why ? `Not refreshed yet. ${why}` : "Not refreshed yet.");
+    },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ["competitor-feed", id] });
       qc.invalidateQueries({ queryKey: ["competitive-alerts", id] });
@@ -246,7 +262,12 @@ export default function CompetitiveFeed() {
           <ArrowLeft /> Competitive reports
         </Button>
       }
-      meta={snapshot ? <span className="t-label">Pulled {formatDateTime(snapshot.fetched_at)}{payload.window ? ` · ${formatRange(payload.window)}` : ""}{payload.truncated ? ` · capped at ${posts.length} posts` : ""}</span> : undefined}
+      meta={snapshot || notRefreshed ? (
+        <>
+          {snapshot && <span className="t-label">Pulled {formatDateTime(snapshot.fetched_at)}{payload.window ? ` · ${formatRange(payload.window)}` : ""}{payload.truncated ? ` · capped at ${posts.length} posts` : ""}</span>}
+          {notRefreshed && <NotYet>{notRefreshed}</NotYet>}
+        </>
+      ) : undefined}
       actions={
         canRunAnalysis ? (
           <Button onClick={() => setConfirmRefresh(true)} disabled={refresh.isPending}>
@@ -430,9 +451,12 @@ export default function CompetitiveFeed() {
         destructive={false}
         onConfirm={async () => {
           if (!pendingDraft) return;
+          const asked = pendingDraft;
           setNotDrafted(false);
           // The dialog stays up while the post is written, and stays up if it does not reach the calendar.
-          const added = await draft.mutateAsync({ topic: pendingDraft.topic, reason: pendingDraft.reason, platform: pendingDraft.platform, alertId: pendingDraft.alertId }).then(() => true, () => false);
+          const added = await draft.mutateAsync({ topic: asked.topic, reason: asked.reason, platform: asked.platform, alertId: asked.alertId }).then(() => true, () => false);
+          // Only the dialog this draft was asked from hears how it ended.
+          if (openDraft.current !== asked) return;
           if (added) setPendingDraft(null);
           else setNotDrafted(true);
         }}

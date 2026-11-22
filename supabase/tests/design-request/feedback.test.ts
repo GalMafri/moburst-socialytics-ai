@@ -60,6 +60,16 @@ describe("feedback", () => {
     expect(d.record).not.toHaveBeenCalled();
   });
 
+  // QA 22 Nov 2026 (P14-02): the screen sends a "Not right" again quietly
+  // when no reply came, and a reply can be lost after the server recorded it.
+  it("records a turned-down design once, however often the feedback is sent", async () => {
+    const { db, d } = setup({ rows: [design({ rejected_at: "2026-11-22T10:00:00Z", rejection_reason: "wrong_style", is_selected: false })] });
+    db.tables.design_learnings = [{ id: "dl-1", client_id: "c1", pattern_type: "avoid", pattern_description: "Avoid crowded scenes.", source_iteration_id: "it-1" }];
+    const answer = await designFeedback(d, { iteration_id: "it-1", verdict: "rejected", reason: "wrong_style" });
+    expect(d.record).not.toHaveBeenCalled();
+    expect(answer.body).toMatchObject({ ok: true, learnings: 1 });
+  });
+
   it("answers 404 for a row that is not a design option, and 400 for another verdict", async () => {
     const { d } = setup({ rows: [design({ variant_angle: "Reference creative 1" })] });
     expect(await designFeedback(d, { iteration_id: "it-1", verdict: "rejected" })).toMatchObject({ status: 404 });

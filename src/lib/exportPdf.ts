@@ -61,7 +61,17 @@ async function layOutHiddenPanels(root: HTMLElement): Promise<() => void> {
       marked.push(holder);
     }
   }
-  const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
+  // QA 22 Nov 2026: this runs after the print window opened, which puts this
+  // tab in the background, and a background tab gets no animation frames: the
+  // export waited on a blank print tab until the person came back. A frame
+  // is therefore the next animation frame or 50 ms, whichever comes first
+  // (timers still run, if slower, in a background tab).
+  const frame = () => new Promise<void>((r) => {
+    let done = false;
+    const go = () => { if (!done) { done = true; r(); } };
+    requestAnimationFrame(go);
+    setTimeout(go, 50);
+  });
   await frame();
   await frame();
   // Charts mount asynchronously; wait until their count stops growing, and

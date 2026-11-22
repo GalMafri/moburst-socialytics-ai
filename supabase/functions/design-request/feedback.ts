@@ -44,10 +44,17 @@ async function currentCopy(db: Db, post: { client_id: string; post_key: string; 
 export async function designFeedback(d: FeedbackDeps, body: Row): Promise<Answer> {
   const verdict = body.verdict === "rejected" ? "rejected" : body.verdict === "deleted" ? "archived" : null;
   if (!verdict) return { status: 400, body: { error: "verdict must be rejected or deleted." } };
-  const { data: it } = await d.db.from("post_iterations").select("id, client_id, calendar_post_key, report_id, platform, format, post_copy, visual_direction, variant_angle, concept, is_selected, variant_group_id").eq("id", String(body.iteration_id || "")).maybeSingle();
+  const { data: it } = await d.db.from("post_iterations").select("id, client_id, calendar_post_key, report_id, platform, format, post_copy, visual_direction, variant_angle, concept, is_selected, variant_group_id, rejected_at").eq("id", String(body.iteration_id || "")).maybeSingle();
   if (!it || !DESIGN_ANGLE.test(it.variant_angle ?? "")) return { status: 404, body: { error: "That design is no longer available." } };
   const userId = await d.requireMember(it.client_id);
-  const learnings = await d.record(it, verdict, body.reason, body.note, userId);
+  // QA 22 Nov 2026: the screen sends a "Not right" again quietly when no reply
+  // came (src/lib/quietSend.ts), and a reply can be lost after this recorded
+  // it. A design already turned down is not recorded or learned from again:
+  // the answer carries the rules its first sending taught. The new design is
+  // the open request startRequest finds, as before.
+  const learnings: Learning[] = verdict === "rejected" && it.rejected_at
+    ? ((await d.db.from("design_learnings").select("id, pattern_type, pattern_description").eq("source_iteration_id", it.id)).data ?? [])
+    : await d.record(it, verdict, body.reason, body.note, userId);
 
   let request: Row | null = null;
   if (verdict === "rejected" && body.make_new !== false && it.calendar_post_key) {

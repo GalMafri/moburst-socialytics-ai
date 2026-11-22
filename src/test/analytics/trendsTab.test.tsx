@@ -70,7 +70,8 @@ it("asks for the weeks inside the period the page is showing, and shows them in 
   await openTrends();
   expect(await screen.findByText("Captain POV skits")).toBeInTheDocument();
   const { start, end } = presetRange("30d");
-  expect(f.rpcs[0]).toEqual({ name: "trend_themes_in_range", p_client: "c1", p_from: start, p_to: end });
+  // The page also reads which clients are strategy-only (an rpc of its own).
+  expect(f.rpcs.find((r) => r.name === "trend_themes_in_range")).toEqual({ name: "trend_themes_in_range", p_client: "c1", p_from: start, p_to: end });
   // A new period asks again for that period's weeks.
   fireEvent.click(screen.getByRole("button", { name: "Last 7 days" }));
   const week = presetRange("7d");

@@ -2,6 +2,7 @@ import { SPROUT_RATE_LABEL, SPROUT_RATE_NOTE } from "@/lib/rateLabels";
 import { chunkWindow, DateRange, isValidRange, localToday, PRESET_LABELS, presetRange, rangeDays, rangesOverlap, reportPeriod, toISODate, yesterdayIn } from "@/lib/dateRange";
 import { cleanText, countOf, countryNames, NO_DATA, firstRunSentence, formatDate, formatDateTime, formatNumbersInText, formatRange, languageNames } from "@/lib/display";
 import { useNextRun } from "@/lib/nextRun";
+import { useStrategyOnlyClients } from "@/lib/strategyOnly";
 import { sproutEngagementRate, sproutEngagements } from "@/lib/reportFigures";
 import { describeChange, StatCard } from "@/components/ui/stat-card";
 import { Section, SectionNav } from "@/components/ui/section";
@@ -128,10 +129,16 @@ export default function Analytics() {
   // A window the function answers in one call comes with the equal-length
   // period before it for comparison; a longer one is asked for in year-sized
   // calls without a comparison and combined (the same path All time takes).
+  // QA 22 Nov 2026: the strategy-only and access gates mount this page hidden
+  // while they decide, so Sprout is asked only once the client row has loaded
+  // (a client the viewer cannot read has none) and it is known not to be
+  // strategy-only. Asking before that drew a 422 or 403 on every such visit.
+  const strategyOnly = useStrategyOnlyClients();
+  const mayAskSprout = !!id && !!client && !strategyOnly.isLoading && !strategyOnly.has(id);
   const liveQuery = useQuery({
     queryKey: ["sprout-analytics", id, viewWindow?.start, viewWindow?.end],
     queryFn: () => fetchSproutWindow(id!, viewWindow!),
-    enabled: !!id && !!viewWindow,
+    enabled: mayAskSprout && !!viewWindow,
     staleTime: 10 * 60 * 1000,
     retry: 1,
     refetchInterval: askAgainWhileNetworkMissing,
@@ -150,7 +157,7 @@ export default function Analytics() {
   const allTimeQuery = useQuery({
     queryKey: ["sprout-analytics-all", id, allTimeWindow?.start, allTimeWindow?.end],
     queryFn: () => fetchSproutWindow(id!, allTimeWindow!, true),
-    enabled: !!id && !!allTimeWindow,
+    enabled: mayAskSprout && !!allTimeWindow,
     staleTime: 10 * 60 * 1000,
     retry: 1,
     refetchInterval: askAgainWhileNetworkMissing,
@@ -436,8 +443,11 @@ export default function Analytics() {
             error={reportsError}
             onRetry={() => refetchReports()}
           />
-        ) : filtered.length === 0 && !viewWindow ? (
-          // Performance has nothing to show without a report. Trends and Competitive do not need one, so their tabs stay open.
+        ) : filtered.length === 0 && !viewWindow && !allTimeQuery.data && !allTimeQuery.isLoading && !allTimeQuery.isError ? (
+          // Performance has nothing to show without a report and without live
+          // figures (QA 22 Nov 2026: All time is answered live, so a client in
+          // its first month sees them here; only a client with no Sprout
+          // profiles has none). Trends and Competitive do not need one, so their tabs stay open.
           <Tabs value={view} onValueChange={(v) => setView(v as AnalyticsView)}>
             {viewTabList}
             <TabsContent value="performance" className="mt-section">
@@ -480,7 +490,7 @@ export default function Analytics() {
                   />
                 )}
                 {/* Summary cards — latest report metrics (All time view) */}
-                {viewWindow ? null : latestTotals ? (
+                {viewWindow || filtered.length === 0 ? null : latestTotals ? (
                   <div>
                     <p className="t-secondary mb-2 flex items-center gap-1.5">
                       <BarChart3 className="h-3 w-3" />

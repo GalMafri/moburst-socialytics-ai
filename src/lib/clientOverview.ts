@@ -10,7 +10,7 @@
  */
 
 import { inWeek, type WeekWindow } from "@/lib/weekWindow";
-import { weekCountLabel } from "@/lib/calendarPosts";
+import { mondayOf, weekCountLabel } from "@/lib/calendarPosts";
 
 const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
 
@@ -147,7 +147,11 @@ export function actionItems(args: {
   const items: ActionItem[] = [];
   if (content.unapprovedSoon.length) {
     const n = content.unapprovedSoon.length;
-    items.push({ key: "approve", tone: "attention", href: week, text: `${n} post${n === 1 ? "" : "s"} going out in the next three days ${n === 1 ? "is" : "are"} not approved yet.` });
+    // QA 22 Nov 2026: on a Saturday or Sunday the next three days reach into
+    // next week, so the item opens the week of the soonest post it counts
+    // (unapprovedSoon is soonest first), where that post is.
+    const at = `/clients/${clientId}/calendar?week=${mondayOf(content.unapprovedSoon[0].post_date)}`;
+    items.push({ key: "approve", tone: "attention", href: at, text: `${n} post${n === 1 ? "" : "s"} going out in the next three days ${n === 1 ? "is" : "are"} not approved yet.` });
   }
   if (content.withoutDesign.length) {
     const n = content.withoutDesign.length;

@@ -257,6 +257,13 @@ describe('the plan buttons when a press gets no answer', () => {
     expect(screen.getByRole('button', { name: 'Plan the week of Nov 9' })).toBeEnabled();
   });
 
+  // QA 22 Nov 2026 (P13-01): a request sent again after a lost reply plans the week the button named, never the week after it.
+  it('Plan the week asks for the week it names', async () => {
+    mounted(<PlanNextWeekButton clientId="c1" week="2026-11-09" onRequested={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Plan the week of Nov 9' }));
+    await waitFor(() => expect(f.invokes).toContainEqual({ name: 'calendar-posts', action: 'plan_next_week', client_id: 'c1', week: '2026-11-09' }));
+  });
+
   it('Revise the week keeps the dialog and the note, and says it is not sent yet', async () => {
     f.refuse = ['revise_week'];
     const onRequested = vi.fn();
