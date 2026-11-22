@@ -3,7 +3,7 @@
 // decided here in code; the hero is the only generated layer.
 import type { DesignSystem, Template, LogoPosition } from '../design-system/types.ts';
 import type { PlatformDesignSpec } from '../design-prompts/aspect.ts';
-import { advance, wordsOf, wrap, type Face, type Word } from './measure.ts';
+import { advance, drawable, rightToLeft, wordsOf, wrap, type Face, type Word } from './measure.ts';
 
 export interface ComposeInput {
   width: number; height: number;
@@ -42,28 +42,45 @@ export function compose(face: Face, input: ComposeInput): ComposeResult {
 
   // Headline: the brand face, sized by the platform, shrunk until it fits the region.
   const bodyBold = t.font.body_weight === 700;
-  const words: Word[] = wordsOf(cased(input.headline, t.font.casing), input.emphasis);
+  const headline = drawable(cased(input.headline, t.font.casing), [face.regular, face.bold]);
+  const words: Word[] = wordsOf(headline, input.emphasis ? drawable(cased(input.emphasis, t.font.casing), [face.regular, face.bold]) : input.emphasis);
+  const rtl = rightToLeft(headline);
   let size = Math.round(W * (template.headline.scale ?? spec.headlineScale));
   let lines: Word[][] = [];
   const padFor = (s: number) => (template.card ? s * 0.75 : 0);
-  for (; size >= Math.round(H * 0.02); size -= 2) {
+  const lineWidth = (line: Word[], s: number) => line.reduce((sum, word, j) => sum + advance(face, word.text, s, word.em || bodyBold) + (j ? advance(face, ' ', s, bodyBold) : 0), 0);
+  // QA 22 Nov 2026: the fit also checks the widest line against the card; it
+  // checked only the number of lines and their height, so a long word or
+  // hashtag ran past the card and off the canvas.
+  const minSize = Math.round(H * 0.02);
+  let fitted = false;
+  for (; size >= minSize; size -= 2) {
     lines = wrap(face, words, size, cardW - padFor(size) * 2, bodyBold);
     const h = lines.length * size * 1.22 + padFor(size) * 2;
-    if (lines.length <= template.headline.max_lines && h <= innerH * (side ? 0.62 : 0.44)) break;
+    const widest = Math.max(0, ...lines.map((line) => lineWidth(line, size)));
+    if (lines.length <= template.headline.max_lines && h <= innerH * (side ? 0.62 : 0.44) && widest <= cardW - padFor(size) * 2) { fitted = true; break; }
   }
+  // Nothing fitted: the smallest size, its lines wrapped at that size.
+  if (!fitted) { size = minSize; lines = wrap(face, words, size, cardW - padFor(size) * 2, bodyBold); }
   const pad = padFor(size), lineH = size * 1.22, cardH = lines.length * lineH + pad * 2;
   const y = region === 'top' ? Math.max(logoBand, safeT + innerH * 0.12)
     : region === 'bottom' ? H - safeB - innerH * 0.06 - cardH
     : Math.max(logoBand, safeT + (innerH - cardH) / 2);
   const radius = size * t.card.radius_em;
 
+  // QA 22 Nov 2026: a right-to-left headline (Hebrew, Arabic) is laid from the
+  // card's right edge, its first word rightmost; laid left to right, each word
+  // its own positioned span, it read backwards.
   const textLines = lines.map((line, i) => {
     const baseline = y + pad + (i + 0.5) * lineH + size * 0.35;
-    let cx = x + pad; const parts: string[] = [];
+    let cx = rtl ? x + cardW - pad : x + pad; const parts: string[] = [];
     line.forEach((word, j) => {
       const bold = word.em || bodyBold;
-      parts.push(`<tspan x="${cx.toFixed(1)}" y="${baseline.toFixed(1)}" fill="${word.em ? t.colors.accent : t.colors.ink}" font-weight="${bold ? 700 : 400}">${esc(word.text)}</tspan>`);
-      cx += advance(face, word.text, size, bold) + (j < line.length - 1 ? advance(face, ' ', size, bodyBold) : 0);
+      const w = advance(face, word.text, size, bold);
+      const gap = j < line.length - 1 ? advance(face, ' ', size, bodyBold) : 0;
+      const at = rtl ? cx - w : cx;
+      parts.push(`<tspan x="${at.toFixed(1)}" y="${baseline.toFixed(1)}" fill="${word.em ? t.colors.accent : t.colors.ink}" font-weight="${bold ? 700 : 400}">${esc(word.text)}</tspan>`);
+      cx += rtl ? -(w + gap) : w + gap;
     });
     return parts.join('');
   }).join('');

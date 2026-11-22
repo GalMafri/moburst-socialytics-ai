@@ -48,7 +48,8 @@ describe("floorStoredFigures", () => {
     expect(mc.previous_month.reactions).toBe(0);
     expect(mc.changes.reactions).toEqual({ current: 823, previous: 0, absolute: 823, percent: null });
     expect(mc.summary).toEqual(["impressions: ↑ 18806% (+4600985)", "reactions: new activity (previous period was zero) (+823)", "shares: ↑ 100% (+47)"]);
-    expect(out.report_data.metrics_summary).toEqual({ impressions_change: 18806, reactions_change: 0, shares_change: 100 });
+    // A change from zero is null, as the comparison says ("new activity"): QA 22 Nov 2026.
+    expect(out.report_data.metrics_summary).toEqual({ impressions_change: 18806, reactions_change: null, shares_change: 100 });
     expect(out.changes.map((c) => c.path).sort()).toEqual([
       "metrics_summary.reactions_change",
       "sprout_performance.month_comparison.changes.reactions.absolute",

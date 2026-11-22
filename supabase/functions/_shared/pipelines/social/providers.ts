@@ -72,7 +72,9 @@ export function sproutReader(o: { customerId: string; signal?: AbortSignal; fetc
   const f: Fetch = o.fetchImpl ?? ((url, init) => fetch(url, init));
   const sleep = o.sleep ?? sleepMs;
   let token: Promise<string> | null = null;
-  const tokenOf = () => (token ??= (o.token ?? (() => sproutAccessToken(f as typeof fetch)))());
+  // QA 22 Nov 2026: a token request that failed is forgotten, so the next try asks again;
+  // kept, it failed every later try of the reader with the same error.
+  const tokenOf = () => (token ??= (o.token ?? (() => sproutAccessToken(f as typeof fetch)))().catch((e) => { token = null; throw e; }));
   const page = async (path: string, body: Record<string, unknown>, n: number): Promise<Any> => {
     for (let attempt = 1; ; attempt++) {
       try {

@@ -80,6 +80,8 @@ export interface PipelineJobPayload {
   paused_at?: string;
   /** What that wait is for (StepResult waitingFor), for the reason a run stopped at its horizon records. */
   paused_for?: string;
+  /** Tries of this step the runner failed itself (poll limit, time budget, state size): StepContext.runnerFailed. */
+  runner_failed?: number;
 }
 
 /**
@@ -112,6 +114,12 @@ export interface StepContext<S extends Record<string, unknown> = Record<string, 
   state: S;
   /** Set when the step is called back to look at an external job it started. */
   poll: PollState | null;
+  /**
+   * How many of this step's earlier tries the runner failed itself (an
+   * external job past the poll limit, the step past its time, too much
+   * state), which the step's own error handling never saw. 0 or absent when none.
+   */
+  runnerFailed?: number;
   now(): Date;
   /** Aborts when the step's time is up; pass it to every fetch. */
   signal: AbortSignal;

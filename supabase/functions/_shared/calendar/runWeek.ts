@@ -464,8 +464,9 @@ const waitForMoments = (now: Date): WeekJobOutcome => ({ status: "queued", reaso
 /**
  * The week's dated moments are judged before it is planned (week_moments,
  * runMoments.ts): queued here once per week, and waited for while queued or
- * running. A moments job that failed before this planning job was created
- * (an earlier week's plan, or a failure the code has since outgrown) is put
+ * running. A moments job that failed or was skipped before this planning job
+ * was created (an earlier week's plan, a stopped plan, or a failure the code
+ * has since outgrown) is put
  * back in the queue once and waited for. One that fails during this planning
  * job's own wait, or a queue that won't take the job, means the week is
  * planned with no moments rather than held, so nothing loops.
@@ -481,11 +482,15 @@ async function momentsPending(admin: Db, job: WeekJob, plan: { moments?: unknown
   const row = (data ?? []).find((r: { dedupe_key?: string }) => r.dedupe_key === key);
   if (row) {
     if (row.status === "queued" || row.status === "running") return true;
-    const failedBefore = row.status === "failed" && !!job.created_at && !!row.finished_at && Date.parse(row.finished_at) < Date.parse(job.created_at);
-    if (!failedBefore) return false;
+    // QA 22 Nov 2026: a moments job skipped because a person stopped the plan
+    // ("Stop planning", then "Plan next week") ended for a reason the re-plan
+    // undid, so it is put back like a failed one; before, the week was planned
+    // with no seasonal moments.
+    const endedBefore = (row.status === "failed" || row.status === "skipped") && !!job.created_at && !!row.finished_at && Date.parse(row.finished_at) < Date.parse(job.created_at);
+    if (!endedBefore) return false;
     const { error: requeueError } = await admin.from("scheduled_jobs")
       .update({ status: "queued", attempts: 0, available_at: now.toISOString(), lease_until: null, reason: null, finished_at: null })
-      .eq("dedupe_key", key).eq("status", "failed");
+      .eq("dedupe_key", key).in("status", ["failed", "skipped"]);
     if (requeueError) {
       console.warn("[calendar] the week's moments were left out:", requeueError.message);
       return false;
@@ -637,9 +642,14 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
     };
 
     // A run cut off after writing the posts: finish the plan, don't write them twice.
+    // QA 22 Nov 2026: the plan keeps the copy rules its posts were checked under
+    // (stored before the posts are written, below). A plan written before that
+    // was stored is stamped here; finished with none, replan.ts read it as
+    // written before the rules and the app rewrote its posts.
     const written = await writtenSoFar();
     if (written) {
-      if (!(await markReady())) return STOPPED;
+      const rules = (plan.evidence as { rules?: unknown } | null)?.rules ? {} : { evidence: { ...((plan.evidence as Record<string, unknown> | null) ?? {}), rules: COPY_RULE } };
+      if (!(await markReady(rules))) return STOPPED;
       return { status: "done", result: { plan_id: plan.id, posts: written, finished: true } };
     }
     const { data: started, error: startError } = await admin.from("calendar_plans").update({ status: "planning", error: null, updated_at: now.toISOString() })
@@ -747,6 +757,8 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
     // A plan stopped after the check above takes none of them (calendar_posts_plan_open).
     const stories = storyPlan(gathered.stories, String(client.name ?? ""), posts);
     const rows = withStories(posts, stories.count, stories.reason).map((p) => ({ ...p, client_id: client.id, plan_id: plan.id, created_by: plan.requested_by ?? null }));
+    // What the posts were written under is kept before they are: a run that stops between the two finishes with it.
+    await must(admin.from("calendar_plans").update({ ...finishing, updated_at: new Date().toISOString() }).eq("id", plan.id).neq("status", "canceled"), "Could not keep the week's evidence");
     await must(admin.from("calendar_posts").insert(rows), "Could not add the week's posts");
     if (!(await markReady(finishing))) return STOPPED;
     return { status: "done", result: { plan_id: plan.id, posts: rows.length, input_tokens: tokens.input, output_tokens: tokens.output } };
@@ -922,10 +934,18 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
       refused = [...second.refused, ...first.refused.filter((r) => !rewrittenNow.has(r.id) && !second.refused.some((x) => x.id === r.id))];
     }
 
+    // QA 22 Nov 2026: asked again right before writing. A person who pressed
+    // Design or scheduled a post during the model call changed nothing the
+    // update below is guarded on, and the design or the Sprout post was left
+    // with copy the calendar no longer showed.
+    const workedSince = await workedOn(admin, client.id, planPosts.filter((p) => !worked.has(p.id)));
+    for (const id of workedSince) if (targets.some((t) => t.id === id)) kept.push(id);
+
     const replaced: Array<Record<string, unknown>> = [];
     /** The new copy of each post rewritten, by its key. */
     const rewrote = new Map<string, string>();
     for (const r of revised) {
+      if (workedSince.has(String(r.id))) continue;
       const was = targets.find((p) => p.id === r.id)!;
       const patch: Record<string, unknown> = { copy: r.copy, hashtags: r.hashtags, cta: r.cta, visual_direction: r.visual_direction, ...(r.pillar ? { pillar: r.pillar } : {}), ...(r.reason ? { reasons: [r.reason] } : {}) };
       // Only if nobody changed the copy or moved the post since it was read, and it is still the plan's.
@@ -937,7 +957,7 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
       }
     }
     // A planned Story takes its post's new copy, the message its frame is written from, only when nobody worked on the Story.
-    for (const st of planPosts.filter((p) => isStoryPost(p) && p.story_of && rewrote.has(p.story_of) && !worked.has(p.id))) {
+    for (const st of planPosts.filter((p) => isStoryPost(p) && p.story_of && rewrote.has(p.story_of) && !worked.has(p.id) && !workedSince.has(p.id))) {
       const { data: updated, error: updateError } = await admin.from("calendar_posts").update({ copy: rewrote.get(st.story_of) }).eq("id", st.id).eq("copy", st.copy ?? "").is("touched_at", null).eq("plan_id", plan.id).select("id");
       if (updateError) throw new Error(`Could not rewrite a Story: ${updateError.message}`);
       if (updated?.length) replaced.push({ id: st.id, copy: st.copy, hashtags: st.hashtags, cta: st.cta, pillar: st.pillar, visual_direction: st.visual_direction, reasons: st.reasons });

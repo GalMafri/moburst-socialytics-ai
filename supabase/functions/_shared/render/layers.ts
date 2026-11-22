@@ -4,11 +4,13 @@
 // what the template reader produces from a client's real post and what the
 // per-post composer fills with new copy; nothing here decides a layout.
 import { opentype } from './opentype.ts';
+import { drawable, rightToLeft } from './measure.ts';
 import { ensureResvg } from './resvg.ts';
 import { Resvg } from 'https://esm.sh/@resvg/resvg-wasm@2.6.2';
 
 export type Weight = 300 | 400 | 500 | 600 | 700;
-export type Span = { text: string; weight?: Weight; color?: string; face?: string };
+/** gap: a word space comes before this span (set by wrapSpans where the style changes inside a line). */
+export type Span = { text: string; weight?: Weight; color?: string; face?: string; gap?: boolean };
 export type Gradient = { from: string; to: string; angle?: number };
 export type Layer =
   | { type: 'background'; color: string; gradient?: Gradient }
@@ -29,17 +31,40 @@ export class Faces {
     for (const [family, weights] of Object.entries(families)) {
       const m = new Map<number, any>();
       for (const [w, bytes] of Object.entries(weights)) { m.set(Number(w), opentype.parse(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength))); this.files.push(bytes); }
-      this.parsed.set(family, m);
+      // QA 22 Nov 2026: a face that loaded no weight is left out, so its spans use the default face; kept empty, measuring them threw.
+      if (m.size) this.parsed.set(family, m);
     }
   }
   private face(family: string | undefined, weight: number) {
     const m = this.parsed.get(family || this.defaultFamily) || this.parsed.get(this.defaultFamily)!;
-    const ws = [...m.keys()].sort((a, b) => Math.abs(a - weight) - Math.abs(b - weight));
-    return m.get(ws[0]);
+    return m.get(cssWeight([...m.keys()], weight));
   }
   advance(text: string, size: number, weight: number, family?: string, letterSpacing = 0): number {
     return this.face(family, weight).getAdvanceWidth(text, size) + letterSpacing * Math.max(0, text.length - 1);
   }
+  /** The text with the emoji this face cannot draw taken out (measure.ts drawable). */
+  drawable(text: string, weight: number, family?: string): string {
+    return drawable(text, [this.face(family, weight)]);
+  }
+}
+
+/**
+ * The loaded weight drawn for an asked one, by the CSS font-matching rule the
+ * rasteriser follows: 400 tries up to 500 first, 500 tries 400 first, below
+ * 400 lighter first, above 500 heavier first. QA 22 Nov 2026: the nearest by
+ * distance (ties to the first loaded) measured 500 for 600 while 700 was
+ * drawn, so the span drew wider than measured.
+ */
+export function cssWeight(loaded: number[], asked: number): number {
+  const ws = [...new Set(loaded)].sort((a, b) => a - b);
+  if (ws.includes(asked)) return asked;
+  const lighter = ws.filter((w) => w < asked).reverse();
+  const heavier = ws.filter((w) => w > asked);
+  if (asked >= 400 && asked <= 500) {
+    const upTo500 = heavier.filter((w) => w <= 500);
+    return [...upTo500, ...lighter, ...heavier.filter((w) => w > 500)][0];
+  }
+  return (asked < 400 ? [...lighter, ...heavier] : [...heavier, ...lighter])[0];
 }
 
 function gradientDef(id: string, g: Gradient): string {
@@ -51,7 +76,7 @@ function gradientDef(id: string, g: Gradient): string {
 /** Wrap spans into lines that fit a width, keeping span styling; returns the lines. */
 export function wrapSpans(faces: Faces, spans: Span[], size: number, maxWidth: number, base: Weight, family?: string): Span[][] {
   const words: Span[] = [];
-  for (const s of spans) for (const w of s.text.split(/\s+/).filter(Boolean)) words.push({ ...s, text: w });
+  for (const s of spans) for (const w of faces.drawable(s.text, s.weight ?? base, s.face || family).split(/\s+/).filter(Boolean)) words.push({ ...s, text: w });
   const lines: Span[][] = []; let line: Span[] = []; let width = 0;
   const space = faces.advance(' ', size, base, family);
   for (const w of words) {
@@ -60,8 +85,14 @@ export function wrapSpans(faces: Faces, spans: Span[], size: number, maxWidth: n
     line.push(w); width += (line.length > 1 ? space : 0) + adv;
   }
   if (line.length) lines.push(line);
-  // join adjacent words of one style into single spans with spaces between
-  return lines.map((ws) => ws.reduce<Span[]>((acc, w) => { const last = acc[acc.length - 1]; if (last && last.weight === w.weight && last.color === w.color && last.face === w.face) last.text += ' ' + w.text; else acc.push({ ...w }); return acc; }, []));
+  // Join adjacent words of one style into single spans with spaces between. Where the style changes, the next span
+  // carries gap: the space measured above is drawn there too (QA 22 Nov 2026: "Grow yourbrandtoday").
+  return lines.map((ws) => ws.reduce<Span[]>((acc, w) => {
+    const last = acc[acc.length - 1];
+    if (last && last.weight === w.weight && last.color === w.color && last.face === w.face) last.text += ' ' + w.text;
+    else { const { gap: _gap, ...rest } = w; acc.push(last ? { ...rest, gap: true } : rest); }
+    return acc;
+  }, []));
 }
 
 export function composeLayers(spec: Spec, faces: Faces): string {
@@ -82,12 +113,23 @@ export function composeLayers(spec: Spec, faces: Faces): string {
       body.push(`<rect x="${L.x}" y="${L.y}" width="${L.w}" height="${L.h}" rx="${L.radius}" fill="${fill}" fill-opacity="${L.fillOpacity ?? 1}"${L.stroke ? ` stroke="${L.stroke}" stroke-opacity="${L.strokeOpacity ?? 1}" stroke-width="${L.strokeWidth ?? 1}"` : ''}/>`);
     } else if (L.type === 'text') {
       const lh = L.lineHeight ?? 1.2; const base = L.weight ?? 400;
-      L.lines.forEach((spans, i) => {
+      const space = faces.advance(' ', L.size, base, L.face);
+      L.lines.forEach((raw, i) => {
+        const spans = raw.map((s) => ({ ...s, text: faces.drawable(s.text, s.weight ?? base, s.face || L.face) }));
         const widths = spans.map((s) => faces.advance(s.text, L.size, s.weight ?? base, s.face || L.face, L.letterSpacing ?? 0));
-        const total = widths.reduce((a, b) => a + b, 0);
-        let x = L.align === 'center' ? L.x + (L.w - total) / 2 : L.align === 'right' ? L.x + L.w - total : L.x;
+        const gaps = spans.map((s, j) => (j && s.gap ? space : 0));
+        const total = widths.reduce((a, b) => a + b, 0) + gaps.reduce((a, b) => a + b, 0);
+        const start = L.align === 'center' ? L.x + (L.w - total) / 2 : L.align === 'right' ? L.x + L.w - total : L.x;
         const y = L.y + L.size * 0.78 + i * L.size * lh;
-        const parts = spans.map((s, j) => { const t = `<tspan x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-family="${esc(s.face || L.face || faces.defaultFamily)}" font-weight="${s.weight ?? base}" fill="${s.color ?? L.color}">${esc(s.text)}</tspan>`; x += widths[j]; return t; });
+        // A right-to-left line (Hebrew, Arabic) of several spans puts its first span rightmost (QA 22 Nov 2026).
+        const rtl = spans.length > 1 && rightToLeft(spans.map((s) => s.text).join(' '));
+        let offset = 0;
+        const parts = spans.map((s, j) => {
+          offset += gaps[j];
+          const x = rtl ? start + total - offset - widths[j] : start + offset;
+          offset += widths[j];
+          return `<tspan x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-family="${esc(s.face || L.face || faces.defaultFamily)}" font-weight="${s.weight ?? base}" fill="${s.color ?? L.color}">${esc(s.text)}</tspan>`;
+        });
         body.push(`<text font-size="${L.size}"${L.letterSpacing ? ` letter-spacing="${L.letterSpacing}"` : ''}>${parts.join('')}</text>`);
       });
     } else if (L.type === 'line') {

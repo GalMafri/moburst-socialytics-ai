@@ -16,6 +16,10 @@
 
 import { anthropicFetch, anthropicMessages } from "../anthropic.ts";
 import { CLAUDE_DIRECT_DEADLINE_MS, CLAUDE_DIRECT_FUNCTION, directFailedKey, directKey, type DirectAnswer, type DirectFailure } from "./claudeDirect.ts";
+
+/** The direct calls a step asked for: the last start, the first start of the round, when the last was asked, and whether the round took its answer. */
+interface DirectAsked { start: number; first: number; at: string; consumed?: boolean }
+const directAskedKey = (saveAs: string) => `${saveAs}.direct_asked`;
 import { StepRestart, type Step, type StepContext, type StepResult } from "./types.ts";
 
 /**
@@ -151,41 +155,69 @@ export function claudeBatchStep(o: {
     const direct = o.direct === undefined ? directThroughFunction(ctx, o.fetchImpl) : o.direct;
     const handle = (ctx.poll?.handle ?? {}) as { claude_batch_id?: unknown; direct_starts?: unknown; direct_started_at?: unknown };
     const batchId = typeof handle.claude_batch_id === "string" ? handle.claude_batch_id : null;
-    let starts = Number(handle.direct_starts ?? 0) || 0;
-    let startedAt = typeof handle.direct_started_at === "string" ? handle.direct_started_at : null;
-    const finish = (detail: Record<string, unknown>): StepResult => (o.next ? { type: "next", step: o.next, detail } : { type: "done", detail });
+    const finish = async (detail: Record<string, unknown>): Promise<StepResult> => {
+      // The round's direct calls are used up: a later round (a fresh analysis) asks anew and never takes their answers.
+      if (direct && last >= first) await ctx.payloads.put(directAskedKey(o.saveAs), { start: last, first, at: startedAt ?? ctx.now().toISOString(), consumed: true } satisfies DirectAsked);
+      return o.next ? { type: "next", step: o.next, detail } : { type: "done", detail };
+    };
 
-    // The direct call answered first: it is the answer.
-    if (direct) {
-      const answer = await ctx.payloads.get<DirectAnswer>(directKey(o.saveAs));
-      if (answer && typeof answer.text === "string") {
-        const saved = await ctx.payloads.put(o.saveAs, { text: answer.text, stop_reason: answer.stop_reason, ...(answer.usage ? { usage: answer.usage } : {}) }, keep);
-        if (batchId) await claudeBatchCancel({ apiKey, batchId, fetchImpl: o.fetchImpl }).catch(() => undefined);
-        return finish({ saved: saved.key, bytes: saved.bytes, stop_reason: answer.stop_reason, answered_by: "direct", direct_seconds: answer.seconds });
-      }
+    // QA 22 Nov 2026: the direct calls asked for are kept in the payload store,
+    // numbered across the run, and a round takes only an answer to a call it
+    // asked for itself. Kept only in the poll handle, the count was lost when a
+    // batch submit failed after the ask (each runner retry started another paid
+    // direct call), and the fresh analysis after a failed repair took the first
+    // round's kept direct answer at once instead of asking again.
+    const handleStarts = Number(handle.direct_starts ?? 0) || 0;
+    const kept = direct ? await ctx.payloads.get<DirectAsked>(directAskedKey(o.saveAs)) : null;
+    const asked: DirectAsked | null = kept ?? (handleStarts > 0 ? { start: handleStarts, first: 1, at: typeof handle.direct_started_at === "string" ? handle.direct_started_at : "" } : null);
+    const answer = direct ? await ctx.payloads.get<DirectAnswer>(directKey(o.saveAs)) : null;
+    let first: number;
+    let last: number;
+    let startedAt: string | null;
+    if (asked && !asked.consumed) {
+      first = asked.first;
+      last = asked.start;
+      startedAt = asked.at || null;
+    } else {
+      // Nothing asked in this round yet: numbered past every call an earlier round asked for or heard from.
+      const failedBefore = direct ? await ctx.payloads.get<DirectFailure>(directFailedKey(o.saveAs)) : null;
+      first = Math.max(asked?.start ?? 0, Number(answer?.start) || 0, Number(failedBefore?.start) || 0) + 1;
+      last = first - 1;
+      startedAt = null;
     }
 
-    // Ask for a direct call: the first time, or once more after one failed outright.
+    // The direct call answered first: it is the answer.
+    if (direct && answer && typeof answer.text === "string" && Number(answer.start) >= first && Number(answer.start) <= last) {
+      const saved = await ctx.payloads.put(o.saveAs, { text: answer.text, stop_reason: answer.stop_reason, ...(answer.usage ? { usage: answer.usage } : {}) }, keep);
+      if (batchId) await claudeBatchCancel({ apiKey, batchId, fetchImpl: o.fetchImpl }).catch(() => undefined);
+      return await finish({ saved: saved.key, bytes: saved.bytes, stop_reason: answer.stop_reason, answered_by: "direct", direct_seconds: answer.seconds });
+    }
+
+    // Ask for a direct call: the first time in the round, or once more after one failed outright.
     let note: Record<string, unknown> = {};
-    if (direct && starts < CLAUDE_DIRECT_STARTS) {
-      const failed = starts > 0 ? await ctx.payloads.get<DirectFailure>(directFailedKey(o.saveAs)) : null;
-      if (starts === 0 || Number(failed?.start) === starts) {
-        starts += 1;
+    const roundStarts = () => last - first + 1;
+    if (direct && roundStarts() < CLAUDE_DIRECT_STARTS) {
+      const failed = roundStarts() > 0 ? await ctx.payloads.get<DirectFailure>(directFailedKey(o.saveAs)) : null;
+      if (roundStarts() === 0 || Number(failed?.start) === last) {
+        const start = last + 1;
         startedAt = ctx.now().toISOString();
+        // Kept before the call is asked for, so a step that fails after asking does not ask again.
+        await ctx.payloads.put(directAskedKey(o.saveAs), { start, first, at: startedAt } satisfies DirectAsked);
+        last = start;
         try {
-          await direct({ runId: ctx.run.id, saveAs: o.saveAs, body, start: starts, keepDays: o.keepDays });
-          note = { direct: "asked", direct_start: starts, ...(failed ? { direct_failed: failed.message } : {}) };
+          await direct({ runId: ctx.run.id, saveAs: o.saveAs, body, start, keepDays: o.keepDays });
+          note = { direct: "asked", direct_start: start, ...(failed ? { direct_failed: failed.message } : {}) };
         } catch (e) {
           // Kept as a failure, so the next look asks once more.
           const message = (e instanceof Error ? e.message : String(e)).slice(0, 300);
-          await ctx.payloads.put(directFailedKey(o.saveAs), { message, seconds: 0, start: starts } satisfies DirectFailure);
+          await ctx.payloads.put(directFailedKey(o.saveAs), { message, seconds: 0, start } satisfies DirectFailure);
           note = { direct: "not asked", reason: message };
         }
       }
     }
     const directLive = !!startedAt && ctx.now().getTime() - Date.parse(startedAt) < CLAUDE_DIRECT_DEADLINE_MS + 60_000;
     const waitSeconds = directLive ? CLAUDE_DIRECT_POLL_SECONDS : CLAUDE_BATCH_POLL_SECONDS;
-    const handleFor = (id: string) => ({ claude_batch_id: id, direct_starts: starts, ...(startedAt ? { direct_started_at: startedAt } : {}) });
+    const handleFor = (id: string) => ({ claude_batch_id: id, direct_starts: Math.max(0, roundStarts()), ...(startedAt ? { direct_started_at: startedAt } : {}) });
 
     const submit = async (resubmits: number): Promise<StepResult> => {
       const id = await claudeBatchSubmit(ctx, { apiKey, body, customId, fetchImpl: o.fetchImpl });
@@ -204,6 +236,6 @@ export function claudeBatchStep(o: {
       }
       return submit(resubmits + 1);
     }
-    return finish({ saved: read.key, bytes: read.bytes, stop_reason: read.stopReason, answered_by: "batch" });
+    return await finish({ saved: read.key, bytes: read.bytes, stop_reason: read.stopReason, answered_by: "batch" });
   };
 }

@@ -52,6 +52,8 @@ export interface PlatformFigures {
   rate: number | null;
   rate_kind: RateKind | null;
   followers: number | null;
+  /** The days a capped public read covers, when fewer than the 90 (publicRead.ts figures). */
+  covers?: { start: string; end: string };
 }
 
 /** The metrics a goal on this platform may use: each one has a figure, and the basis allows it. */

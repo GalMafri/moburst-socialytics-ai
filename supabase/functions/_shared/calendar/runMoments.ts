@@ -25,7 +25,7 @@ import { learnFromSignal, loadClientVoice } from "../voice/load.ts";
 import { clientCompanyId, isClientPost, platformName, type OwnPost } from "./evidence.ts";
 import {
   belongsToSpace, blockedCategories, checkJudgement, clientCountries, competitorMentions, filterMoments, judgePrompt, momentHistory, momentsListPrompt,
-  parseMomentsList, GLOBAL, JUDGE_SCHEMA, LIST_WEEKS, SENSITIVE_CATEGORIES, type DroppedMoment, type HistoryPost, type JudgeInput, type JudgeOwnPost, type Moment,
+  latestListed, parseMomentsList, readsAsMoments, GLOBAL, JUDGE_SCHEMA, LIST_WEEKS, SENSITIVE_CATEGORIES, type DroppedMoment, type HistoryPost, type JudgeInput, type JudgeOwnPost, type Moment,
   type MomentHistory,
 } from "./moments.ts";
 import { CLIENT_COLUMNS, feedSnapshots, retryWait, type WeekJob, type WeekJobOutcome } from "./runWeek.ts";
@@ -108,13 +108,15 @@ export async function runMomentsList(admin: Db, job: WeekJob, now = new Date()):
       const u = usageOf(result.raw);
       used.input += u.input; used.output += u.output; used.searches += u.searches;
       if (result.stopReason === "refusal") throw new Error("The moments list was declined.");
+      // QA 22 Nov 2026: a list cut off at its token limit is half a list; asked again, never recorded as found none.
+      if (result.stopReason === "max_tokens") throw new Error("The moments list was cut off.");
       if (result.stopReason !== "pause_turn") { text = result.text; break; }
       // A long search pauses; the turn is sent back as it came so the search goes on.
       if (turn + 1 >= MAX_TURNS) throw new Error("The moments search did not finish.");
       messages = [...messages, { role: "assistant", content: (result.raw as Any)?.content ?? [] }];
     }
     const moments = parseMomentsList(text, { country, from: week, through });
-    if (!moments.length && !/"moments"\s*:\s*\[/.test(text)) throw new Error("The moments list could not be read.");
+    if (!readsAsMoments(text)) throw new Error("The moments list could not be read.");
     const at = now.toISOString();
     if (moments.length) {
       const { error } = await admin.from("moments").upsert(moments.map((m) => ({ ...m, listed_for: week, updated_at: at })), { onConflict: "key,date" });
@@ -162,16 +164,23 @@ async function listsPending(admin: Db, countries: string[], week: string, priori
   return missing.some((c) => ["queued", "running"].includes(state.get(listKey(c, week)) ?? ""));
 }
 
-/** The moments stored for a set of countries on the days of a week. */
+/**
+ * The moments stored for a set of countries on the days of a week, as the
+ * newest lists date them: rows a list's span around the week are read so a
+ * moment a newer list moved out of the week is not kept on its old date.
+ */
 async function storedMoments(admin: Db, countries: string[], week: string): Promise<Moment[]> {
-  const { data, error } = await admin.from("moments").select("key, name, date, last_year_date, country, category, link, hashtags, aliases, terms")
-    .in("country", countries).gte("date", week).lte("date", addDays(week, 6));
+  const span = LIST_WEEKS * 7;
+  const { data, error } = await admin.from("moments").select("key, name, date, last_year_date, country, category, link, hashtags, aliases, terms, listed_for")
+    .in("country", countries).gte("date", addDays(week, -span)).lte("date", addDays(week, 6 + span));
   if (error) throw new Error(`Could not read the moments: ${error.message}`);
-  return ((data ?? []) as Any[]).map((m) => ({
+  const last = addDays(week, 6);
+  return latestListed(((data ?? []) as Any[]).map((m) => ({
     key: String(m.key), name: String(m.name), date: String(m.date).slice(0, 10), last_year_date: m.last_year_date ? String(m.last_year_date).slice(0, 10) : null,
     country: String(m.country), category: m.category, link: String(m.link ?? ""),
     hashtags: Array.isArray(m.hashtags) ? m.hashtags.map(String) : [], aliases: Array.isArray(m.aliases) ? m.aliases.map(String) : [], terms: Array.isArray(m.terms) ? m.terms.map(String) : [],
-  }));
+    listed_for: m.listed_for ? String(m.listed_for).slice(0, 10) : null,
+  }))).filter((m) => m.date >= week && m.date <= last).map(({ listed_for: _listed, ...m }) => m);
 }
 
 /**
@@ -364,7 +373,7 @@ export async function runWeekMoments(admin: Db, job: WeekJob, now = new Date()):
       } });
       const u = usageOf(result.raw);
       used.input += u.input; used.output += u.output;
-      if (result.stopReason === "refusal" || !/"moments"\s*:\s*\[/.test(result.text)) continue;
+      if (result.stopReason === "refusal" || result.stopReason === "max_tokens" || !readsAsMoments(result.text)) continue;
       checked = checkJudgement(result.text, input, best);
     }
     if (!checked) throw new Error("The moments' judgement could not be read.");

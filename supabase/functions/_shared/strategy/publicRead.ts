@@ -60,6 +60,13 @@ export const TIKTOK_MAX_PER_PROFILE = 120;
 export const POLL_MINUTES = 3;
 /** Runs that have not finished after this long are left out. */
 const GIVE_UP_MS = 60 * 60_000;
+/**
+ * How many times the runs of a read that failed are run again. QA 22 Nov
+ * 2026: a run that failed left its profiles with no posts, reused for 7 days
+ * as a finished read; now the failed runs alone are asked again on the next
+ * lifecycle runs, at most this many times, the rest of the read kept.
+ */
+export const REREAD_FAILED = 2;
 const TEXT_CHARS = 400;
 
 export interface PublicPost {
@@ -277,7 +284,11 @@ export interface PublicReadState {
   posts: PublicPost[];
   /** Why no actor ran, for developers ("no_token"). */
   skipped?: string;
+  /** How many times the failed runs were run again (REREAD_FAILED). */
+  rereads?: number;
 }
+
+const failedRun = (r: PublicReadState["runs"][number]) => !!r.status && isFinalRunStatus(r.status) && r.status !== "SUCCEEDED";
 
 export interface CompanyFigures {
   company: string;
@@ -337,10 +348,27 @@ export type ApifyFactory = () => ApifyClient | null;
 export async function stepRead(state: PublicReadState | null, targets: Target[], apify: ApifyFactory, now: Date): Promise<PublicReadState> {
   const key = targetsKey(targets);
   const window = { start: new Date(now.getTime() - READ_DAYS * DAY).toISOString().slice(0, 10), end: now.toISOString().slice(0, 10) };
-  const fresh = (s: PublicReadState) => s.status === "done" && s.version === READ_VERSION && !!s.read_at && now.getTime() - Date.parse(s.read_at) < REUSE_DAYS * DAY;
+  // A read Apify could not run (no token) is not kept: the next run reads once the token is there.
+  const fresh = (s: PublicReadState) => s.status === "done" && !s.skipped && s.version === READ_VERSION && !!s.read_at && now.getTime() - Date.parse(s.read_at) < REUSE_DAYS * DAY;
   if (state && state.key === key && (fresh(state) || state.status === "reading")) {
-    if (state.status === "done") return state;
-    return await look(state, apify, now);
+    if (state.status === "reading") return await look(state, apify, now);
+    if (!state.runs.some(failedRun) || (state.rereads ?? 0) >= REREAD_FAILED) return state;
+    const client = apify();
+    if (!client) return state;
+    const again: PublicReadState["runs"] = [];
+    for (const r of state.runs.filter(failedRun)) {
+      const reader = PUBLIC_READERS[r.platform];
+      for (const next of reader?.runs(r.targets, state.window.start) ?? []) {
+        try {
+          const run = await client.startRun(reader.actor.id, next.input, { timeoutSecs: reader.actor.timeoutSecs, memoryMbytes: reader.actor.memoryMbytes });
+          again.push({ platform: r.platform, run_id: run.id, targets: next.targets, status: run.status });
+        } catch (e) {
+          console.warn("[strategy] public read not started again", r.platform, e instanceof Error ? e.message : String(e));
+        }
+      }
+    }
+    if (!again.length) return state;
+    return { ...state, status: "reading", started_at: now.toISOString(), runs: [...state.runs.filter((r) => !failedRun(r)), ...again], rereads: (state.rereads ?? 0) + 1 };
   }
   const base: PublicReadState = { version: READ_VERSION, key, status: "done", started_at: now.toISOString(), read_at: now.toISOString(), window, runs: [], posts: [] };
   if (!targets.length) return base;
@@ -388,8 +416,11 @@ async function look(state: PublicReadState, apify: ApifyFactory, now: Date): Pro
       else { waiting = true; runs.push(r); }
     }
   }
-  if (waiting) return { ...state, runs };
-  return { ...state, version: READ_VERSION, status: "done", read_at: now.toISOString(), runs, posts: [...state.posts, ...posts] };
+  // QA 22 Nov 2026: the posts of a run that finished while another still runs are kept now; the run is stored as
+  // finished, so a later look never reads it again, and they were lost.
+  const kept = [...state.posts, ...posts.filter((p) => !state.posts.some((x) => x.id === p.id))];
+  if (waiting) return { ...state, runs, posts: kept };
+  return { ...state, version: READ_VERSION, status: "done", read_at: now.toISOString(), runs, posts: kept };
 }
 
 // ── What the read is made from, in the database ────────────────────────────

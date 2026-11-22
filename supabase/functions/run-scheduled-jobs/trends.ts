@@ -218,15 +218,15 @@ function namesOf(platforms: TrendPlatform[]): string {
 }
 
 /** The columns of trend_weeks and report_pipeline_runs the rule reads. */
-const WEEK_COLUMNS = "id, client_id, week_start, status, platforms, finished_at";
+const WEEK_COLUMNS = "id, client_id, week_start, status, platforms, finished_at, filter_status";
 const RUN_COLUMNS = "id, status, input, started_at, finished_at, outcome, job_id";
 
-export interface TrendWeekRow { id: string; client_id: string; week_start: string; status: string; platforms: unknown; finished_at: string | null }
+export interface TrendWeekRow { id: string; client_id: string; week_start: string; status: string; platforms: unknown; finished_at: string | null; filter_status?: string | null }
 export interface TrendRunRow { id: string; status: string; input: Record<string, unknown> | null; started_at: string | null; finished_at: string | null; outcome: string | null; job_id?: string | null }
 
 export type RecollectDecision =
   /** The next try has come: these sources are asked again, the rest read from the run the week was saved from. `refused`: failed sources no longer asked. */
-  | { act: "collect"; try: number; platforms: TrendPlatform[]; fromRun: string; refused: TrendPlatform[] }
+  | { act: "collect"; try: number; platforms: TrendPlatform[]; fromRun: string; refused: TrendPlatform[]; rejudge?: boolean }
   /** No source is asked again and one still has not answered: every try was used ("tries"), or what is left refused the request or the account twice running ("refused"). The week stays as it is. */
   | { act: "end"; why: "tries" | "refused"; tries: number; platforms: TrendPlatform[] }
   /** Nothing to do now, and why. */
@@ -265,19 +265,23 @@ export function recollectDecision(week: TrendWeekRow, runs: TrendRunRow[], now: 
   if (week.status === "running") return none("The week is still being collected.");
   if (week.status !== "partial") return none("Every source of the week answered, so nothing is collected again.");
   const failed = failedSources(week.platforms);
-  if (!failed.length) return none("No source of the week failed, so nothing is collected again.");
+  // QA 22 Nov 2026: a week whose posts the model never judged (its filter gave
+  // up during a Claude outage) is a gap like a failed source: it is judged
+  // again from the answers the sources kept, with no source paid for twice.
+  const rejudge = week.filter_status === "failed";
+  if (!failed.length && !rejudge) return none("No source of the week failed, so nothing is collected again.");
   if (runs.some((r) => r.status === "running")) return none("A run of the week is under way.");
   const tries = runs.filter(isRecollect);
   const refused = refusedSources(week.platforms);
   const platforms = failed.filter((p) => !refused.includes(p));
-  if (!platforms.length) return { act: "end", why: "refused", tries: tries.length, platforms: failed };
+  if (!platforms.length && !rejudge) return { act: "end", why: "refused", tries: tries.length, platforms: failed };
   if (tries.length >= RECOLLECTS_PER_WEEK) return { act: "end", why: "tries", tries: tries.length, platforms: failed };
   const from = lastDone(runs);
   if (!from) return none("No finished run of the week is left to start from.");
   const lastEnd = Math.max(timeOf(week.finished_at), ...tries.map((r) => timeOf(r.finished_at)));
   const due = lastEnd + recollectWaitMs(tries.length + 1);
   if (now.getTime() < due) return none(`The next try is due at ${new Date(due).toISOString()}.`);
-  return { act: "collect", try: tries.length + 1, platforms, fromRun: from.id, refused };
+  return { act: "collect", try: tries.length + 1, platforms, fromRun: from.id, refused, ...(rejudge ? { rejudge } : {}) };
 }
 
 async function weekRuns(db: Db, weekId: string): Promise<TrendRunRow[]> {
@@ -316,7 +320,7 @@ export async function queueSourceRecollects(db: Db, now: Date): Promise<string[]
   const day = now.toISOString().slice(0, 10);
   const queued: string[] = [];
   for (const week of (data ?? []) as TrendWeekRow[]) {
-    if (week.status === "partial" && !failedSources(week.platforms).length) continue;
+    if (week.status === "partial" && !failedSources(week.platforms).length && week.filter_status !== "failed") continue;
     const runs = await weekRuns(db, week.id);
     const decision = recollectDecision(week, runs, now);
     let key: string | null = null;
@@ -426,11 +430,14 @@ async function runSourceRecollect(db: Db, job: ScheduledJob, weekId: string, now
   // A source the client stopped watching since the week was saved is not paid for again.
   const watched = Array.isArray(profile.platforms) ? new Set((profile.platforms as Array<{ platform?: unknown }>).map((p) => String(p?.platform ?? ""))) : null;
   const platforms = watched ? decision.platforms.filter((p) => watched.has(p)) : decision.platforms;
-  if (!platforms.length) return { status: "skipped", reason: `The client no longer watches ${names}, so nothing is collected again.`, result: { ...about, sources } };
+  if (!platforms.length && !decision.rejudge) return { status: "skipped", reason: `The client no longer watches ${names}, so nothing is collected again.`, result: { ...about, sources } };
+  // With no source to ask, the run reads every kept answer and judges the week again (recollectOf: a plain replay).
   const recollect: Recollect = { platforms, try: decision.try };
   const started = await startOn(db, row.client_id, row.id, weekStart, `source-${decision.try}`, decision.fromRun, recollect);
   return {
-    status: "done", reason: `${namesOf(platforms)} ${platforms.length > 1 ? "are" : "is"} collected again for the week (try ${decision.try} of ${RECOLLECTS_PER_WEEK}).`,
+    status: "done", reason: platforms.length
+      ? `${namesOf(platforms)} ${platforms.length > 1 ? "are" : "is"} collected again for the week (try ${decision.try} of ${RECOLLECTS_PER_WEEK}).`
+      : `The week's posts are judged again (try ${decision.try} of ${RECOLLECTS_PER_WEEK}).`,
     result: {
       ...about, run_id: started.runId, started: started.started, sources,
       recollect: { try: decision.try, of: RECOLLECTS_PER_WEEK, platforms, from_run: decision.fromRun, ...(refused.length ? { refused } : {}) },

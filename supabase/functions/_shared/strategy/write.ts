@@ -37,6 +37,7 @@ import { fmtMultiple } from "../calendar/reasonText.ts";
 import { competitorSet, feedSnapshots, gatherEvidence, trackedRates, type Gathered } from "../calendar/runWeek.ts";
 import { competitiveBrief } from "../competitive/brief.ts";
 import { collectOwnedFollowers } from "../competitive/ownedSource.ts";
+import { ownedNetwork } from "../competitive/ownedMerge.ts";
 import { setBy } from "../lifecycle/fields.ts";
 import { activeTerms } from "../trends/profile.ts";
 import { clip } from "../trends/text.ts";
@@ -200,9 +201,12 @@ export function platformFigures(platform: string, i: { sprout: boolean; own: Pre
   const posts = pub?.posts ?? 0;
   const basis = basisOf({ sprout: false, posts });
   const rate_kind = rateKindOf(platform, basis);
+  // A read that reached its cap covers fewer days than the 90: its count is said over those days (figureWords).
+  const capped = !!pub && pub.covers.start > new Date(i.now.getTime() - READ_DAYS * 86_400_000).toISOString().slice(0, 10);
   return {
     platform, basis, posts, posts_per_week: pub?.posts_per_week ?? 0, median_engagement: pub?.median_engagement ?? null,
     rate: rate_kind ? pub?.rate_per_view ?? null : null, rate_kind: rate_kind && pub?.rate_per_view != null ? rate_kind : null, followers,
+    ...(capped ? { covers: pub!.covers } : {}),
   };
 }
 
@@ -261,7 +265,8 @@ export async function strategyEvidence(db: Db, client: Any, now: Date, io: Strat
   // The followers of the accounts Sprout measures: each profile's newest reading, from the reader the reports use. A read that fails leaves them unknown.
   const ownedFollowers = sprout.size ? await tryOr(async () => (await io.ownedFollowers?.(db, client, now)) ?? {}, {} as Record<string, number | null>) : {};
   const platforms = states.platforms.map((p) => ({
-    ...p, figures: platformFigures(p.platform, { sprout: onSprout(p.platform), own, publicPosts, now, followers: ownedFollowers[platformKey(p.platform)] ?? null }),
+    // QA 22 Nov 2026: the reader keys a network as ownedNetwork does (X is "twitter"); looked up by platformKey ("x"), X had no followers.
+    ...p, figures: platformFigures(p.platform, { sprout: onSprout(p.platform), own, publicPosts, now, followers: ownedFollowers[ownedNetwork(platformKey(p.platform))] ?? ownedFollowers[platformKey(p.platform)] ?? null }),
   }));
 
   // The client's own calendar posts over the last 8 weeks, read from calendar_posts as the calendar reads them.
@@ -343,7 +348,9 @@ function cadenceWords(c: Cadence | null, e: StrategyEvidence): string {
 
 function figureWords(f: PlatformFigures, e: StrategyEvidence): string[] {
   const parts: string[] = [`data: ${basisWords(f)}`];
-  if (f.basis !== "none") parts.push(`${plural(f.posts, "post")} from ${e.window.start} to ${e.window.end} (${f.posts_per_week} a week)`);
+  // QA 22 Nov 2026: a capped read's count is said over the days it covers; said over the 90 days, it was a count the 90 days do not have.
+  const span = f.covers ?? e.window;
+  if (f.basis !== "none") parts.push(`${plural(f.posts, "post")} from ${span.start} to ${span.end} (${f.posts_per_week} a week)`);
   if (f.median_engagement !== null && (f.basis === "measured" || f.basis === "public")) parts.push(`median engagement per post ${f.median_engagement}`);
   if (f.rate !== null && f.rate_kind) parts.push(`engagement rate per ${f.rate_kind} ${percent(f.rate)}`);
   if (f.followers !== null) parts.push(`${f.followers.toLocaleString("en-US")} followers`);
@@ -479,6 +486,20 @@ export interface StrategyDraft {
 }
 
 const EVIDENCE_ID = /\b[PCTNR]\d{1,2}\b/;
+
+/**
+ * Whether a text holds an evidence id (P1, C2). QA 22 Nov 2026: a
+ * brand or competitor named like an id ("N26", "C3") was read as one, and a
+ * positioning point that must name the competitor exactly was refused on every
+ * write. The client's own words and the companies' names are set aside first.
+ */
+function namesEvidenceId(text: string, e: StrategyEvidence): boolean {
+  const names = [e.client.name, ...e.competitors].map((n) => String(n ?? "").trim()).filter(Boolean);
+  let t = names.length ? text.replace(new RegExp(names.map((n) => `(?<![\\p{L}\\p{N}])${escapeRe(n)}(?![\\p{L}\\p{N}])`).join("|"), "giu"), " ") : text;
+  const own = ownWords(e);
+  if (own) t = t.replace(own, " ");
+  return EVIDENCE_ID.test(t);
+}
 const DASH = /—|\s–\s/;
 
 /** A text field of a draft and where it is, for the problem that names it. An example hook is the brand's own voice and language. */
@@ -685,7 +706,7 @@ export function strategyProblems(d: StrategyDraft, e: StrategyEvidence): string[
   });
 
   const texts = draftLines(d).map((l) => l.text);
-  if (texts.some((t) => EVIDENCE_ID.test(t))) out.push("An evidence id (such as P1 or C2) may appear only in a platform's worked list; say what it was in words.");
+  if (texts.some((t) => namesEvidenceId(t, e))) out.push("An evidence id (such as P1 or C2) may appear only in a platform's worked list; say what it was in words.");
   if (texts.some((t) => DASH.test(t))) out.push("Use no em dashes; use a period, a comma, a colon or parentheses instead.");
   out.push(...houseRuleProblems(d, e));
   return out;

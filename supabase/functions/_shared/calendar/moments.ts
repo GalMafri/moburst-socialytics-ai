@@ -82,6 +82,16 @@ function jsonObject(text: string): Record<string, unknown> | null {
   try { return JSON.parse(text.slice(start, end + 1)); } catch { return null; }
 }
 
+/**
+ * True when a reply is a whole moments answer: its JSON reads and holds a
+ * moments array. QA 22 Nov 2026: a reply cut off at max_tokens still matched
+ * a `"moments":[` regex, so a half list was recorded as "found none" and a
+ * half judgement dropped every moment as unanswered, both for good.
+ */
+export function readsAsMoments(text: string): boolean {
+  return Array.isArray(jsonObject(text)?.moments);
+}
+
 /** Lowercase words with accents, punctuation and years removed. */
 function words(s: string): string {
   return String(s || "").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/&/g, " and ")
@@ -147,6 +157,29 @@ export function parseMomentsList(text: string, range: { country: string; from: s
     });
   }
   return [...out.values()];
+}
+
+/**
+ * The stored moments as the newest lists have them. Each country is listed
+ * every week for five weeks ahead and rows are only ever added (key and
+ * date), so one moment can be stored under two dates, or one holiday under
+ * two near names on one date. QA 22 Nov 2026: both were planned (a post on a
+ * stale date, or two posts for one holiday). Per key only the newest list's
+ * dates stay, and per country and date one name stays (the newest listed),
+ * names told apart only by a plural "s" being one name.
+ */
+export function latestListed<T extends Moment & { listed_for?: string | null }>(rows: T[]): T[] {
+  const listed = (r: T) => String(r.listed_for ?? "").slice(0, 10);
+  const newest = new Map<string, string>();
+  for (const r of rows) if (listed(r) > (newest.get(r.key) ?? "")) newest.set(r.key, listed(r));
+  const loose = (r: T) => `${r.country}|${r.date}|${slugOf(r.key).split("-").map((w) => w.replace(/s$/, "")).join("-")}`;
+  const one = new Map<string, T>();
+  for (const r of rows) {
+    if (listed(r) !== (newest.get(r.key) ?? "")) continue;
+    const had = one.get(loose(r));
+    if (!had || listed(r) > listed(had)) one.set(loose(r), r);
+  }
+  return [...one.values()];
 }
 
 // ── 2. Code's filter ────────────────────────────────────────────────────────

@@ -141,7 +141,14 @@ export function aggregateCompetitive(i: AggregateInputs): Any {
     const lower = name.toLowerCase();
     const agg = blank(key, name, c.url);
     agg.is_client = key === verifiedClientId;
-    agg.in_confirmed_top3 = selected.some((s) => { const sn = String(s.name || "").toLowerCase(); return !!sn && (lower.includes(sn) || sn.includes(lower)); });
+    // QA 22 Nov 2026: the landscape step's resolved ids (matched by website or
+    // saved id) say which companies are the confirmed competitors; a name
+    // substring missed one RivalIQ names differently ("Meta" for "Facebook")
+    // and flagged a client whose name holds a competitor's ("Acme Bank").
+    // Names are matched only for a landscape with no resolved selection.
+    agg.in_confirmed_top3 = !agg.is_client && (landscape.selected_company_ids
+      ? landscape.selected_company_ids.map(String).includes(key)
+      : selected.some((s) => { const sn = String(s.name || "").toLowerCase(); return !!sn && (lower.includes(sn) || sn.includes(lower)); }));
     byCompany[key] = agg;
   }
   for (const p of posts) {
