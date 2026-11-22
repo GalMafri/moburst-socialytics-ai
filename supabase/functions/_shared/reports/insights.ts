@@ -126,7 +126,8 @@ export function insightsPrompt(input: InsightsInput, problems: string[] = []): s
   ];
   if (input.kind === "social") {
     lines.push("", "Write:",
-      "- summary: two or three sentences on what moved most this period and why it matters, citing the facts it rests on;",
+      // QA 22 Nov 2026 (P47-07): never "what moved most": "most" compares, and the check refuses it without a ranking, share or outlier fact.
+      "- summary: two or three sentences on what changed this period and why it matters, citing the facts it rests on;",
       "- insights: three to six insights, each one or two sentences, each citing at least one fact;",
       "- recommendations: two to four things to do next on social media, each citing at least one fact it acts on.");
   } else {
@@ -216,8 +217,12 @@ function textProblems(where: string, text: string, citedIds: string[], byId: Map
   const unknown = citedIds.filter((id) => !byId.has(id));
   if (unknown.length) out.push(`${where} cites ${unknown.join(", ")}, which are not in the facts.`);
   const facts = citedIds.map((id) => byId.get(id)).filter((f): f is Fact => !!f);
+  // QA 22 Nov 2026: the companies' names are blanked (positions kept) before
+  // the numbers are read, so "Studio 54", "7 Cups" or "5W Public Relations"
+  // is a name, not a figure; read raw, every answer naming one was refused.
+  const unnamed = names ? text.replace(names, (m) => " ".repeat(m.length)) : text;
   // Every number is one of the cited facts' numbers at the precision it was written.
-  for (const n of numbersOf(text)) {
+  for (const n of numbersOf(unnamed)) {
     if (!facts.some((f) => f.numbers.some((v) => Math.abs(Math.abs(v) - n.value) <= n.tolerance))) out.push(`${where} writes ${n.text}, which is not a number of the facts it cites.`);
   }
   // The words, without the companies' own names ("Top Shelf Co" is no comparison).
@@ -246,7 +251,7 @@ function textProblems(where: string, text: string, citedIds: string[], byId: Map
   // A direction word next to a change's number agrees with the change's sign.
   for (const f of facts.filter((x) => x.kind === "change")) {
     const own = [Math.abs(f.percent ?? NaN), Math.abs(f.change ?? NaN)].filter(Number.isFinite);
-    for (const n of numbersIn(text)) {
+    for (const n of numbersIn(unnamed)) {
       if (!own.some((v) => Math.abs(v - n.value) <= n.tolerance)) continue;
       const words = [...text.matchAll(UP)].map((m) => ({ at: m.index!, up: true })).concat([...text.matchAll(DOWN)].map((m) => ({ at: m.index!, up: false })));
       const sentenceStart = Math.max(text.lastIndexOf(".", n.start - 1), text.lastIndexOf("!", n.start - 1), text.lastIndexOf("?", n.start - 1)) + 1;

@@ -30,6 +30,7 @@ import { anthropicMessages } from "../anthropic.ts";
 import { answerText, roomFor } from "../anthropicReply.ts";
 import { queueReportInsights } from "./insights.ts";
 import { clientFiguresFromStoredPosts } from "../competitive/storedFigures.ts";
+import { competitiveReportQuality } from "../competitive/reportEvidence.ts";
 import {
   applyCorrections, checkCorrection, competitiveFigures, correctionPrompt, CORRECTION_SYSTEM, parseCorrection, socialFigures, staleReportText,
   type Figure, type ReportKind, type StaleSentence,
@@ -105,11 +106,14 @@ function socialAsWritten(reportData: Any, audit: Any): Any {
  * The competitive report a monthly report shows beside its own figures: the
  * client's latest finished one written before the monthly report, read as
  * written and as shown now, under a prefix so its figures stay its own.
+ * QA 22 Nov 2026 (P47-05): only one that passed its checks, as the run's
+ * payload (payloads.ts) and the report page take it; a held one is never
+ * shown, so its figures are not the ones the monthly text is checked against.
  */
 async function competitiveBeside(db: Db, clientId: string, before: string): Promise<{ stored: Figure[]; shown: Figure[] }> {
   const rows = await read<Any[]>(db.from("competitive_reports").select("report_data, correction_audit").eq("client_id", clientId)
-    .eq("status", "complete").lte("created_at", before).order("created_at", { ascending: false }).limit(1), "the competitive report");
-  const row = rows?.[0];
+    .eq("status", "complete").lte("created_at", before).order("created_at", { ascending: false }).limit(12), "the competitive report");
+  const row = (rows ?? []).find((r) => r?.report_data && competitiveReportQuality(r.report_data).ready);
   if (!row?.report_data) return { stored: [], shown: [] };
   return {
     stored: competitiveFigures(asWritten(row.report_data, row.correction_audit), "stored", "competitive|"),

@@ -12,7 +12,7 @@ import { answerText, replyStopped, roomFor } from "../anthropicReply.ts";
 import { parseAnswer } from "../pipelines/competitive/analysis.ts";
 import { topCounts } from "../competitive/postSample.ts";
 import { textHash } from "../lifecycle/names.ts";
-import { HASHTAG } from "./hashtag.ts";
+import { HASHTAG, HASHTAG_IN_TEXT } from "./hashtag.ts";
 import { MAX_SEARCHES } from "./sources.ts";
 import { clip } from "./text.ts";
 import { HASHTAG_PLATFORMS, TREND_PLATFORMS, type HashtagPlatform, type Term, type TrendPlatform, type TrendProfile } from "./types.ts";
@@ -66,7 +66,7 @@ const str = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
 export function hashtagCounts(texts: string[]): Record<string, number> {
   const out: Record<string, number> = {};
   for (const t of texts) {
-    for (const tag of String(t ?? "").match(/#[\p{L}0-9_]+/gu) ?? []) {
+    for (const tag of String(t ?? "").match(HASHTAG_IN_TEXT) ?? []) {
       const k = tag.toLowerCase();
       out[k] = (out[k] ?? 0) + 1;
     }
@@ -215,12 +215,28 @@ export function namesBrand(text: string, brand: string): boolean {
   return false;
 }
 
-/** A hashtag is the brand's own: #baderlaw, #moburstlife. */
+/** Words a brand's own tag adds after its name: #moburstlife, #calmapp, #baderlawfirm. */
+const BRAND_TAG_AFTER = new Set(["life", "official", "team", "hq", "app", "news", "family", "fam", "community", "careers", "jobs", "inc", "co", "love", "lovers", "crew", "squad", "club", "nation", "insider", "insiders", "style", "world", "tips", "studio", "store", "shop", "events", "partner", "partners", "ambassador", "ambassadors", "global", "usa", "us", "uk", "firm", "group", "agency", "media", "brand", "moments", "daily", "fans"]);
+/** Words a brand's own tag puts before its name: #teammoburst, #ilovecalm. */
+const BRAND_TAG_BEFORE = new Set(["team", "the", "my", "i", "we", "love", "ilove", "welove", "official", "inside", "at", "with", "go", "ask", "by", "from", "only", "made", "madeby", "life"]);
+
+/**
+ * A hashtag is the brand's own: #baderlaw, #moburstlife, #teammoburst, or
+ * one whose written words name the brand (#CalmApp). QA 22 Nov 2026
+ * (P52-01): a brand name merely inside a tag is not the brand ("Calm" in
+ * #calmingmusic, "Nova" in #novascotia), as namesBrand already holds for a
+ * phrase; the substring rule refused on-topic tags and cost a second call.
+ */
 export function tagNamesBrand(tag: string, brand: string): boolean {
   const b = squash(brand);
   const t = squash(tag);
   if (!b) return false;
-  return b.length >= 4 ? t.includes(b) : t === b;
+  if (t === b) return true;
+  if (b.length < 4) return false;
+  if (t.startsWith(b) && BRAND_TAG_AFTER.has(t.slice(b.length))) return true;
+  if (t.endsWith(b) && BRAND_TAG_BEFORE.has(t.slice(0, t.length - b.length))) return true;
+  // The words the tag was written with, split at its capitals (#CalmApp is "Calm App").
+  return namesBrand(String(tag).replace(/^#/, "").replace(/(\p{Ll})(\p{Lu})/gu, "$1 $2"), brand);
 }
 
 function placesOf(e: ProfileEvidence): Set<string> {
@@ -388,11 +404,18 @@ export async function syncLifecycleTerms(db: Db, clientId: string, kind: "topic"
       const { error: e } = await db.from("trend_terms").insert({ client_id: clientId, kind, platform, term, reason: item.reason, source: "lifecycle" });
       if (e) throw new Error(`Could not save a trend term: ${e.message}`);
     } else if (hit.source === "lifecycle" && !hit.removed_at && hit.reason !== item.reason) {
-      await db.from("trend_terms").update({ reason: item.reason }).eq("id", hit.id);
+      // QA 22 Nov 2026 (P52-04): the update and the delete below throw on an
+      // error as the insert does, so the step is retried; ignored, a term the
+      // new profile dropped kept being searched every week.
+      const { error: e } = await db.from("trend_terms").update({ reason: item.reason }).eq("id", hit.id);
+      if (e) throw new Error(`Could not update a trend term: ${e.message}`);
     }
   }
   for (const [key, r] of existing) {
-    if (r.source === "lifecycle" && !r.removed_at && !wanted.has(key)) await db.from("trend_terms").delete().eq("id", r.id);
+    if (r.source === "lifecycle" && !r.removed_at && !wanted.has(key)) {
+      const { error: e } = await db.from("trend_terms").delete().eq("id", r.id);
+      if (e) throw new Error(`Could not take away a trend term: ${e.message}`);
+    }
   }
 }
 

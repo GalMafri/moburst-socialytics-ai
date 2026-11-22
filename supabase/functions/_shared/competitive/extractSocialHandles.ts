@@ -50,7 +50,8 @@ const RESERVED: Record<string, Set<string>> = {
   facebook: new Set(["sharer", "share", "sharer.php", "dialog", "plugins", "tr", "profile.php", "pages", "groups", "events", "watch", "story.php", "help", "policies", "legal", "privacy", "login", "search", "photo", "video", "media", "people", "hashtag", "marketplace", "gaming", "business", "ads", "settings", "bookmarks", "friends", "notes", "reel", "reels", "permalink.php", "directory", "home.php", "games", "jobs", "fundraisers", "live"]),
   tiktok: new Set(["video", "tag", "music", "discover", "foryou", "explore", "legal", "about", "embed", "live", "upload", "following", "friends", "search", "business", "ads", "effect", "t", "creators", "trending"]),
   linkedin: new Set(["shareArticle", "sharing", "feed", "posts", "pulse", "jobs", "legal", "help", "school", "showcase", "learning", "groups", "events", "newsletters", "signup", "login", "uas", "checkpoint"]),
-  youtube: new Set(["watch", "embed", "playlist", "results", "shorts", "feed", "about", "t", "howyoutubeworks", "hashtag", "live", "premium", "gaming", "music", "account", "signin", "redirect"]),
+  // QA 22 Nov 2026 (P30-01): the player scripts a page loads were saved as a channel.
+  youtube: new Set(["watch", "embed", "playlist", "results", "shorts", "feed", "about", "t", "howyoutubeworks", "hashtag", "live", "premium", "gaming", "music", "account", "signin", "redirect", "iframe_api", "player_api"]),
   x: new Set(["intent", "share", "hashtag", "home", "explore", "i", "search", "login", "signup", "settings", "privacy", "tos", "notifications", "messages", "compose", "account", "download", "tos.html"]),
 };
 
@@ -85,6 +86,9 @@ function harvestUrls(text: string): Array<{ url: string; index: number }> {
   // http(s), protocol-relative, and bare host forms.
   const re = /(?:https?:)?\/\/[^\s"'<>\\)]+|(?:^|[\s"'(>])((?:www\.)?(?:instagram|facebook|tiktok|linkedin|youtube|twitter|x)\.com\/[^\s"'<>\\)]+)/gi;
   for (const m of text.matchAll(re)) {
+    // QA 22 Nov 2026 (P30-01): an XML namespace (xmlns:fb="http://www.facebook.com/2008/fbml") names a schema, never a profile.
+    const start = (m.index ?? 0) + m[0].length - (m[1] || m[0]).length;
+    if (/xmlns(?::[\w-]+)?\s*=\s*["']?$/i.test(text.slice(Math.max(0, start - 40), start))) continue;
     const raw = (m[1] || m[0]).trim().replace(/[),.;]+$/, "");
     // The protocol is matched case-insensitively, so the check has to be too:
     // "HTTPS://..." used to be prefixed again and parsed as nothing.
@@ -138,6 +142,8 @@ export function classifyUrl(url: string): { platform: string; handle: string; yo
   if (!["https:", "http:"].includes(parsed.protocol) || parsed.username || parsed.password) return null;
   const platform = platformOf(parsed.hostname);
   if (!platform) return null;
+  // QA 22 Nov 2026 (P30-01): a youtu.be link is always one video, never a channel.
+  if (/(^|\.)youtu\.be$/i.test(parsed.hostname)) return null;
   if (EMBED_HINT.test(parsed.pathname)) return null;
   const segments = parsed.pathname.split("/").filter(Boolean);
   if (segments.length === 0) return null;
@@ -175,6 +181,8 @@ export function classifyUrl(url: string): { platform: string; handle: string; yo
   if (!handle) return null;
   if (RESERVED[platform]?.has(handle)) return null;
   if (!HANDLE_OK[platform].test(handle)) return null;
+  // QA 22 Nov 2026 (P30-01): a year ("facebook.com/2008/fbml", the old namespace) is no page; numeric page ids are far longer.
+  if (platform === "facebook" && /^(?:19|20)\d\d$/.test(handle)) return null;
   return { platform, handle, youtubeKind };
 }
 

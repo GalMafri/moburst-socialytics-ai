@@ -12,7 +12,7 @@
 // RivalIQ's own record of it, the exact source.
 
 import { rivalIqFetch } from "./rivaliqFetch.ts";
-import { advanceRivalIqSetup, publicCompanyUrl, type SetupJob, type SetupPlan } from "./rivaliqSetup.ts";
+import { advanceRivalIqSetup, publicCompanyUrl, UnmatchedCompanies, type SetupJob, type SetupPlan } from "./rivaliqSetup.ts";
 import { companyToHandles, type RivalIqCompany } from "./rivaliqLandscape.ts";
 import { parentClientFor } from "../lifecycle/parentPage.ts";
 
@@ -126,6 +126,29 @@ export type ServerSetupOutcome =
   /** Another run holds the setup row. */
   | { state: "busy" };
 
+/** How long a follow may sit unanswered, or a verify unmatched, before the follow is sent again. */
+const REFOLLOW_AFTER_MS = 86_400_000;
+
+/** A row no live run holds: no lease, or one that ran out (the same test leaseSetupJob uses). */
+const leaseFree = () => `lease_id.is.null,lease_until.lt.${new Date().toISOString()}`;
+
+/**
+ * The setup row's landscape when this setup made it: it carries the setup's
+ * own name (the name holds the set's id). Null when the row has none, or the
+ * landscape is gone or is somebody else's (an imported or shared one).
+ */
+// deno-lint-ignore no-explicit-any
+async function ownLandscape(api: Api, row: any): Promise<string | null> {
+  if (!row?.landscape_id || !row?.plan?.name) return null;
+  try {
+    const { landscape } = await api(`/landscapes/${encodeURIComponent(String(row.landscape_id))}`);
+    return landscape && landscape.name === row.plan.name ? String(row.landscape_id) : null;
+  } catch (e) {
+    if (/HTTP 404\b/.test(e instanceof Error ? e.message : "")) return null;
+    throw e;
+  }
+}
+
 /**
  * Advance the set's setup until it is complete, RivalIQ is still working, or
  * the time budget is spent. A follow that failed is sent again on the next
@@ -139,11 +162,23 @@ export async function advanceSetupOnServer(db: Db, setId: string, api: Api, opts
   const budget = opts.budgetMs ?? 90_000;
   const plan = await setupPlan(db, setId);
   const hash = await planFingerprint(plan);
-  const { data: prior, error: je } = await db.from("rivaliq_setup_jobs").select("set_id, fingerprint, phase").eq("set_id", setId).maybeSingle();
+  const { data: prior, error: je } = await db.from("rivaliq_setup_jobs").select("set_id, fingerprint, phase, landscape_id, plan").eq("set_id", setId).maybeSingle();
   if (je) throw je;
   // A setup row for an earlier selection of this set: the confirmed selection is the one to track.
+  // QA 22 Nov 2026 (P31-05): a row whose lease ran out belongs to a run that
+  // died (killed past its wall clock, so it never released): it is free, as
+  // leaseSetupJob already treats it. Testing `lease_id is null` alone left
+  // such a row in place and every later run answered busy for good.
   if (prior && prior.fingerprint !== hash) {
-    const { error } = await db.from("rivaliq_setup_jobs").delete().eq("set_id", setId).eq("fingerprint", prior.fingerprint).is("lease_id", null);
+    // QA 22 Nov 2026 (P31-04): the landscape this setup already made is kept
+    // and the new selection is followed into it. Deleting the row forgot it:
+    // a second landscape was made under the same name while the first kept
+    // holding plan places nobody could see from the app.
+    const kept = await ownLandscape(api, prior);
+    const { error } = kept
+      ? await db.from("rivaliq_setup_jobs").update({ plan, fingerprint: hash, phase: "created", landscape_id: kept, operation_token: null, updated_at: new Date().toISOString() })
+        .eq("set_id", setId).eq("fingerprint", prior.fingerprint).or(leaseFree())
+      : await db.from("rivaliq_setup_jobs").delete().eq("set_id", setId).eq("fingerprint", prior.fingerprint).or(leaseFree());
     if (error) throw error;
   }
   const leased = await leaseSetupJob(db, plan, hash, Math.ceil(budget / 1000) + 60);
@@ -155,16 +190,31 @@ export async function advanceSetupOnServer(db: Db, setId: string, api: Api, opts
       await linkVerified(db, plan, hash, String(job.landscape_id));
       return { state: "complete", landscape_id: String(job.landscape_id), phase: "complete" };
     }
+    // When the setup last moved; a run that moves it starts the clock again.
+    // deno-lint-ignore no-explicit-any
+    const updatedAt = (job as any).updated_at ? String((job as any).updated_at) : null;
+    const stale = !!updatedAt && now() - Date.parse(updatedAt) > REFOLLOW_AFTER_MS;
+    let since = updatedAt;
+    const moved = () => { since = new Date(now()).toISOString(); };
     // A follow that failed is sent again; a setup removed as abandoned starts again for the confirmed set.
     if (job.phase === "following_failed") {
       await leased.save({ phase: "created", operation_token: null });
       job.phase = "created";
+      // QA 22 Nov 2026 (P31-06): the fresh follow is looked at again soon, not hours after the old failure.
+      moved();
     } else if (job.phase === "retired") {
       await leased.save({ phase: "ready", landscape_id: null, operation_token: null });
       Object.assign(job, { phase: "ready", landscape_id: null, operation_token: null });
+      moved();
+    } else if (job.phase === "following" && stale) {
+      // QA 22 Nov 2026 (P31-08): a follow RivalIQ has not answered for a day
+      // (its operation still pending, or forgotten) is checked by reading the
+      // landscape, and sent again when the companies are not there.
+      await leased.save({ phase: "follow_requested", operation_token: null });
+      Object.assign(job, { phase: "follow_requested", operation_token: null });
+      moved();
     }
-    // deno-lint-ignore no-explicit-any
-    const since = (job as any).updated_at ? String((job as any).updated_at) : null;
+    let refollowed = false;
     for (let steps = 0; steps < 8 && now() - started < budget; steps++) {
       const before = job.phase;
       try {
@@ -177,11 +227,32 @@ export async function advanceSetupOnServer(db: Db, setId: string, api: Api, opts
           if (!(list.landscapes || []).some((l: any) => l.name === job.plan.name)) {
             await leased.save({ phase: "ready" });
             job.phase = "ready";
+            moved();
             continue;
           }
         }
+        // QA 22 Nov 2026 (P31-01): a follow whose POST did not go through (a
+        // busy connection, a timeout, an HTTP error) left nothing in the
+        // landscape: it is sent again, as a lost create is. Every landscape in
+        // these phases is this setup's own, so following the same websites
+        // into it again is safe. Before, the setup read the empty landscape on
+        // every run and never sent the follow (live since 13 Nov).
+        // QA 22 Nov 2026 (P31-02): a verify that still finds a reviewed
+        // website missing a day after RivalIQ said every one was followed is
+        // followed again, at most once a day, and the error names the website
+        // RivalIQ does not hold, so staff can act on it.
+        const refollow = e instanceof UnmatchedCompanies && !refollowed &&
+          (job.phase === "follow_requested" || (job.phase === "verify" && before === "verify" && stale));
+        if (refollow) {
+          await leased.save({ phase: "created", operation_token: null });
+          Object.assign(job, { phase: "created", operation_token: null });
+          refollowed = true;
+          moved();
+          continue;
+        }
         throw e;
       }
+      if (job.phase !== before) moved();
       if (job.phase === "verified") {
         await linkVerified(db, plan, hash, String(job.landscape_id));
         await leased.save({ phase: "complete" });
@@ -202,7 +273,8 @@ export async function resetTracking(db: Db, setId: string, missingLandscapeId: s
     const { error } = await db.from("competitor_sets").update({ rivaliq_landscape_id: null }).eq("id", setId).eq("rivaliq_landscape_id", missingLandscapeId);
     if (error) throw error;
   }
-  const { error } = await db.from("rivaliq_setup_jobs").delete().eq("set_id", setId).is("lease_id", null);
+  // QA 22 Nov 2026 (P31-05): a lease that ran out is free, as in advanceSetupOnServer.
+  const { error } = await db.from("rivaliq_setup_jobs").delete().eq("set_id", setId).or(leaseFree());
   if (error) throw error;
 }
 

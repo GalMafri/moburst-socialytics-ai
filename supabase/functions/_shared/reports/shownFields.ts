@@ -171,7 +171,8 @@ export function shownSocial(aiAnalysis: unknown, row: ShownInsightsRow | null | 
   const ownSummary = typeof perf.month_over_month_summary === "string" && perf.month_over_month_summary.trim() ? perf.month_over_month_summary : null;
   const summary = fields?.summary?.text ? word(fields.summary) : ownSummary ? { text: ownSummary, basedOn: "" } : null;
   const insights = fields?.insights?.length ? fields.insights.map(word) : own(strings(perf.key_insights));
-  const recommendations = fields?.recommendations ? fields.recommendations.map(word) : own(strings(perf.pillar_alignment?.recommendations));
+  // QA 22 Nov 2026 (P48-02): an answer with no recommendations ([] is truthy) leaves the report's own in place, as for insights.
+  const recommendations = fields?.recommendations?.length ? fields.recommendations.map(word) : own(strings(perf.pillar_alignment?.recommendations));
   const analysis = ai && fields
     ? {
       ...ai,
@@ -179,7 +180,7 @@ export function shownSocial(aiAnalysis: unknown, row: ShownInsightsRow | null | 
         ...perf,
         ...(fields.summary?.text ? { month_over_month_summary: fields.summary.text } : {}),
         ...(fields.insights?.length ? { key_insights: insights.map((i) => i.text) } : {}),
-        ...(fields.recommendations ? { pillar_alignment: { ...(perf.pillar_alignment ?? {}), recommendations: recommendations.map((r) => r.text) } } : {}),
+        ...(fields.recommendations?.length ? { pillar_alignment: { ...(perf.pillar_alignment ?? {}), recommendations: recommendations.map((r) => r.text) } } : {}),
       },
     }
     : ai;

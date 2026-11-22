@@ -92,8 +92,8 @@ describe("socialFacts", () => {
     rd[0].sprout_performance.top_posts = posts as never;
     const outliers = socialFacts(rd).filter((f) => f.kind === "outlier");
     expect(outliers.map((f) => f.sentence).sort()).toEqual([
-      "A LinkedIn image post got 400 engagements, 8.3x the platform's usual per post.",
-      "An Instagram video post got 90 engagements, 8.3x the platform's usual per post.",
+      "A LinkedIn image post got 400 engagements, 8.4x the platform's usual per post.",
+      "An Instagram video post got 90 engagements, 9x the platform's usual per post.",
     ]);
     for (const f of outliers) expect(f.sentence + f.basis).not.toMatch(/instagram media|company update|_/i);
   });
@@ -105,7 +105,7 @@ describe("socialFacts", () => {
       expect(`${f.sentence} ${f.basis}`).not.toMatch(/Sprout|Rival ?IQ|Apify|Gamma/i);
       expect(f.sources).toEqual(["sprout"]);
     }
-    expect(facts.find((f) => f.metric === "engagement_rate")!.sentence).toMatch(/^Engagement rate (rose|fell) /);
+    expect(facts.find((f) => f.metric === "engagement_rate")!.sentence).toMatch(/^Reported engagement rate (rose|fell) /);
   });
 
   it("numbers facts by score, then by a fixed key, and never past twenty", () => {

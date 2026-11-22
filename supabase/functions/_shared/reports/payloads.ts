@@ -150,6 +150,9 @@ export function splitBrandVoice(brandNotes: string | null | undefined): { voice:
 const splitList = (value: string | null | undefined, fallback: string[]): string[] =>
   value ? value.split(",").map((s) => s.trim()).filter(Boolean) : fallback;
 
+/** A read that failed, as an Error the run's retry reads (QA 22 Nov 2026, P47-01). */
+const readFailed = (what: string, error: { message?: string }) => new Error(`Could not read ${what}: ${error.message ?? "unknown error"}`);
+
 /** The monthly performance run. */
 export async function buildSocialPayload(args: {
   supabase: any;
@@ -161,11 +164,15 @@ export async function buildSocialPayload(args: {
   staggerSeconds?: number;
 }): Promise<Record<string, unknown>> {
   const { supabase, client, reportId, range } = args;
-  const { data: profiles } = await supabase
+  // QA 22 Nov 2026 (P47-01): every read's error is thrown, so the run is
+  // tried again. Ignored, a failed read went out as "nothing there": a client
+  // with no Sprout profile, a run with no competitors, no rejected suggestions.
+  const { data: profiles, error: profilesError } = await supabase
     .from("sprout_profiles")
     .select("*")
     .eq("client_id", client.id)
     .neq("is_active", false);
+  if (profilesError) throw readFailed("the client's Sprout profiles", profilesError);
   // The newest finished analysis that passed its checks. A held one is never
   // context (clients never see it), so the report reads the previous good one.
   const completeRuns = async (id?: string): Promise<Array<{ id: string; created_at: string; report_data: unknown }>> => {
@@ -179,16 +186,18 @@ export async function buildSocialPayload(args: {
   const pinned = args.competitiveReportId ? await completeRuns(args.competitiveReportId) : null;
   if (pinned && !pinned.length) throw new Error("The required competitive report is not complete for this client.");
   const latestCompetitive = (pinned ?? []).find(passed) ?? (await completeRuns()).find(passed) ?? null;
-  const { data: feedback } = await supabase
+  const { data: feedback, error: feedbackError } = await supabase
     .from("competitive_insight_feedback")
     .select("insight_key, verdict, gap_text, edited")
     .eq("client_id", client.id);
-  const { data: learnings } = await supabase
+  if (feedbackError) throw readFailed("the team's verdicts on suggestions", feedbackError);
+  const { data: learnings, error: learningsError } = await supabase
     .from("competitive_learnings")
     .select("kind, text")
     .eq("client_id", client.id)
     .order("created_at", { ascending: false })
     .limit(20);
+  if (learningsError) throw readFailed("what the team taught the analysis", learningsError);
 
   const competitiveInsights = await readShownInsights(supabase, "competitive_reports", latestCompetitive?.id);
   const { voice, notes } = splitBrandVoice(client.brand_notes);
@@ -244,23 +253,27 @@ export async function buildCompetitivePayload(args: {
   staggerSeconds?: number;
 }): Promise<Record<string, unknown>> {
   const { supabase, client, reportId, set, range } = args;
-  const { data: comps } = await supabase
+  // QA 22 Nov 2026 (P47-01): as in buildSocialPayload, a failed read is thrown for a retry, never sent as empty.
+  const { data: comps, error: compsError } = await supabase
     .from("competitors")
     .select("*, competitor_handles(*)")
     .eq("set_id", set.id)
     .eq("is_selected", true)
     .order("selected_rank");
-  const { data: down } = await supabase
+  if (compsError) throw readFailed("the selected competitors", compsError);
+  const { data: down, error: downError } = await supabase
     .from("competitive_insight_feedback")
     .select("gap_text, insight_key")
     .eq("client_id", client.id)
     .eq("verdict", "down");
-  const { data: learned } = await supabase
+  if (downError) throw readFailed("the rejected suggestions", downError);
+  const { data: learned, error: learnedError } = await supabase
     .from("competitive_learnings")
     .select("kind, text")
     .eq("client_id", client.id)
     .order("created_at", { ascending: false })
     .limit(20);
+  if (learnedError) throw readFailed("what the team taught the analysis", learnedError);
 
   const { data: ownProfiles, error: ownError } = await supabase.from("sprout_profiles")
     .select("sprout_profile_id,network_type,native_link,native_name,profile_name").eq("client_id", client.id).neq("is_active", false);

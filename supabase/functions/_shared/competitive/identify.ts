@@ -126,6 +126,11 @@ export async function proposeCompetitors(args: { anthropicKey: string; client: R
 // deno-lint-ignore no-explicit-any
 type Db = any;
 
+/** A company name as compared with another: lower case, letters and digits only, no legal suffix ("Bader Law, P.C." is "baderlaw"). */
+const nameKey = (name: unknown) => String(name ?? "").toLowerCase().replace(/\./g, "")
+  .replace(/[,\s]+(?:inc|llc|ltd|co|corp|corporation|company|pc|pllc|plc|llp|gmbh)\s*$/, "")
+  .replace(/[^\p{L}\p{N}]+/gu, "");
+
 /**
  * Identify and save a new draft set. Fewer than three proposals with a
  * website that answers leaves no draft (IdentifyError too_few).
@@ -134,7 +139,12 @@ type Db = any;
 export async function identifyCompetitors(db: Db, client: Record<string, any>, anthropicKey: string, opts: { generatedBy?: string | null; postsText?: string | null } = {}) {
   const siteText = client.website_url ? await fetchSiteText(client.website_url) : "";
   const suggestions = await proposeCompetitors({ anthropicKey, client, siteText, postsText: siteText ? "" : (opts.postsText ?? "").slice(0, 6000) });
-  const { verified: proposed, rejected } = await validateCompetitorWebsites(suggestions, client.website_url);
+  // QA 22 Nov 2026 (P30-05): the client is never its own competitor. The
+  // website check alone let it through for a client with no website on file,
+  // or a proposal on another of the client's domains.
+  const own = nameKey(client.name);
+  const others = own ? suggestions.filter((p) => nameKey(p.name) !== own) : suggestions;
+  const { verified: proposed, rejected } = await validateCompetitorWebsites(others, client.website_url);
   if (proposed.length < 3) {
     throw new IdentifyError("too_few", `Only ${proposed.length} proposed company websites could be checked. No new draft was created.`, rejected);
   }

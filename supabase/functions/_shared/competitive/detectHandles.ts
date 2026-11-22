@@ -125,6 +125,17 @@ export interface DetectResult {
 }
 
 const NO_WEBSITE = "No company website is on file.";
+const BAD_WEBSITE = "The website address on file is not a valid web address.";
+const LOOKUP_FAILED = "The profile lookup could not finish; it runs again later.";
+
+/** Whether a website address can be read at all ("acme .com" cannot). */
+function validWebsite(websiteUrl: string): boolean {
+  try {
+    return new URL(normalizeUrl(websiteUrl)).hostname.includes(".");
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Look up and save the profiles of these competitors, one after another
@@ -158,9 +169,25 @@ export async function detectCompetitorHandles(db: Db, competitors: DetectTarget[
       results.push({ competitor_id: comp.id, detected: [], status: "missing_website", warnings: [NO_WEBSITE] });
       continue;
     }
+    // QA 22 Nov 2026 (P30-02): an address that does not parse made the
+    // lookup throw after "running" was saved, so the row read "running" for
+    // good and the competitors after it were never looked up. It ends as
+    // failed with the reason, and any other throw ends this competitor alone.
+    if (!validWebsite(comp.website_url)) {
+      await saveStatus("failed", [BAD_WEBSITE]);
+      results.push({ competitor_id: comp.id, detected: [], status: "failed", warnings: [BAD_WEBSITE] });
+      continue;
+    }
     await saveStatus("running");
     const previousWriteErrors = writeErrors.length;
-    const discovery = await detectForSite(comp.website_url, comp.name);
+    let discovery: Awaited<ReturnType<typeof detectForSite>>;
+    try {
+      discovery = await detectForSite(comp.website_url, comp.name);
+    } catch {
+      await saveStatus("failed", [LOOKUP_FAILED]);
+      results.push({ competitor_id: comp.id, detected: [], status: "failed", warnings: [LOOKUP_FAILED] });
+      continue;
+    }
     const saved: string[] = [];
     for (const h of discovery.handles) {
       const k = `${comp.id}:${h.platform}`;

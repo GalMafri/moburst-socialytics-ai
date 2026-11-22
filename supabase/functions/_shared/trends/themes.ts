@@ -82,7 +82,8 @@ export function parseThemes(answerText: string, kept: KeptPost[]): { value: Them
   if (list.length < MIN_THEMES || list.length > MAX_THEMES) return { error: `There must be 3 to 6 themes; there are ${list.length}.` };
   const problems: string[] = [];
   const themes: Theme[] = list.map((t: Any) => {
-    const ids: string[] = Array.isArray(t?.post_ids) ? t.post_ids.map((x: unknown) => text(x)) : [];
+    // QA 22 Nov 2026 (P52-02): a post named twice in one theme is listed once.
+    const ids: string[] = Array.isArray(t?.post_ids) ? [...new Set<string>(t.post_ids.map((x: unknown) => text(x)))] : [];
     const posts = ids.map((id) => kept[Number(id.replace(/^K/, "")) - 1]);
     if (!ids.length || posts.some((p, i) => !p || !/^K\d+$/.test(ids[i]))) problems.push(`The theme "${text(t?.title)}" names posts that were not kept: ${ids.join(", ") || "none"}.`);
     if (!text(t?.title) || !text(t?.happening) || !text(t?.why_it_matters) || !text(t?.angle)) problems.push(`A theme is missing its title, what is happening, why it matters or the angle.`);
@@ -92,5 +93,14 @@ export function parseThemes(answerText: string, kept: KeptPost[]): { value: Them
       platforms: [...new Set(found.map((p) => p.platform))] as TrendPlatform[], post_urls: found.map((p) => p.url),
     };
   });
+  // QA 22 Nov 2026 (P52-02): two themes whose titles match as a dismissal
+  // compares them (themeKey) are one trend shown twice, and dismissing one
+  // card left its twin on screen. The answer is asked for again.
+  const seen = new Set<string>();
+  for (const t of themes) {
+    const key = themeKey(t.title);
+    if (key && seen.has(key)) problems.push(`Two themes have the title "${t.title}"; each theme is one trend, written once.`);
+    seen.add(key);
+  }
   return problems.length ? { error: problems.join(" ") } : { value: themes };
 }

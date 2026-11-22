@@ -45,7 +45,9 @@ const day = (d: Date) => d.toISOString().slice(0, 10);
 function dayRange(ctx: RouteContext): { start: string; end: string } {
   const endRaw = q(ctx, "end"), startRaw = q(ctx, "start");
   const re = /^\d{4}-\d{2}-\d{2}$/;
-  if ((endRaw && !re.test(endRaw)) || (startRaw && !re.test(startRaw))) throw invalid("start and end must be yyyy-mm-dd");
+  // QA 22 Nov 2026 (P48-03): the shape alone let 2026-13-01 through to a RangeError, answered as a server failure.
+  const realDay = (x: string) => re.test(x) && !Number.isNaN(Date.parse(`${x}T00:00:00Z`)) && day(new Date(`${x}T00:00:00Z`)) === x;
+  if ((endRaw && !realDay(endRaw)) || (startRaw && !realDay(startRaw))) throw invalid("start and end must be yyyy-mm-dd");
   const end = endRaw ?? day(new Date());
   const start = startRaw ?? day(new Date(new Date(end).getTime() - 29 * 86_400_000));
   if (start > end) throw invalid("start must be on or before end");

@@ -28,6 +28,7 @@ import { normalizedCompetitiveMetrics } from "../competitive/reportMetrics.ts";
 import { sproutEngagements } from "./socialFigures.ts";
 import { median } from "../calendar/evidence.ts";
 import { mediaKind, mediaLabel, postType } from "./mediaKind.ts";
+import { SPROUT_RATE_LABEL } from "./rateNames.ts";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -85,8 +86,10 @@ export const FALLBACK_CHANGES = 5;
 export const OUTLIER_MULTIPLE = 2;
 const OUTLIERS = 3;
 
+// QA 22 Nov 2026 (P47-04): the client's own rate is named as the screens name
+// it (rateNames.ts, owner's decision of 20 Oct), never the bare "engagement rate".
 const METRIC_WORDS: Record<string, string> = {
-  engagements: "engagements", impressions: "impressions", views: "video views", engagement_rate: "engagement rate", posts: "posts",
+  engagements: "engagements", impressions: "impressions", views: "video views", engagement_rate: SPROUT_RATE_LABEL.toLowerCase(), posts: "posts",
   cadence: "posts a week", compared_rate: "engagement rate compared on likes, comments and shares", engagements_per_post: "engagements per post",
   impressions_per_post: "impressions per post", share_of_voice: "share of voice", followers: "followers",
 };
@@ -148,17 +151,17 @@ type Draft = Omit<Fact, "id">;
 const subject = (platform: string, metric: string) => (platform === "all" ? cap(METRIC_WORDS[metric] ?? metric) : `${platformName(platform)} ${METRIC_WORDS[metric] ?? metric}`);
 
 /** A change in words: "Impressions rose 26.5% to 12,400." A rate's change is in points. */
-function changeFact(platform: string, metric: string, unit: FactUnit, value: number, previous: number, period: Period | undefined, sources: FactSource[], company?: string): Draft | null {
-  const words = periodWords(period);
+function changeFact(platform: string, metric: string, unit: FactUnit, value: number, previous: number, period: Period | undefined, sources: FactSource[], company?: string, words = periodWords(period)): Draft | null {
   const who = company ? `${company}'s ${platform === "all" ? "" : `${platformName(platform)} `}${METRIC_WORDS[metric] ?? metric}` : subject(platform, metric);
   if (unit === "percent") {
     const change = round2(value - previous);
     if (change === 0) return null;
+    const points = `${round2(Math.abs(change))} ${Math.abs(change) === 1 ? "point" : "points"}`;
     return {
       key: `change|${platform}|${metric}|${company ?? ""}`, kind: "change", platform, metric, ...(company ? { company } : {}), unit, value, previous, change, percent: change,
       score: 0, numbers: [value, previous, Math.abs(change)], sources,
-      sentence: `${cap(who)} ${change > 0 ? "rose" : "fell"} ${round2(Math.abs(change))} points to ${fmt(value, unit)}.`,
-      basis: `${cap(who)} ${fmt(value, unit)} in ${words.now} against ${fmt(previous, unit)} in ${words.before}, ${change > 0 ? "+" : "-"}${round2(Math.abs(change))} points`,
+      sentence: `${cap(who)} ${change > 0 ? "rose" : "fell"} ${points} to ${fmt(value, unit)}.`,
+      basis: `${cap(who)} ${fmt(value, unit)} in ${words.now} against ${fmt(previous, unit)} in ${words.before}, ${change > 0 ? "+" : "-"}${points}`,
     };
   }
   const percent = percentChange(value, previous);
@@ -273,18 +276,22 @@ export function socialFacts(reportData: Any, opts: FactOptions = {}): Fact[] {
     const total = fig.get(`${net}|current|engagements`), count = fig.get(`${net}|posts`);
     if (!net || !valid(value) || !valid(total) || !valid(count) || count <= 0) continue;
     const usual = round1(total / count);
-    const multiple = round1(ratio(value, usual));
-    if (multiple < OUTLIER_MULTIPLE) continue;
+    // QA 22 Nov 2026 (P47-03): the smoothed ratio decides and scores an
+    // outlier; the multiple written is the one its own figures hold (10
+    // engagements against 2 per post is 5x), not the smoothed 3.7x.
+    const smoothed = round1(ratio(value, usual));
+    if (smoothed < OUTLIER_MULTIPLE) continue;
+    const multiple = round1(value / usual);
     const format = formatOf(p, link);
     const post = postWords(net, format);
     outliers.push({
       key: `outlier|${net}|engagements|${link}`, kind: "outlier", platform: net, metric: "engagements", unit: "count", value, usual, multiple, link, format,
-      score: multiple / 2, numbers: [value, usual, multiple], sources: ["sprout"],
+      score: smoothed / 2, numbers: [value, usual, multiple], sources: ["sprout"],
       sentence: `${cap(article(post))} ${post} got ${fmt(value, "count")} engagements, ${fmtX(multiple)} the platform's usual per post.`,
       basis: `${cap(article(post))} ${post}: ${fmt(value, "count")} engagements against ${fmt(usual, "count")} per post on ${platformName(net)} this period`,
     });
   }
-  drafts.push(...outliers.sort((a, b) => (b.multiple ?? 0) - (a.multiple ?? 0) || a.key.localeCompare(b.key)).slice(0, OUTLIERS));
+  drafts.push(...outliers.sort((a, b) => b.score - a.score || a.key.localeCompare(b.key)).slice(0, OUTLIERS));
   return numberFacts(drafts);
 }
 
@@ -309,9 +316,14 @@ export function competitiveChanges(reportData: Any, period?: Period): Draft[] {
   if (!client) return [];
   const fig = byKey(competitiveFigures(reportData || {}, "shown"));
   const out: Draft[] = [];
+  // QA 22 Nov 2026 (P47-06): a competitive run compares with the window of
+  // equal length before it (pipelines/competitive/nodes.ts previousPeriodOf),
+  // which is not the calendar month before (29 Jan to 28 Feb for March), so
+  // that window is never named as a month.
+  const words = { now: periodWords(period).now, before: "the period before" };
   for (const metric of ["followers", "engagements", "impressions", "posts"]) {
     const cur = fig.get(`${client}|all|${metric}|current`), prev = fig.get(`${client}|all|${metric}|previous`);
-    if (valid(cur) && valid(prev)) { const d = changeFact("all", metric, "count", cur, prev, period, ["sprout"], client); if (d) out.push(d); }
+    if (valid(cur) && valid(prev)) { const d = changeFact("all", metric, "count", cur, prev, period, ["sprout"], client, words); if (d) out.push(d); }
   }
   return out;
 }
@@ -360,20 +372,22 @@ export function competitiveFacts(reportData: Any, opts: FactOptions = {}): Fact[
         const value = Number(p?.engagement);
         const link = String(p?.url || "");
         if (!valid(value) || !link) continue;
-        const multiple = round1(ratio(value, round1(usual)));
-        if (multiple < OUTLIER_MULTIPLE) continue;
+        // QA 22 Nov 2026 (P47-03): as for the monthly report, the smoothed ratio decides; the written multiple is value over usual.
+        const smoothed = round1(ratio(value, round1(usual)));
+        if (smoothed < OUTLIER_MULTIPLE) continue;
+        const multiple = round1(value / round1(usual));
         const format = formatOf(p, link);
         const net = channel === "x" ? "twitter" : channel;
         const post = postWords(net, format);
         outliers.push({
           key: `outlier|${net}|engagements|${link}`, kind: "outlier", platform: net, metric: "engagements", company, unit: "count", value, usual: round1(usual), multiple, link, format,
-          score: multiple / 2, numbers: [value, round1(usual), multiple], sources: [company === client ? "sprout" : "rivaliq"],
+          score: smoothed / 2, numbers: [value, round1(usual), multiple], sources: [company === client ? "sprout" : "rivaliq"],
           sentence: `${cap(article(post))} ${post} by ${company} got ${fmt(value, "count")} engagements, ${fmtX(multiple)} its usual per post.`,
           basis: `${company}'s ${post}: ${fmt(value, "count")} engagements against ${fmt(usual, "count")} per post on ${platformName(net)}`,
         });
       }
     }
   }
-  drafts.push(...outliers.sort((a, b) => (b.multiple ?? 0) - (a.multiple ?? 0) || a.key.localeCompare(b.key)).slice(0, OUTLIERS));
+  drafts.push(...outliers.sort((a, b) => b.score - a.score || a.key.localeCompare(b.key)).slice(0, OUTLIERS));
   return numberFacts(drafts);
 }
