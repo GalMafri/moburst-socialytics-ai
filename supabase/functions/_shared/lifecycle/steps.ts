@@ -1467,8 +1467,18 @@ export const STEPS: Record<string, StepDef> = {
         }
       }
       const links = [...new Set([...stored, ...fresh])].sort();
-      const { data: assignedRows, error } = await db.from("sprout_profiles").select("client_id, sprout_profile_id, network_type, is_active, profile_name, native_name, assigned_at, parked_at, parked_reason");
+      // The rows this needs, never the whole table in one read (PostgREST answers 1,000 rows at most): the
+      // client's own, and who holds each of the Sprout customer's profiles (QA 22 Nov 2026, P39-05).
+      const columns = "client_id, sprout_profile_id, network_type, is_active, profile_name, native_name, assigned_at, parked_at, parked_reason";
+      const { data: ownAssigned, error } = await db.from("sprout_profiles").select(columns).eq("client_id", client.id);
       if (error) throw new Error(`Could not read the assigned accounts: ${error.message}`);
+      const assignedRows: ClientRow[] = [...(ownAssigned ?? [])];
+      const profileIds = [...new Set(profiles.map((p) => Number(p.id)).filter(Number.isFinite))];
+      for (let i = 0; i < profileIds.length; i += 200) {
+        const { data: held, error: heldError } = await db.from("sprout_profiles").select(columns).in("sprout_profile_id", profileIds.slice(i, i + 200)).neq("client_id", client.id);
+        if (heldError) throw new Error(`Could not read the assigned accounts: ${heldError.message}`);
+        assignedRows.push(...(held ?? []));
+      }
       const assigned = new Map<string, string[]>();
       for (const r of assignedRows ?? []) {
         const id = String(r.sprout_profile_id);
