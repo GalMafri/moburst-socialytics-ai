@@ -42,6 +42,33 @@ const RULES: Record<string, NetworkRule> = {
   threads: { name: "Threads", maxChars: 500, maxMedia: 10 },
 };
 
+// Code points X counts as one; every other character (CJK, emoji) counts as
+// two. twitter-text v3 config ("weightedLength", ranges of weight 100).
+const X_LIGHT: Array<[number, number]> = [[0, 4351], [8192, 8205], [8208, 8223], [8242, 8247]];
+const X_LINK = /https?:\/\/\S+/gi;
+
+/**
+ * The length X gives the copy: each link counts as 23 (X shortens every link
+ * to t.co), and a character outside X's light ranges counts as two, an emoji
+ * sequence as one such character. QA 22 Nov 2026: the raw length refused X
+ * posts whose copy fit but whose link was long.
+ */
+export function xLength(text: string): number {
+  let n = 0;
+  const rest = text.replace(X_LINK, () => {
+    n += 23;
+    return "";
+  });
+  const graphemes = typeof Intl !== "undefined" && "Segmenter" in Intl
+    ? [...new Intl.Segmenter("en", { granularity: "grapheme" }).segment(rest)].map((s) => s.segment)
+    : [...rest];
+  for (const g of graphemes) {
+    const cp = g.codePointAt(0) ?? 0;
+    n += X_LIGHT.some(([a, b]) => cp >= a && cp <= b) ? 1 : 2;
+  }
+  return n;
+}
+
 /** One key per network, from a Sprout network type or a platform name. */
 export function networkKey(value: string | null | undefined): string {
   const v = String(value ?? "").toLowerCase();
@@ -86,7 +113,7 @@ export function publishProblems(input: PublishInput): string[] {
     else if (at <= (input.now ?? new Date()).getTime() + 60_000) out.push("The time has already passed.");
   }
   if (!rule) return out;
-  const chars = [...text].length;
+  const chars = rule === RULES.x ? xLength(text) : [...text].length;
   if (chars > rule.maxChars) out.push(`The copy is ${count(chars)} characters. ${rule.name} takes up to ${count(rule.maxChars)}.`);
   const tags = (text.match(/#[\p{L}\p{N}_]+/gu) ?? []).length;
   if (rule.maxHashtags && tags > rule.maxHashtags) out.push(`The copy has ${tags} hashtags. ${rule.name} takes up to ${rule.maxHashtags}.`);
