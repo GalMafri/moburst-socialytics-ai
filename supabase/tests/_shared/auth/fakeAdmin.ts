@@ -33,6 +33,7 @@ export function fakeAdmin(opts: FakeAdminOptions = {}) {
     },
     from: (table: string) => ({
       upsert: async (row: Row) => { if (table === "profiles") { calls.profiles.push(row); return { error: opts.failProfile ? { message: "duplicate key (secret detail)" } : null }; } return { error: null }; },
+      update: (row: Row) => ({ eq: async (column: string, value: unknown) => { if (table === "profiles") { calls.profiles.push({ ...row, [column]: value }); return { error: opts.failProfile ? { message: "duplicate key (secret detail)" } : null }; } return { error: null }; } }),
       select: () => ({ not: async () => ({ data: opts.clients ?? [], error: null }) }),
     }),
     rpc: async (name: string, args: Row) => {

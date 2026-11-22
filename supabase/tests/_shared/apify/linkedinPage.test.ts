@@ -88,4 +88,16 @@ describe("readLinkedInPage", () => {
     expect(await readLinkedInPage(apify, URL)).toEqual({ state: "failed", run_id: "r1", status: "FAILED" });
     expect(calls.some((c) => c.startsWith("items"))).toBe(false);
   });
+
+  // QA 22 Nov 2026 (P24-05): a run that found no page read the same as a page with nothing on it.
+  it("answers a run whose dataset holds no item for the page, or only an error item, as failed", async () => {
+    for (const items of [[], [{ error: "Company not found" }], [{ ...ITEM, universalName: "another-co" }]]) {
+      const { apify } = fake([run("SUCCEEDED")], items);
+      expect(await readLinkedInPage(apify, URL, { runId: "r1" })).toEqual({ state: "failed", run_id: "r1", status: "EMPTY" });
+    }
+  });
+  it("still answers a page that was read and has nothing on it as read, with no page", async () => {
+    const { apify } = fake([run("SUCCEEDED")], [{ universalName: "kitcaster-by-moburst", name: "Kitcaster" }]);
+    expect(await readLinkedInPage(apify, URL, { runId: "r1" })).toMatchObject({ state: "read", page: null });
+  });
 });

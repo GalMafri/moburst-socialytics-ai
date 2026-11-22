@@ -22,7 +22,11 @@ export const Logout = () => {
       const destination = portalUrl();
       try {
         clearHubToken();
-        await supabase.auth.signOut();
+        // QA 22 Nov 2026 (P20-5): a global sign-out whose request does not get
+        // through keeps the stored session, and the next visit would resume it.
+        // The local sign-out always removes it from this device.
+        const { error } = await supabase.auth.signOut().catch((e: unknown) => ({ error: e }));
+        if (error) await supabase.auth.signOut({ scope: "local" }).catch(() => undefined);
       } finally {
         window.location.replace(destination);
       }

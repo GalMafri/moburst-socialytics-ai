@@ -35,8 +35,21 @@ function isPrivateIPv4(host: string): boolean {
 function isPrivateIPv6(host: string): boolean {
   const h = host.replace(/^\[|\]$/g, "").toLowerCase();
   if (h === "::1" || h === "::") return true; // loopback / unspecified
-  if (h.startsWith("fe80")) return true; // link-local
+  // QA 22 Nov 2026 (P41-02): link-local is all of fe80::/10 (fe80 to febf),
+  // and the retired site-local fec0::/10 still routes inside some networks.
+  if (/^fe[89a-f]/.test(h)) return true;
   if (/^f[cd]/.test(h)) return true; // unique local fc00::/7
+  // IPv4-compatible ::/96 (::7f00:1 is 127.0.0.1): retired, never a public host.
+  if (/^::[0-9a-f]{1,4}(:[0-9a-f]{1,4})?$/.test(h)) return true;
+  // NAT64 64:ff9b::/96 carries an IPv4 address in its last two groups; the
+  // local-use 64:ff9b:1::/48 is never public.
+  if (h.startsWith("64:ff9b:1:")) return true;
+  const nat64 = h.match(/^64:ff9b::([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (nat64) {
+    const hi = parseInt(nat64[1], 16);
+    const lo = parseInt(nat64[2], 16);
+    return isPrivateIPv4(`${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`);
+  }
 
   // IPv4-mapped. The URL parser rewrites ::ffff:127.0.0.1 into hextets as
   // ::ffff:7f00:1, so the dotted form never survives to be matched: the two
@@ -66,7 +79,10 @@ export function isPubliclyFetchable(raw: string | null | undefined): boolean {
   }
   if (u.protocol !== "http:" && u.protocol !== "https:") return false;
 
-  const host = u.hostname.toLowerCase();
+  // QA 22 Nov 2026 (P41-02): a fully qualified name keeps its trailing dot in
+  // URL.hostname ("localhost.", "metadata.google.internal.") and resolves to
+  // the same place, so the dot comes off before any name is compared.
+  const host = u.hostname.toLowerCase().replace(/\.$/, "");
   if (!host) return false;
   if (BLOCKED_HOSTNAMES.has(host)) return false;
   if (host.endsWith(".localhost") || host.endsWith(".internal") || host.endsWith(".local")) return false;

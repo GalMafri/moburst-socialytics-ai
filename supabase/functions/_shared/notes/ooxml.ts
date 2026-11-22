@@ -12,8 +12,15 @@ import { strFromU8, unzipSync } from "npm:fflate@0.8.3";
 /** A part larger than this is not read: a zip that unpacks to far more than any note. */
 export const MAX_PART_BYTES = 64 * 1024 * 1024;
 
-/** A tag (close slash, name, attributes with quoted values, self-closing slash) or a run of text. */
-export const TOKENS = /<(\/?)([\w.-]+(?::[\w.-]+)?)((?:[^>"']|"[^"]*"|'[^']*')*?)(\/?)>|([^<]+)/g;
+/**
+ * A tag (close slash, name, attributes with quoted values, self-closing slash) or a run of text.
+ *
+ * QA 22 Nov 2026 (P41-03): neither the attributes nor a quoted value may run
+ * past a "<" (XML never allows one there). Before, a tag with no ">" scanned
+ * on to the end of the part, once for every "<", so a few KB of zipped
+ * malformed XML kept the notes worker busy for minutes.
+ */
+export const TOKENS = /<(\/?)([\w.-]+(?::[\w.-]+)?)((?:[^<>"']|"[^"<]*"|'[^'<]*')*?)(\/?)>|([^<]+)/g;
 
 const ENTITIES: Record<string, string> = { lt: "<", gt: ">", amp: "&", quot: '"', apos: "'" };
 

@@ -48,6 +48,19 @@ export interface NotesDeps {
 /** The points of one part, and room for the model to think first (anthropicReply.ts, roomFor). */
 export const READ_MAX_TOKENS = roomFor(6000);
 
+/**
+ * Runs that may start reading one note before it is given up.
+ *
+ * QA 22 Nov 2026 (P41-01): notes are read oldest first, so a note the model
+ * never reads (declined, an answer that is not the reading, a 400, a run the
+ * wall clock stops) was picked again on every run and every later note of
+ * the client stayed Reading for good. A try is counted on the note before
+ * the call, so a run that never comes back counts too; past this many the
+ * note is finished with the reason kept and the next note is read. Six runs
+ * span the job's tries and the next day's, longer than a provider outage.
+ */
+export const NOTE_READ_MAX_TRIES = 6;
+
 /** The note a rewrite with no person carries (section 9). */
 export const rewriteNote = (brand: string) => `Follow what ${brand} told the team in its newest notes.`;
 
@@ -82,7 +95,7 @@ async function must<T = unknown>(p: PromiseLike<{ data?: T; error: { message: st
 interface Client { id: string; name: string; timezone: string | null; primary_platforms: unknown }
 interface WaitingNote {
   id: string; kind: string; file_path: string | null; file_type: NoteFileType | null; text: string | null; parts_done: number;
-  note_date: string; date_set_by: string; input_tokens: number; output_tokens: number;
+  note_date: string; date_set_by: string; input_tokens: number; output_tokens: number; read_tries: number | null;
 }
 
 export async function runNotesRead(admin: Db, job: NotesJob, deps: NotesDeps, now = new Date()): Promise<NotesJobOutcome> {
@@ -91,7 +104,7 @@ export async function runNotesRead(admin: Db, job: NotesJob, deps: NotesDeps, no
     if (!client) return { status: "skipped", reason: "The client no longer exists." };
     const today = todayIn(String(client.timezone || "UTC"), now);
     const nextNote = async () => (await must<WaitingNote[] | null>(admin.from("client_notes")
-      .select("id, kind, file_path, file_type, text, parts_done, note_date, date_set_by, input_tokens, output_tokens")
+      .select("id, kind, file_path, file_type, text, parts_done, note_date, date_set_by, input_tokens, output_tokens, read_tries")
       .eq("client_id", client.id).eq("state", "reading").order("created_at", { ascending: true }).order("id", { ascending: true }).limit(1), "Could not read the waiting notes"))?.[0];
     const note = await nextNote();
     if (!note) {
@@ -100,6 +113,16 @@ export async function runNotesRead(admin: Db, job: NotesJob, deps: NotesDeps, no
       if (await nextNote()) return { status: "queued", available_at: now.toISOString(), resetAttempts: true, result: { rewrites } };
       return { status: "done", result: { rewrites } };
     }
+    const tries = Number(note.read_tries) || 0;
+    if (tries >= NOTE_READ_MAX_TRIES) {
+      const why = note.parts_done > 0
+        ? `The rest of the note could not be read after ${NOTE_READ_MAX_TRIES} tries.`
+        : `The note could not be read after ${NOTE_READ_MAX_TRIES} tries.`;
+      console.warn(`[notes] ${note.id}: given up (${why})`);
+      const state = await finishNote(admin, note.id, { unread_reason: why }, now);
+      return { status: "queued", available_at: now.toISOString(), resetAttempts: true, result: { note_id: note.id, state, why } };
+    }
+    await must(admin.from("client_notes").update({ read_tries: tries + 1 }).eq("id", note.id), "Could not count the try");
     const read = await readOnePart(admin, client, note, deps, now, today);
     return { status: "queued", available_at: now.toISOString(), resetAttempts: true, result: { note_id: note.id, ...read } };
   } catch (e) {
@@ -148,8 +171,10 @@ async function finishNote(admin: Db, noteId: string, patch: Record<string, unkno
 async function readOnePart(admin: Db, client: Client, note: WaitingNote, deps: NotesDeps, now: Date, today: string): Promise<Record<string, unknown>> {
   const source = await noteSource(admin, note, deps);
   if (source.kind === "nothing") {
-    console.log(`[notes] ${note.id}: nothing to read (${source.why})`);
-    return { state: await finishNote(admin, note.id, {}, now), why: source.why };
+    console.log(`[notes] ${note.id}: nothing to read (${source.why}${source.detail ? ` ${source.detail}` : ""})`);
+    // QA 22 Nov 2026 (P41-06): the reason is kept on the note, so a file that
+    // could not be opened does not look read and empty on the screen.
+    return { state: await finishNote(admin, note.id, { unread_reason: source.why, read_tries: 0 }, now), why: source.why };
   }
 
   const parts = source.kind === "text" ? splitParts(source.text) : [null];
@@ -213,7 +238,8 @@ async function readOnePart(admin: Db, client: Client, note: WaitingNote, deps: N
   if (index === 1 && reading.noteDate && note.date_set_by !== "person" && reading.noteDate !== note.note_date) {
     await must(admin.from("client_notes").update({ note_date: reading.noteDate }).eq("id", note.id).eq("date_set_by", "app"), "Could not date the note");
   }
-  const patch = { ...tokens, parts_done: index };
+  // A part read: the tries start again for the next part.
+  const patch = { ...tokens, parts_done: index, read_tries: 0 };
   if (index < parts.length) {
     await must(admin.from("client_notes").update({ ...patch, updated_at: now.toISOString() }).eq("id", note.id), "Could not record the part");
     return { part: index, parts: parts.length, points: reading.points.length };

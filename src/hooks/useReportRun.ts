@@ -76,7 +76,11 @@ export function runView(request: RequestRow | null, running: RunningRow | null, 
 
 export function useReportRun(clientId: string | undefined, kind: ReportRunKind) {
   const table = kind === "competitive" ? "competitive_reports" : "reports";
-  const watched = useRef(false);
+  // QA 22 Nov 2026 (P21-03): the request this page watched, by its job. A
+  // plain "watched" flag was set by any running report, scheduled ones too,
+  // so when a scheduled run finished the page called the newest manual
+  // request (perhaps days old) ready and opened that older report.
+  const watchedJob = useRef<string | null>(null);
   const [sending, setSending] = useState(false);
   const [notStarted, setNotStarted] = useState(false);
 
@@ -104,33 +108,37 @@ export function useReportRun(clientId: string | undefined, kind: ReportRunKind) 
     },
   });
 
+  const request = query.data?.request ?? null;
   const view = sending
     ? ({ state: "starting", requestedAt: new Date().toISOString(), range: null } as ReportRunView)
-    : runView(query.data?.request ?? null, query.data?.running ?? null, watched.current, kind);
+    : runView(request, query.data?.running ?? null, !!request && request.job_id === watchedJob.current, kind);
+  const openJob = request?.open ? request.job_id : null;
   useEffect(() => {
-    if (view.state === "starting" || view.state === "running" || view.state === "again" || view.state === "waiting") watched.current = true;
-  }, [view.state]);
+    if (openJob) watchedJob.current = openJob;
+  }, [openJob]);
 
   /** Ask for a run. Resolves true once the server has it. */
   const start = useCallback(async (body: Record<string, unknown>) => {
     if (!clientId) return false;
     setSending(true);
     setNotStarted(false);
-    watched.current = true;
     const reply = await sendQuietly(() => supabase.functions.invoke("run-report", { body: { client_id: clientId, kind, ...body } }), {
       again: (e) => invokeResendable(e, { idempotent: true }),
       waits: SEND_WAITS_MS,
     });
     const ok = !reply.error && !(reply.data as { error?: unknown } | null)?.error;
     if (!ok) console.warn("[report run] the request was not taken", reply.error ?? (reply.data as { error?: unknown } | null)?.error);
-    await query.refetch();
+    const after = await query.refetch();
+    // The request just asked for is the newest one (run-report answers an open one once).
+    const asked = (after.data as { request: RequestRow | null } | undefined)?.request;
+    if (ok && asked) watchedJob.current = asked.job_id;
     setSending(false);
     setNotStarted(!ok);
     return ok;
   }, [clientId, kind, query]);
 
   /** Back to a fresh form after a finished run. */
-  const reset = useCallback(() => { watched.current = false; setNotStarted(false); void query.refetch(); }, [query]);
+  const reset = useCallback(() => { watchedJob.current = null; setNotStarted(false); void query.refetch(); }, [query]);
 
   return { view, start, reset, sending, notStarted, isLoading: query.isLoading, isError: query.isError };
 }

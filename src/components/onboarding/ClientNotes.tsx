@@ -30,7 +30,7 @@ import { invokeResendable, sendQuietly, uploadQuietly } from "@/lib/quietSend";
 import { formatDate, noteAddedLine, noteReadLine, notePointKindName, noteStateLine, platformName } from "@/lib/display";
 import {
   noteFileType, pointStates, pointsInUse, readNoteRows, selectForPrompt, todayIn,
-  NOTE_FILE_MAX_BYTES, NOTE_FILES, NOTE_FILES_AT_ONCE, NOTE_TEXT_MAX, NOTES_BUCKET, POINT_KINDS,
+  NOTE_FILE_MAX_BYTES, NOTE_SCREEN_COLUMNS, NOTE_FILES, NOTE_FILES_AT_ONCE, NOTE_TEXT_MAX, NOTES_BUCKET, POINT_KINDS,
   type DatedPoint, type PointState,
 } from "../../../supabase/functions/_shared/notes/notes.ts";
 import { NOTE_READ_MAX_CHARS } from "../../../supabase/functions/_shared/notes/read.ts";
@@ -45,6 +45,8 @@ interface NoteItem {
   created_at: string;
   /** claude when a person saved it from Claude. */
   source?: string | null;
+  /** Why the note was finished without being read, in plain words; null when it was read. */
+  unread_reason?: string | null;
 }
 
 const ACCEPT = Object.keys(NOTE_FILES).map((ext) => `.${ext}`).join(",");
@@ -113,7 +115,7 @@ export function ClientNotes({ clientId, clientName, brandNotes, timeZone }: {
 
   const { data, isError, error, refetch } = useQuery({
     queryKey,
-    queryFn: () => readNoteRows(supabase, clientId),
+    queryFn: () => readNoteRows(supabase, clientId, NOTE_SCREEN_COLUMNS),
     // A note being read is checked again until it is read.
     refetchInterval: (query) => (query.state.data?.notes.some((n) => n.state === "reading") ? 10_000 : false),
   });
@@ -299,7 +301,9 @@ export function ClientNotes({ clientId, clientName, brandNotes, timeZone }: {
                           {note.title}
                         </button>
                         <p className="t-label">{noteAddedLine(note, zone)}</p>
-                        <p className="t-secondary">{noteStateLine(note.state, counted)}</p>
+                        {/* QA 22 Nov 2026 (P41-06): a file that could not be opened says so, rather than looking read and empty. */}
+                        <p className="t-secondary">{note.unread_reason && note.state === "nothing" ? "Not read" : noteStateLine(note.state, counted)}</p>
+                        {note.unread_reason && note.state !== "reading" && <p className="t-label">{note.unread_reason}</p>}
                         {readLine && <p className="t-label">{readLine}</p>}
                       </div>
                       <Input type="date" key={note.note_date} aria-label={`Date of ${note.title}`} className="w-auto" defaultValue={note.note_date} max={tomorrowOf(today)}

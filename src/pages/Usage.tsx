@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Loading } from "@/components/ui/loading";
 import { LoadRetry } from "@/components/ui/load-error";
@@ -113,6 +113,22 @@ function Tile({ label, value, hint, icon: Icon, tone }: { label: string; value: 
   );
 }
 
+/**
+ * A section drawn only from a read that answered. QA 22 Nov 2026 (P21-06):
+ * `data ?? []` turned a read that did not answer into "nothing recorded",
+ * "No activity yet" and "0 of 0 actions"; until the read answers the section
+ * loads, and a failed read is tried again on its own (LoadRetry).
+ */
+function Answered<T>({ query, context, children }: {
+  query: { data: T | undefined; isError: boolean; error: unknown; refetch: () => unknown };
+  context: string;
+  children: (data: T) => ReactNode;
+}) {
+  if (query.isError) return <LoadRetry context={context} error={query.error} onRetry={() => void query.refetch()} />;
+  if (query.data === undefined) return <Loading label="Loading" />;
+  return <>{children(query.data)}</>;
+}
+
 export default function Usage() {
   const [selected, setSelected] = useState<{ email: string; name: string | null } | null>(null);
   const users = useQuery({
@@ -131,6 +147,8 @@ export default function Usage() {
       if (error) throw error;
       return (data ?? []) as unknown as TrendRow[];
     },
+    // The "Did not finish" tile reads it on every tab, so it is read again on its own (QA 22 Nov 2026, P21-06).
+    refetchInterval: (query) => (query.state.status === "error" ? 30_000 : false),
   });
 
 
@@ -221,7 +239,12 @@ export default function Usage() {
             tone={summary.idle > summary.producing ? "warn" : undefined}
           />
           {/* Internal health, admins only: the same rows as the activity chart. */}
-          <Tile label="Did not finish" value={activity.failures} hint={`of ${activity.actions} actions, all time`} icon={AlertCircle} />
+          <Tile
+            label="Did not finish"
+            value={trend.data ? activity.failures : "…"}
+            hint={trend.data ? `of ${activity.actions} actions, all time` : "Reading the activity"}
+            icon={AlertCircle}
+          />
         </StatGrid>
 
         <Tabs defaultValue="people" className="space-y-section">
@@ -239,7 +262,9 @@ export default function Usage() {
                 <CardTitle className="t-h3">Activity over time</CardTitle>
               </CardHeader>
               <CardContent>
-                {trend.data && trend.data.length > 0 ? (
+                {trend.data === undefined ? (
+                  <Answered query={trend} context="usage trend">{() => null}</Answered>
+                ) : trend.data.length > 0 ? (
                   <div className="h-64">
                     <ResponsiveContainer width="100%" height="100%">
                       <AreaChart data={trend.data} margin={{ top: 8, right: 8, bottom: 0, left: -20 }}>
@@ -316,30 +341,46 @@ export default function Usage() {
 
           <TabsContent value="behaviour" className="space-y-section">
             <div className="grid gap-section lg:grid-cols-2">
-              <FunnelCard rows={(funnel.data ?? []) as FunnelRow[]} windowDays={WINDOW_DAYS} />
-              <MetricsCard
-                title="Draft quality and trust"
-                note="Edit distance is how much of the generated draft the user rewrote. 0% means it shipped verbatim, above 50% means they effectively started over. Rising regenerations per draft is the earliest signal that drafts have stopped being useful."
-                rows={(ai.data ?? []) as MetricRow[]}
-                windowDays={WINDOW_DAYS}
-              />
-              <MetricsCard
-                title="Is the output read?"
-                note="Read rate compares distinct calendars opened against calendars that completed in the same days. A low number means you are generating content nobody reviews."
-                rows={(reading.data ?? []) as MetricRow[]}
-                windowDays={WINDOW_DAYS}
-              />
-              <MetricsCard
-                title="Session quality"
-                note="A dead-end session is one where somebody looked around and did nothing. High numbers point at navigation or discovery problems rather than broken features."
-                rows={(sessions.data ?? []) as MetricRow[]}
-                windowDays={WINDOW_DAYS}
-              />
+              <Answered query={funnel} context="usage funnel">
+                {(rows) => <FunnelCard rows={rows as FunnelRow[]} windowDays={WINDOW_DAYS} />}
+              </Answered>
+              <Answered query={ai} context="usage drafts">
+                {(rows) => (
+                  <MetricsCard
+                    title="Draft quality and trust"
+                    note="Edit distance is how much of the generated draft the user rewrote. 0% means it shipped verbatim, above 50% means they effectively started over. Rising regenerations per draft is the earliest signal that drafts have stopped being useful."
+                    rows={rows as MetricRow[]}
+                    windowDays={WINDOW_DAYS}
+                  />
+                )}
+              </Answered>
+              <Answered query={reading} context="usage reading">
+                {(rows) => (
+                  <MetricsCard
+                    title="Is the output read?"
+                    note="Read rate compares distinct calendars opened against calendars that completed in the same days. A low number means you are generating content nobody reviews."
+                    rows={rows as MetricRow[]}
+                    windowDays={WINDOW_DAYS}
+                  />
+                )}
+              </Answered>
+              <Answered query={sessions} context="usage sessions">
+                {(rows) => (
+                  <MetricsCard
+                    title="Session quality"
+                    note="A dead-end session is one where somebody looked around and did nothing. High numbers point at navigation or discovery problems rather than broken features."
+                    rows={rows as MetricRow[]}
+                    windowDays={WINDOW_DAYS}
+                  />
+                )}
+              </Answered>
             </div>
           </TabsContent>
 
           <TabsContent value="features" className="space-y-section">
-            <FeatureTable rows={(features.data ?? []) as FeatureRow[]} windowDays={WINDOW_DAYS} />
+            <Answered query={features} context="usage features">
+              {(rows) => <FeatureTable rows={rows as FeatureRow[]} windowDays={WINDOW_DAYS} />}
+            </Answered>
           </TabsContent>
 
           <TabsContent value="people" className="space-y-section">

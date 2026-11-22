@@ -445,6 +445,12 @@ export function parseReading(text: string, ctx: { aliases: Record<string, string
 type Db = any;
 
 export const NOTE_COLUMNS = "id, client_id, kind, title, file_type, text_chars, parts_done, note_date, date_set_by, state, added_by_name, created_at, read_at, source";
+/**
+ * The Client notes screen also reads why a note was not read (QA 22 Nov
+ * 2026, P41-06). Only the screen asks for it, so the copy writers' reads do
+ * not depend on the column.
+ */
+export const NOTE_SCREEN_COLUMNS = `${NOTE_COLUMNS}, unread_reason`;
 const POINT_COLUMNS = "id, note_id, kind, text, platform, said_on, until, part, created_at, removed_at";
 const LINK_COLUMNS = "point_id, other_id, relation";
 const PAGE = 1000;
@@ -465,9 +471,9 @@ async function readAll<T>(page: (from: number, to: number) => PromiseLike<{ data
  * links between points, oldest first. The copy writers, the reading job and
  * the screen all read them here.
  */
-export async function readNoteRows(db: Db, clientId: string): Promise<{ notes: Array<NoteRow & Record<string, unknown>>; points: Array<PointRow & { part: number }>; links: LinkRow[] }> {
+export async function readNoteRows(db: Db, clientId: string, noteColumns: string = NOTE_COLUMNS): Promise<{ notes: Array<NoteRow & Record<string, unknown>>; points: Array<PointRow & { part: number }>; links: LinkRow[] }> {
   const [notes, points, links] = await Promise.all([
-    readAll((a, b) => db.from("client_notes").select(NOTE_COLUMNS).eq("client_id", clientId).order("created_at", { ascending: true }).order("id", { ascending: true }).range(a, b)),
+    readAll((a, b) => db.from("client_notes").select(noteColumns).eq("client_id", clientId).order("created_at", { ascending: true }).order("id", { ascending: true }).range(a, b)),
     readAll((a, b) => db.from("client_note_points").select(POINT_COLUMNS).eq("client_id", clientId).is("removed_at", null).order("created_at", { ascending: true }).order("id", { ascending: true }).range(a, b)),
     readAll((a, b) => db.from("client_note_links").select(LINK_COLUMNS).eq("client_id", clientId).order("created_at", { ascending: true }).order("id", { ascending: true }).range(a, b)),
   ]);

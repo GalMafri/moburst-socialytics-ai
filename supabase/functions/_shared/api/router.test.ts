@@ -14,6 +14,12 @@ describe("matchRoute", () => {
     const m = matchRoute(routes, "GET", "/v1/runs/abc/ads");
     expect("route" in m && m.params).toEqual({ id: "abc" });
   });
+  // QA 22 Nov 2026 (P24-03): decodeURIComponent threw on a broken escape.
+  it("answers not_found for a path segment with a broken percent escape, and still decodes a good one", () => {
+    expect(matchRoute(routes, "GET", "/v1/runs/%E0%A4%A/ads")).toEqual({ error: "not_found" });
+    const m = matchRoute(routes, "GET", "/v1/runs/a%20b/ads");
+    expect("route" in m && m.params).toEqual({ id: "a b" });
+  });
   it("answers not_found for an unknown path", () => {
     expect(matchRoute(routes, "GET", "/v1/nothing")).toEqual({ error: "not_found" });
   });

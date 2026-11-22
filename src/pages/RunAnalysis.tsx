@@ -16,6 +16,7 @@ import { Play, CheckCircle2, CalendarDays } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loading } from "@/components/ui/loading";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
 import { Navigate } from "react-router-dom";
 import { todayInZone } from "@/lib/weekWindow";
@@ -45,7 +46,7 @@ export default function RunAnalysis() {
   // Subscribe to realtime report updates
   useRealtimeReports(id);
 
-  const { data: client } = useQuery({
+  const { data: client, isSuccess: clientRead } = useQuery({
     queryKey: ["client", id],
     queryFn: async () => {
       const { data, error } = await supabase.from("clients").select("*").eq("id", id!).maybeSingle();
@@ -53,6 +54,9 @@ export default function RunAnalysis() {
       return data;
     },
     enabled: !!id,
+    // QA 22 Nov 2026 (P21-04): a read that did not answer stayed on "Loading
+    // the client" until a refocus; it is read again while the page is open.
+    refetchInterval: (query) => (query.state.status === "error" ? 10_000 : false),
   });
 
   const today = client ? todayInZone(client.timezone) : "";
@@ -73,6 +77,9 @@ export default function RunAnalysis() {
       return data;
     },
     enabled: !!id,
+    // QA 22 Nov 2026 (P21-05): a read that did not answer left the run button
+    // disabled with nothing saying why; it is read again while the page is open.
+    refetchInterval: (query) => (query.state.status === "error" ? 10_000 : false),
   });
 
   // The latest competitive analysis that passed its checks: the one the
@@ -139,10 +146,12 @@ export default function RunAnalysis() {
 
   if (!canRunAnalysis) return <Navigate to="/" replace />;
 
+  // A client read that answered with no row says so (QA 22 Nov 2026, P21-04).
   if (!client)
     return (
       <AppLayout title="Monthly report" description="The configuration the monthly report uses and the period it covers.">
-        <Loading label="Loading the client" />
+        {clientRead ? <EmptyState title="This client is not available" description="It may have been removed, or your account may not have access to it." />
+          : <Loading label="Loading the client" />}
       </AppLayout>
     );
 
@@ -151,7 +160,7 @@ export default function RunAnalysis() {
     ["Platforms", (client.primary_platforms || []).map((p: string) => platformName(p)).join(", ") || "None yet"],
     ["Regions", countryNames(client.geo) || "None yet"],
     ["Languages", languageNames(client.language) || "None yet"],
-    ["Social accounts", profiles?.length || 0],
+    ["Social accounts", profiles ? profiles.length : "Not read yet"],
     ["Competitive context", latestCompetitive ? `From ${formatDate(latestCompetitive.created_at)}` : "None yet"],
   ];
 

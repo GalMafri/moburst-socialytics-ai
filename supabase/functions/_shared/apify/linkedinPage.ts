@@ -78,8 +78,21 @@ export function pageFromItem(item: unknown, url: string): LinkedInPage | null {
   return { url, name: clean(o.name), website, about: about.slice(0, 3000), tagline: clean(o.tagline), specialties: strings(o.specialities ?? o.specialties), industries, logo, headquarters: headquartersOf(o) };
 }
 
+/** An item the actor wrote for this page: not an error item, and for the address asked about. */
+function isPageItem(item: unknown, url: string): boolean {
+  const o = rec(item);
+  if (!o || o.error) return false;
+  const universal = clean(o.universalName)?.toLowerCase();
+  const wanted = slugOf(url);
+  return !universal || !wanted || universal === wanted;
+}
+
 async function finished(apify: ApifyClient, runId: string, datasetId: string, url: string, usd: unknown): Promise<PageRead> {
   const items = await apify.datasetItems(datasetId, { pageSize: 10, maxItems: 10 });
+  // QA 22 Nov 2026 (P24-05): a run that found no page (nothing, or only an
+  // error item) is a read that did not happen, for the caller to try again;
+  // a page read with nothing on it is a read.
+  if (!items.some((i) => isPageItem(i, url))) return { state: "failed", run_id: runId, status: "EMPTY" };
   const page = items.map((i) => pageFromItem(i, url)).find(Boolean) ?? null;
   return { state: "read", page, run_id: runId, usd: typeof usd === "number" ? usd : null };
 }

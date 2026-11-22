@@ -31,14 +31,22 @@ export type NoteSource =
   | { kind: "text"; text: string; chars: number }
   | { kind: "document"; data: string; pages: number }
   | { kind: "image"; mediaType: "image/png" | "image/jpeg"; data: string }
-  | { kind: "nothing"; why: string };
+  /** why: a plain sentence a person can be shown; detail: what the reader said, for the log. */
+  | { kind: "nothing"; why: string; detail?: string };
 
 /** Text past this is not read; the note says how much was. */
 export const NOTE_READ_MAX_CHARS = 400_000;
 /** One reading call's part. */
 export const PART_CHARS = 60_000;
-/** The largest image one reading call takes. */
-export const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+/**
+ * The largest image one reading call takes.
+ *
+ * QA 22 Nov 2026 (P41-05): the Messages API's 5 MB image limit counts the
+ * base64 data, which is a third larger than the file, so a file is held to
+ * three quarters of 5 MB; a larger screenshot comes as storage's smaller
+ * rendition (run.ts download).
+ */
+export const IMAGE_MAX_BYTES = Math.floor((5 * 1024 * 1024 * 3) / 4);
 /** The most pages of a scan one reading call takes. */
 export const PDF_MAX_PAGES = 100;
 
@@ -144,7 +152,7 @@ export async function readNoteFile(bytes: Uint8Array, type: NoteFileType, parser
         return { kind: "image", mediaType: type === "png" ? "image/png" : "image/jpeg", data: base64(bytes) };
     }
   } catch (e) {
-    return { kind: "nothing", why: `The file could not be opened: ${e instanceof Error ? e.message : String(e)}` };
+    return { kind: "nothing", why: "The file could not be opened.", detail: e instanceof Error ? e.message : String(e) };
   }
   return { kind: "nothing", why: `No reader takes ${type} files.` };
 }

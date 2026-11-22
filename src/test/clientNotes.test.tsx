@@ -129,6 +129,17 @@ describe('the notes', () => {
     expect(within(follows).queryByText('Say "budget".')).toBeNull();
   });
 
+  // QA 22 Nov 2026 (P41-06): a file that could not be opened looked read and empty.
+  it('says a note was not read, and why, when the reading kept a reason', async () => {
+    f.tables.client_notes[2] = { ...f.tables.client_notes[2], unread_reason: 'The file could not be opened.' };
+    mount();
+    const list = await screen.findByRole('list', { name: 'Notes' });
+    const item = within(list).getAllByRole('listitem')[1];
+    expect(within(item).getByText('Not read')).toBeInTheDocument();
+    expect(within(item).getByText('The file could not be opened.')).toBeInTheDocument();
+    expect(within(item).queryByText('Nothing in this note for the copy')).toBeNull();
+  });
+
   it('opens a note to show its points, which a newer note replaced, and removes one point', async () => {
     mount();
     fireEvent.click(await screen.findByRole('button', { name: 'Open Call Oct 1' }));
