@@ -34,11 +34,13 @@ function hubSettingsRole(hubUser: HubUser, toolName: string): RoleResolution {
   const target = toolName.toLowerCase().trim();
   const allNames = (hubUser.tools || []).map((t) => t?.tool?.name || "");
 
-  // Permissive match: exact OR starts-with (e.g. "Socialytics AI" or "Socialytics by Moburst")
-  const toolEntry = (hubUser.tools || []).find((t) => {
-    const n = (t?.tool?.name || "").toLowerCase().trim();
-    return n === target || n.startsWith(target + " ") || n.startsWith(target + "-") || n.startsWith(target);
-  });
+  // The exact entry first; then a name that starts with it as a word (e.g.
+  // "Socialytics AI" or "Socialytics by Moburst"). QA 22 Nov 2026: the first
+  // entry that only started with the name ("Socialytics Reports" listed before
+  // "Socialytics", or "SocialyticsOld") gave its role instead.
+  const nameOf = (t: HubUser["tools"][number] | undefined) => (t?.tool?.name || "").toLowerCase().trim();
+  const toolEntry = (hubUser.tools || []).find((t) => nameOf(t) === target)
+    ?? (hubUser.tools || []).find((t) => nameOf(t).startsWith(target + " ") || nameOf(t).startsWith(target + "-"));
 
   if (toolEntry) {
     const rawRole = toolEntry.role || "";
