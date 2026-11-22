@@ -64,11 +64,14 @@ interface Props {
   filmedReason?: string | null;
   /** What to film, for Moburst staff and admins only (null for everyone else). */
   shotBrief?: ShotBrief | null;
+  /** No shot brief was written, and asking for one did not bring it: say so, with a way to ask again. */
+  shotBriefMissing?: boolean;
+  onAskShotBrief?: () => void;
   /** A Story: posted by hand, its design downloaded under this name ("brand-story-2026-11-05.png"). */
   storyFileName?: string | null;
 }
 
-export function PostDesign({ versions, preparing, notMade, isStaff, aspect, filenameStub, onCreate, onRegenerate, brand, creating, onUse, usingId, onFeedback, feedbackLine, waitingForCopy, onCamera, textOnly, onUploadClip, uploadingClip, onMakeFromPosts, filmedReason, shotBrief, storyFileName }: Props) {
+export function PostDesign({ versions, preparing, notMade, isStaff, aspect, filenameStub, onCreate, onRegenerate, brand, creating, onUse, usingId, onFeedback, feedbackLine, waitingForCopy, onCamera, textOnly, onUploadClip, uploadingClip, onMakeFromPosts, filmedReason, shotBrief, shotBriefMissing, onAskShotBrief, storyFileName }: Props) {
   const clipInput = useRef<HTMLInputElement>(null);
   const requests = useDesignRequests()?.requests;
   /** Regenerate's note box: open, its note, and whether the last press did not start. */
@@ -111,7 +114,7 @@ export function PostDesign({ versions, preparing, notMade, isStaff, aspect, file
                 <div className="glass-inner p-4 space-y-3 flex flex-col">
                   <p className="t-h4">Film it</p>
                   <p className="t-secondary flex-1">This video is filmed: {onCamera}. Upload the vertical clip and it's edited the way your own videos are.</p>
-                  {isStaff && <ShotBriefCard brief={shotBrief ?? null} />}
+                  {isStaff && <ShotBriefCard brief={shotBrief ?? null} missing={!!shotBriefMissing} onAsk={onAskShotBrief} />}
                   {onUploadClip && <ClipUpload input={clipInput} onUploadClip={onUploadClip} uploadingClip={uploadingClip} />}
                 </div>
                 {onMakeFromPosts && (
@@ -552,8 +555,16 @@ function ClipUpload({ input, onUploadClip, uploadingClip, compact }: { input: Re
 }
 
 /** What to film for this post, written in the client's filmed format. Shown to Moburst staff and admins only. */
-function ShotBriefCard({ brief }: { brief: ShotBrief | null }) {
+function ShotBriefCard({ brief, missing, onAsk }: { brief: ShotBrief | null; missing?: boolean; onAsk?: () => void }) {
   const [open, setOpen] = useState(false);
+  if (!brief && missing) {
+    return (
+      <p role="status" className="t-label inline-flex flex-wrap items-center gap-1.5">
+        No shot brief yet.
+        {onAsk && <button type="button" onClick={onAsk} className="underline underline-offset-2 hover:!text-white">Ask for the shot brief again</button>}
+      </p>
+    );
+  }
   if (!brief) return <p className="t-label inline-flex items-center gap-1.5"><Loader2 className="h-3 w-3 animate-spin" aria-hidden />Writing the shot brief</p>;
   return (
     <div className="rounded-[12px] border border-white/10 p-3 space-y-2">
