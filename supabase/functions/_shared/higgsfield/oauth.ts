@@ -234,6 +234,9 @@ async function claimRefresh(supabase: Db, now: Date): Promise<string | null> {
 async function keepRefresh(supabase: Db, until: string): Promise<string | null> {
   const next = new Date(Date.now() + LEASE_MS).toISOString();
   const kept = await supabase.from("integration_tokens").update({ refreshing_until: next }).eq("provider", PROVIDER).eq("refreshing_until", until).select("provider");
+  // A write that did not get through says nothing about who holds the lease: this caller still keeps its rotated
+  // pair, whose refresh token is the only live one (P53-09). Only a lease known to be another caller's is left to them.
+  if (kept.error) return until;
   return kept.data?.length ? next : null;
 }
 
