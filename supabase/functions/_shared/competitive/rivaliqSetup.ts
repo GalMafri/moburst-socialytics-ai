@@ -32,6 +32,50 @@ export function matchSetupCompanies(plan: SetupPlan, companies: Company[]): Comp
   return new Set(result.map(c => String(c.id))).size === plan.companies.length ? result : null;
 }
 
+/**
+ * The landscape does not hold exactly one company for every reviewed website.
+ * `missing` names the reviewed websites RivalIQ holds no single company for.
+ * QA 22 Nov 2026 (P31-01, P31-02): a type of its own, so the server run can
+ * send the follow again instead of reading the same empty answer forever.
+ */
+export class UnmatchedCompanies extends Error {
+  constructor(public missing: string[]) {
+    super(`RivalIQ has not returned exactly one company for every reviewed website${missing.length ? ` (${missing.join(', ')})` : ''}. Nothing was linked; check status later.`);
+    this.name = 'UnmatchedCompanies';
+  }
+}
+
+const hostOf = (url: string) => url.replace(/^https:\/\//, '').replace(/\/$/, '');
+
+/** The reviewed websites RivalIQ holds no single company for. */
+function unmatchedWebsites(plan: SetupPlan, companies: Company[]): string[] {
+  return plan.companies.filter(wanted => companies.filter(c => {
+    try { return publicCompanyUrl(c.url || '') === wanted.url; } catch { return false; }
+  }).length !== 1).map(c => hostOf(c.url));
+}
+
+/**
+ * QA 22 Nov 2026 (P31-02): a landscape this setup made and followed, that
+ * holds exactly as many companies as the plan, all but one matched by
+ * website: the one left is the reviewed website's company, stored by RivalIQ
+ * under the address that website sends visitors to (adaptivesound.com held
+ * as yogasleep.com). Only after RivalIQ said every website was followed.
+ */
+function matchByElimination(plan: SetupPlan, companies: Company[]): Company[] | null {
+  if (companies.length !== plan.companies.length) return null;
+  const claims = plan.companies.map(wanted => companies.filter(c => {
+    try { return publicCompanyUrl(c.url || '') === wanted.url; } catch { return false; }
+  }));
+  const missing = claims.map((m, i) => (m.length ? -1 : i)).filter(i => i >= 0);
+  if (missing.length !== 1 || claims.some(m => m.length > 1)) return null;
+  const used = new Set(claims.flat().map(c => String(c.id)));
+  const spare = companies.filter(c => !used.has(String(c.id)));
+  if (spare.length !== 1) return null;
+  claims[missing[0]] = [spare[0]];
+  const result = claims.map(m => m[0]);
+  return new Set(result.map(c => String(c.id))).size === plan.companies.length ? result : null;
+}
+
 export async function advanceRivalIqSetup(job: SetupJob, api: Api, save: Save): Promise<SetupJob> {
   if (job.phase === 'retired') {
     throw new Error('This abandoned tracking setup was removed. Use the current confirmed selection, or create a new draft with verified company websites.');
@@ -56,8 +100,14 @@ export async function advanceRivalIqSetup(job: SetupJob, api: Api, save: Save): 
   if (job.phase === 'create_requested') {
     const list = await api('/landscapes');
     const found = (list.landscapes || []).filter((l: any) => l.name === job.plan.name);
-    if (found.length !== 1) throw new Error('Creation outcome is uncertain. No duplicate request was sent; provider review is required.');
-    await update({ landscape_id: String(found[0].id), phase: 'created' });
+    if (!found.length) throw new Error('Creation outcome is uncertain. No duplicate request was sent; provider review is required.');
+    // QA 22 Nov 2026 (P31-04): several landscapes can carry this setup's name
+    // (one left by an earlier selection of the same set). The name holds the
+    // set's id, so every one is ours: take the one already holding most of the
+    // plan's companies rather than stopping here for good.
+    const held = (l: any) => job.plan.companies.length - unmatchedWebsites(job.plan, l.companies || []).length;
+    const chosen = [...found].sort((a: any, b: any) => held(b) - held(a))[0];
+    await update({ landscape_id: String(chosen.id), phase: 'created' });
     return job;
   }
   if (!job.landscape_id) throw new Error('Setup has no landscape ID. Provider review is required.');
@@ -90,11 +140,15 @@ export async function advanceRivalIqSetup(job: SetupJob, api: Api, save: Save): 
   }
   if (['follow_requested', 'verify'].includes(job.phase)) {
     const response = await api(`${path}/companies`);
-    const matched = matchSetupCompanies(job.plan, response.companies || []);
-    if (!matched) {
-      throw new Error('RivalIQ has not returned exactly one company for every reviewed website. Nothing was linked; check status later.');
+    const companies: Company[] = response.companies || [];
+    let matched = matchSetupCompanies(job.plan, companies);
+    let landscape: any = null;
+    if (!matched && job.phase === 'verify') {
+      ({ landscape } = await api(path));
+      if (landscape?.name === job.plan.name) matched = matchByElimination(job.plan, companies);
     }
-    const { landscape } = await api(path);
+    if (!matched) throw new UnmatchedCompanies(unmatchedWebsites(job.plan, companies));
+    if (!landscape) ({ landscape } = await api(path));
     // A bulk follow can finish competitors before the client. Only adjust a
     // landscape created for this selection; an imported shared set keeps its focus.
     if (landscape?.name === job.plan.name && String(landscape.focusCompanyId) !== String(matched[0].id)) {
