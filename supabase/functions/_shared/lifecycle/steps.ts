@@ -1979,6 +1979,15 @@ export const STEPS: Record<string, StepDef> = {
           if (e instanceof SetupError && e.code === "selection") return { status: "waiting", reason: "selection", result: { set_id: set.id, detail: e.message } };
           if (e instanceof SetupError && e.code === "busy") return { status: "waiting", reason: "analysis_running", recheckMinutes: 60 };
           if (e instanceof SetupError && e.code === "changed") return { status: "failed", error: e.message, soonMinutes: 5 };
+          // RivalIQ has not yet listed one company for every website it follows (rivaliqSetup.ts, verify): it is
+          // still settling, so tracking waits, asked again hourly for a day and then every six hours (QA 22 Nov 2026,
+          // P39-01: this was a failure, retried weekly, while the screens showed tracking as not started).
+          if (e instanceof Error && /check status later/i.test(e.message)) {
+            const was = rows.get("tracking")?.result as Record<string, unknown> | null | undefined;
+            const since = typeof was?.verify_since === "string" ? was.verify_since : deps.now().toISOString();
+            const age = deps.now().getTime() - Date.parse(since);
+            return { status: "waiting", reason: "in_progress", recheckMinutes: age < DAY ? 60 : 360, result: { set_id: set.id, phase: "verify", verify_since: since } };
+          }
           // The plan is full: tracking waits for a free place, looked at again daily.
           if (e instanceof FollowFailure && e.planFull) return { status: "waiting", reason: "rivaliq_full", recheckDays: 1, result: { set_id: set.id } };
           // A chosen website refused the visit: tracking waits on the selection instead of failing every two hours.

@@ -100,9 +100,14 @@ export function rowAfter(prev: StepRow | null, base: { client_id: string; step: 
   // A run is marked "running" first; the failure count survives that mark through `error`.
   const attempts = (sameInputs && prev?.error ? prev.attempts : 0) + 1;
   const minutes = outcome.soonMinutes ?? retryAfterMinutes(attempts);
+  // The earlier work is kept, never what an earlier wait waited for: a failed
+  // row is not waiting (QA 22 Nov 2026, P39-01: a failed tracking row kept
+  // saying it waited for a free place on the plan).
+  const kept = outcome.result ?? (sameInputs ? prev?.result ?? null : null);
+  const { waiting_for: _waited, ...result } = kept ?? {};
   return {
     ...base, status: "failed", attempts, attempted_at: at, done_at: sameInputs ? prev?.done_at ?? null : null,
     next_attempt_at: new Date(now.getTime() + minutes * 60_000).toISOString(),
-    result: outcome.result ?? (sameInputs ? prev?.result ?? null : null), error: outcome.error.slice(0, 500),
+    result: kept ? result : null, error: outcome.error.slice(0, 500),
   };
 }
