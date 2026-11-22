@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { describe, it, expect } from "vitest";
 import { VIDEO_SIZE, audioScript, captionFontName, captionWeight, captionsAss, framesScript, parseAudio, parseFrames, videoLogoBox, composeScript, footageTextPrompt, hookPlacement, parseComposed, parseFootageText, shellQuote, writingCounts } from "../../../functions/_shared/video/compose";
 import { filmedNeed, parseShotBrief, parseVideoBriefs, parseVideoStyle, sceneLettering, shotBriefPrompt, videoPlannerPrompt, videoStylePrompt } from "../../../functions/_shared/canva/options";
@@ -335,6 +336,29 @@ describe("a filmed clip edited the way the client's filmed videos are", () => {
     expect(script).toContain("-sseof -3.0 -i endsrc.mp4");
     expect(script).toContain('if [ "$EC_H" -gt "$EC_W" ]');
     expect(script).toContain("concat=n=2:v=1:a=1[vout][aout]");
+  });
+  it("joins a filmed clip with no sound track to the end card on silence of the clip's length", () => {
+    // QA 22 Nov 2026 (P53-08): the end card's join took [0:a], which a silent upload does not have, so every join failed.
+    const script = composeScript({ footageUrl: "https://s/f.mp4", uploadUrl: "https://s/up", endCard: { url: "https://s/own.mp4", seconds: 3 } });
+    const lines = script.split("\n");
+    const filter = lines.find((l) => l.startsWith("FILTER="))!;
+    const join = lines.find((l) => l.startsWith('if [ "${EC:-0}" = 1 ]; then ECIN='))!;
+    const run = (vars: string) => execFileSync("bash", ["-c", `${vars}\n${filter}\n${join}\nprintf '%s\\n%s' "$ECIN" "$FILTER"`], { encoding: "utf8" }).split("\n");
+    const [silentIn, silentFilter] = run("EC=1; CLIP_SILENT=1; CLIP_D=8.04");
+    expect(silentIn).toBe("-i endcard.mp4 -f lavfi -t 8.04 -i anullsrc=r=48000:cl=stereo");
+    expect(silentFilter).toContain("[2:a]aformat=sample_rates=48000:channel_layouts=stereo[am]");
+    expect(silentFilter).not.toContain("[0:a]");
+    expect(silentFilter).toContain("[1:v]");
+    // Both silent: the card's silence comes first, the clip's after it.
+    const [bothIn, bothFilter] = run("EC=1; EC_SILENT=1; CLIP_SILENT=1; CLIP_D=8.04");
+    expect(bothIn).toBe("-i endcard.mp4 -f lavfi -t 3.0 -i anullsrc=r=48000:cl=stereo -f lavfi -t 8.04 -i anullsrc=r=48000:cl=stereo");
+    expect(bothFilter).toContain("[3:a]aformat=sample_rates=48000:channel_layouts=stereo[am]");
+    expect(bothFilter).toContain("[2:a]aformat=sample_rates=48000:channel_layouts=stereo[eca]");
+    // A clip with its sound keeps it, as before.
+    const [soundIn, soundFilter] = run("EC=1");
+    expect(soundIn).toBe("-i endcard.mp4");
+    expect(soundFilter).toContain("[0:a]aformat=sample_rates=48000:channel_layouts=stereo[am]");
+    expect(script).toMatch(/ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 clip\.mp4 \| wc -l\)" -lt 1 \]; then CLIP_SILENT=1/);
   });
   it("writes a shot brief from the post in the client's filmed format", () => {
     const p = shotBriefPrompt({ brand: "Bader Law", platform: "Instagram", copy: "Insurance called?", reason: "it needs Seth Bader on camera", format: "the attorney talking to camera in his office" });
