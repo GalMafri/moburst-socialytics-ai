@@ -68,6 +68,7 @@ import { ReportDecks } from "@/components/reports/ReportDecks";
 import { IndustryTrendsSection } from "@/components/reports/IndustryTrendsSection";
 import { InsightGrid } from "@/components/ui/insight-card";
 import { CompareBars, RankedBars } from "@/components/ui/bars";
+import { todayInZone } from "@/lib/weekWindow";
 import {
   parseCsv,
   stripVoicePreset,
@@ -432,7 +433,12 @@ export default function ReportView() {
   const insightsBasis = shown.insights.map((i) => i.basedOn);
   const summary: string | null = shown.summary?.text ?? null;
   const summaryBasis = shown.summary?.basedOn;
-  const pillars = aiAnalysis?.sprout_performance_analysis?.pillar_alignment;
+  const pillarLists = aiAnalysis?.sprout_performance_analysis?.pillar_alignment;
+  // QA 22 Nov 2026 (P21-01): the recommendations come from the insights row
+  // when it has them (shownSocial), and the analysis need not hold pillar
+  // lists; the section is there whenever it has something to list, so "See
+  // the pillar detail" always has a place to go.
+  const pillars = pillarLists ?? (pillarRecs.length ? {} : undefined);
   // The overview's sections that render, numbered by their place in the order shown (no gap where one is missing).
   const overviewShown: [keyof typeof OVERVIEW_TITLES, boolean][] = [
     ["glance", !!monthComparison?.changes],
@@ -445,9 +451,9 @@ export default function ReportView() {
     ["pillars", !!pillars],
   ];
   const sectionNo = (sectionId: keyof typeof OVERVIEW_TITLES) => overviewShown.filter(([, shownHere]) => shownHere).findIndex(([k]) => k === sectionId) + 1;
-  const pillarsLine = pillars
-    ? `${(pillars.well_represented || []).length} pillars well represented, ${(pillars.underrepresented || []).length} need attention, ${pillarRecs.length} recommendations.`
-    : undefined;
+  const pillarsLine = pillarLists
+    ? `${(pillarLists.well_represented || []).length} pillars well represented, ${(pillarLists.underrepresented || []).length} need attention, ${pillarRecs.length} recommendations.`
+    : pillars ? `${pillarRecs.length} recommendation${pillarRecs.length === 1 ? "" : "s"}.` : undefined;
 
   // One running order per tab. Every section is listed unconditionally: the rail
   // drops the ones this report does not have, and returns nothing at all when a
@@ -591,15 +597,17 @@ export default function ReportView() {
               <Section id="actions" index={sectionNo("actions")} title={OVERVIEW_TITLES.actions} description={`${actions.length < totalRecommendations ? `${actions.length} of ${totalRecommendations}` : actions.length} recommendation${Math.max(actions.length, totalRecommendations) === 1 ? "" : "s"}${(() => { const c: Record<string, number> = {}; for (const a of actions) c[a.source] = (c[a.source] || 0) + 1; const parts = Object.entries(c).map(([k, n]) => `${n} from ${k === "Competitors" ? "the competitive analysis" : k === "Trends" ? "the trends" : "performance"}`); return parts.length ? `: ${parts.join(", ")}` : ""; })()}. Each one opens its evidence.`}>
                 <div className="grid gap-inner md:grid-cols-2 xl:grid-cols-3">
                   {actions.map((a, i) => (
+                    // Keyed by what the card says (QA 22 Nov 2026, P21-02): keyed by place, a card whose
+                    // recommendation changed when a later read arrived kept the old text in its post dialog.
                     <ActionCard
-                      key={i}
+                      key={`${a.source}|${a.title}|${i}`}
                       action={a}
                       onOpen={() => openAction(a)}
                       extra={isMoburstStaff ? (
                         <NewPostDialog
                           clientId={clientId}
                           platforms={availablePlatforms.length ? availablePlatforms : ["Instagram", "LinkedIn", "TikTok", "Facebook", "X"]}
-                          defaultDate={new Date().toISOString().slice(0, 10)}
+                          defaultDate={todayInZone(clientContext.timezone)}
                           initialIdea={[a.title, a.detail].filter(Boolean).join(". ")}
                           reason={{ type: a.source === "Competitors" ? "competitor" : a.source === "Trends" ? "trend" : "performance", label: a.title, report_id: reportId }}
                           reportId={reportId}
@@ -674,7 +682,7 @@ export default function ReportView() {
               <div id="report-pillars">
                 <Section id="pillars" index={sectionNo("pillars")} title={OVERVIEW_TITLES.pillars} description={pillarsLine}>
                   <Card><CardContent className="space-y-5">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {pillarLists && <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {pillars.well_represented?.length > 0 && (
                           <div className="space-y-2">
                             <p className="t-subhead flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-success" /> Well represented</p>
@@ -687,9 +695,9 @@ export default function ReportView() {
                             <PillarEntries entries={pillars.underrepresented} variant="outline" />
                           </div>
                         )}
-                      </div>
+                      </div>}
                       {pillarRecs.length > 0 && (
-                        <div className="pt-4 border-t border-white/[0.06] space-y-2">
+                        <div className={pillarLists ? "pt-4 border-t border-white/[0.06] space-y-2" : "space-y-2"}>
                           <p className="t-subhead">Recommendations</p>
                           <ul className="space-y-2">
                             {pillarRecs.map((r, i) => (
