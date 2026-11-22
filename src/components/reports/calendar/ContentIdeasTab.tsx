@@ -73,7 +73,7 @@ export function ContentIdeasTab({
   const qc = useQueryClient();
   const { isMoburstStaff } = useAuth();
 
-  const { data: postIterations = [], isLoading: iterationsLoading, isError: iterationsFailed, refetch: reloadIterations } = useQuery({
+  const { data: iterationsRead, isLoading: iterationsLoading, isError: iterationsReadFailed, refetch: reloadIterations } = useQuery({
     queryKey: ["post-iterations", clientId],
     queryFn: async () => {
       if (!clientId) return [];
@@ -95,9 +95,9 @@ export function ContentIdeasTab({
   });
 
   const {
-    data: scheduledPosts = [],
+    data: scheduledRead,
     isLoading: scheduledPostsLoading,
-    isError: scheduledPostsFailed,
+    isError: scheduledReadFailed,
     error: scheduledPostsError,
     refetch: reloadScheduledPosts,
   } = useQuery({
@@ -113,6 +113,13 @@ export function ContentIdeasTab({
     },
     enabled: !!clientId,
   });
+  // QA 22 Nov 2026: a read counts as failed only while nothing has been read. A re-read that ended in an
+  // error (the board re-reads its designs often while a panel is open) keeps what was read, so the open
+  // panel and the edit in it stay; before, one failed re-read closed the panel and the board.
+  const postIterations = (iterationsRead ?? []) as any[];
+  const iterationsFailed = iterationsReadFailed && iterationsRead === undefined;
+  const scheduledPosts = (scheduledRead ?? []) as any[];
+  const scheduledPostsFailed = scheduledReadFailed && scheduledRead === undefined;
 
   // QA 22 Nov 2026: the chip asks for the state it showed the opposite of
   // ("Mark as approved" approves), and the board shows that state at once.
