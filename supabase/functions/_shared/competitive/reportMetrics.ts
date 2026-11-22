@@ -165,11 +165,25 @@ function companyRates(metrics: any, totals: any) {
       return { networks, impressions: null, posts: null, rate: null };
     }
     if (totalsApply) {
+      // QA 22 Nov 2026 (P31-03): RivalIQ's totals count estimated impressions
+      // on every network; on a video network the rate divides by views. Each
+      // video network whose views and impressions are both known has its
+      // impressions swapped for its views, so a competitor's cross-network
+      // rate uses the same definition as its own TikTok or YouTube rate and
+      // as a Sprout client's. Networks the totals hold beyond by_network keep
+      // their share of the totals.
+      const estimated = totals?.estimated_impressions?.[which];
+      const impressions = valid(estimated)
+        ? Object.entries(by_network).reduce((total, [network, n]) => {
+          const views = n?.views?.[which], own = n?.impressions?.[which];
+          return isVideoNetwork(network) && valid(views) && valid(own) ? total - own + views : total;
+        }, estimated)
+        : null;
       return {
         networks,
-        impressions: valid(totals?.estimated_impressions?.[which]) ? totals.estimated_impressions[which] : null,
+        impressions,
         posts: totals?.posts?.[which],
-        rate: totals?.posts?.[which] === 0 ? null : engagementRate(totals?.engagement?.[which], totals?.estimated_impressions?.[which]),
+        rate: totals?.posts?.[which] === 0 ? null : engagementRate(totals?.engagement?.[which], impressions),
       };
     }
     const impressions = sum(networks, (network, n) => networkImpressions(network, n, which));
