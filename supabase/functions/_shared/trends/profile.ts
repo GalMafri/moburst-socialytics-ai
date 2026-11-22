@@ -404,11 +404,18 @@ export async function syncLifecycleTerms(db: Db, clientId: string, kind: "topic"
       const { error: e } = await db.from("trend_terms").insert({ client_id: clientId, kind, platform, term, reason: item.reason, source: "lifecycle" });
       if (e) throw new Error(`Could not save a trend term: ${e.message}`);
     } else if (hit.source === "lifecycle" && !hit.removed_at && hit.reason !== item.reason) {
-      await db.from("trend_terms").update({ reason: item.reason }).eq("id", hit.id);
+      // QA 22 Nov 2026 (P52-04): the update and the delete below throw on an
+      // error as the insert does, so the step is retried; ignored, a term the
+      // new profile dropped kept being searched every week.
+      const { error: e } = await db.from("trend_terms").update({ reason: item.reason }).eq("id", hit.id);
+      if (e) throw new Error(`Could not update a trend term: ${e.message}`);
     }
   }
   for (const [key, r] of existing) {
-    if (r.source === "lifecycle" && !r.removed_at && !wanted.has(key)) await db.from("trend_terms").delete().eq("id", r.id);
+    if (r.source === "lifecycle" && !r.removed_at && !wanted.has(key)) {
+      const { error: e } = await db.from("trend_terms").delete().eq("id", r.id);
+      if (e) throw new Error(`Could not take away a trend term: ${e.message}`);
+    }
   }
 }
 
