@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { platformName, sproutDraftLine, timeZoneName } from "@/lib/display";
+import { formatDateTime, platformName, sproutDraftLine, timeZoneName } from "@/lib/display";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -50,7 +50,8 @@ export interface ScheduledRow { id: string; platform?: string | null; post_conte
  * "asked" (Sprout is being asked) and "unconfirmed" (the send ended without Sprout's answer) may have a post in
  * Sprout, so they read as sent, never as not sent.
  */
-const SENT = ["scheduled", "sent_now", "asked", "unconfirmed"];
+// QA 22 Nov 2026: "published" (allowed by the table) is a sent post too; left out, it read as not sent.
+const SENT = ["scheduled", "sent_now", "asked", "unconfirmed", "published"];
 
 /** A send that holds its post: Sprout was asked and no post id was written. The table allows one per post. */
 const holdsPost = (r: ScheduledRow) => (r.status === "asked" || r.status === "unconfirmed") && !r.sprout_post_id;
@@ -80,6 +81,12 @@ export function sendStateLine(row: ScheduledRow | null | undefined, timeZone?: s
   const state = sendStateOf(row, now);
   if (state === "being_sent") return "This post is being sent to Sprout.";
   if (state === "unconfirmed") return "Sprout did not confirm this post. Send it again to be sure it is there.";
+  // QA 22 Nov 2026: the line used to stay the same before and after the draft's time. Nothing reads Sprout
+  // back yet, so once the time has passed it says where to see whether the draft was approved and posted.
+  const at = formatDateTime(row?.scheduled_time, { timeZone, year: false });
+  if (row?.status === "published" && at) return `Posted from Sprout for ${at}.`;
+  const due = Date.parse(row?.scheduled_time ?? "");
+  if (state === "sent" && Number.isFinite(due) && due < now) return `${sproutDraftLine(row?.scheduled_time, timeZone)} Its time has passed: whether it was approved and posted shows in Sprout.`;
   return sproutDraftLine(row?.scheduled_time, timeZone);
 }
 
