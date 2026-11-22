@@ -73,7 +73,11 @@ export function safeToResend(error: unknown): boolean {
   const err = error as { name?: string; message?: string; context?: InvokeContext } | null;
   if (!err) return false;
   const status = err.context?.status;
-  if (typeof status === "number") return status === 429 || status === 502 || status === 503;
+  // QA 22 Nov 2026: 502 is not here. A gateway answers it for a worker that
+  // died mid-work, and this project's own functions answer it after part of
+  // the work ran (revise-suggestion, schedule-sprout-post, generate-post-image),
+  // so only a call marked idempotent is sent again on a 502 (invokeResendable).
+  if (typeof status === "number") return status === 429 || status === 503;
   return err.name === "FunctionsFetchError" || /fetch|network|load failed/i.test(String(err.message ?? ""));
 }
 
