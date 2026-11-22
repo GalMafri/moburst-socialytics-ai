@@ -203,12 +203,19 @@ export function languagesOf(language: unknown): string[] {
   return codes.length ? [...new Set(codes)] : ["en"];
 }
 
-/** The client's country for the sources that take one: the first two-letter code of its market (UK is GB). */
+/**
+ * Two-letter codes that name a region or nothing, never one country. QA 22 Nov
+ * 2026: a client whose market is "Europe" (ClientSetup's "EU") had "EU" sent
+ * to TikTok and YouTube as its country.
+ */
+const NOT_COUNTRIES = new Set(["EU", "EZ", "UN", "AP", "WW", "XX", "ZZ", "AA", "QO"]);
+
+/** The client's country for the sources that take one: the first two-letter country code of its market (UK is GB). */
 function regionOf(geo: unknown): string | undefined {
   for (const part of String(geo ?? "").split(/[,\s]+/)) {
     const code = part.trim().toUpperCase();
     if (code === "UK") return "GB";
-    if (/^[A-Z]{2}$/.test(code)) return code;
+    if (/^[A-Z]{2}$/.test(code) && !NOT_COUNTRIES.has(code)) return code;
   }
   return undefined;
 }
