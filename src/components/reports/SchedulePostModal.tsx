@@ -127,6 +127,9 @@ export function scheduledFor(rows: ScheduledRow[] | null | undefined, post: { _c
   return standingRow(live.filter((r) => !r.calendar_post_key && (r.platform || "").toLowerCase() === platform && copy && (r.post_content || "").trim().slice(0, 200) === copy));
 }
 
+/** How long a send waits for the client's rows to be read again before it settles on the function's answer. */
+const ROWS_WAIT_MS = 3_000;
+
 async function readScheduledPosts(clientId: string): Promise<ScheduledRow[]> {
   const { data, error } = await supabase.from("scheduled_posts").select("*").eq("client_id", clientId);
   if (error) throw error;
@@ -313,9 +316,16 @@ export function SchedulePostModal({
         media_urls: mediaUrls.length > 0 ? mediaUrls : undefined,
       },
     }));
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["scheduled-posts-full", clientId] }),
-      queryClient.invalidateQueries({ queryKey: ["scheduled-posts", clientId] }),
+    // QA 22 Nov 2026: the rows are read again, but the press waits for them only a short while. Their query is
+    // retried until it answers, so a read that kept failing after a send that went through left Send spinning
+    // and the dialog open over a post that was in Sprout. The outcome follows the function's own answer; the
+    // rows go on being read in the background.
+    await Promise.race([
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["scheduled-posts-full", clientId] }),
+        queryClient.invalidateQueries({ queryKey: ["scheduled-posts", clientId] }),
+      ]),
+      new Promise((resolve) => setTimeout(resolve, ROWS_WAIT_MS)),
     ]);
     setScheduling(false);
     if (error || !(data as any)?.success) {
