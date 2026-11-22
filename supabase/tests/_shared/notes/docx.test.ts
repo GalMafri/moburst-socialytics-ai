@@ -58,3 +58,24 @@ describe("docxText", () => {
     expect(() => docxText(new TextEncoder().encode("not a zip"))).toThrow();
   });
 });
+
+// QA 22 Nov 2026 (P41-03): an unclosed tag made the tokenizer rescan to the
+// end of the part for every "<", so a few KB of zipped XML ran for minutes.
+describe("docxText on malformed XML", () => {
+  it("reads a 120 KB part full of unclosed tags in well under a second", () => {
+    const xml = `<w:document><w:body><w:p><w:r><w:t>Hi</w:t></w:r></w:p>${"<x ".repeat(40_000)}`;
+    const bytes = zipSync({ "word/document.xml": strToU8(xml) });
+    const t0 = performance.now();
+    const text = docxText(bytes);
+    const ms = performance.now() - t0;
+    expect(text).toContain("Hi");
+    expect(ms).toBeLessThan(1000);
+  });
+
+  it("stays fast when unclosed tags open quoted attribute values", () => {
+    const xml = `<w:document><w:body><w:p><w:r><w:t>Hi</w:t></w:r></w:p>${'<x a="'.repeat(30_000)}`;
+    const t0 = performance.now();
+    expect(docxText(zipSync({ "word/document.xml": strToU8(xml) }))).toContain("Hi");
+    expect(performance.now() - t0).toBeLessThan(1000);
+  });
+});
