@@ -96,7 +96,13 @@ export function PostPanel({
   const filmedReason = useFilmedReasonForPost(post);
   const designRequests = useDesignRequests();
   const preparingDesigns = isPreparing(designRequest, isMoburstStaff);
-  const [startingDesigns, setStartingDesigns] = useState(false);
+  // QA 22 Nov 2026: the panel stays mounted between posts, so what a press is doing belongs to the post it
+  // was pressed on. Kept by post key, a design starting, a clip going up, a clip that did not go up and a
+  // clip's note show on that post only; before, another post opened next showed them, and its Upload sent
+  // the first post's clip as its own footage.
+  const postKey = post?._calendarPostKey ?? null;
+  const [startingFor, setStartingFor] = useState<string | null>(null);
+  const startingDesigns = startingFor !== null && startingFor === postKey;
   const [usingId, setUsingId] = useState<string | null>(null);
   // Designs are offered once the client's design settings exist: the
   // lifecycle works them out on its own (decision 2), so nobody confirms them.
@@ -142,7 +148,7 @@ export function PostPanel({
   /** Start the post's design, with the note left on Regenerate; true once it has started. */
   const startDesigns = async (route?: "posts", note?: string): Promise<boolean> => {
     if (!clientId || !post) return false;
-    setStartingDesigns(true);
+    setStartingFor(postKey);
     try {
       // A client whose settings are still being worked out gets its design once they are.
       const started = await createDesigns({ clientId, reportId, post, route: route ?? (filmedReason ? "posts" : undefined), note });
@@ -153,7 +159,7 @@ export function PostPanel({
       designRequests?.refresh();
       return false;
     } finally {
-      setStartingDesigns(false);
+      setStartingFor((k) => (k === postKey ? null : k));
     }
   };
   /** Create design and Make this video: when the press got no answer the panel says it is not started yet. */
@@ -161,24 +167,28 @@ export function PostPanel({
     notYet.clear();
     if (!(await startDesigns(route))) notYet.say(NOT_YET.start);
   };
-  const [uploadingClip, setUploadingClip] = useState(false);
-  /** A clip that has not gone up yet: it stays selected, so sending it again never means choosing it again. */
-  const [pendingClip, setPendingClip] = useState<File | null>(null);
-  const [clipNote, setClipNote] = useState<string | null>(null);
+  const [uploadingFor, setUploadingFor] = useState<string | null>(null);
+  const uploadingClip = uploadingFor !== null && uploadingFor === postKey;
+  /** A clip that has not gone up yet, with its post: it stays selected, so sending it again never means choosing it again. */
+  const [pendingFor, setPendingFor] = useState<{ key: string; file: File } | null>(null);
+  const pendingClip = pendingFor && pendingFor.key === postKey ? pendingFor.file : null;
+  const [noteFor, setNoteFor] = useState<{ key: string; text: string } | null>(null);
+  const clipNote = noteFor && noteFor.key === postKey ? noteFor.text : null;
   const uploadClip = async (file: File) => {
-    if (!clientId || !post) return;
-    setUploadingClip(true);
-    setClipNote(null);
+    if (!clientId || !post || !postKey) return;
+    const key = postKey;
+    setUploadingFor(key);
+    setNoteFor(null);
     try {
       await uploadFilmedClip({ clientId, reportId, post, file });
-      setPendingClip(null);
+      setPendingFor((p) => (p?.key === key ? null : p));
       designRequests?.refresh();
       toast.success("Clip uploaded", { description: "The hook and your logo are being added." });
     } catch (e) {
-      if (e instanceof ClipNotAccepted) setClipNote(e.message);
-      else setPendingClip(file);
+      if (e instanceof ClipNotAccepted) setNoteFor({ key, text: e.message });
+      else setPendingFor({ key, file });
     } finally {
-      setUploadingClip(false);
+      setUploadingFor((k) => (k === key ? null : k));
     }
   };
   // Sent again quietly when they do not get through; the designs then show what the server has.
