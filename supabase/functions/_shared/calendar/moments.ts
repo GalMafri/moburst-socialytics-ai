@@ -159,6 +159,29 @@ export function parseMomentsList(text: string, range: { country: string; from: s
   return [...out.values()];
 }
 
+/**
+ * The stored moments as the newest lists have them. Each country is listed
+ * every week for five weeks ahead and rows are only ever added (key and
+ * date), so one moment can be stored under two dates, or one holiday under
+ * two near names on one date. QA 22 Nov 2026: both were planned (a post on a
+ * stale date, or two posts for one holiday). Per key only the newest list's
+ * dates stay, and per country and date one name stays (the newest listed),
+ * names told apart only by a plural "s" being one name.
+ */
+export function latestListed<T extends Moment & { listed_for?: string | null }>(rows: T[]): T[] {
+  const listed = (r: T) => String(r.listed_for ?? "").slice(0, 10);
+  const newest = new Map<string, string>();
+  for (const r of rows) if (listed(r) > (newest.get(r.key) ?? "")) newest.set(r.key, listed(r));
+  const loose = (r: T) => `${r.country}|${r.date}|${slugOf(r.key).split("-").map((w) => w.replace(/s$/, "")).join("-")}`;
+  const one = new Map<string, T>();
+  for (const r of rows) {
+    if (listed(r) !== (newest.get(r.key) ?? "")) continue;
+    const had = one.get(loose(r));
+    if (!had || listed(r) > listed(had)) one.set(loose(r), r);
+  }
+  return [...one.values()];
+}
+
 // ── 2. Code's filter ────────────────────────────────────────────────────────
 
 /** The client's countries: clients.geo, else its headquarters' country (clients.location), else none (global moments only). */

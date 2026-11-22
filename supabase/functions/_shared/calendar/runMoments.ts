@@ -25,7 +25,7 @@ import { learnFromSignal, loadClientVoice } from "../voice/load.ts";
 import { clientCompanyId, isClientPost, platformName, type OwnPost } from "./evidence.ts";
 import {
   belongsToSpace, blockedCategories, checkJudgement, clientCountries, competitorMentions, filterMoments, judgePrompt, momentHistory, momentsListPrompt,
-  parseMomentsList, readsAsMoments, GLOBAL, JUDGE_SCHEMA, LIST_WEEKS, SENSITIVE_CATEGORIES, type DroppedMoment, type HistoryPost, type JudgeInput, type JudgeOwnPost, type Moment,
+  latestListed, parseMomentsList, readsAsMoments, GLOBAL, JUDGE_SCHEMA, LIST_WEEKS, SENSITIVE_CATEGORIES, type DroppedMoment, type HistoryPost, type JudgeInput, type JudgeOwnPost, type Moment,
   type MomentHistory,
 } from "./moments.ts";
 import { CLIENT_COLUMNS, feedSnapshots, retryWait, type WeekJob, type WeekJobOutcome } from "./runWeek.ts";
@@ -164,16 +164,23 @@ async function listsPending(admin: Db, countries: string[], week: string, priori
   return missing.some((c) => ["queued", "running"].includes(state.get(listKey(c, week)) ?? ""));
 }
 
-/** The moments stored for a set of countries on the days of a week. */
+/**
+ * The moments stored for a set of countries on the days of a week, as the
+ * newest lists date them: rows a list's span around the week are read so a
+ * moment a newer list moved out of the week is not kept on its old date.
+ */
 async function storedMoments(admin: Db, countries: string[], week: string): Promise<Moment[]> {
-  const { data, error } = await admin.from("moments").select("key, name, date, last_year_date, country, category, link, hashtags, aliases, terms")
-    .in("country", countries).gte("date", week).lte("date", addDays(week, 6));
+  const span = LIST_WEEKS * 7;
+  const { data, error } = await admin.from("moments").select("key, name, date, last_year_date, country, category, link, hashtags, aliases, terms, listed_for")
+    .in("country", countries).gte("date", addDays(week, -span)).lte("date", addDays(week, 6 + span));
   if (error) throw new Error(`Could not read the moments: ${error.message}`);
-  return ((data ?? []) as Any[]).map((m) => ({
+  const last = addDays(week, 6);
+  return latestListed(((data ?? []) as Any[]).map((m) => ({
     key: String(m.key), name: String(m.name), date: String(m.date).slice(0, 10), last_year_date: m.last_year_date ? String(m.last_year_date).slice(0, 10) : null,
     country: String(m.country), category: m.category, link: String(m.link ?? ""),
     hashtags: Array.isArray(m.hashtags) ? m.hashtags.map(String) : [], aliases: Array.isArray(m.aliases) ? m.aliases.map(String) : [], terms: Array.isArray(m.terms) ? m.terms.map(String) : [],
-  }));
+    listed_for: m.listed_for ? String(m.listed_for).slice(0, 10) : null,
+  }))).filter((m) => m.date >= week && m.date <= last).map(({ listed_for: _listed, ...m }) => m);
 }
 
 /**
