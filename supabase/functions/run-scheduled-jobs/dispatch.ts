@@ -350,6 +350,9 @@ export interface DispatchMemory {
 }
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** A dispatch that cannot be made until a person sets something up (its webhook): blocked, not tried again. */
+class NotConfigured extends Error {}
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
 
@@ -835,7 +838,7 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
     if (route.engine === "app") target = { engine: "app", pipeline: route.pipeline, refused: route.refused, unreadable: route.unreadable };
     else if (url) target = { engine: route.engine, pipeline: route.pipeline, url };
     // Only a request to n8n needs its webhook. Without it: blocked, before anything is made.
-    else throw new Error(competitive ? "competitive webhook URL not configured" : "n8n webhook URL not configured");
+    else throw new NotConfigured(competitive ? "competitive webhook URL not configured" : "n8n webhook URL not configured");
 
     if (competitive) {
       const set = await d.store.competitorSet(client.id);
@@ -968,6 +971,16 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
     // A report this job opened is taken away and the occurrence runs again.
     if (reportId) return runAgain(reportId, msg, "error");
     await note(`error: ${msg}`);
+    // QA 22 Nov 2026 (P60-2): anything else that stops the dispatch before a
+    // report exists (a dropped connection on a read, say) is tried again
+    // shortly while it has tries left, as the worker does for a thrown job.
+    // Every error used to block it, and only the next day's enqueue released
+    // a blocked dispatch.
+    if (!(err instanceof NotConfigured) && job.attempts < job.max_attempts) {
+      return { status: "queued", reason: `${msg}; it is tried again shortly.`, available_at: new Date(now.getTime() + RETRY_MINUTES * MINUTE).toISOString() };
+    }
+    // Blocked: a social report held for this competitive one is not held any longer.
+    if (competitive) await d.store.releaseHeldSocial(client.id).catch(() => undefined);
     return { status: "blocked", reason: msg };
   }
 }
