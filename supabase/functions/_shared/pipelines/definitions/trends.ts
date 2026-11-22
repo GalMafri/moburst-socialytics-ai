@@ -251,7 +251,12 @@ export interface Recollect {
   try: number;
 }
 
-/** The run's recollect, or null for any other run. */
+/**
+ * The run's recollect, or null for any other run. A recollect that names no
+ * source (a week whose filter gave up, judged again) is read as a plain
+ * replay: every source from the answers the earlier run kept, then the
+ * filter, the themes and the save, as on the week's first run.
+ */
 export function recollectOf(run: Pick<PipelineRun, "input">): Recollect | null {
   const r = ((run.input ?? {}) as { recollect?: { platforms?: unknown; try?: unknown } | null }).recollect;
   if (!r || !Array.isArray(r.platforms)) return null;
