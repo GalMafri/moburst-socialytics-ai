@@ -29,6 +29,8 @@ type Choice = 'kept' | 'left_out';
 interface Shown { path: string; platform: string | null; posted_at: string | null; source_url: string | null; upload: boolean; occasion?: string | null }
 
 const POLL_MS = 15_000;
+/** How long the card keeps reading after a saved choice for the check it started. */
+const CHOICE_WAIT_MS = 10 * 60_000;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const entryOf = (r: any, uploads: string[]): Shown => ({
@@ -121,29 +123,67 @@ export function AutomaticBrandReferences({ clientId, savedVersion, onReady }: {
 
   useEffect(() => { lastDone.current = null; void load(); }, [load, savedVersion]);
 
+  /** Where the client's check stands, read on its own right after a saved choice; the polls then read the whole card. */
+  const readStep = useCallback(async () => {
+    if (!clientId) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: row, error } = await (supabase.from as any)('client_lifecycle_steps').select('status, done_at, attempted_at, result').eq('client_id', clientId).eq('step', 'design_refs').maybeSingle();
+    if (!error && row) setStep(row as RefsStep);
+  }, [clientId]);
+
   const busy = checking(step);
+  // QA 22 Nov 2026: a saved choice starts the client's check on the server, so
+  // the card reads itself again and keeps reading until that check has run
+  // (the step's attempted_at moves on and it is no longer running), for at
+  // most CHOICE_WAIT_MS. Before, the card never read again after a choice and
+  // the check and the look it learned showed only after a reload.
+  const [waitFrom, setWaitFrom] = useState<{ attempted: string | null } | null>(null);
+  const awaitingCheck = waitFrom !== null && (busy || (step?.attempted_at ?? null) === waitFrom.attempted);
   useEffect(() => {
-    if (!busy) return;
+    if (waitFrom && !awaitingCheck) setWaitFrom(null);
+  }, [waitFrom, awaitingCheck]);
+  useEffect(() => {
+    if (!waitFrom) return;
+    const t = window.setTimeout(() => setWaitFrom(null), CHOICE_WAIT_MS);
+    return () => window.clearTimeout(t);
+  }, [waitFrom]);
+  const polling = busy || awaitingCheck;
+  useEffect(() => {
+    if (!polling) return;
     const t = window.setInterval(() => void load(), POLL_MS);
     return () => window.clearInterval(t);
-  }, [busy, load]);
+  }, [polling, load]);
 
   // A choice is saved at once and sent again quietly on a dropped connection.
   // One that does not get through puts the post back as it was and says so;
   // the server runs the client's check once it is saved.
   const choose = async (path: string, choice: Choice | 'none') => {
     if (!clientId) return;
-    const before = choices;
-    const next = { ...choices };
-    if (choice === 'none') delete next[path]; else next[path] = choice;
-    setChoices(next);
+    const had = choices[path];
+    const asked = choice === 'none' ? undefined : choice;
+    setChoices((cur) => {
+      const next = { ...cur };
+      if (asked) next[path] = asked; else delete next[path];
+      return next;
+    });
     setNotSaved(false);
+    const attempted = step?.attempted_at ?? null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error } = await sendQuietly(() => (supabase.rpc as any)('design_reference_choose', { p_client: clientId, p_path: path, p_choice: choice }), { again: writeResendable });
     if (error) {
-      setChoices(before);
+      // QA 22 Nov 2026: only this post goes back, and only if nothing changed it
+      // since; putting back the whole map undid other choices saved meanwhile.
+      setChoices((cur) => {
+        if (cur[path] !== asked) return cur;
+        const next = { ...cur };
+        if (had) next[path] = had; else delete next[path];
+        return next;
+      });
       setNotSaved(true);
+      return;
     }
+    setWaitFrom((w) => w ?? { attempted });
+    void readStep();
   };
 
   // The library, and at once any offered or occasion post someone just chose to use.
