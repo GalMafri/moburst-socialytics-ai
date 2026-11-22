@@ -258,6 +258,11 @@ describe('each post and the dock', () => {
     cleanup();
     card('k2');
     expect(await screen.findByText('Designed once its copy is written')).toBeInTheDocument();
+    cleanup();
+    // QA 22 Nov 2026 (P34-03): a video held for the clip balance says so.
+    f.runs = [run({ posts: [runPost('k3', { waits_for: 'credits' })] })];
+    card('k3');
+    expect(await screen.findByText('Made once there are enough video credits')).toBeInTheDocument();
   });
 
   it("shows the week as one card in the dock, not one per post", async () => {

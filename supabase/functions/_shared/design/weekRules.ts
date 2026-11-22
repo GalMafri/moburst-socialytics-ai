@@ -147,8 +147,8 @@ export interface RunPost {
   /** queued: waits its turn; started: its request was made; filming: its video is filmed instead; left_out: see why. */
   state: "queued" | "started" | "filming" | "left_out";
   why?: LeftOut | null;
-  /** A queued post whose copy is not written yet. */
-  waits_for?: "copy" | null;
+  /** A queued post whose copy is not written yet, or a queued video held while the Higgsfield balance cannot cover its clip (QA 22 Nov 2026). */
+  waits_for?: "copy" | "credits" | null;
   /** Who added the post to the run; its request names them. */
   added_by: string;
   added_at: string;
@@ -256,7 +256,12 @@ export function planPass(input: {
   for (const { order: _order, ...c } of candidates) {
     if (starts.length >= input.room) break;
     if (busy.has(c.client_id)) continue;
-    if (c.kind === "video" && !input.clipAffordable) continue;
+    if (c.kind === "video" && !input.clipAffordable) {
+      // QA 22 Nov 2026: the post says why it is held, as one waiting for its copy does; the next pass clears it.
+      const held = runs.get(c.runId)?.find((p) => p.post_key === c.post_key);
+      if (held) held.waits_for = "credits";
+      continue;
+    }
     starts.push(c);
     busy.add(c.client_id);
   }

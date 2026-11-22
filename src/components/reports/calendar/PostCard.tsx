@@ -121,7 +121,7 @@ function FeedPostCard({ post, iteration, status, sendState, onOpen, onToggleAppr
               ) : weekState && !designing ? (
                 <>
                   <Clock className="h-4 w-4" />
-                  <span className="t-label">{weekState === "copy" ? "Designed once its copy is written" : "Queued for design"}</span>
+                  <span className="t-label">{weekState === "copy" ? "Designed once its copy is written" : weekState === "credits" ? "Made once there are enough video credits" : "Queued for design"}</span>
                 </>
               ) : endedWithoutDesign(designRequest) && designRequest ? (
                 // The last one asked for ended without a design: the card says so, not "No design yet".

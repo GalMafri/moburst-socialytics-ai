@@ -142,8 +142,8 @@ export function useDesignRequestForPost(post: { _calendarPostKey?: string } | nu
   return ctx.byPost.get(post._calendarPostKey) ?? null;
 }
 
-/** Where the post stands in a week being designed: queued for design, or waiting for its copy. Null otherwise. */
-export function useWeekStateForPost(post: { _calendarPostKey?: string } | null | undefined): "queued" | "copy" | null {
+/** Where the post stands in a week being designed: queued for design, waiting for its copy, or a video waiting for video credits. Null otherwise. */
+export function useWeekStateForPost(post: { _calendarPostKey?: string } | null | undefined): "queued" | "copy" | "credits" | null {
   const ctx = useContext(DesignRequestsCtx);
   if (!ctx) return null;
   return weekStateOf(ctx.weekRuns, post?._calendarPostKey);
