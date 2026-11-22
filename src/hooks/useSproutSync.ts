@@ -60,15 +60,21 @@ export function useSproutSync(enabled: boolean): SproutSync {
     pressing.current = true;
     setStarting(true);
     setLine(null);
-    void startSproutSync().then((reply) => {
-      pressing.current = false;
-      setStarting(false);
+    void startSproutSync().then(async (reply) => {
       if (!reply || (!reply.started && !reply.sync.open)) {
+        pressing.current = false;
+        setStarting(false);
         setLine({ added: [], text: SYNC_NOT_STARTED });
         return;
       }
+      // QA 22 Nov 2026: a read of the run that left before the press (the dashboard opening, the tab
+      // regaining focus) is stopped first. Landing after the press's answer, it said the run was over
+      // and showed the last run's line while the new run went on.
+      await queryClient.cancelQueries({ queryKey: SYNC_KEY });
       watched.current = true;
       queryClient.setQueryData(SYNC_KEY, reply.sync);
+      pressing.current = false;
+      setStarting(false);
     });
   }, [open, queryClient]);
 

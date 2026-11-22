@@ -64,11 +64,14 @@ interface Props {
   filmedReason?: string | null;
   /** What to film, for Moburst staff and admins only (null for everyone else). */
   shotBrief?: ShotBrief | null;
+  /** No shot brief was written, and asking for one did not bring it: say so, with a way to ask again. */
+  shotBriefMissing?: boolean;
+  onAskShotBrief?: () => void;
   /** A Story: posted by hand, its design downloaded under this name ("brand-story-2026-11-05.png"). */
   storyFileName?: string | null;
 }
 
-export function PostDesign({ versions, preparing, notMade, isStaff, aspect, filenameStub, onCreate, onRegenerate, brand, creating, onUse, usingId, onFeedback, feedbackLine, waitingForCopy, onCamera, textOnly, onUploadClip, uploadingClip, onMakeFromPosts, filmedReason, shotBrief, storyFileName }: Props) {
+export function PostDesign({ versions, preparing, notMade, isStaff, aspect, filenameStub, onCreate, onRegenerate, brand, creating, onUse, usingId, onFeedback, feedbackLine, waitingForCopy, onCamera, textOnly, onUploadClip, uploadingClip, onMakeFromPosts, filmedReason, shotBrief, shotBriefMissing, onAskShotBrief, storyFileName }: Props) {
   const clipInput = useRef<HTMLInputElement>(null);
   const requests = useDesignRequests()?.requests;
   /** Regenerate's note box: open, its note, and whether the last press did not start. */
@@ -111,7 +114,7 @@ export function PostDesign({ versions, preparing, notMade, isStaff, aspect, file
                 <div className="glass-inner p-4 space-y-3 flex flex-col">
                   <p className="t-h4">Film it</p>
                   <p className="t-secondary flex-1">This video is filmed: {onCamera}. Upload the vertical clip and it's edited the way your own videos are.</p>
-                  {isStaff && <ShotBriefCard brief={shotBrief ?? null} />}
+                  {isStaff && <ShotBriefCard brief={shotBrief ?? null} missing={!!shotBriefMissing} onAsk={onAskShotBrief} />}
                   {onUploadClip && <ClipUpload input={clipInput} onUploadClip={onUploadClip} uploadingClip={uploadingClip} />}
                 </div>
                 {onMakeFromPosts && (
@@ -476,11 +479,16 @@ function SlideLightbox({ state, onClose }: { state: { urls: string[]; index: num
 
 function DownloadButton({ urls, filenameStub }: { urls: string[]; filenameStub: string }) {
   const [busy, setBusy] = useState(false);
+  /** QA 22 Nov 2026: a download that did not happen says so; before, a failed fetch left the screen as it was and a refused one saved the error page as the picture. */
+  const [notDownloaded, setNotDownloaded] = useState(false);
   const download = async () => {
     setBusy(true);
+    setNotDownloaded(false);
     try {
       for (let i = 0; i < urls.length; i++) {
-        const blob = await (await fetch(urls[i])).blob();
+        const res = await fetch(urls[i]);
+        if (!res.ok) throw new Error(`download answered ${res.status}`);
+        const blob = await res.blob();
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
         const ext = isVideoMedia(urls[i]) ? "mp4" : "png";
@@ -488,15 +496,21 @@ function DownloadButton({ urls, filenameStub }: { urls: string[]; filenameStub: 
         a.click();
         URL.revokeObjectURL(a.href);
       }
+    } catch (e) {
+      console.warn("[design] not downloaded yet", e);
+      setNotDownloaded(true);
     } finally {
       setBusy(false);
     }
   };
   return (
-    <Button size="sm" variant="ghost" className="h-9" onClick={download} disabled={busy}>
-      {busy ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1.5" />}
-      {urls.length > 1 ? "Download slides" : "Download"}
-    </Button>
+    <>
+      <Button size="sm" variant="ghost" className="h-9" onClick={download} disabled={busy}>
+        {busy ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1.5" />}
+        {urls.length > 1 ? "Download slides" : "Download"}
+      </Button>
+      {notDownloaded && <span role="status" className="t-secondary">Not downloaded yet.</span>}
+    </>
   );
 }
 
@@ -541,8 +555,16 @@ function ClipUpload({ input, onUploadClip, uploadingClip, compact }: { input: Re
 }
 
 /** What to film for this post, written in the client's filmed format. Shown to Moburst staff and admins only. */
-function ShotBriefCard({ brief }: { brief: ShotBrief | null }) {
+function ShotBriefCard({ brief, missing, onAsk }: { brief: ShotBrief | null; missing?: boolean; onAsk?: () => void }) {
   const [open, setOpen] = useState(false);
+  if (!brief && missing) {
+    return (
+      <p role="status" className="t-label inline-flex flex-wrap items-center gap-1.5">
+        No shot brief yet.
+        {onAsk && <button type="button" onClick={onAsk} className="underline underline-offset-2 hover:!text-white">Ask for the shot brief again</button>}
+      </p>
+    );
+  }
   if (!brief) return <p className="t-label inline-flex items-center gap-1.5"><Loader2 className="h-3 w-3 animate-spin" aria-hidden />Writing the shot brief</p>;
   return (
     <div className="rounded-[12px] border border-white/10 p-3 space-y-2">

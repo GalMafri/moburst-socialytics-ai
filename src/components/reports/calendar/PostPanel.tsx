@@ -36,6 +36,7 @@ import { tileAspectFor } from "@/lib/tileAspect";
 import { useNaturalRatio, useVideoRatio, videoAspectClass } from "@/lib/naturalRatio";
 import { mediaInUse, tilesFromIterations, type Iteration, type MediaTile } from "@/lib/postMediaTiles";
 import { supabase } from "@/integrations/supabase/client";
+import { invokeResendable, sendQuietly } from "@/lib/quietSend";
 import { postCopyOf } from "@/lib/postCopy";
 import { finishIterations, type ProductionPlan } from "@/lib/creativeProduction";
 
@@ -64,6 +65,12 @@ const TAB_COLUMNS: Record<number, string> = { 2: "grid-cols-2", 3: "grid-cols-3"
 function isVideoUrl(url: string): boolean {
   return /\.(mp4|webm|mov)/i.test(url);
 }
+
+/** How late a filmed post's shot brief may be before the panel asks for it to be written again. */
+const BRIEF_WAIT_MS = 60_000;
+/** A reference artwork that could not be finished is tried this many times in all, this long apart. */
+const FINISH_TRIES = 3;
+const FINISH_RETRY_MS = 30_000;
 
 export function PostPanel({
   open,
@@ -96,7 +103,13 @@ export function PostPanel({
   const filmedReason = useFilmedReasonForPost(post);
   const designRequests = useDesignRequests();
   const preparingDesigns = isPreparing(designRequest, isMoburstStaff);
-  const [startingDesigns, setStartingDesigns] = useState(false);
+  // QA 22 Nov 2026: the panel stays mounted between posts, so what a press is doing belongs to the post it
+  // was pressed on. Kept by post key, a design starting, a clip going up, a clip that did not go up and a
+  // clip's note show on that post only; before, another post opened next showed them, and its Upload sent
+  // the first post's clip as its own footage.
+  const postKey = post?._calendarPostKey ?? null;
+  const [startingFor, setStartingFor] = useState<string | null>(null);
+  const startingDesigns = startingFor !== null && startingFor === postKey;
   const [usingId, setUsingId] = useState<string | null>(null);
   // Designs are offered once the client's design settings exist: the
   // lifecycle works them out on its own (decision 2), so nobody confirms them.
@@ -127,9 +140,19 @@ export function PostPanel({
   // A filmed post's video can instead be made in the look of the client's
   // posts; once chosen, making it again follows the same route.
   // The shot brief for a filmed post: only Moburst staff and admins can read it.
+  // QA 22 Nov 2026: the brief is written once, a few seconds after the post is
+  // marked as filmed, and a write that failed was never tried again, so staff
+  // saw "Writing the shot brief" for good while the panel read every 5 s. Once
+  // the brief is BRIEF_WAIT_MS late the panel asks design-request to write it
+  // (its shot_brief action), and when that brings none it stops reading and
+  // says there is no shot brief yet, with a button to ask again.
+  const briefKey = post?._calendarPostKey ?? null;
+  const [briefAsk, setBriefAsk] = useState<{ key: string | null; state: "waiting" | "asking" | "none" }>({ key: null, state: "waiting" });
+  const briefState = briefAsk.key === briefKey ? briefAsk.state : "waiting";
+  const briefWanted = !!clientId && open && isMoburstStaff && !!filmedReason && !!briefKey;
   const { data: shotBrief } = useQuery({
     queryKey: ["shot-brief", clientId, post?._calendarPostKey],
-    enabled: !!clientId && open && isMoburstStaff && !!filmedReason && !!post?._calendarPostKey,
+    enabled: briefWanted && briefState !== "none",
     queryFn: async () => {
       const { data, error } = await (supabase.from("design_shot_briefs" as any) as any)
         .select("brief").eq("client_id", clientId).eq("calendar_post_key", post!._calendarPostKey).order("updated_at", { ascending: false }).limit(1).maybeSingle();
@@ -139,10 +162,33 @@ export function PostPanel({
     // Written a few seconds after the post is marked as filmed.
     refetchInterval: (query) => (query.state.data ? false : 5000),
   });
+  const filmingRequestId = designRequest?.status === "needs_filming" ? designRequest.id : null;
+  const askForBrief = async () => {
+    if (!clientId || !briefKey) return;
+    const key = briefKey;
+    setBriefAsk({ key, state: "asking" });
+    const { data, error } = filmingRequestId
+      ? await sendQuietly(() => supabase.functions.invoke("design-request", { body: { action: "shot_brief", request_id: filmingRequestId } }), { again: (e) => invokeResendable(e, { idempotent: true }) })
+      : { data: null, error: true };
+    const brief = !error && data?.brief ? (data.brief as ShotBrief) : null;
+    if (brief) queryClient.setQueryData(["shot-brief", clientId, key], brief);
+    setBriefAsk({ key, state: brief ? "waiting" : "none" });
+  };
+  const askedForBrief = useRef(new Set<string>());
+  useEffect(() => {
+    if (!briefWanted || shotBrief || briefState !== "waiting" || !briefKey || askedForBrief.current.has(briefKey)) return;
+    // Asked once on its own, when the brief is late: counted from when the post was marked as filmed.
+    const since = Date.parse(designRequest?.updated_at ?? "");
+    const wait = Number.isFinite(since) ? Math.max(0, since + BRIEF_WAIT_MS - Date.now()) : BRIEF_WAIT_MS;
+    const key = briefKey;
+    const t = window.setTimeout(() => { askedForBrief.current.add(key); void askForBrief(); }, wait);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [briefWanted, shotBrief, briefState, briefKey, designRequest?.updated_at]);
   /** Start the post's design, with the note left on Regenerate; true once it has started. */
   const startDesigns = async (route?: "posts", note?: string): Promise<boolean> => {
     if (!clientId || !post) return false;
-    setStartingDesigns(true);
+    setStartingFor(postKey);
     try {
       // A client whose settings are still being worked out gets its design once they are.
       const started = await createDesigns({ clientId, reportId, post, route: route ?? (filmedReason ? "posts" : undefined), note });
@@ -153,7 +199,7 @@ export function PostPanel({
       designRequests?.refresh();
       return false;
     } finally {
-      setStartingDesigns(false);
+      setStartingFor((k) => (k === postKey ? null : k));
     }
   };
   /** Create design and Make this video: when the press got no answer the panel says it is not started yet. */
@@ -161,24 +207,28 @@ export function PostPanel({
     notYet.clear();
     if (!(await startDesigns(route))) notYet.say(NOT_YET.start);
   };
-  const [uploadingClip, setUploadingClip] = useState(false);
-  /** A clip that has not gone up yet: it stays selected, so sending it again never means choosing it again. */
-  const [pendingClip, setPendingClip] = useState<File | null>(null);
-  const [clipNote, setClipNote] = useState<string | null>(null);
+  const [uploadingFor, setUploadingFor] = useState<string | null>(null);
+  const uploadingClip = uploadingFor !== null && uploadingFor === postKey;
+  /** A clip that has not gone up yet, with its post: it stays selected, so sending it again never means choosing it again. */
+  const [pendingFor, setPendingFor] = useState<{ key: string; file: File } | null>(null);
+  const pendingClip = pendingFor && pendingFor.key === postKey ? pendingFor.file : null;
+  const [noteFor, setNoteFor] = useState<{ key: string; text: string } | null>(null);
+  const clipNote = noteFor && noteFor.key === postKey ? noteFor.text : null;
   const uploadClip = async (file: File) => {
-    if (!clientId || !post) return;
-    setUploadingClip(true);
-    setClipNote(null);
+    if (!clientId || !post || !postKey) return;
+    const key = postKey;
+    setUploadingFor(key);
+    setNoteFor(null);
     try {
       await uploadFilmedClip({ clientId, reportId, post, file });
-      setPendingClip(null);
+      setPendingFor((p) => (p?.key === key ? null : p));
       designRequests?.refresh();
       toast.success("Clip uploaded", { description: "The hook and your logo are being added." });
     } catch (e) {
-      if (e instanceof ClipNotAccepted) setClipNote(e.message);
-      else setPendingClip(file);
+      if (e instanceof ClipNotAccepted) setNoteFor({ key, text: e.message });
+      else setPendingFor({ key, file });
     } finally {
-      setUploadingClip(false);
+      setUploadingFor((k) => (k === key ? null : k));
     }
   };
   // Sent again quietly when they do not get through; the designs then show what the server has.
@@ -227,10 +277,27 @@ export function PostPanel({
   };
   // Artwork the server completed while nobody was watching still needs its
   // headline card, type and logo. Finish it here, once per row.
+  // QA 22 Nov 2026: a row that could not be finished was forgotten and tried
+  // again on the next render of the board, which hands over a new array every
+  // render: a plan call, a canvas render and a stored file per render. A row
+  // is now tried at most FINISH_TRIES times, the next try no sooner than
+  // FINISH_RETRY_MS after the last, and the effect follows the pending rows'
+  // ids rather than the array.
   const finishingRef = useRef(new Set<string>());
+  const finishTries = useRef(new Map<string, { tries: number; at: number }>());
+  const [finishClock, setFinishClock] = useState(0);
+  const pendingFinishIds = postIterations
+    .filter((it) => it.id && it.finishing === "pending" && /^Reference creative ([0-9a-f-]{36})/.test(String(it.variant_angle || "")))
+    .map((it) => it.id)
+    .join(",");
   useEffect(() => {
     if (!isMoburstStaff || !clientId) return;
-    const pending = postIterations.filter((it) => it.id && it.finishing === "pending" && /^Reference creative ([0-9a-f-]{36})/.test(String(it.variant_angle || "")) && !finishingRef.current.has(it.id));
+    const now = Date.now();
+    const due = (id: string) => {
+      const t = finishTries.current.get(id);
+      return !t || (t.tries < FINISH_TRIES && now - t.at >= FINISH_RETRY_MS);
+    };
+    const pending = postIterations.filter((it) => it.id && it.finishing === "pending" && /^Reference creative ([0-9a-f-]{36})/.test(String(it.variant_angle || "")) && !finishingRef.current.has(it.id) && due(it.id));
     if (!pending.length) return;
     const byPlan = new Map<string, Iteration[]>();
     for (const it of pending) { const planId = String(it.variant_angle).match(/^Reference creative ([0-9a-f-]{36})/)![1]; byPlan.set(planId, [...(byPlan.get(planId) || []), it]); finishingRef.current.add(it.id!); }
@@ -243,11 +310,18 @@ export function PostPanel({
           refreshMedia();
         } catch (e) {
           console.warn("[PostPanel] finishing failed:", e);
-          for (const r of rows) finishingRef.current.delete(r.id!);
+          for (const r of rows) {
+            finishingRef.current.delete(r.id!);
+            const tries = (finishTries.current.get(r.id!)?.tries ?? 0) + 1;
+            finishTries.current.set(r.id!, { tries, at: Date.now() });
+          }
+          // The next try, when one is left, comes after the wait.
+          if (rows.some((r) => (finishTries.current.get(r.id!)?.tries ?? 0) < FINISH_TRIES)) window.setTimeout(() => setFinishClock((n) => n + 1), FINISH_RETRY_MS);
         }
       }
     })();
-  }, [postIterations, isMoburstStaff, clientId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingFinishIds, isMoburstStaff, clientId, finishClock]);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewIsVideo, setPreviewIsVideo] = useState(false);
@@ -382,6 +456,8 @@ export function PostPanel({
                     onMakeFromPosts={() => void startFromButton("posts")}
                     filmedReason={filmedReason}
                     shotBrief={isMoburstStaff ? shotBrief ?? null : null}
+                    shotBriefMissing={isMoburstStaff && !shotBrief && briefState === "none"}
+                    onAskShotBrief={() => void askForBrief()}
                     creating={startingDesigns}
                     onUse={applyDesign}
                     usingId={usingId}

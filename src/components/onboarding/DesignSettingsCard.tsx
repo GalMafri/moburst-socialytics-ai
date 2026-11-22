@@ -219,12 +219,15 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
   const [unnamed, setUnnamed] = useState<{ name: string; path: string } | null>(null);
   const [refusedOther, setRefusedOther] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
+  /** QA 22 Nov 2026: a Remove that did not get through says so; before, the file simply stayed with no word. */
+  const [notRemoved, setNotRemoved] = useState(false);
   const nameOther = useCallback(async (name: string, path: string | null) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error } = await sendQuietly(() => (supabase.rpc as any)("set_design_logo_other", { p_client: clientId, p_path: path }), { again: writeResendable });
     // Stored and not named yet: the file stays chosen, shown as not uploaded yet.
     setUnnamed(error && path ? { name, path } : null);
     if (!error) void qc.invalidateQueries({ queryKey: ["design-settings-full", clientId] });
+    return !error;
   }, [clientId, qc]);
   const uploadOther = useCallback(async (file: File) => {
     const png = await asPng(file);
@@ -236,12 +239,15 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
     if (!/^image\/(png|jpeg|webp)$/.test(file.type)) { setRefusedOther(file.name); return; }
     setRefusedOther(null);
     setUnnamed(null);
+    setNotRemoved(false);
     void other.send(file);
   };
   const removeOther = async () => {
     setRemoving(true);
-    await nameOther("", null);
+    setNotRemoved(false);
+    const removed = await nameOther("", null);
     setRemoving(false);
+    setNotRemoved(!removed);
   };
   const otherWaiting = other.pending && !other.uploading ? other.pending.name : unnamed?.name ?? null;
   const publicUrl = (path: string) => supabase.storage.from("generated-media").getPublicUrl(path).data.publicUrl;
@@ -343,10 +349,11 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
                       {control.label}
                     </label>
                   </Button>
-                  {control.removable && <Button variant="link" size="sm" className="px-0" disabled={removing} onClick={() => void removeOther()}>Remove your team's file</Button>}
+                  {control.removable && <Button variant="link" size="sm" className="px-0" disabled={removing} onClick={() => void removeOther()}>{removing && <Loader2 className="animate-spin" aria-hidden />}Remove your team's file</Button>}
                 </div>
               )}
               <input id="design-logo-other" aria-label="A second logo file" type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; if (f) chooseOther(f); e.target.value = ""; }} />
+              {notRemoved && <p className="t-secondary" role="status">Your team's file is not removed yet.</p>}
               {refusedOther && <p className="t-secondary" role="status">{refusedOther} is not a PNG, JPG or WebP image, so nothing changes.</p>}
               {otherWaiting && (
                 <div className="flex items-center gap-2" role="status">

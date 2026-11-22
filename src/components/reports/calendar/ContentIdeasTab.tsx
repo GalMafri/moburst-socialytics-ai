@@ -16,6 +16,8 @@ import type { ClientContext } from "@/lib/clientContext";
 import type { ReportTrends } from "@/lib/reportFigures";
 import { applyCopyRevisions, calendarWithRevisions, iterationMatchesPost } from "@/lib/calendarRevision";
 import { useAuth } from "@/hooks/useAuth";
+import { useInRouterContext, useNavigate } from "react-router-dom";
+import { mondayOf } from "@/lib/calendarPosts";
 
 interface Props {
   contentCalendar: any[];
@@ -71,7 +73,7 @@ export function ContentIdeasTab({
   const qc = useQueryClient();
   const { isMoburstStaff } = useAuth();
 
-  const { data: postIterations = [], isLoading: iterationsLoading, isError: iterationsFailed, refetch: reloadIterations } = useQuery({
+  const { data: iterationsRead, isLoading: iterationsLoading, isError: iterationsReadFailed, refetch: reloadIterations } = useQuery({
     queryKey: ["post-iterations", clientId],
     queryFn: async () => {
       if (!clientId) return [];
@@ -93,9 +95,9 @@ export function ContentIdeasTab({
   });
 
   const {
-    data: scheduledPosts = [],
+    data: scheduledRead,
     isLoading: scheduledPostsLoading,
-    isError: scheduledPostsFailed,
+    isError: scheduledReadFailed,
     error: scheduledPostsError,
     refetch: reloadScheduledPosts,
   } = useQuery({
@@ -111,15 +113,24 @@ export function ContentIdeasTab({
     },
     enabled: !!clientId,
   });
+  // QA 22 Nov 2026: a read counts as failed only while nothing has been read. A re-read that ended in an
+  // error (the board re-reads its designs often while a panel is open) keeps what was read, so the open
+  // panel and the edit in it stay; before, one failed re-read closed the panel and the board.
+  const postIterations = (iterationsRead ?? []) as any[];
+  const iterationsFailed = iterationsReadFailed && iterationsRead === undefined;
+  const scheduledPosts = (scheduledRead ?? []) as any[];
+  const scheduledPostsFailed = scheduledReadFailed && scheduledRead === undefined;
 
-  // The flip is worked out once from the stored row; the read and the write
-  // each repeat safely, so either one that does not get through is sent
-  // again quietly. The board is read again either way, so the chip shows the
-  // approval as it is stored.
+  // QA 22 Nov 2026: the chip asks for the state it showed the opposite of
+  // ("Mark as approved" approves), and the board shows that state at once.
+  // A blind flip of whatever the server held, with a chip that did not change
+  // for up to 13 s of quiet resends, let a second press of "Mark as approved"
+  // undo the first. The read and the write each repeat safely, so either one
+  // that does not get through is sent again quietly; the board is read again
+  // either way, so the chip ends on the approval as it is stored.
   const toggleApproved = useMutation({
-    mutationFn: async (iterationId: string) => {
+    mutationFn: async ({ iterationId, approve }: { iterationId: string; approve: boolean }) => {
       if (!clientId) return;
-      // Read current state
       const { data: current, error: readErr } = await sendQuietly(() => supabase
         .from("post_iterations")
         .select("variant_group_id, is_approved")
@@ -129,7 +140,7 @@ export function ContentIdeasTab({
       if (!current) throw new Error(`post_iterations ${iterationId} is no longer on the board`);
 
       const variantGroupId = (current as any).variant_group_id;
-      const newApproved = !((current as any).is_approved);
+      const newApproved = approve;
       // Column defaults only apply on insert, so record the approver here.
       const { data: auth } = await supabase.auth.getUser();
       const update: any = {
@@ -146,6 +157,15 @@ export function ContentIdeasTab({
         ? supabase.from("post_iterations").update(update).eq("variant_group_id", variantGroupId)
         : supabase.from("post_iterations").update(update).eq("id", iterationId), { again: writeResendable });
       if (writeErr) throw writeErr;
+    },
+    onMutate: async ({ iterationId, approve }) => {
+      // A board read already on its way would draw the old approval over this one.
+      await qc.cancelQueries({ queryKey: ["post-iterations", clientId] });
+      qc.setQueryData<any[]>(["post-iterations", clientId], (rows) => {
+        if (!rows) return rows;
+        const group = rows.find((r) => r.id === iterationId)?.variant_group_id ?? null;
+        return rows.map((r) => (r.id === iterationId || (group && r.variant_group_id === group) ? { ...r, is_approved: approve } : r));
+      });
     },
     onError: (err: any) => console.warn("[approval] not changed yet", err),
     onSettled: () => {
@@ -198,14 +218,35 @@ export function ContentIdeasTab({
     setPanelTab(openPostTab);
   }, [openPostKey, openPostTab, revisedCalendar, iterationsLoading]);
 
+  // QA 22 Nov 2026: on a report's own board the dock lists every design the
+  // person asked for on the client, Calendar posts too, and a report page has
+  // no week to go to. Open on one of those went nowhere; it now goes to the
+  // post on the Calendar, opened on its Design tab (the Calendar itself when
+  // the post is no longer there).
+  const navigate = useNavigateIfRouted();
+  const openOnCalendar = useCallback(async (postKey: string) => {
+    if (!clientId) return;
+    // calendar_posts is not in the generated types yet.
+    const { data } = await (supabase.from("calendar_posts" as never) as any).select("id, post_date").eq("client_id", clientId).eq("post_key", postKey).maybeSingle();
+    const there = data as { id: string; post_date: string } | null;
+    const url = there
+      ? `/clients/${clientId}/calendar?week=${mondayOf(there.post_date)}&post=${there.id}&tab=design`
+      : `/clients/${clientId}/calendar`;
+    if (navigate) navigate(url);
+    else window.location.assign(url);
+  }, [clientId, navigate]);
+
   // A design progress card names its post by key; find that post on the board.
   const openDesignsFor = useCallback((postKey: string) => {
     const post = (revisedCalendar as any[]).flatMap((d: any) => (Array.isArray(d?.posts) ? d.posts : [d])).find((p: any) => p?._calendarPostKey === postKey);
-    // A post in another week: the page goes to its week and opens it there.
-    if (!post) return onOpenElsewhere?.(postKey);
+    if (!post) {
+      // A post in another week: the page goes to its week and opens it there.
+      if (onOpenElsewhere) return onOpenElsewhere(postKey);
+      return void openOnCalendar(postKey);
+    }
     setActivePost(post);
     setPanelTab("design");
-  }, [revisedCalendar, onOpenElsewhere]);
+  }, [revisedCalendar, onOpenElsewhere, openOnCalendar]);
 
   return (
     <DesignRequestsProvider clientId={clientId} onOpenPost={openDesignsFor}>
@@ -252,7 +293,7 @@ export function ContentIdeasTab({
               setActivePost(post);
               setPanelTab(undefined);
             }}
-            onToggleApproved={(iterationId) => toggleApproved.mutate(iterationId)}
+            onToggleApproved={(iterationId, approve) => toggleApproved.mutate({ iterationId, approve })}
           />}
         </div>
         </>}
@@ -293,4 +334,12 @@ export function ContentIdeasTab({
       </div>
     </DesignRequestsProvider>
   );
+}
+
+/** The router's navigate where the board is inside one (every page is); null where it is drawn on its own. */
+function useNavigateIfRouted() {
+  // Whether the board is inside a router does not change while it is mounted, so the hook order is stable.
+  const routed = useInRouterContext();
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  return routed ? useNavigate() : null;
 }

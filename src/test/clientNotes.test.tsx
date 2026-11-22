@@ -155,6 +155,16 @@ describe('the notes', () => {
     await waitFor(() => expect(f.invoke).toHaveBeenCalledWith('client-notes', { body: { action: 'set_date', note_id: 'n1', date: '2026-09-30' } }));
   });
 
+  // QA 22 Nov 2026 (P07-09): typing a year into the date field fires a change for each partial year
+  // (0002, 0020, 0202, 2026); only the finished date is sent.
+  it('sends one date when a year is typed digit by digit', async () => {
+    mount();
+    const input = await screen.findByLabelText('Date of Call Oct 1');
+    for (const value of ['0002-09-30', '0020-09-30', '0202-09-30', '2025-09-30']) fireEvent.change(input, { target: { value } });
+    await waitFor(() => expect(f.invoke).toHaveBeenCalledWith('client-notes', { body: { action: 'set_date', note_id: 'n1', date: '2025-09-30' } }));
+    expect(f.invoke.mock.calls.filter((c) => c[1].body.action === 'set_date')).toHaveLength(1);
+  });
+
   it('says only that a change is not saved yet when it does not get through', async () => {
     f.invoke.mockResolvedValue({ data: null, error: { context: { status: 400 } } });
     mount();

@@ -33,7 +33,11 @@ export function ClientOverview({ clientId, isStaff }: { clientId: string; isStaf
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["client-overview", clientId, isStaff],
     queryFn: async () => {
-      const { data: client } = await supabase.from("clients").select("id, name, timezone").eq("id", clientId).maybeSingle();
+      // QA 22 Nov 2026: a read that did not answer is an error, so the overview keeps loading and reads
+      // again (LoadRetry). Reading only `data` turned a failed read into "No monthly report yet." and
+      // "No posts are planned for this week." for clients that have them, and the week into UTC's.
+      const { data: client, error: clientError } = await supabase.from("clients").select("id, name, timezone").eq("id", clientId).maybeSingle();
+      if (clientError) throw clientError;
       const timeZone = client?.timezone || "UTC";
       // "This week" is Monday to Sunday in the client's time zone, as on the calendar.
       const week = thisWeek(timeZone);
@@ -52,6 +56,7 @@ export function ClientOverview({ clientId, isStaff }: { clientId: string; isStaf
         fetchNextRun(clientId, "monthly").catch(() => null),
         fetchNextRun(clientId, "competitive").catch(() => null),
       ]);
+      for (const read of [report, feedback, posts]) if (read.error) throw read.error;
       // The newest report that passed its checks: a newer held one never hides an older ready one.
       const compRow = competitive.row;
       // Read as every reader reads it: its insights where it has them, through the evidence limits (shownFields.ts).

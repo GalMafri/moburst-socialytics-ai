@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, Copy, KeyRound, Plus } from "lucide-react";
+import { Check, Copy, KeyRound, Loader2, Plus } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,7 +37,7 @@ function ScopeChips({ scopes }: { scopes: string[] }) {
   );
 }
 
-function KeyRow({ k, onRevoke }: { k: ApiKey; onRevoke: (k: ApiKey) => void }) {
+function KeyRow({ k, onRevoke, revoking = false }: { k: ApiKey; onRevoke: (k: ApiKey) => void; revoking?: boolean }) {
   // A personal key reaches what its owner can see, worked out on every call
   // (a Moburst user's key never reaches a demo client), so its empty client
   // list does not mean "all clients" the way a tool key's does.
@@ -70,7 +70,8 @@ function KeyRow({ k, onRevoke }: { k: ApiKey; onRevoke: (k: ApiKey) => void }) {
         {k.revoked_at ? `Revoked ${relative(k.revoked_at)}` : k.last_used_at ? `Last used ${relative(k.last_used_at)}` : "Never used"}
       </p>
       {!k.revoked_at && (
-        <Button variant="ghost" size="sm" onClick={() => onRevoke(k)} aria-label={`Revoke ${k.name}`}>
+        <Button variant="ghost" size="sm" onClick={() => onRevoke(k)} aria-label={`Revoke ${k.name}`} disabled={revoking}>
+          {revoking && <Loader2 className="animate-spin" aria-hidden />}
           Revoke
         </Button>
       )}
@@ -117,12 +118,18 @@ function CreateKeyDialog({ open, onOpenChange, clientSlugs, onCreated }: { open:
   const [expires, setExpires] = useState("");
   /** A key that has not been made yet; the dialog keeps everything chosen. */
   const [notCreated, setNotCreated] = useState(false);
+  // QA 22 Nov 2026: busy for the whole press, quiet resends included. The mutation is idle between
+  // resends, so Create came back on and a second press could make a second key whose secret was never seen.
+  const [submitting, setSubmitting] = useState(false);
   const toggle = (list: string[], v: string) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
   const submit = async () => {
+    if (submitting) return;
+    setSubmitting(true);
     setNotCreated(false);
     const input = { name: name.trim(), scopes: SCOPES.map((s) => s.id).filter((s) => scopes.includes(s)), company_slugs: slugs, expires_at: expires ? new Date(expires).toISOString() : null };
     // A new key each time, so it is sent again only when it never reached the server.
     const { data: created, error } = await sendQuietly(() => create.mutateAsync(input).then((data) => ({ data, error: null }), (e: unknown) => ({ data: null, error: e })));
+    setSubmitting(false);
     if (error || !created) {
       console.warn("[api key] not created yet", error);
       setNotCreated(true);
@@ -188,7 +195,10 @@ function CreateKeyDialog({ open, onOpenChange, clientSlugs, onCreated }: { open:
           {notCreated && <p role="status" className="t-secondary">The key is not created yet. Your choices are kept.</p>}
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button onClick={submit} disabled={!name.trim() || scopes.length === 0 || create.isPending}>Create</Button>
+            <Button onClick={submit} disabled={!name.trim() || scopes.length === 0 || submitting || create.isPending}>
+              {submitting && <Loader2 className="animate-spin" aria-hidden />}
+              Create
+            </Button>
           </div>
         </div>
       </DialogContent>
@@ -206,16 +216,20 @@ export function ApiAccessCard({ clientSlugs }: { clientSlugs: string[] }) {
   const [toRevoke, setToRevoke] = useState<ApiKey | null>(null);
   /** One quiet line over the list: a key that is not revoked yet. */
   const [notice, setNotice] = useState<string | null>(null);
+  /** The key whose revoke is being sent, quiet resends included: its Revoke is busy meanwhile. */
+  const [revokingId, setRevokingId] = useState<string | null>(null);
   if (!isAdmin) return null;
   const live = keys.filter((k) => !k.revoked_at);
   const confirmRevoke = async (k: ApiKey) => {
     setToRevoke(null);
     setNotice(null);
+    setRevokingId(k.id);
     // Revoking twice answers the first revoke, so a send that failed on the server is safe to repeat.
     const { error: notDone } = await sendQuietly(
       () => revoke.mutateAsync(k.id).then(() => ({ error: null }), (e: unknown) => ({ error: e })),
       { again: (e) => invokeResendable(e, { idempotent: true }) },
     );
+    setRevokingId(null);
     if (notDone) {
       console.warn("[api key] not revoked yet", notDone);
       setNotice(`${k.name} is not revoked yet.`);
@@ -253,7 +267,7 @@ export function ApiAccessCard({ clientSlugs }: { clientSlugs: string[] }) {
         ) : (
           <ul className="space-y-2">
             {keys.map((k) => (
-              <KeyRow key={k.id} k={k} onRevoke={setToRevoke} />
+              <KeyRow key={k.id} k={k} onRevoke={setToRevoke} revoking={revokingId === k.id} />
             ))}
           </ul>
         )}

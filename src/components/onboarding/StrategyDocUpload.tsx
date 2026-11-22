@@ -64,6 +64,8 @@ export function StrategyDocUpload({
    */
   const remove = () => {
     onFilePathChange("");
+    // QA 22 Nov 2026: ConfirmDialog leaves closing to its caller; without this the question stayed up after Remove.
+    setConfirmRemove(false);
   };
 
   return (

@@ -74,12 +74,17 @@ export function StrategyExports({ clientId, client, writtenAt, newestEdit, conte
   });
 
   const state = deckState({ connected: google.data ? google.data.connected : null, exports: exports.data ?? [], writtenAt, newestEdit });
+  // QA 22 Nov 2026: a request that still did not get through after the quiet resends says so in one line,
+  // until the next press, as the header above promises; before, the button came back with no word.
+  const [notAsked, setNotAsked] = useState(false);
   const ask = async () => {
     setAsking(true);
+    setNotAsked(false);
     const { error } = await sendQuietly(() => supabase.rpc("strategy_deck_request", { p_client: clientId }), { again: writeResendable });
     if (error) console.warn("[strategy deck] not asked yet", error);
     await exports.refetch();
     setAsking(false);
+    setNotAsked(!!error);
   };
 
   return (
@@ -116,6 +121,7 @@ export function StrategyExports({ clientId, client, writtenAt, newestEdit, conte
       </div>
       {state.kind === "made" && <p className="t-label">Google Slides deck, {state.on}</p>}
       {state.kind === "not_connected" && <p className="t-label">Google Slides is unavailable right now. The PDF works.</p>}
+      {notAsked && !asking && state.kind !== "making" && <p role="status" className="t-label">The deck is not asked for yet.</p>}
     </div>
   );
 }

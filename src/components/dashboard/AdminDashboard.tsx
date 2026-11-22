@@ -20,7 +20,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Plus, Play, Calendar, BarChart3, MoreVertical, Archive, RotateCcw, Trash2, Crosshair, Users, Settings, FileText } from "lucide-react";
+import { Plus, Play, Calendar, BarChart3, MoreVertical, Archive, RotateCcw, Trash2, Crosshair, Users, Settings, FileText, Loader2 } from "lucide-react";
 import { PlatformBadge } from "@/lib/platform-config";
 import { isActiveClient, LOGO_SURFACE_SELECT } from "@/lib/activeClients";
 import { formatDate } from "@/lib/display";
@@ -43,6 +43,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
 import { StrategyOnlyNotice } from "@/components/clients/StrategyOnly";
+import { NOT_YET, NotYet } from "@/components/ui/not-yet";
 import { useStrategyOnlyClients } from "@/lib/strategyOnly";
 
 export function AdminDashboard() {
@@ -100,6 +101,25 @@ export function AdminDashboard() {
     onError: (err: any) => console.warn("[delete client] not deleted yet", err),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["clients"] }),
   });
+
+  // QA 22 Nov 2026: what is happening to a client, on its own card. A delete,
+  // archive or restore is resent quietly for up to 13 s, so the card says it
+  // is under way, and when the last try still did not get through it says the
+  // client is not deleted (archived, restored) yet. Before, the dialog closed
+  // and the card looked as if nothing had been pressed.
+  const actionLine = (clientId: string): { busy: boolean; line: string } | null => {
+    const runs = [
+      { m: deleteMutation, busy: "Deleting the client…", notYet: NOT_YET.delete },
+      { m: archiveMutation, busy: "Archiving the client…", notYet: "Not archived yet." },
+      { m: restoreMutation, busy: "Restoring the client…", notYet: "Not restored yet." },
+    ];
+    for (const r of runs) {
+      if (r.m.variables !== clientId) continue;
+      if (r.m.isPending) return { busy: true, line: r.busy };
+      if (r.m.isError) return { busy: false, line: r.notYet };
+    }
+    return null;
+  };
 
   // Realtime: listen for any report changes to refresh dashboard
   useEffect(() => {
@@ -302,6 +322,13 @@ export function AdminDashboard() {
                   </div>
                   {/* A client the weekly Sprout onboarding added says so under its name. */}
                   <ClientOrigin origin={(client as any).origin} />
+                  {(() => {
+                    const action = actionLine(client.id);
+                    if (!action) return null;
+                    return action.busy
+                      ? <p role="status" className="t-secondary flex items-center gap-2"><Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> {action.line}</p>
+                      : <NotYet>{action.line}</NotYet>;
+                  })()}
                 </CardHeader>
                 <CardContent className="space-y-4 pt-card">
                   {/* The client's status at a glance, with what needs doing. */}
