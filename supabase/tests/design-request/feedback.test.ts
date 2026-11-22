@@ -66,27 +66,4 @@ describe("feedback", () => {
     expect(await designFeedback(d, { iteration_id: "it-1", verdict: "maybe" })).toMatchObject({ status: 400 });
     expect(d.record).not.toHaveBeenCalled();
   });
-
-  // QA 22 Nov 2026 (P56-03): the quiet resend of a rejection whose reply was lost.
-  it("a resent rejection of the same design records its rules once", async () => {
-    const { db, d } = setup();
-    // As recordFeedback does: the design is marked rejected, and its rules are stored.
-    d.record.mockImplementation(async (it: Row) => {
-      const row = db.tables.post_iterations.find((r) => r.id === it.id)!;
-      row.rejected_at = "2026-11-20T10:00:00Z";
-      row.is_selected = false;
-      return [{ id: `dl-${d.record.mock.calls.length}`, pattern_type: "avoid", pattern_description: "Avoid crowded scenes." }];
-    });
-    const body = { iteration_id: "it-1", verdict: "rejected", reason: "wrong_style", note: "Too busy" };
-    await designFeedback(d, body);
-    const again = await designFeedback(d, body);
-    expect(d.record).toHaveBeenCalledTimes(1);
-    expect(again.body).toMatchObject({ ok: true, learnings: 0 });
-  });
-
-  it("deletes a design that was turned down before", async () => {
-    const { d } = setup({ rows: [design({ rejected_at: "2026-11-20T10:00:00Z", is_selected: false })] });
-    await designFeedback(d, { iteration_id: "it-1", verdict: "deleted" });
-    expect(d.record).toHaveBeenCalledWith(expect.anything(), "archived", undefined, undefined, "person-1");
-  });
 });

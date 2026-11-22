@@ -4,22 +4,18 @@
 // are made once per week by the scheduled jobs (_shared/calendar/runWeek.ts):
 // every Monday for the following week, or when someone asks here.
 //
-//   POST {action:"plan_next_week", client_id, week?}
-//        a member of the client or staff: plan the week named (its Monday),
-//        or the earliest week without a plan (or whose plan a person stopped
-//        or removed), from this week up to four weeks ahead. Asked again for
-//        a week that has a plan, it answers that plan: a resend is a no-op
-//   POST {action:"stop_plan", plan_id, intent?: "stop" | "remove"}
+//   POST {action:"plan_next_week", client_id}
+//        a member of the client or staff: plan the earliest week without a
+//        plan (or whose plan a person stopped or removed), from this week up
+//        to four weeks ahead
+//   POST {action:"stop_plan", plan_id}
 //        a member of the client or staff: stop a plan that is queued or being
 //        written, or remove a finished one while its week has days to come.
 //        The posts nobody worked on leave the calendar; the rest stay
-//        (calendar_stop_plan decides; Lital, 3 Nov 2026). With intent
-//        "stop", a plan that finished meanwhile is left as it is and
-//        answered, so the band shows it planned
+//        (calendar_stop_plan decides; Lital, 3 Nov 2026)
 //   POST {action:"revise_week", plan_id, note}
 //        a member of the client or staff: rewrite the week's posts nobody
-//        worked on, following the note (the note also teaches the memory).
-//        The same note sent again while it waits is answered as queued
+//        worked on, following the note (the note also teaches the memory)
 //   POST {action:"save_copy", client_id, calendar_post_key, post_copy, source?, note?, ...}
 //        a member of the client or staff: save a copy edit (a revision row
 //        without media) and update the calendar post; a person's edit
@@ -50,7 +46,7 @@ import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { requireMember } from "../_shared/auth/requireMember.ts";
 import { learnFromSignal, undoLearning } from "../_shared/voice/load.ts";
 import { CLIENT_COLUMNS, gatherEvidence } from "../_shared/calendar/runWeek.ts";
-import { planInFlight, plannable } from "../_shared/calendar/planState.ts";
+import { plannable } from "../_shared/calendar/planState.ts";
 import { type CopyDeps, saveCopyAction, undoNote } from "../_shared/calendar/saveCopy.ts";
 import { momentEvidence } from "../_shared/calendar/moments.ts";
 import { strategyOnlyRefusal } from "../_shared/sprout/strategyOnly.ts";
@@ -80,24 +76,6 @@ function todayIn(timeZone: string): string {
   }
 }
 
-/** A week's plan as "Plan next week" reads it. */
-interface PlanHeld {
-  id: string;
-  week_start: string;
-  status: string;
-  trigger?: string | null;
-  requested_by?: string | null;
-  updated_at?: string | null;
-}
-
-/** How long after a press its quiet resends can still arrive (waits of 1, 3 and 9 s, plus each try's own time). */
-const RESEND_WINDOW_MS = 60_000;
-
-/** A plan this person asked for with the button a moment ago, still on its way: a resend of that press. */
-const justAskedBy = (p: PlanHeld, userId: string) =>
-  planInFlight(p.status) && p.trigger === "button" && p.requested_by === userId &&
-  Date.now() - Date.parse(String(p.updated_at ?? "")) < RESEND_WINDOW_MS;
-
 const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86400_000).toISOString().slice(0, 10);
 const mondayOf = (day: string) => addDays(day, -((new Date(`${day}T00:00:00Z`).getUTCDay() + 6) % 7));
 
@@ -118,24 +96,9 @@ Deno.serve(async (req) => {
       const tomorrow = addDays(todayIn(String(client.timezone || "UTC")), 1);
       const thisWeek = mondayOf(todayIn(String(client.timezone || "UTC")));
       const weeks = Array.from({ length: WEEKS_AHEAD + 1 }, (_, i) => addDays(thisWeek, i * 7)).filter((w) => addDays(w, 6) >= tomorrow);
-      const { data: plans } = await admin.from("calendar_plans").select("id, week_start, status, trigger, requested_by, updated_at").eq("client_id", clientId).in("week_start", weeks);
-      const rows = (plans ?? []) as PlanHeld[];
-      const held = new Map(rows.map((p) => [p.week_start, p.status]));
-      // QA 22 Nov 2026 (P56-01): a press whose reply was lost is sent again
-      // with the same body (quietSend), and choosing "the first week without a
-      // plan" again then planned a second week. The week the button names is
-      // planned once however often it is asked; a press that names no week
-      // (an older screen) is answered with the plan this person asked for a
-      // moment ago while it is still on its way.
-      const named = /^\d{4}-\d{2}-\d{2}$/.test(String(body.week || "")) ? mondayOf(String(body.week)) : null;
-      const already = named && weeks.includes(named)
-        ? rows.find((p) => p.week_start === named && !plannable(p.status))
-        : named ? undefined : rows.find((p) => justAskedBy(p, userId));
-      if (already) {
-        const { data: plan } = await admin.from("calendar_plans").select("*").eq("id", already.id).maybeSingle();
-        return json({ plan: plan ?? already, week: already.week_start }, 202);
-      }
-      const week = named && weeks.includes(named) ? named : weeks.find((w) => plannable(held.get(w)));
+      const { data: plans } = await admin.from("calendar_plans").select("week_start, status").eq("client_id", clientId).in("week_start", weeks);
+      const held = new Map((plans ?? []).map((p: { week_start: string; status: string }) => [p.week_start, p.status]));
+      const week = weeks.find((w) => plannable(held.get(w)));
       if (!week) return json({ error: "The next four weeks are already planned." }, 409);
       const { data: plan, error } = await admin.rpc("calendar_request_week", { p_client: clientId, p_week: week, p_trigger: "button", p_user: userId });
       if (error) return json({ error: error.message }, 409);
@@ -148,10 +111,7 @@ Deno.serve(async (req) => {
       const { data: found } = await admin.from("calendar_plans").select("id, client_id").eq("id", planId).maybeSingle();
       if (!found) return json({ error: "No such plan." }, 404);
       const userId = await requireMember(req, found.client_id);
-      // QA 22 Nov 2026 (P56-07): which button was pressed. "stop" on a plan that
-      // finished meanwhile leaves it planned (20261122131000_calendar_stop_plan_intent.sql).
-      const intent = body.intent === "stop" || body.intent === "remove" ? body.intent : null;
-      const { data: plan, error } = await admin.rpc("calendar_stop_plan", { p_plan: planId, p_user: userId, ...(intent ? { p_intent: intent } : {}) });
+      const { data: plan, error } = await admin.rpc("calendar_stop_plan", { p_plan: planId, p_user: userId });
       if (error) return json({ error: error.message }, 409);
       return json({ plan });
     }
@@ -168,17 +128,8 @@ Deno.serve(async (req) => {
       if (closed) return json({ error: closed }, 409);
       // Writing the posts that have no copy yet is the daily run's job (enqueue_scheduled_report_jobs), not a button.
       const scope = viaSecret && body.scope === "empty" ? "empty" : "untouched";
-      const by = viaSecret ? null : userId;
-      const { data: plan, error } = await admin.rpc("calendar_request_revision", { p_plan: planId, p_note: note, p_user: by, p_scope: scope });
-      if (error) {
-        // QA 22 Nov 2026 (P56-02): a resend of a note that was queued (its
-        // reply was lost) is refused as "already being revised"; that is the
-        // same revision, so it is answered as queued, with the plan.
-        const { data: now } = await admin.from("calendar_plans").select("*").eq("id", planId).maybeSingle();
-        const pending = now?.pending_revision as { note?: unknown; by?: unknown } | null | undefined;
-        if (pending && String(pending.note ?? "") === note.slice(0, 2000) && (pending.by ?? null) === by) return json({ plan: now }, 202);
-        return json({ error: error.message }, 409);
-      }
+      const { data: plan, error } = await admin.rpc("calendar_request_revision", { p_plan: planId, p_note: note, p_user: viaSecret ? null : userId, p_scope: scope });
+      if (error) return json({ error: error.message }, 409);
       return json({ plan }, 202);
     }
 

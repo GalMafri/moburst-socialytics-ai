@@ -44,15 +44,10 @@ async function currentCopy(db: Db, post: { client_id: string; post_key: string; 
 export async function designFeedback(d: FeedbackDeps, body: Row): Promise<Answer> {
   const verdict = body.verdict === "rejected" ? "rejected" : body.verdict === "deleted" ? "archived" : null;
   if (!verdict) return { status: 400, body: { error: "verdict must be rejected or deleted." } };
-  const { data: it } = await d.db.from("post_iterations").select("id, client_id, calendar_post_key, report_id, platform, format, post_copy, visual_direction, variant_angle, concept, is_selected, variant_group_id, rejected_at, archived_at").eq("id", String(body.iteration_id || "")).maybeSingle();
+  const { data: it } = await d.db.from("post_iterations").select("id, client_id, calendar_post_key, report_id, platform, format, post_copy, visual_direction, variant_angle, concept, is_selected, variant_group_id").eq("id", String(body.iteration_id || "")).maybeSingle();
   if (!it || !DESIGN_ANGLE.test(it.variant_angle ?? "")) return { status: 404, body: { error: "That design is no longer available." } };
   const userId = await d.requireMember(it.client_id);
-  // QA 22 Nov 2026 (P56-03): a resend of a verdict whose first reply was lost
-  // (sendDesignFeedback resends quietly) found the design already turned down
-  // and taught its rules a second time. A verdict already applied is answered
-  // without teaching again; the new design it started is answered as it is.
-  const applied = verdict === "rejected" ? !!(it.rejected_at || it.archived_at) : !!it.archived_at;
-  const learnings = applied ? [] : await d.record(it, verdict, body.reason, body.note, userId);
+  const learnings = await d.record(it, verdict, body.reason, body.note, userId);
 
   let request: Row | null = null;
   if (verdict === "rejected" && body.make_new !== false && it.calendar_post_key) {
