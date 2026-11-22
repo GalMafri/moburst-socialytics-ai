@@ -281,7 +281,12 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
   // gets the filming path, never a generated video in some other style.
   const filmedBy = generatedVideo ? filmedNeed(videoStyle?.profile) : null;
   if (filmedBy) {
-    await admin.from("design_requests").update({ status: "needs_filming", stage: "ready", options_wanted: 0, on_camera: filmedBy, updated_at: new Date().toISOString() }).eq("id", request.id);
+    // QA 22 Nov 2026 (P56-06): only a request still being prepared turns into
+    // one waiting for filming; one a person stopped while it waited for the
+    // plan lease stays stopped, and gets no shot brief.
+    const { data: turned } = await admin.from("design_requests").update({ status: "needs_filming", stage: "ready", options_wanted: 0, on_camera: filmedBy, updated_at: new Date().toISOString() })
+      .eq("id", request.id).eq("status", "preparing").select("id");
+    if (!turned?.length) return;
     await writeShotBrief(admin, request.id).catch((e) => console.error("[design-request] shot brief:", e instanceof Error ? e.message : e));
     return;
   }
