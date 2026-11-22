@@ -147,7 +147,8 @@ describe("room for thinking, across the functions", () => {
   it("the video steps' checks and the read of a client's videos have room, and none reads a reply that did not finish", () => {
     const text = source("_shared/video/steps.ts");
     expect(text).toContain("const CHECK_TOKENS = roomFor(2000);");
-    expect(count(text, "anthropicMessages({")).toBe(6);
+    // A check's call goes through askVision (a busy model is a wait, QA 22 Nov 2026), which hands it on as it is.
+    expect(count(text, "anthropicMessages({") + count(text, "askVision({")).toBe(6);
     expect(count(text, "max_tokens: CHECK_TOKENS")).toBe(5);
     expect(count(text, "max_tokens: roomFor(4000)")).toBe(1);
     expect(count(text, "answerText(result)")).toBe(6);

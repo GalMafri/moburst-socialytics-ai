@@ -217,8 +217,14 @@ export async function consolidateMemory(admin: Db, clientId: string): Promise<{ 
  */
 export async function buildVoiceProfile(admin: Db, clientId: string, posts: OwnPost[], now = new Date(), opts: { names?: ListedName[] } = {}): Promise<SocialVoice> {
   const names = opts.names ?? [];
-  const { data: client } = await admin.from("clients").select("name, timezone").eq("id", clientId).maybeSingle();
+  const { data: client } = await admin.from("clients").select("name, timezone, social_voice").eq("id", clientId).maybeSingle();
   const sample = voiceSample(posts);
+  // Nothing read is nothing learned: a voice the client already has is kept,
+  // never overwritten with an empty one (QA 22 Nov 2026, P54-04: a Sprout read
+  // that failed during the monthly run erased the brand's voice for every
+  // copy writer until the next run).
+  const stored = client?.social_voice as SocialVoice | null | undefined;
+  if (!Object.keys(sample).length && stored && (Object.keys(stored.platforms ?? {}).length || stored.overall)) return stored;
   const { own, thin } = voicePlatforms(sample);
   let profile: SocialVoice["platforms"] = {};
   let overall: SocialVoice["overall"] | null = null;

@@ -143,3 +143,32 @@ describe("a title that is no good", () => {
     expect(r.row.state.hooks).toBe(1);
   });
 });
+
+describe("a title that shows the copy's words passes the check, however its lettering is set", () => {
+  // QA 22 Nov 2026 (P54-03): these were drawn again, paid each time, and the video ended after MAX_HOOKS.
+  async function check(copy: string[], read: string[]) {
+    const deps: TitleDeps = {
+      draw: async () => new Uint8Array(), store: async () => undefined, renewLease: async () => undefined,
+      locate: async () => FOUND, read: async () => read, save: async () => undefined,
+    };
+    const job = { id: "j", client_id: "c", step: "title_check", state: { hooks: 1, hook_path: "c/canva-finish/j/hook-1.png" }, input: { copy }, design_request_id: null, option_index: 0 } as unknown as VideoJob;
+    await runTitleCheck(deps, job, "frame");
+    return job.step;
+  }
+  it.each([
+    ["a hyphenated word broken over the title's two lines", ["Your self-care Sunday"], ["Your self-", "care Sunday"]],
+    ["an ellipsis drawn as one character", ["Wait for it..."], ["Wait for it…"]],
+    ["a heart read without its emoji selector", ["We ❤️ our regulars"], ["We ❤ our regulars"]],
+    ["a spaced dash drawn tight", ["Fresh — every morning"], ["Fresh—every morning"]],
+    ["a brand mark kept", ["Acme® every day"], ["Acme® every day"]],
+  ])("%s", async (_why, copy, read) => {
+    expect(await check(copy, read)).toBe("frame");
+  });
+  it.each([
+    ["a missing word", ["Fresh every morning"], ["Fresh morning"]],
+    ["another word", ["Your self-care Sunday"], ["Your self-", "love Sunday"]],
+    ["a brand mark missing", ["Acme® every day"], ["Acme every day"]],
+  ])("still sends back %s", async (_why, copy, read) => {
+    expect(await check(copy, read)).toBe("title");
+  });
+});

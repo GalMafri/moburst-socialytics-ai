@@ -126,12 +126,15 @@ export function clipOrderDecision(
 /** A clip not back this long after its order is taken as lost (Seedance usually takes 3 to 10 minutes). */
 export const CLIP_LOST_MS = 3 * 60 * 60_000;
 
-const ENDED = new Set(["completed", "failed", "nsfw", "canceled", "timed_out"]);
+/** A clip's end other than ready. "completed" is not one: completed without its file is asked about again. */
+const ENDED = new Set(["failed", "nsfw", "canceled", "timed_out"]);
 
 /**
  * Where an ordered clip stands, from the video service's answer about it:
  * ready with its file; failed when it ended any other way; lost when it has
- * not ended CLIP_LOST_MS after the order; else running.
+ * not ended CLIP_LOST_MS after the order; else running. A clip completed
+ * before its file is given is still running (QA 22 Nov 2026, P53-07: it was
+ * taken as failed, giving up a paid clip whose file was on its way).
  */
 export function clipOutcome(
   o: { status?: string; error?: string | null; result_url?: string | null } | undefined,

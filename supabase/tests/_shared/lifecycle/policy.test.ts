@@ -37,6 +37,13 @@ describe("decide", () => {
 
 describe("rowAfter", () => {
   const base = { client_id: "c", step: "design_refs", inputs_key: "k1" };
+  it("keeps the earlier work on a failure, but never what the earlier wait waited for", () => {
+    // QA 22 Nov 2026 (P39-01): a failed tracking row kept saying it waited for a free plan place.
+    const waited = row({ status: "running", result: { set_id: "s1", waiting_for: "rivaliq_full" } });
+    const failed = rowAfter(waited, base, { status: "failed", error: "down" }, NOW);
+    expect(failed.result).toEqual({ set_id: "s1" });
+    expect(rowAfter(waited, base, { status: "failed", error: "down", result: { set_id: "s1", waiting_for: "x" } }, NOW).result).toEqual({ set_id: "s1" });
+  });
   it("backs off on repeated failures with the same inputs, through the running mark", () => {
     const first = rowAfter(null, base, { status: "failed", error: "down" }, NOW);
     expect(first.attempts).toBe(1);

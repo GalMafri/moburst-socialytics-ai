@@ -56,6 +56,26 @@ describe("voicePromptBlock", () => {
     expect(block).toContain("Not learned yet");
     expect(block).toContain("3. The brief's tone: not given");
   });
+
+  it("gives a post for Twitter/X the client's X voice, X preferences and X examples", () => {
+    // QA 22 Nov 2026 (P54-05): platforms were matched by lower case only, so "Twitter/X" missed what was stored under "X".
+    const pv = { summary: "Short, dry one-liners.", opening: "", length: "", structure: "", emoji: "", hashtags: "", cta: "", person: "", formality: "", phrases: [] };
+    const v: ClientVoice = {
+      brand: "Acme",
+      preferences: [
+        { id: "p1", pattern_type: "length", pattern_description: "Keep X posts under 200 characters.", times_confirmed: 2, source: "copy_edit", last_confirmed_at: "2026-11-10T00:00:00Z", platform: "X" },
+        { id: "p2", pattern_type: "tone", pattern_description: "No emoji on LinkedIn.", times_confirmed: 1, source: "copy_edit", last_confirmed_at: "2026-11-10T00:00:00Z", platform: "LinkedIn" },
+      ],
+      social: { built_at: "2026-11-01T00:00:00Z", post_count: 30, platforms: { X: pv }, examples: { X: [{ text: "Ship it.", date: "2026-10-30" }] } },
+      briefTone: null,
+    } as ClientVoice;
+    const block = voicePromptBlock(v, { platforms: ["Twitter/X"] });
+    expect(block).toContain("X: Short, dry one-liners.");
+    expect(block).toContain("Keep X posts under 200 characters.");
+    expect(block).not.toContain("No emoji on LinkedIn.");
+    expect(block).toContain('- X, 2026-10-30: "Ship it."');
+    expect(block).not.toContain("too few for a voice of its own");
+  });
 });
 
 describe("what the client told the team (section 1)", () => {

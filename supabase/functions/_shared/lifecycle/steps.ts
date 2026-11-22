@@ -177,6 +177,8 @@ export const deps = {
 };
 
 const DAY = 86_400_000;
+/** Voice rebuilds asked for one set of facts before the voice step gives up on them (the monthly rebuild is the next). */
+const VOICE_REBUILD_TRIES = 3;
 const str = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
 const day = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -1465,8 +1467,18 @@ export const STEPS: Record<string, StepDef> = {
         }
       }
       const links = [...new Set([...stored, ...fresh])].sort();
-      const { data: assignedRows, error } = await db.from("sprout_profiles").select("client_id, sprout_profile_id, network_type, is_active, profile_name, native_name, assigned_at, parked_at, parked_reason");
+      // The rows this needs, never the whole table in one read (PostgREST answers 1,000 rows at most): the
+      // client's own, and who holds each of the Sprout customer's profiles (QA 22 Nov 2026, P39-05).
+      const columns = "client_id, sprout_profile_id, network_type, is_active, profile_name, native_name, assigned_at, parked_at, parked_reason";
+      const { data: ownAssigned, error } = await db.from("sprout_profiles").select(columns).eq("client_id", client.id);
       if (error) throw new Error(`Could not read the assigned accounts: ${error.message}`);
+      const assignedRows: ClientRow[] = [...(ownAssigned ?? [])];
+      const profileIds = [...new Set(profiles.map((p) => Number(p.id)).filter(Number.isFinite))];
+      for (let i = 0; i < profileIds.length; i += 200) {
+        const { data: held, error: heldError } = await db.from("sprout_profiles").select(columns).in("sprout_profile_id", profileIds.slice(i, i + 200)).neq("client_id", client.id);
+        if (heldError) throw new Error(`Could not read the assigned accounts: ${heldError.message}`);
+        assignedRows.push(...(held ?? []));
+      }
       const assigned = new Map<string, string[]>();
       for (const r of assignedRows ?? []) {
         const id = String(r.sprout_profile_id);
@@ -1629,19 +1641,31 @@ export const STEPS: Record<string, StepDef> = {
       const why = [...(held ? ["names"] : []), ...(parkedSince ? ["accounts"] : [])];
       // One rebuild for these facts, whatever voice they are found in: the rule, the listed names and the parked time.
       const key = `voice_profile:${client.id}:rule${VOICE_RULE}:${textHash(`${facts.names.map((n) => `${n.name}>${n.plain}`).join("\n")}|${facts.ownDroppedAt ?? ""}`)}`;
-      const { data: asked, error: askedError } = await db.from("scheduled_jobs").select("status").eq("dedupe_key", key).limit(1);
+      // The rebuild's job, and its tries again after a failed one (QA 22 Nov 2026, P39-04: a rebuild for a parked
+      // account that failed was taken as made, and the step was never looked at again). The step waits while a job
+      // is on its way and looks again hourly, so a failure is seen. A parked account's voice can only be rebuilt, so
+      // its rebuild is asked again, VOICE_REBUILD_TRIES jobs at most for one set of facts; listed names alone are
+      // corrected in code below, as for a rebuild that was made.
+      const keys = Array.from({ length: VOICE_REBUILD_TRIES }, (_, i) => (i ? `${key}:try${i + 1}` : key));
+      const { data: asked, error: askedError } = await db.from("scheduled_jobs").select("dedupe_key, status").in("dedupe_key", keys);
       if (askedError) throw new Error(`Could not read the voice profile's job: ${askedError.message}`);
-      const job = (asked ?? [])[0] as { status?: string } | undefined;
-      if (!job) {
+      const byKey = new Map(((asked ?? []) as Array<{ dedupe_key: string; status?: string }>).map((j) => [j.dedupe_key, j]));
+      const lastKey = [...keys].reverse().find((k) => byKey.has(k));
+      const job = lastKey ? byKey.get(lastKey) : undefined;
+      const failedJob = job?.status === "failed" || job?.status === "canceled";
+      const waitingFor = (queued: string, at?: string): StepOutcome => ({ status: "waiting", reason: "in_progress", recheckMinutes: 60, result: { conforms: false, rule: VOICE_RULE, built_at: builtAt, why, names: held, queued, ...(at ? { at } : {}) } });
+      if (!job || (failedJob && parkedSince)) {
+        const next = !job ? key : keys[keys.indexOf(lastKey!) + 1];
+        if (!next) return { status: "failed", error: `The voice could not be built again after ${VOICE_REBUILD_TRIES} tries.` };
         const at = deps.now().toISOString();
         const { error: queueError } = await db.from("scheduled_jobs").upsert(
-          { kind: "voice_profile", client_id: client.id, dedupe_key: key, priority: 39, available_at: at },
+          { kind: "voice_profile", client_id: client.id, dedupe_key: next, priority: 39, available_at: at },
           { onConflict: "dedupe_key", ignoreDuplicates: true });
         if (queueError) return { status: "failed", error: `Could not queue the voice profile: ${queueError.message}` };
-        return { status: "done", result: { conforms: false, rule: VOICE_RULE, built_at: builtAt, why, names: held, queued: key, at } };
+        return waitingFor(next, at);
       }
       // The rebuild for these facts is on its way: the look that follows it (runVoiceProfile) reads the new voice.
-      if (!job.status || job.status === "queued" || job.status === "running") return { status: "done", result: { conforms: false, rule: VOICE_RULE, built_at: builtAt, why, names: held, queued: key } };
+      if (!job.status || job.status === "queued" || job.status === "running") return waitingFor(lastKey!);
       // The rebuild for these facts has been made, and the voice still holds a listed name: no second rebuild. The names are
       // written plainly in the stored text, exactly, and the date the voice was built stays, so nothing downstream runs.
       let corrected = 0;
@@ -1651,7 +1675,7 @@ export const STEPS: Record<string, StepDef> = {
         corrected = changed?.length ? held : 0;
       }
       // An account parked since the voice was built, with the one rebuild already made: the monthly rebuild is the next one.
-      return { status: "done", result: { conforms: !parkedSince && (!held || corrected > 0), rule: VOICE_RULE, built_at: builtAt, why, names: held, corrected, rebuilt: key } };
+      return { status: "done", result: { conforms: !parkedSince && (!held || corrected > 0), rule: VOICE_RULE, built_at: builtAt, why, names: held, corrected, rebuilt: lastKey } };
     },
   },
 
@@ -1979,6 +2003,15 @@ export const STEPS: Record<string, StepDef> = {
           if (e instanceof SetupError && e.code === "selection") return { status: "waiting", reason: "selection", result: { set_id: set.id, detail: e.message } };
           if (e instanceof SetupError && e.code === "busy") return { status: "waiting", reason: "analysis_running", recheckMinutes: 60 };
           if (e instanceof SetupError && e.code === "changed") return { status: "failed", error: e.message, soonMinutes: 5 };
+          // RivalIQ has not yet listed one company for every website it follows (rivaliqSetup.ts, verify): it is
+          // still settling, so tracking waits, asked again hourly for a day and then every six hours (QA 22 Nov 2026,
+          // P39-01: this was a failure, retried weekly, while the screens showed tracking as not started).
+          if (e instanceof Error && /check status later/i.test(e.message)) {
+            const was = rows.get("tracking")?.result as Record<string, unknown> | null | undefined;
+            const since = typeof was?.verify_since === "string" ? was.verify_since : deps.now().toISOString();
+            const age = deps.now().getTime() - Date.parse(since);
+            return { status: "waiting", reason: "in_progress", recheckMinutes: age < DAY ? 60 : 360, result: { set_id: set.id, phase: "verify", verify_since: since } };
+          }
           // The plan is full: tracking waits for a free place, looked at again daily.
           if (e instanceof FollowFailure && e.planFull) return { status: "waiting", reason: "rivaliq_full", recheckDays: 1, result: { set_id: set.id } };
           // A chosen website refused the visit: tracking waits on the selection instead of failing every two hours.

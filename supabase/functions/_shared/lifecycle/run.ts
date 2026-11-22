@@ -121,9 +121,15 @@ async function execute(db: Db, client: ClientRow, rows: Map<string, StepRow>, st
   const def = STEPS[step];
   const prev = rows.get(step) ?? null;
   const base = { client_id: client.id, step, inputs_key: inputsKey };
+  // A step run from the queue reads its row after the claim marked it
+  // "running"; the claim keeps the last outcome's error (a result or a wait
+  // clears it), so a claimed row with an error failed last time, and the
+  // step is told so (QA 22 Nov 2026, P38-1: design_refs never saw its earlier
+  // failures and so never gave up on a post the model could not review).
+  const last: StepRow | null = prev?.status === "running" && prev.error ? { ...prev, status: "failed" } : prev;
   let outcome: StepOutcome;
   try {
-    outcome = await def.run(db, client, { force, previous: prev && prev.inputs_key === inputsKey ? prev : null, rows });
+    outcome = await def.run(db, client, { force, previous: last && last.inputs_key === inputsKey ? last : null, rows });
   } catch (e) {
     outcome = { status: "failed", error: e instanceof Error ? e.message : String(e) };
   }

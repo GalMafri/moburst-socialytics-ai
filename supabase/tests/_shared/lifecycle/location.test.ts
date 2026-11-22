@@ -25,6 +25,19 @@ describe("addresses in the page", () => {
     expect(textAddresses("Office: 12 Peachtree St, Atlanta, Georgia")).toEqual([]);
     expect(zoneOf({ region: "Georgia", country: "United States" })).toEqual({ zone: "America/New_York", country: "US" });
   });
+  it("reads a footer address abroad whose region code is also a US state code in its own country", () => {
+    // QA 22 Nov 2026 (P38-2): "Perth, WA 6000, Australia" was read as Washington state, and the page_footer source outranks every later read.
+    const perth = `<html lang="en-AU"><body><footer>Harbour Lane Studio, 123 Hay Street, Perth, WA 6000, Australia</footer></body></html>`;
+    expect(resolveLocation(perth, { website: "https://harbourlane.com.au/" }).timezone).toBe("Australia/Perth");
+    const chennai = `<html lang="en-IN"><body><footer>12 Anna Salai, Chennai, TN 600002, India</footer></body></html>`;
+    expect(resolveLocation(chennai, { website: "https://example.in/" }).timezone).toBe("Asia/Kolkata");
+    // A code with a postcode that is no ZIP is not a US state either.
+    expect(textAddresses("12 Rua Augusta, Panaji, GA 403001")).toEqual([]);
+    // A US address keeps its state, with or without the country after it.
+    expect(textAddresses("Office: 500 Pike Street, Seattle, WA 98101, USA")).toEqual([{ locality: "Seattle", region: "WA", country: "US" }]);
+    expect(textAddresses("Office: 500 Pike Street, Seattle, WA 98101")).toEqual([{ locality: "Seattle", region: "WA", country: "US" }]);
+    expect(textAddresses("Office: 500 Pike Street, Seattle, WA 98101 206 555 0100")).toEqual([{ locality: "Seattle", region: "WA", country: "US" }]);
+  });
   it("uses a single-zone country without a region, and a province where the country spans zones", () => {
     expect(zoneOf({ country: "Israel" })).toEqual({ zone: "Asia/Jerusalem", country: "IL" });
     expect(zoneOf({ region: "BC", country: "Canada" })).toEqual({ zone: "America/Vancouver", country: "CA" });

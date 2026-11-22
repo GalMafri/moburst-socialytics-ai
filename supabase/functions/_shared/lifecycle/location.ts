@@ -218,7 +218,17 @@ export function textAddresses(text: string): Address[] {
     out.push({ locality: m[1].trim().split(" ").slice(-3).join(" "), region: m[2], country: "US" });
   }
   const street = `\\b\\d{1,6}[A-Za-z]? [A-Z0-9][^,]{2,60}?(?:, (?:Suite|Ste\\.?|Unit|Floor|Fl\\.?) [^,]{1,15})?[,.] ?([A-Z][A-Za-z.' -]{1,30}),`;
-  for (const m of text.matchAll(new RegExp(`${street} (${ABBR})\\b(?![a-z])`, "g"))) out.push({ locality: m[1].trim(), region: m[2], country: "US" });
+  // A state code is a US state only when what follows it says so: a postcode
+  // that is no ZIP, or another country named after it ("Perth, WA 6000,
+  // Australia", "Chennai, TN 600002, India"), makes it that country's region
+  // (QA 22 Nov 2026, P38-2: such footers were placed in the US, and the
+  // footer's rank kept the wrong zone for good).
+  for (const m of text.matchAll(new RegExp(`${street} (${ABBR})\\b(?![a-z])(?:\\.?\\s+(\\d{3,6}(?:-\\d{4})?)\\b)?(?:,?\\s*(${COUNTRY_WORDS}|USA|United States)\\b)?`, "g"))) {
+    const [, locality, region, postcode, country] = m;
+    const zip = !postcode || /^\d{5}(?:-\d{4})?$/.test(postcode.trim());
+    if (country && !/^(USA|United States)$/.test(country)) out.push({ locality: locality.trim(), region, country });
+    else if (zip) out.push({ locality: locality.trim(), region, country: "US" });
+  }
   for (const m of text.matchAll(new RegExp(`${street} (${COUNTRY_WORDS})\\b`, "g"))) out.push({ locality: m[1].trim(), country: m[2] });
   return distinct(out);
 }

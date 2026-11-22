@@ -70,9 +70,11 @@ export function hookPlacement(box: HookBox, layer: { width: number; height: numb
   if (width > maxWidth) { height = Math.round((height * maxWidth) / width); width = maxWidth; }
   const x = Math.round((frame.width - width) / 2);
   const style = textStyle.toLowerCase();
+  // "upper" as a place only: uppercase type says how the letters look, not where they go
+  // (QA 22 Nov 2026, P53-05: a centered uppercase title was moved under the logo).
   const y = /lower third|bottom|lower part|lower half/.test(style)
     ? Math.round(frame.height * 0.78) - height
-    : /\btop\b|upper/.test(style)
+    : /\btop\b|\bupper\b(?![- ]?case)/.test(style)
       ? Math.max(Math.round(logoBottom + frame.height * 0.03), Math.round(frame.height * 0.12))
       : Math.round((frame.height - height) / 2);
   return { x, y, width, height };
@@ -146,8 +148,10 @@ export function composeScript(input: ComposeInput): string {
   }
   filter.push(`[${last}]format=yuv420p[v]`);
   // The end card follows the clip, with its own sound (or silence); added by the script only when it has the frame's orientation.
+  // The clip's sound is @CA@: its own track, or silence of its length when it has none (QA 22 Nov 2026, P53-08:
+  // [0:a] alone failed every join of a filmed upload with no sound track).
   const endFilter = input.endCard
-    ? `;[v]setsar=1[vm];[0:a]aformat=sample_rates=48000:channel_layouts=stereo[am];[@EC@:v]${FIT},format=yuv420p[ecv];[@ECA@]aformat=sample_rates=48000:channel_layouts=stereo[eca];[vm][am][ecv][eca]concat=n=2:v=1:a=1[vout][aout]`
+    ? `;[v]setsar=1[vm];[@CA@]aformat=sample_rates=48000:channel_layouts=stereo[am];[@EC@:v]${FIT},format=yuv420p[ecv];[@ECA@]aformat=sample_rates=48000:channel_layouts=stereo[eca];[vm][am][ecv][eca]concat=n=2:v=1:a=1[vout][aout]`
     : "";
 
   return [
@@ -169,6 +173,7 @@ export function composeScript(input: ComposeInput): string {
       `EC_W=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of csv=p=0 endsrc.mp4); EC_H=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 endsrc.mp4)`,
       `if ${sameOrientation(frame)}; then ffmpeg -hide_banner -loglevel error -y -sseof -${input.endCard.seconds.toFixed(1)} -i endsrc.mp4 -t ${input.endCard.seconds.toFixed(1)} -c:v libx264 -preset veryfast -crf 16 -c:a aac endcard.mp4 && EC=1; else EC=0; fi`,
       `if [ "\${EC:-0}" = 1 ] && [ "$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 endcard.mp4 | wc -l)" -lt 1 ]; then EC_SILENT=1; fi`,
+      `if [ "\${EC:-0}" = 1 ] && [ "$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 clip.mp4 | wc -l)" -lt 1 ]; then CLIP_SILENT=1; CLIP_D=$(ffprobe -v error -show_entries format=duration -of csv=p=0 clip.mp4); fi`,
     ] : []),
     // Stills of the footage alone, before anything is laid over it.
     ...(input.frameUploads ?? []).flatMap((url, i, all) => [
@@ -182,7 +187,7 @@ export function composeScript(input: ComposeInput): string {
     ...(input.logo?.end ? ['FILTER="${FILTER//@END@/$END}"'] : []),
     ...(input.endCard ? [
       // With an end card of the frame's orientation, the clip and the card are joined; otherwise the clip stands alone.
-      `if [ "\${EC:-0}" = 1 ]; then ECIN="-i endcard.mp4"; ECN=${inputs.length}; if [ "\${EC_SILENT:-0}" = 1 ]; then ECIN="$ECIN -f lavfi -t ${input.endCard.seconds.toFixed(1)} -i anullsrc=r=48000:cl=stereo"; ECA="$((ECN + 1)):a"; else ECA="$ECN:a"; fi; END_F=${shellQuote(endFilter)}; END_F="\${END_F//@EC@/$ECN}"; FILTER="$FILTER\${END_F//@ECA@/$ECA}"; MAPS='-map [vout] -map [aout]'; else ECIN=""; MAPS='-map [v] -map 0:a?'; fi`,
+      `if [ "\${EC:-0}" = 1 ]; then ECIN="-i endcard.mp4"; ECN=${inputs.length}; if [ "\${EC_SILENT:-0}" = 1 ]; then ECIN="$ECIN -f lavfi -t ${input.endCard.seconds.toFixed(1)} -i anullsrc=r=48000:cl=stereo"; ECA="$((ECN + 1)):a"; CAN=$((ECN + 2)); else ECA="$ECN:a"; CAN=$((ECN + 1)); fi; if [ "\${CLIP_SILENT:-0}" = 1 ]; then ECIN="$ECIN -f lavfi -t $CLIP_D -i anullsrc=r=48000:cl=stereo"; CA="$CAN:a"; else CA="0:a"; fi; END_F=${shellQuote(endFilter)}; END_F="\${END_F//@EC@/$ECN}"; END_F="\${END_F//@CA@/$CA}"; FILTER="$FILTER\${END_F//@ECA@/$ECA}"; MAPS='-map [vout] -map [aout]'; else ECIN=""; MAPS='-map [v] -map 0:a?'; fi`,
     ] : [`ECIN=""; MAPS='-map [v] -map 0:a?'`]),
     // The maps hold brackets; no file name may stand in for them.
     "set -f",

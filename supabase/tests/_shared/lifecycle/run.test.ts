@@ -113,7 +113,8 @@ describe("the voice and the calendar check in a look", () => {
     await run(d, "accounts");
     await look(d);
     await run(d, "voice");
-    expect(step(d, "voice")).toMatchObject({ status: "done", result: { conforms: false, why: ["names"] } });
+    // Waiting for its rebuild, looked at again hourly, so a rebuild that failed is seen (QA 22 Nov 2026, P39-04).
+    expect(step(d, "voice")).toMatchObject({ status: "waiting", result: { conforms: false, why: ["names"], waiting_for: "in_progress" } });
     const job = d.tables.scheduled_jobs.find((j) => j.kind === "voice_profile")!;
     expect(job).toMatchObject({ client_id: "c1", priority: 39 });
     // The job is on its way: the calendar check waits for it.

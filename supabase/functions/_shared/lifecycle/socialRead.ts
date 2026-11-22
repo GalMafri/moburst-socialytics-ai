@@ -572,16 +572,22 @@ async function readBio(profiles: ProfileRef[], pictures: Picture[], prev: Instag
   if (!ig) return null;
   const key = `${ig.id}:${ig.native_name.toLowerCase()}:${pictures.find((p) => p.profileId === ig.id)?.hash ?? ""}`;
   if (prev?.key === key && !prev.run_id && prev.read_at) return prev;
-  const pending = prev?.key === key ? prev.run_id ?? null : null;
+  const same = prev?.key === key;
+  const pending = same ? prev.run_id ?? null : null;
+  const base = { profile_id: ig.id, handle: ig.native_name, key };
   try {
     const got = await io.instagram(ig.native_name, pending);
-    const base = { profile_id: ig.id, handle: ig.native_name, key };
-    if (got.state === "pending") return { ...base, read_at: prev?.read_at ?? null, bio: prev?.bio ?? null, run_id: got.run_id };
-    if (got.state === "failed") return { ...base, read_at: now.toISOString(), bio: prev?.bio ?? null, status: got.status };
+    if (got.state === "pending") return { ...base, read_at: same ? prev.read_at ?? null : null, bio: same ? prev.bio ?? null : null, run_id: got.run_id };
+    // A failed run is read again on the next look, as the LinkedIn page is (QA 22 Nov 2026, P39-02: its read
+    // time made it a finished read, never asked again while the account stayed the same).
+    if (got.state === "failed") return { ...base, read_at: null, bio: same ? prev.bio ?? null : null, status: got.status };
     return { ...base, read_at: now.toISOString(), bio: got.bio };
   } catch (e) {
     console.warn("[social_read] Instagram bio not read:", e instanceof Error ? e.message : String(e));
     if (!prev) return null;
+    // Another account's bio is never this one's: a changed account has none until it is read
+    // (QA 22 Nov 2026, P39-03: the old account's bio and links stayed while reads failed).
+    if (!same) return { ...base, read_at: null, bio: null };
     if (!pending) return { ...prev };
     const { run_id: _lost, ...rest } = prev;
     return { ...rest, read_at: null };

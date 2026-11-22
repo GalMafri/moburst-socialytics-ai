@@ -140,6 +140,23 @@ describe("buildVoiceProfile", () => {
     expect(JSON.stringify(db.tables.clients[0].social_voice)).not.toContain("★");
   });
 
+  it("keeps the voice the client already had when no posts were read", async () => {
+    // QA 22 Nov 2026 (P54-04): a Sprout read that failed (posts = []) overwrote the learned voice with an empty one.
+    const learned = { built_at: "2026-10-20T00:00:00.000Z", post_count: 40, platforms: { Instagram: { summary: "Warm, playful, first person plural." } }, examples: {}, rule: 1 };
+    const db = fakeDb({ clients: [{ id: "c1", name: "Acme", timezone: "UTC", social_voice: learned }] });
+    const voice = await buildVoiceProfile(db, "c1", [], NOW);
+    expect(voice).toEqual(learned);
+    expect(db.tables.clients[0].social_voice).toEqual(learned);
+    expect(anthropic).not.toHaveBeenCalled();
+  });
+
+  it("stores an empty voice for a client with no posts and none learned before", async () => {
+    const db = fakeDb({ clients: [{ id: "c1", name: "Acme", timezone: "UTC" }] });
+    const voice = await buildVoiceProfile(db, "c1", [], NOW);
+    expect(voice.platforms).toEqual({});
+    expect(db.tables.clients[0].social_voice).toEqual(voice);
+  });
+
   it("stores the rule's version for a client with no listed names, and leaves its phrases as written", async () => {
     anthropic.mockResolvedValue({ text: reply, raw: {} });
     const db = fakeDb({ clients: [{ id: "c1", name: "Northwind Law", timezone: "UTC" }] });
