@@ -154,7 +154,18 @@ export function NewPostDialog({ clientId, platforms, defaultDate, onCreated, ini
   };
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) reset(); else setDate(defaultDate); }}>
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        // QA 22 Nov 2026: the dialog can be closed while the post is being
+        // written. The fields stay until that write settles, so a write that
+        // does not get through finds the date, platform and idea still here
+        // when the dialog is opened again, as its "kept here" line says.
+        if (!o) { if (!busy) reset(); }
+        else if (!busy && !notAdded) setDate(defaultDate);
+      }}
+    >
       <DialogTrigger asChild>
         {trigger ?? <Button size="sm"><Plus className="h-3.5 w-3.5 mr-1.5" />New post</Button>}
       </DialogTrigger>
