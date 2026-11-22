@@ -486,9 +486,14 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
       return false;
     }
   };
-  /** A run of the report starts. The occurrence's first run that counts (lateRuns) sets when its alert is due. */
+  /**
+   * A run of the report starts. The occurrence's first run that counts
+   * (lateRuns) sets when its alert is due, unless the occurrence already
+   * alerted: it alerts once (QA 22 Nov 2026, P60-1: the first run after a
+   * tracking wait armed it again, and the job span until its next run).
+   */
   const startRun = (reportId: string, startedAt: string) => {
-    if (!lateRuns().length && d.alert) memory.alert_due_at = new Date(Date.parse(startedAt) + ALERT_AFTER_MINUTES * MINUTE).toISOString();
+    if (!lateRuns().length && d.alert && !memory.alerted_at) memory.alert_due_at = new Date(Date.parse(startedAt) + ALERT_AFTER_MINUTES * MINUTE).toISOString();
     runs.push({ report_id: reportId, started_at: startedAt });
   };
   /**
@@ -499,7 +504,9 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
    * wait: the runs that ended in it, and those before it, are not counted.
    */
   const alertIfLate = async (end: RunEnd | undefined): Promise<boolean> => {
-    if (memory.alerted_at || !d.alert || d.dryRun) return false;
+    // Already alerted: no alert is due again, so the job is not leased for one (P60-1).
+    if (memory.alerted_at) { delete memory.alert_due_at; return false; }
+    if (!d.alert || d.dryRun) return false;
     const first = Math.min(...lateRuns().map((r) => Date.parse(r.started_at)).filter(Number.isFinite));
     // No run counts (each one ended waiting for tracking): no alert is due, so the job is not leased for one either.
     if (!Number.isFinite(first)) { delete memory.alert_due_at; return false; }
@@ -511,13 +518,15 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
   };
   /**
    * When the job is next leased: at the next run, or at the alert's time
-   * when that comes first, with the next run's time kept as retry_at.
+   * when that comes first, with the next run's time kept as retry_at. Never
+   * at once: an alert whose time has come was checked in this lease, so one
+   * still kept is looked at again a minute on, not in the same tick (P60-1).
    */
   const leaseAt = (next: Date, kept: DispatchMemory): string => {
     const due = Date.parse(kept.alert_due_at ?? "");
     if (!Number.isFinite(due) || due >= next.getTime()) return next.toISOString();
     kept.retry_at = next.toISOString();
-    return new Date(Math.max(due, now.getTime())).toISOString();
+    return new Date(Math.min(next.getTime(), Math.max(due, now.getTime() + MINUTE))).toISOString();
   };
 
   /** The run with this report ended (why for the logs, end for the alert); the occurrence runs again later, or closes. */
