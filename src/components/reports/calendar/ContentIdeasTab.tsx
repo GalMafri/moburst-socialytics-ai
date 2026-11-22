@@ -16,6 +16,8 @@ import type { ClientContext } from "@/lib/clientContext";
 import type { ReportTrends } from "@/lib/reportFigures";
 import { applyCopyRevisions, calendarWithRevisions, iterationMatchesPost } from "@/lib/calendarRevision";
 import { useAuth } from "@/hooks/useAuth";
+import { useInRouterContext, useNavigate } from "react-router-dom";
+import { mondayOf } from "@/lib/calendarPosts";
 
 interface Props {
   contentCalendar: any[];
@@ -209,14 +211,35 @@ export function ContentIdeasTab({
     setPanelTab(openPostTab);
   }, [openPostKey, openPostTab, revisedCalendar, iterationsLoading]);
 
+  // QA 22 Nov 2026: on a report's own board the dock lists every design the
+  // person asked for on the client, Calendar posts too, and a report page has
+  // no week to go to. Open on one of those went nowhere; it now goes to the
+  // post on the Calendar, opened on its Design tab (the Calendar itself when
+  // the post is no longer there).
+  const navigate = useNavigateIfRouted();
+  const openOnCalendar = useCallback(async (postKey: string) => {
+    if (!clientId) return;
+    // calendar_posts is not in the generated types yet.
+    const { data } = await (supabase.from("calendar_posts" as never) as any).select("id, post_date").eq("client_id", clientId).eq("post_key", postKey).maybeSingle();
+    const there = data as { id: string; post_date: string } | null;
+    const url = there
+      ? `/clients/${clientId}/calendar?week=${mondayOf(there.post_date)}&post=${there.id}&tab=design`
+      : `/clients/${clientId}/calendar`;
+    if (navigate) navigate(url);
+    else window.location.assign(url);
+  }, [clientId, navigate]);
+
   // A design progress card names its post by key; find that post on the board.
   const openDesignsFor = useCallback((postKey: string) => {
     const post = (revisedCalendar as any[]).flatMap((d: any) => (Array.isArray(d?.posts) ? d.posts : [d])).find((p: any) => p?._calendarPostKey === postKey);
-    // A post in another week: the page goes to its week and opens it there.
-    if (!post) return onOpenElsewhere?.(postKey);
+    if (!post) {
+      // A post in another week: the page goes to its week and opens it there.
+      if (onOpenElsewhere) return onOpenElsewhere(postKey);
+      return void openOnCalendar(postKey);
+    }
     setActivePost(post);
     setPanelTab("design");
-  }, [revisedCalendar, onOpenElsewhere]);
+  }, [revisedCalendar, onOpenElsewhere, openOnCalendar]);
 
   return (
     <DesignRequestsProvider clientId={clientId} onOpenPost={openDesignsFor}>
@@ -304,4 +327,12 @@ export function ContentIdeasTab({
       </div>
     </DesignRequestsProvider>
   );
+}
+
+/** The router's navigate where the board is inside one (every page is); null where it is drawn on its own. */
+function useNavigateIfRouted() {
+  // Whether the board is inside a router does not change while it is mounted, so the hook order is stable.
+  const routed = useInRouterContext();
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  return routed ? useNavigate() : null;
 }
