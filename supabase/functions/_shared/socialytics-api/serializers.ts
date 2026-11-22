@@ -170,6 +170,9 @@ export function clientOut(row: ClientRow, extras: { sproutProfiles: SproutProfil
     .map((r) => (typeof r === "string" ? r : String((r as { path?: unknown } | null)?.path ?? ""))).filter(Boolean);
   const refs = new Set(refPaths).size;
   const active = extras.sproutProfiles.filter((p) => p.is_active !== false);
+  // QA 22 Nov 2026 (P48-01): a schedule someone turned off runs no report, so
+  // readiness counts active ones only, on every route (client_counts does the same).
+  const activeSchedules = (extras.schedules ?? []).filter((s) => s.is_active !== false).length;
   const last = extras.lastReport;
   const lastData = obj(last?.report_data);
   const out: ClientOut = {
@@ -180,7 +183,7 @@ export function clientOut(row: ClientRow, extras: { sproutProfiles: SproutProfil
     competitors: { set_status: set?.status ?? null, selected: set ? set.competitors.filter((c) => c.is_selected).sort((a, b) => (a.selected_rank ?? 99) - (b.selected_rank ?? 99)).map((c) => c.name) : [], tracked: !!set?.rivaliq_landscape_id },
     counts: extras.counts,
     last_report: last ? { id: last.id, status: last.status, period: { start: last.date_range_start ?? str(obj(obj(lastData.report_period).current_month).start), end: last.date_range_end ?? str(obj(obj(lastData.report_period).current_month).end) }, completed_at: str(lastData.completed_at) } : null,
-    setup: clientSetup(row, { sproutProfiles: extras.sproutProfiles, sets: extras.sets, designSettings: extras.designSettings, designSteps: extras.designSteps, schedules: Math.max(extras.counts.schedules, extras.schedules?.length ?? 0) }),
+    setup: clientSetup(row, { sproutProfiles: extras.sproutProfiles, sets: extras.sets, designSettings: extras.designSettings, designSteps: extras.designSteps, schedules: Math.max(extras.counts.schedules, activeSchedules) }),
     archived: !!row.archived_at, demo_job_id: row.demo_job_id, created_at: row.created_at, links: { app: `${APP_URL}/clients/${row.id}/setup`, api: `/v1/clients/${row.id}` },
   };
   if (extras.detail) {
