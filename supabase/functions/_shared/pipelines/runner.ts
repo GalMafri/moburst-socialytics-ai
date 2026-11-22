@@ -105,6 +105,7 @@ export function pipelinePayload(job: Pick<ScheduledJob, "payload">): PipelineJob
     ...(Number(p.paused_ms) > 0 ? { paused_ms: Number(p.paused_ms) } : {}),
     ...(typeof p.paused_at === "string" && Number.isFinite(Date.parse(p.paused_at)) ? { paused_at: p.paused_at } : {}),
     ...(typeof p.paused_for === "string" && p.paused_for ? { paused_for: p.paused_for } : {}),
+    ...(Number(p.runner_failed) > 0 ? { runner_failed: Number(p.runner_failed) } : {}),
   };
 }
 
@@ -178,8 +179,14 @@ export async function runPipelineJob(job: ScheduledJob, d: RunnerDeps): Promise<
     }
   };
 
-  /** A failed try: again after a growing wait, or the run stops once the tries are used up. */
-  const failedTry = async (why: string, payload: PipelineJobPayload): Promise<JobOutcome> => {
+  /**
+   * A failed try: again after a growing wait, or the run stops once the tries
+   * are used up. byRunner: the runner failed it, not the step's own throw;
+   * counted so the step can tell (QA 22 Nov 2026: a trend source whose run
+   * never ended was started again on every try, past the step's own give-up).
+   */
+  const failedTry = async (why: string, given: PipelineJobPayload, byRunner = false): Promise<JobOutcome> => {
+    const payload = byRunner ? { ...given, runner_failed: (p.runner_failed ?? 0) + 1 } : given;
     if (job.attempts >= maxAttempts) {
       await logEnd("stopped", { error: why.slice(0, 500) });
       return stop(`Step ${p.step} did not finish in ${maxAttempts} tries: ${why}`.slice(0, 500));
@@ -201,21 +208,23 @@ export async function runPipelineJob(job: ScheduledJob, d: RunnerDeps): Promise<
   const maxPoll = def.maxPollMinutes ?? MAX_POLL_MINUTES;
   const inAccountWait = typeof p.paused_for === "string" && p.paused_for !== "";
   if (p.poll && !inAccountWait && now.getTime() - Date.parse(p.poll.since) > maxPoll * MINUTE) {
-    return failedTry(`the external job did not finish in ${maxPoll} minutes`, { ...p, poll: null });
+    return failedTry(`the external job did not finish in ${maxPoll} minutes`, { ...p, poll: null }, true);
   }
 
   const budget = d.stepBudgetMs ?? STEP_BUDGET_MS;
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
   const timeUp = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
+      timedOut = true;
       controller.abort(new Error(`step ${p.step} ran past its ${Math.round(budget / 1000)} s`));
       reject(new Error(`the step ran past its ${Math.round(budget / 1000)} s`));
     }, budget);
   });
   const services = d.services(run, def);
   const ctx: StepContext = {
-    run, step: p.step, attempt: job.attempts, state: p.state, poll: p.poll ?? null,
+    run, step: p.step, attempt: job.attempts, state: p.state, poll: p.poll ?? null, runnerFailed: p.runner_failed ?? 0,
     now: d.now, signal: controller.signal, deadline: new Date(now.getTime() + budget),
     payloads: services.payloads, output: services.output, db: services.db, env: services.env,
   };
@@ -241,7 +250,7 @@ export async function runPipelineJob(job: ScheduledJob, d: RunnerDeps): Promise<
       return stop(e.message);
     }
     // An external job that ended without its result is started again on the next try.
-    return failedTry(message(e), e instanceof StepRestart ? { ...p, poll: null } : p);
+    return failedTry(message(e), e instanceof StepRestart ? { ...p, poll: null } : p, timedOut);
   } finally {
     clearTimeout(timer);
   }
@@ -249,7 +258,7 @@ export async function runPipelineJob(job: ScheduledJob, d: RunnerDeps): Promise<
   const state = result.state ?? p.state;
   const stateBytes = JSON.stringify(state ?? {}).length;
   if (stateBytes > STATE_MAX_BYTES) {
-    return failedTry(`the step kept ${stateBytes} bytes of state; more than ${STATE_MAX_BYTES} goes to the payload store`, p);
+    return failedTry(`the step kept ${stateBytes} bytes of state; more than ${STATE_MAX_BYTES} goes to the payload store`, p, true);
   }
 
   if (result.type === "done") {
@@ -288,6 +297,6 @@ export async function runPipelineJob(job: ScheduledJob, d: RunnerDeps): Promise<
   // Looking at an external job is not a failed try.
   return {
     status: "queued", reason: `Step ${p.step} looks again in ${wait} s.`, available_at: new Date(now.getTime() + wait * 1000).toISOString(), deferred: true,
-    payload: withPause({ run_id: run.id, pipeline: def.name, step: p.step, state, poll }, waitingFor),
+    payload: withPause({ run_id: run.id, pipeline: def.name, step: p.step, state, poll, ...(p.runner_failed ? { runner_failed: p.runner_failed } : {}) }, waitingFor),
   };
 }

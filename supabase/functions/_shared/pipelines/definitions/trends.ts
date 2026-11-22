@@ -150,7 +150,7 @@ export type KeptSearch = { state: "answered" } | { state: "failed"; message: str
 
 interface TrendState {
   [key: string]: unknown;
-  scrape?: Partial<Record<TrendPlatform, { i: number; rows: number; ok: number; failed: number }>>;
+  scrape?: Partial<Record<TrendPlatform, { i: number; rows: number; ok: number; failed: number; stalled?: boolean }>>;
   platforms?: Partial<Record<TrendPlatform, { status: PlatformStatus; searched: number; rows: number }>>;
   apifyUsd?: number;
   claude?: Record<string, { input_tokens: number; output_tokens: number }>;
@@ -429,6 +429,17 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
           detail = { ...detail, replayed: true };
         }
       } else {
+        // QA 22 Nov 2026: a try the runner failed itself (a run that never
+        // finished within the poll limit, or a step past its time) never reached
+        // this step's catch, so a hung source was started again on every try
+        // until the run stopped at 12 hours and the week was not saved. Past its
+        // tries the search fails here like any other, and once one search of a
+        // source has, the source's other searches are not asked this week.
+        if (prog.stalled) throw new Error(`The ${platform} source did not finish an earlier search this week.`);
+        if (ctx.attempt > SCRAPE_TRIES && (ctx.runnerFailed ?? 0) > 0) {
+          prog.stalled = true;
+          throw new Error(`The ${platform} source did not finish in ${SCRAPE_TRIES} tries.`);
+        }
         const actor = await runActorStep(ctx, { actor: TREND_SOURCES[platform].actor, input: run.input, datasetKey: key, keepDays: SOURCE_KEEP_DAYS, apify: deps.apify });
         if (actor.type === "wait") return actor.result;
         // A run that took every search and brought back nothing at all may have
@@ -450,7 +461,7 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
       }
     } catch (e) {
       // A stop, and a payload that could not be read, are not this source failing: the first ends the run, the second is tried again.
-      if (e instanceof StepStop || e instanceof PayloadUnread || ctx.attempt < SCRAPE_TRIES) throw e;
+      if (e instanceof StepStop || e instanceof PayloadUnread || (ctx.attempt < SCRAPE_TRIES && !prog.stalled)) throw e;
       const message = (e instanceof Error ? e.message : String(e)).slice(0, 300);
       // The failed search is a fact a replay reads: here, and in this step's log (detail.failed with the search's number), which keptSearches falls back on.
       await ctx.payloads.put(`${key}.failed`, { message }, KEEP).catch(() => undefined);
@@ -515,6 +526,8 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
 
   /** A Claude step that cannot get an answer in CLAUDE_TRIES gives up into a saved week instead of stopping the run. */
   const orGiveUp = (inner: Step, giveUp: (ctx: StepContext, why: string) => Promise<StepResult>): Step => async (ctx) => {
+    // QA 22 Nov 2026: tries the runner failed itself (a batch pending past the poll limit, a step past its time) count too.
+    if (ctx.attempt > CLAUDE_TRIES && (ctx.runnerFailed ?? 0) > 0) return giveUp(ctx, `Claude did not answer in ${CLAUDE_TRIES} tries.`);
     try {
       return await inner(ctx);
     } catch (e) {
