@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Loader2, X, Image } from "lucide-react";
@@ -30,6 +30,10 @@ export function DesignReferencesUpload({
   const [uploading, setUploading] = useState(false);
   const [pending, setPending] = useState<File[]>([]);
   const [skipped, setSkipped] = useState<string[]>([]);
+  // QA 22 Nov 2026: an upload adds to the references as they are when it finishes. Reading the list of the
+  // render that started it put back a reference removed while the upload was going up.
+  const latest = useRef(designReferences);
+  latest.current = designReferences;
   const folder = clientName.replace(/[^a-zA-Z0-9]/g, "-");
   const pathFor = (file: File) => `${folder}/${clientId || "new"}-${fileKey(file)}`;
 
@@ -46,7 +50,8 @@ export function DesignReferencesUpload({
     setUploading(false);
     setPending(left);
     if (done.length) {
-      onDesignReferencesChange([...designReferences, ...done.filter((p) => !designReferences.includes(p))]);
+      const now = latest.current;
+      onDesignReferencesChange([...now, ...done.filter((p) => !now.includes(p))]);
       toast.success(`${done.length} design reference${done.length === 1 ? "" : "s"} uploaded`);
     }
   };
