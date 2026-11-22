@@ -9,8 +9,7 @@
 // the credits are spent either way. So submission and collection are two
 // separate calls with a media_jobs row between them.
 
-import { McpClient } from "./mcp.ts";
-import { MCP_URL, accessTokenFor } from "./oauth.ts";
+import { higgsfieldMcp } from "./oauth.ts";
 import {
   HiggsfieldError,
   VIDEO_MODEL,
@@ -62,8 +61,8 @@ export interface StartedVideo {
 
 /** Submit a clip and return at once. Nothing here waits for pixels. */
 export async function startVideoWithHiggsfield(args: StartVideoArgs): Promise<StartedVideo> {
-  const token = await accessTokenFor(args.supabase);
-  const mcp = new McpClient({ url: MCP_URL, accessToken: token, timeoutMs: 30_000 });
+  // The token is renewed once if it runs out mid-render (oauth.ts, higgsfieldMcp; QA 22 Nov 2026).
+  const mcp = await higgsfieldMcp(args.supabase);
 
   const balance = await creditBalance(mcp);
   if (balance && balance.credits < VIDEO_CREDIT_FLOOR) {
@@ -116,8 +115,7 @@ export function videoJobSnapshot(waited:Awaited<ReturnType<typeof awaitJobs>>):J
  * agent willing to hold a socket open.
  */
 export async function checkVideoJob(supabase: any, jobId: string): Promise<JobSnapshot> {
-  const token = await accessTokenFor(supabase);
-  const mcp = new McpClient({ url: MCP_URL, accessToken: token, timeoutMs: 30_000 });
+  const mcp = await higgsfieldMcp(supabase);
   const waited = await awaitJobs(mcp, [{ index: 0, job_id: jobId }], { budgetMs: 0, pollSeconds: 0 });
   return videoJobSnapshot(waited);
 }

@@ -66,11 +66,14 @@ export interface McpClientOptions {
   fetchImpl?: typeof fetch;
   /** Per-request budget. Edge functions die at 150s, so never near that. */
   timeoutMs?: number;
+  /** A fresh access token in place of one the server rejected (higgsfield/oauth.ts, higgsfieldMcp): a 401 is answered with one renewal and the request sent again. */
+  renewToken?: (rejected: string) => Promise<string>;
 }
 
 export class McpClient {
   private readonly url: string;
-  private readonly token: string;
+  private token: string;
+  private readonly renewToken?: (rejected: string) => Promise<string>;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
   private sessionId: string | null = null;
@@ -80,6 +83,7 @@ export class McpClient {
   constructor(opts: McpClientOptions) {
     this.url = opts.url;
     this.token = opts.accessToken;
+    this.renewToken = opts.renewToken;
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.timeoutMs = opts.timeoutMs ?? 60_000;
   }
@@ -101,12 +105,20 @@ export class McpClient {
     if (params !== undefined) payload.params = params;
     if (!isNotification) payload.id = this.nextId++;
 
-    const resp = await this.fetchImpl(this.url, {
+    const post = () => this.fetchImpl(this.url, {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(this.timeoutMs),
     });
+    let resp = await post();
+    // QA 22 Nov 2026: a token that ran out during a long call is renewed once and the same request sent again.
+    if (resp.status === 401 && this.renewToken) {
+      await resp.body?.cancel();
+      const rejected = this.token;
+      this.token = await this.renewToken(rejected);
+      if (this.token !== rejected) resp = await post();
+    }
 
     const sid = resp.headers.get("Mcp-Session-Id") || resp.headers.get("mcp-session-id");
     if (sid) this.sessionId = sid;
