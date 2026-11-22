@@ -59,8 +59,10 @@ export function xLength(text: string): number {
     n += 23;
     return "";
   });
-  const graphemes = typeof Intl !== "undefined" && "Segmenter" in Intl
-    ? [...new Intl.Segmenter("en", { granularity: "grapheme" }).segment(rest)].map((s) => s.segment)
+  // Intl.Segmenter is ES2022; the app's type library is ES2020, so it is typed here.
+  const Segmenter = (typeof Intl !== "undefined" ? (Intl as unknown as { Segmenter?: new (locale: string, o: { granularity: "grapheme" }) => { segment(s: string): Iterable<{ segment: string }> } }).Segmenter : undefined);
+  const graphemes = Segmenter
+    ? [...new Segmenter("en", { granularity: "grapheme" }).segment(rest)].map((s) => s.segment)
     : [...rest];
   for (const g of graphemes) {
     const cp = g.codePointAt(0) ?? 0;
