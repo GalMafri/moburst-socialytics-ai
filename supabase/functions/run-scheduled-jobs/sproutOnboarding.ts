@@ -19,7 +19,7 @@
 // search can tie two brands into one. sprout_onboard_client makes the client
 // under a lock; the lifecycle, which its insert triggers start, does the rest.
 //
-// A run works within 90 seconds and queues itself a minute later with the
+// A run works within its time (RUN_BUDGET_MS) and queues itself a minute later with the
 // brands left. Its result lists every brand with what was done and why. The
 // harness mode sprout_onboarding_dry_run runs the same thing and writes
 // nothing. Nothing here alerts anyone or makes a model call.
@@ -35,8 +35,19 @@ import type { JobOutcome, ScheduledJob } from "../_shared/scheduled-jobs/types.t
 // deno-lint-ignore no-explicit-any
 type Db = any;
 
-/** How long one run looks at brands before it leaves the rest to the next run, a minute later. */
-export const RUN_BUDGET_MS = 90_000;
+/**
+ * How long one run starts brands before it leaves the rest to the next run,
+ * a minute later. QA 22 Nov 2026 (P60-3): at 90 s, one more brand (its posts,
+ * then up to three sites followed through their redirects) could carry the
+ * request past the edge's wall clock before the rest was queued.
+ */
+export const RUN_BUDGET_MS = 60_000;
+/**
+ * A brand still being looked at this long after its run's budget is left
+ * for the next run: its website search reads nothing more, and what it found
+ * is dropped, so the run ends and queues the rest in time.
+ */
+export const RUN_STOP_MARGIN_MS = 40_000;
 const DAY = 86_400_000;
 const PAGE = 1000;
 
@@ -50,6 +61,8 @@ export interface OnboardingDeps {
   posts(profileIds: string[], since: Date, until: Date): Promise<SproutPost[]>;
   reader: SiteReader;
   budgetMs: number;
+  /** When a brand still being looked at is left for the next run; by default the budget plus RUN_STOP_MARGIN_MS. */
+  stopMs?: number;
   /** Milliseconds, for the budget. */
   clock(): number;
 }
@@ -256,6 +269,12 @@ export async function sproutOnboarding(db: Db, deps: OnboardingDeps, o: { dryRun
   // The brands that may become clients: their posts and website, within the run's time.
   const evaluated = new Map<string, Evaluated>();
   const left = new Set<string>();
+  const late = () => deps.clock() - started >= (deps.stopMs ?? deps.budgetMs + RUN_STOP_MARGIN_MS);
+  // Past the stop, a site is read as not answering, so the search ends at once (its result is dropped below).
+  const reader: SiteReader = {
+    resolve: (url) => (late() ? Promise.resolve(null) : deps.reader.resolve(url)),
+    homepage: (url) => (late() ? Promise.resolve(null) : deps.reader.homepage(url)),
+  };
   for (const brand of pending) {
     if (deps.clock() - started >= deps.budgetMs) {
       left.add(brand.key);
@@ -263,7 +282,13 @@ export async function sproutOnboarding(db: Db, deps: OnboardingDeps, o: { dryRun
     }
     try {
       const posts = await deps.posts(brand.profiles.map((p) => String(p.id)), new Date(now.getTime() - POSTS_WINDOW_DAYS * DAY), now);
-      evaluated.set(brand.key, { brand, posts: posts.length, search: posts.length ? await searchWebsite(brand, posts, deps.reader) : null });
+      const search = posts.length ? await searchWebsite(brand, posts, reader) : null;
+      // Looked at past the stop: what it found may be cut short, so the next run looks at it whole.
+      if (late()) {
+        left.add(brand.key);
+        continue;
+      }
+      evaluated.set(brand.key, { brand, posts: posts.length, search });
     } catch (e) {
       results.push({ ...base(brand), decision: "not_read", reason: `Not read: Sprout's posts did not answer (${message(e)}). It is looked at again next run.` });
     }
@@ -294,7 +319,7 @@ export async function sproutOnboarding(db: Db, deps: OnboardingDeps, o: { dryRun
 
   for (const key of left) {
     const b = brands.find((x) => x.key === key)!;
-    results.push({ ...base(b), decision: "later", reason: o.dryRun ? "Not looked at: the 90 seconds were used. Ask again with these brands as left." : "Left for the next run, a minute from now: this run's 90 seconds were used." });
+    results.push({ ...base(b), decision: "later", reason: o.dryRun ? "Not looked at: this run's time was used. Ask again with these brands as left." : "Left for the next run, a minute from now: this run's time was used." });
   }
   results.sort(resultOrder);
   return { dry_run: o.dryRun, at: now.toISOString(), profiles: listed.length, brands: brands.length, created, left: [...left].sort((a, b) => a.length - b.length || (a < b ? -1 : 1)), results };

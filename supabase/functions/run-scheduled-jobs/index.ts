@@ -88,7 +88,7 @@
 //                              group ids, its decision, the reason and the
 //                              website search, read from live Sprout and sites,
 //                              writing nothing.
-//                              Brands its 90 seconds did not reach come back as
+//                              Brands its time did not reach come back as
 //                              "left"; send them as "left" to look at those.
 // POST {"mode":"onboarding_fields_check","client_id":"<id>"}
 //                              which fields the social read needs Sprout
