@@ -7,6 +7,7 @@
 // report has no decks, and a read that does not answer is tried again
 // quietly.
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink, Presentation } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -14,6 +15,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { deckAddedLine } from "@/lib/display";
 import { sendQuietly } from "@/lib/quietSend";
+import { NotYet } from "@/components/ui/not-yet";
 
 export interface ReportDeck {
   id: string;
@@ -30,23 +32,49 @@ const BUCKET = "report-decks";
 /** How long the link to a deck file lasts: long enough to open it. */
 const FILE_LINK_SECONDS = 600;
 
-/** Opens a deck in a new tab: its own link, or a short-lived link to its file. */
-export async function openDeck(deck: ReportDeck): Promise<void> {
+/** Opens a deck in a new tab: its own link, or a short-lived link to its file. False when no link could be made. */
+export async function openDeck(deck: ReportDeck): Promise<boolean> {
   if (deck.link) {
     window.open(deck.link, "_blank", "noopener,noreferrer");
-    return;
+    return true;
   }
-  if (!deck.file_path) return;
+  if (!deck.file_path) return false;
   // The tab opens on the click, so the browser lets it; the file's link follows.
   const tab = window.open("", "_blank");
   const { data, error } = await sendQuietly(() => supabase.storage.from(BUCKET).createSignedUrl(deck.file_path!, FILE_LINK_SECONDS), { again: () => true });
   if (error || !data?.signedUrl) {
     console.warn("[report decks] no link to the file yet", deck.id, error);
     tab?.close();
-    return;
+    return false;
   }
   if (tab) tab.location.href = data.signedUrl;
   else window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+  return true;
+}
+
+/**
+ * One deck and its Open. QA 22 Nov 2026: when no link to the file can be made
+ * after the quiet resends, the blank tab closes and the deck says it is not
+ * open yet, with Open still there; before, nothing on the page changed.
+ */
+function DeckRow({ deck, staff, timeZone }: { deck: ReportDeck; staff: boolean; timeZone?: string }) {
+  const [notOpened, setNotOpened] = useState(false);
+  const open = async () => {
+    setNotOpened(false);
+    setNotOpened(!(await openDeck(deck)));
+  };
+  return (
+    <li className="glass-inner p-inner flex items-center justify-between gap-3 flex-wrap">
+      <div className="min-w-0 space-y-0.5">
+        <p className="t-body truncate">{deck.title}</p>
+        <p className="t-label">{deckAddedLine(deck, { staff, timeZone })}</p>
+        {notOpened && <NotYet>Not opened yet.</NotYet>}
+      </div>
+      <Button size="sm" variant="outline" onClick={() => void open()} aria-label={`Open ${deck.title}`}>
+        <ExternalLink aria-hidden /> Open
+      </Button>
+    </li>
+  );
 }
 
 export function ReportDecks({ reportId, kind, timeZone }: { reportId: string; kind: "social" | "competitive"; timeZone?: string }) {
@@ -69,17 +97,7 @@ export function ReportDecks({ reportId, kind, timeZone }: { reportId: string; ki
     <section data-print="hide" aria-label="Decks" className="glass p-card space-y-3">
       <h2 className="t-h4 flex items-center gap-2"><Presentation className="h-4 w-4" aria-hidden /> {decks.length === 1 ? "Deck" : "Decks"}</h2>
       <ul className="space-y-2">
-        {decks.map((d) => (
-          <li key={d.id} className="glass-inner p-inner flex items-center justify-between gap-3 flex-wrap">
-            <div className="min-w-0 space-y-0.5">
-              <p className="t-body truncate">{d.title}</p>
-              <p className="t-label">{deckAddedLine(d, { staff: isMoburstStaff, timeZone })}</p>
-            </div>
-            <Button size="sm" variant="outline" onClick={() => void openDeck(d)} aria-label={`Open ${d.title}`}>
-              <ExternalLink aria-hidden /> Open
-            </Button>
-          </li>
-        ))}
+        {decks.map((d) => <DeckRow key={d.id} deck={d} staff={isMoburstStaff} timeZone={timeZone} />)}
       </ul>
     </section>
   );
