@@ -48,7 +48,8 @@ export interface SendRequest {
  */
 export interface SentStore {
   /** The send time of a row for the post with this status: at this minute, or (sent now) sent since a time. Null when there is none. */
-  alreadySent(q: { clientId: string; calendarPostKey: string; status: string; at?: string; since?: string }): Promise<string | null>;
+  /** A send of this post to this profile (its sprout_profiles row) already made, by minute or since a time. */
+  alreadySent(q: { clientId: string; calendarPostKey: string; profileId: string; status: string; at?: string; since?: string }): Promise<string | null>;
   /** Writes the row as sending. "taken" when another send of this post holds it; null when it could not be written. */
   claim(row: Record<string, unknown>, opts?: { supersede?: string | null }): Promise<{ id: string } | "taken" | null>;
   /**
@@ -104,13 +105,15 @@ export async function sendToSprout(req: SendRequest, store: SentStore, opts: { f
   const problems = publishProblems({ network: req.profile.networkType || req.platform, text: req.text, mediaUrls: req.mediaUrls, sendAt: chosenAt });
   if (problems.length) return { status: 422, body: { error: problems.join(" "), code: "not_publishable", problems } };
 
-  // A post already sent is not sent twice: for the same calendar post and
-  // minute, or sent now within the last quarter hour.
+  // A post already sent is not sent twice: for the same calendar post,
+  // profile and minute, or sent now to that profile within the last quarter
+  // hour. QA 22 Nov 2026 (P61-01): without the profile, a send of the post to
+  // the client's second page was answered "already sent" and made nothing.
   if (req.calendarPostKey) {
     const since = new Date(Date.now() - SEND_NOW_WINDOW_MS).toISOString();
     const already = await store.alreadySent(req.sendNow
-      ? { clientId: req.clientId, calendarPostKey: req.calendarPostKey, status, since }
-      : { clientId: req.clientId, calendarPostKey: req.calendarPostKey, status, at: chosenAt! });
+      ? { clientId: req.clientId, calendarPostKey: req.calendarPostKey, profileId: req.profile.rowId, status, since }
+      : { clientId: req.clientId, calendarPostKey: req.calendarPostKey, profileId: req.profile.rowId, status, at: chosenAt! });
     if (already) return { status: 200, body: { success: true, already: true, recorded: true, status, scheduled_time: already } };
   }
 
@@ -175,8 +178,8 @@ export async function sendToSprout(req: SendRequest, store: SentStore, opts: { f
   if (req.calendarPostKey) {
     const since = new Date(Date.now() - SEND_NOW_WINDOW_MS).toISOString();
     const already = await store.alreadySent(req.sendNow
-      ? { clientId: req.clientId, calendarPostKey: req.calendarPostKey, status, since }
-      : { clientId: req.clientId, calendarPostKey: req.calendarPostKey, status, at: chosenAt! });
+      ? { clientId: req.clientId, calendarPostKey: req.calendarPostKey, profileId: req.profile.rowId, status, since }
+      : { clientId: req.clientId, calendarPostKey: req.calendarPostKey, profileId: req.profile.rowId, status, at: chosenAt! });
     if (already) {
       await store.drop(claimed.id);
       return { status: 200, body: { success: true, already: true, recorded: true, status, scheduled_time: already } };
