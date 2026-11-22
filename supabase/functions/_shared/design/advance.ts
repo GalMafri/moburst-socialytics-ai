@@ -19,7 +19,7 @@ import { ACTIVE_JOB, recordStepError, type StepJob, type StepLimits } from "../c
 /** next: run the following step now; wait: a later pass; held: work continues in the background under its lease; done. */
 export type StepResult = "next" | "wait" | "held" | "done";
 
-/** Tries of one job before it fails. */
+/** Tries of one step of a job before the job fails: a step that moves on starts them again. */
 export const MAX_DESIGN_ATTEMPTS = 4;
 /** The design worker's limits for the shared step-error rule and the hold. */
 export const DESIGN_LIMITS: StepLimits = { maxAttempts: MAX_DESIGN_ATTEMPTS, worker: "design-worker" };
@@ -41,9 +41,15 @@ export async function advanceDesignJob(
   try {
     let result: StepResult = "next";
     while (result === "next" && timeLeft()) {
+      const from = job.step;
       result = await runStep();
       if (result !== "held") {
-        const saved = await landed(jobs().update({ step: job.step, state: job.state, error: null, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE_JOB), job);
+        // QA 22 Nov 2026: a job's tries are the tries of the step it is at. A step that moved on starts
+        // them again, so errors and cut-off runs spread over a whole job (three designs, five steps) never
+        // add up to a failure that says it stopped "4 times" at one step.
+        const moved = job.step !== from;
+        if (moved) job.attempts = 0;
+        const saved = await landed(jobs().update({ step: job.step, state: job.state, error: null, ...(moved ? { attempts: 0 } : {}), updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE_JOB), job);
         // The row is another cover design's by now, or was stopped: this run's work is dropped here.
         if (!saved) return;
       }

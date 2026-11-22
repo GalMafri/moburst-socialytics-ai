@@ -45,7 +45,7 @@ export function jobRow(init: Partial<JobRow> = {}) {
           let select = false;
           const run = () => {
             const holds = id === row.id && (!statuses || statuses.includes(row.status))
-              && conditions.every(([how, column, value]) => (how === "is" ? valueOf(row, column) === null : valueOf(row, column) === value));
+              && conditions.every(([how, column, value]) => (how === "is" ? valueOf(row, column) === null : how === "not-is" ? valueOf(row, column) !== null : valueOf(row, column) === value));
             if (holds) {
               Object.assign(row, structuredClone(values));
               updates.push(values);
@@ -56,6 +56,7 @@ export function jobRow(init: Partial<JobRow> = {}) {
           const chain = {
             eq(column: string, value: unknown) { if (column === "id") id = value; else conditions.push(["eq", column, value]); return chain; },
             is(column: string, value: null) { conditions.push(["is", column, value]); return chain; },
+            not(column: string, op: "is", value: null) { if (op === "is") conditions.push(["not-is", column, value]); return chain; },
             in(column: string, values: unknown[]) { if (column === "status") statuses = values; return chain; },
             select(_columns: string) { select = true; return chain; },
             then<T>(resolve: (r: { error: null; data?: Array<{ id: string }> }) => T, reject?: (e: unknown) => T) { return Promise.resolve().then(run).then(resolve, reject); },

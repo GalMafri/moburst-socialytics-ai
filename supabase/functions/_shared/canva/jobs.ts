@@ -497,7 +497,9 @@ export async function saveJobProgress(admin: any, job: { id: string; step: strin
  * queued or running was being worked on by a run that died (the edge runtime
  * cuts a run off for time or memory without letting it write anything), so
  * taking it counts a try; its other tries are counted where an error is
- * caught (recordFailure). At maxAttempts the job fails and its option is
+ * caught (canva/stepError.ts). A run that died wrote nothing, so its row has
+ * no error (the claim cleared it); a lease that ran out with an error on the
+ * row is the rest after a spent try, and is taken without counting again. At maxAttempts the job fails and its option is
  * replaced, instead of the same step dying every few minutes for days (10 Nov
  * 2026: one job, five days). The claim holds only while the row is as the pass
  * read it, so two passes never count one dead run twice.
@@ -512,16 +514,28 @@ export async function claimJob(
   if (job.status !== "queued" && job.status !== "running") return "lost";
   const heldUntil = job.lease_until ? Date.parse(job.lease_until) : null;
   if (heldUntil !== null && heldUntil > now.getTime()) return "lost";
-  const died = heldUntil !== null;
   const before = job.attempts ?? 0;
+  const at = now.toISOString();
+  const lease = new Date(now.getTime() + leaseMs).toISOString();
+  // The claim holds only while the row is as the pass read it. It clears the row's error, so a run that dies leaves none.
+  const claim = (change: Record<string, unknown>) => {
+    const held = admin.from("canva_finish_jobs").update(change).eq("id", job.id).in("status", ["queued", "running"]).eq("attempts", before);
+    return job.lease_until ? held.eq("lease_until", job.lease_until) : held.is("lease_until", null);
+  };
+  if (heldUntil !== null) {
+    // QA 22 Nov 2026: a lease that ran out with the try's error still on the row is the rest after a spent
+    // try (canva/stepError.ts, retryPauseMs), already counted: taken with no try counted.
+    const { data: rested } = await claim({ status: "running", attempts: before, error: null, lease_until: lease, updated_at: at }).not("error", "is", null).select("id");
+    if (rested?.length) return "claimed";
+  }
+  const died = heldUntil !== null;
   const attempts = before + (died ? 1 : 0);
   const over = died && attempts >= maxAttempts;
-  const at = now.toISOString();
   const change = over
-    ? { status: "failed", attempts, error: `The design stopped before it finished, ${attempts} times in a row.`, lease_until: null, updated_at: at }
-    : { status: "running", attempts, lease_until: new Date(now.getTime() + leaseMs).toISOString(), updated_at: at };
-  const held = admin.from("canva_finish_jobs").update(change).eq("id", job.id).in("status", ["queued", "running"]).eq("attempts", before);
-  const { data } = await (job.lease_until ? held.eq("lease_until", job.lease_until) : held.is("lease_until", null)).select("id");
+    ? { status: "failed", attempts, error: `The design stopped before it finished, ${attempts} times at the same step.`, lease_until: null, updated_at: at }
+    : { status: "running", attempts, error: null, lease_until: lease, updated_at: at };
+  const q = claim(change);
+  const { data } = await (died ? q.is("error", null) : q).select("id");
   if (!data?.length) return "lost";
   return over ? "failed" : "claimed";
 }

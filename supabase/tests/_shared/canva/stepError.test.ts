@@ -101,7 +101,9 @@ describe("recordStepError", () => {
     const { admin, updates } = fakeAdmin();
     const outcome = await recordStepError(admin, job(1), new PictureError("The picture service refused the call (400).", "finish", "refused"), opts);
     expect(outcome).toBe("retry");
-    expect(updates[0].values).toMatchObject({ attempts: 2, status: "running", step: "finish", state: { final_path: null, kept: 1 }, error: "The picture service refused the call (400).", lease_until: null });
+    expect(updates[0].values).toMatchObject({ attempts: 2, status: "running", step: "finish", state: { final_path: null, kept: 1 }, error: "The picture service refused the call (400)." });
+    // It rests before its next try (QA 22 Nov 2026): two minutes after its second.
+    expect(Date.parse(updates[0].values.lease_until as string) - Date.now()).toBeGreaterThan(110_000);
   });
 
   it("fails the job on its last try or a FINAL reason, without the FINAL mark in the reason", async () => {

@@ -334,7 +334,7 @@ describe("no cover is made again", () => {
 });
 
 describe("a job that follows no cover", () => {
-  it("is written by the very statements it always was: no condition is added and no row is asked back", async () => {
+  it("is written by the very statements it always was: no cover condition is added", async () => {
     for (const slide_index of [null, 0]) {
       const r = jobRow({ step: "generate", slide_index, state: slide_index === 0 ? { generations: 1 } : {} });
       await generate(r, OLD_COVER, async () => png()).ended();
@@ -345,7 +345,8 @@ describe("a job that follows no cover", () => {
       await recordStepError(r.admin, job, new Error("x"), DESIGN_LIMITS);
       await advanceDesignJob(r.admin, r.read(), async () => "done", () => true);
       expect(r.statements.length).toBeGreaterThan(5);
-      expect(r.statements.every((s) => s.conditions.length === 0 && !s.select && s.landed)).toBe(true);
+      // The hold's own lease (canva/hold.ts, QA 22 Nov 2026) is the only condition such a job's writes carry.
+      expect(r.statements.every((s) => s.conditions.every(([, column]) => column === "lease_until") && s.landed)).toBe(true);
     }
   });
 
