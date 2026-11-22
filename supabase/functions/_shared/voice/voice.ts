@@ -23,7 +23,7 @@
 // Free of Deno and network imports so it can be tested; load.ts reads and
 // writes the database.
 
-import { notesSectionLines, shortDate, type NotesVoice } from "../notes/notes.ts";
+import { notesSectionLines, platformKey, shortDate, type NotesVoice } from "../notes/notes.ts";
 import { platformName } from "../calendar/evidence.ts";
 import { CATEGORY_WORDS, type MomentCategory } from "../calendar/moments.ts";
 import { plainNames, type ListedName } from "../text/displayName.ts";
@@ -170,8 +170,10 @@ export interface ClientVoice {
  * is for.
  */
 export function voicePromptBlock(v: ClientVoice, opts: { platforms?: string[]; examples?: Record<string, VoiceExample[]> } = {}): string {
-  const wanted = opts.platforms?.length ? new Set(opts.platforms.map((p) => p.toLowerCase())) : null;
-  const keep = (platform: string) => !wanted || wanted.has(platform.toLowerCase());
+  // Platforms are matched by their network (notes.ts platformKey), as the notes in section 1 are:
+  // "Twitter/X" asks for what is stored under "X" (QA 22 Nov 2026, P54-05).
+  const wanted = opts.platforms?.length ? new Set(opts.platforms.map(platformKey)) : null;
+  const keep = (platform: string) => !wanted || wanted.has(platformKey(platform));
   const told = v.notes ? notesSectionLines(v.notes, { platforms: opts.platforms }) : [];
   const today = v.notes?.today ?? new Date().toISOString().slice(0, 10);
   const lines: string[] = [told.length
@@ -194,10 +196,10 @@ export function voicePromptBlock(v: ClientVoice, opts: { platforms?: string[]; e
 
   const platforms = Object.entries(v.social?.platforms ?? {}).filter(([k]) => keep(k));
   // A platform with too few posts of its own, asked for (or, with none asked for, every thin one), borrows the overall voice.
-  const ownNames = new Set(Object.keys(v.social?.platforms ?? {}).map((k) => k.toLowerCase()));
-  const thinCount = (p: string) => Object.entries(v.social?.thin ?? {}).find(([k]) => k.toLowerCase() === p.toLowerCase())?.[1] ?? 0;
+  const ownNames = new Set(Object.keys(v.social?.platforms ?? {}).map(platformKey));
+  const thinCount = (p: string) => Object.entries(v.social?.thin ?? {}).find(([k]) => platformKey(k) === platformKey(p))?.[1] ?? 0;
   const borrowing = v.social?.overall
-    ? (opts.platforms?.length ? opts.platforms.filter((p) => !ownNames.has(p.toLowerCase())) : Object.keys(v.social.thin ?? {}))
+    ? (opts.platforms?.length ? opts.platforms.filter((p) => !ownNames.has(platformKey(p))) : Object.keys(v.social.thin ?? {}))
     : [];
   const voiceLines = (pv: PlatformVoice) => {
     const details: Array<[string, string]> = [["Openings", pv.opening], ["Length", pv.length], ["Structure", pv.structure], ["Emoji", pv.emoji], ["Hashtags", pv.hashtags], ["Calls to action", pv.cta], ["Person", pv.person], ["Formality", pv.formality]];
@@ -228,7 +230,7 @@ export function voicePromptBlock(v: ClientVoice, opts: { platforms?: string[]; e
   const stored = v.social?.examples ?? {};
   const given = { ...(opts.examples ?? stored) };
   for (const p of borrowing) {
-    const key = Object.keys(stored).find((k) => k.toLowerCase() === p.toLowerCase());
+    const key = Object.keys(stored).find((k) => platformKey(k) === platformKey(p));
     if (key && !given[key]?.length) given[key] = stored[key];
   }
   const examples = Object.entries(given).filter(([k, xs]) => keep(k) && xs.length);
