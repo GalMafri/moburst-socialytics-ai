@@ -376,9 +376,20 @@ export function changeSummaryLine(metric: string, change: MetricChange): string 
 
 /** The metrics the run summary carries a change for, as metrics_summary.<metric>_change. */
 export const SUMMARY_CHANGE_METRICS = ["impressions", "reactions", "link_clicks", "video_views", "comments", "shares"] as const;
-/** The run summary's change figures, read from the comparison's changes. */
-export function metricsSummaryChanges(changes: Any): Record<string, number> {
-  return Object.fromEntries(SUMMARY_CHANGE_METRICS.map((m) => [`${m}_change`, changes?.[m]?.percent || 0]));
+/**
+ * The run summary's change figures, read from the comparison's changes. A
+ * metric whose previous period was zero has no percent change: null, as the
+ * comparison says ("new activity"). QA 22 Nov 2026: it was written as 0, read
+ * as "no change" by the API and MCP report lists.
+ */
+export function metricsSummaryChanges(changes: Any): Record<string, number | null> {
+  return Object.fromEntries(SUMMARY_CHANGE_METRICS.map((m) => [`${m}_change`, changeOf(changes?.[m])]));
+}
+
+/** One metric's percent change: null when its previous period was zero, 0 when there is no figure at all. */
+function changeOf(change: Any): number | null {
+  if (change && change.percent === null) return null;
+  return Number(change?.percent) || 0;
 }
 
 /** The period totals, per platform and overall, the month-over-month changes, and the top posts. Throws on an incomplete or out-of-period answer. */
@@ -882,9 +893,14 @@ export function buildPresentationContent(clientData: Any, ai: Any, now: Date, tr
   const postsBefore = platformBreakdown.reduce((s, p) => s + (Number(p.previous_post_count) || 0), 0);
   let keyInsight = "";
   if (changes.impressions?.percent < -50) {
+    // QA 22 Nov 2026: "across all metrics" only when every measured metric fell; else the fall in impressions is named alone.
+    const measured = SUMMARY_CHANGE_METRICS.filter((m) => typeof changes[m]?.percent === "number");
+    const decline = measured.every((m) => changes[m].percent < 0)
+      ? "Significant performance decline across all metrics requires immediate attention."
+      : `Impressions fell ${Math.abs(changes.impressions.percent)}%, which requires immediate attention.`;
     keyInsight = postsBefore > postsNow
-      ? `Significant performance decline across all metrics requires immediate attention. Content volume dropped from ${postsBefore} to ${postsNow} posts, directly impacting reach.`
-      : "Significant performance decline across all metrics requires immediate attention.";
+      ? `${decline} Content volume dropped from ${postsBefore} to ${postsNow} posts, directly impacting reach.`
+      : decline;
   } else if (changes.impressions?.percent > 20) {
     keyInsight = `Strong growth momentum with ${changes.impressions?.percent}% increase in impressions. Top performing content themes should be expanded.`;
   } else {
@@ -1148,10 +1164,10 @@ END OF PRESENTATION
     report_date: now.toISOString().split("T")[0],
     total_recommendations: 0,
     metrics_summary: {
-      impressions_change: changes.impressions?.percent || 0,
-      reactions_change: changes.reactions?.percent || 0,
-      link_clicks_change: changes.link_clicks?.percent || 0,
-      video_views_change: changes.video_views?.percent || 0,
+      impressions_change: changeOf(changes.impressions),
+      reactions_change: changeOf(changes.reactions),
+      link_clicks_change: changeOf(changes.link_clicks),
+      video_views_change: changeOf(changes.video_views),
     },
     data_included: {
       sprout_top_posts: sproutTopPosts.length,
@@ -1206,6 +1222,13 @@ export interface SummaryInput {
  * the analysis of trends is null when there are none. The counts of TikTok
  * and Instagram trend posts are the industry trends' posts on each.
  */
+/** The pillar block with its three lists, each empty when the answer left it out. */
+function pillarAlignmentOf(p: Any): { well_represented: string[]; underrepresented: string[]; recommendations: string[] } & Record<string, unknown> {
+  const obj = p && typeof p === "object" && !Array.isArray(p) ? p : {};
+  const list = (x: unknown) => (Array.isArray(x) ? x : []);
+  return { ...obj, well_represented: list(obj.well_represented), underrepresented: list(obj.underrepresented), recommendations: list(obj.recommendations) };
+}
+
 export function generateRunSummary(a: SummaryInput): Any {
   const gammaResult = a.gamma || {};
   const presentationData = a.presentation || {};
@@ -1256,8 +1279,15 @@ export function generateRunSummary(a: SummaryInput): Any {
   if (!Array.isArray(languagesArr)) languagesArr = [languagesArr];
 
   const skipped = clientData.skip_trends === true || cbc.skip_trends === true;
+  // QA 22 Nov 2026: an analysis the model wrote without pillar_alignment (the
+  // format check leaves it optional, as n8n's parser did) is written with the
+  // block empty, so the report page always reads one shape.
+  const performance = aiAnalysis?.sprout_performance_analysis;
+  const withPillars = performance && typeof performance === "object" && !Array.isArray(performance)
+    ? { sprout_performance_analysis: { ...performance, pillar_alignment: pillarAlignmentOf(performance.pillar_alignment) } }
+    : {};
   const analysis = aiAnalysis && typeof aiAnalysis === "object" && !Array.isArray(aiAnalysis)
-    ? { ...aiAnalysis, industry_trends_analysis: industry ? aiAnalysis.industry_trends_analysis ?? null : null }
+    ? { ...aiAnalysis, ...withPillars, industry_trends_analysis: industry ? aiAnalysis.industry_trends_analysis ?? null : null }
     : aiAnalysis;
   const calendar: Any[] = aiAnalysis.content_calendar || [];
   return {
