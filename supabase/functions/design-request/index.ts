@@ -301,7 +301,19 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
     paths: videoStyle ? videoStyle.frames as string[] : settings.reference_paths, harvested: client?.harvested_design_references, platform: request.platform ?? null,
     max: videoStyle ? Infinity : MAX_LIBRARY, stills: !!videoStyle,
   });
-  if (!library.length) throw new Error("None of the client's reference posts could be read.");
+  if (!library.length) {
+    // QA 22 Nov 2026 (P56-09): settings with no reference posts at all can
+    // never be planned, and were planned again and again until the 90-minute
+    // limit with the card on "preparing". Ended now, as planning that cannot
+    // go on ends. Posts that are there but could not be read this time may
+    // be a passing storage hiccup: planned again as before.
+    const sources = videoStyle ? videoStyle.frames : settings.reference_paths;
+    if (!Array.isArray(sources) || !sources.some((p: unknown) => typeof p === "string" && p)) {
+      await endRequest(admin, request.id, "no_progress", "The client's design settings have no reference posts.");
+      return;
+    }
+    throw new Error("None of the client's reference posts could be read.");
+  }
   const recentList = await recentDesigns(admin, request.client_id);
   const recent = recentLines(recentList, library);
   // What people who turned down this client's earlier designs asked for.
