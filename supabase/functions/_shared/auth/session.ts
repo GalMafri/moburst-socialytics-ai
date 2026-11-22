@@ -260,6 +260,12 @@ export async function revokeAccess(admin: Admin, email: string, presentedAccessT
       if (roleError) console.error("Role removal error:", roleError);
       const { error: clearError } = await admin.rpc("set_client_access", { p_user_id: user.id, p_client_ids: [] });
       if (clearError) console.error("Client access removal error:", clearError);
+      // QA 22 Nov 2026 (P24-01): is_client_member also matches on the
+      // profile's company and slug allowlist, so they go too; a session that
+      // was not presented here (another browser, a stored refresh token) is
+      // left with nothing to match on. The next portal sign-in writes them again.
+      const { error: profileError } = await admin.from("profiles").update({ hub_company_name: null, allowed_company_slugs: null }).eq("user_id", user.id);
+      if (profileError) console.error("Profile company removal error:", profileError);
     }
     // Only the refused person's own session ends. A browser can hold someone
     // else's session next to this person's portal token, and that one stays.

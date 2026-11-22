@@ -19,10 +19,14 @@ export async function requireMember(req: Request, clientId: string): Promise<str
   });
   const { data: user, error } = await asCaller.auth.getUser(jwt);
   if (error || !user?.user) throw new AuthzError(401, "Invalid or expired session.");
-  const [{ data: canWrite }, { data: member }] = await Promise.all([
+  const [{ data: canWrite, error: writeErr }, { data: member, error: memberErr }] = await Promise.all([
     asCaller.rpc("can_write_client", { _client_id: clientId }),
     asCaller.rpc("is_client_member", { _client_id: clientId }),
   ]);
-  if (!canWrite && !member) throw new AuthzError(403, "You do not have access to this client.");
-  return user.user.id;
+  if (canWrite || member) return user.user.id;
+  // QA 22 Nov 2026 (P24-04): a check the database did not answer is a server
+  // fault (resent quietly by the app), never "no access", as in requireStaff.
+  const failed = writeErr ?? memberErr;
+  if (failed) throw new AuthzError(500, `Access check failed: ${failed.message}`);
+  throw new AuthzError(403, "You do not have access to this client.");
 }
