@@ -357,7 +357,8 @@ describe('Trends we track on the Content strategy tab', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     f.readFails = true;
     mount();
-    expect(await screen.findByText(/Loading trends we track/)).toBeInTheDocument();
+    // The loading line is redrawn as the quiet tries go on, so it is looked for as it stands.
+    await waitFor(() => expect(screen.getByText(/Loading trends we track/)).toBeInTheDocument());
     expect(screen.queryByText('Suggested topics and hashtags appear here.')).toBeNull();
     expect(screen.queryByRole('group', { name: 'Topics' })).toBeNull();
     expect(screen.queryByText(/connection failure|did not load|could not/i)).toBeNull();
