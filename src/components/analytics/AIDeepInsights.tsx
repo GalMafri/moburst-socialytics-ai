@@ -7,7 +7,7 @@ import { Section } from "@/components/ui/section";
 import { Badge } from "@/components/ui/badge";
 import { Eye, Heart, Percent, ListChecks, Loader2 } from "lucide-react";
 import { reportCounts, reportTrends, themesInPeriod } from "@/lib/reportFigures";
-import { useTrendThemes } from "@/hooks/useTrendThemes";
+import { THEME_WAIT_MS, useTrendThemes, useWaitedOut } from "@/hooks/useTrendThemes";
 import { engagementRate } from "@/lib/competitiveMetrics";
 import { countOf } from "@/lib/display";
 import { formatCount } from "@/lib/platformMeasures";
@@ -36,7 +36,10 @@ export function AIDeepInsights({ clientId, reports, chartData }: Props) {
     return chartData.length > 0 && starts.length && ends.length ? { from: starts[0], to: ends[ends.length - 1] } : { from: "", to: "" };
   }, [reports, chartData.length]);
   const storedThemes = useTrendThemes(clientId, span.from, span.to, { untilRead: true });
-  const themesPending = !!(span.from && span.to) && !storedThemes.data;
+  // QA 22 Nov 2026: held for as long as the report page holds its own (THEME_WAIT_MS), then the reports'
+  // own figures show; a read that answers later replaces them. A read that kept failing held the tile for good.
+  const themesWaitedOut = useWaitedOut(!!(span.from && span.to) && !storedThemes.data, THEME_WAIT_MS);
+  const themesPending = !!(span.from && span.to) && !storedThemes.data && !themesWaitedOut;
   const reportTrendRows = useMemo(() => reports.map((r) => {
     const rd = Array.isArray(r.report_data) ? r.report_data[0] : r.report_data;
     const themes = themesInPeriod(storedThemes.data?.themes, r.date_range_start, r.date_range_end);
