@@ -58,7 +58,10 @@ function PairRows({ f, id, rows, onChange }: { f: Field; id: string; rows: Pair[
 export function EditSheet({ e, title }: { e: SectionEditor; title: string }) {
   const long = overCap(e.fields, e.form);
   return (
-    <Sheet open={e.open} onOpenChange={(open) => { if (!open) e.cancel(); }}>
+    // QA 22 Nov 2026: the sheet stays open while a save is sent (as Cancel is disabled then). Closed over a
+    // save that then did not get through, its "not saved yet" line was inside a closed sheet and the
+    // words typed were gone when the pencil was pressed again.
+    <Sheet open={e.open} onOpenChange={(open) => { if (!open && !e.saving) e.cancel(); }}>
       <SheetContent className="w-full sm:max-w-[560px] overflow-y-auto space-y-5">
         <SheetHeader>
           <SheetTitle className="t-h2">{title}</SheetTitle>
