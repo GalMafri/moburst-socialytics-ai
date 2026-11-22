@@ -215,12 +215,28 @@ export function namesBrand(text: string, brand: string): boolean {
   return false;
 }
 
-/** A hashtag is the brand's own: #baderlaw, #moburstlife. */
+/** Words a brand's own tag adds after its name: #moburstlife, #calmapp, #baderlawfirm. */
+const BRAND_TAG_AFTER = new Set(["life", "official", "team", "hq", "app", "news", "family", "fam", "community", "careers", "jobs", "inc", "co", "love", "lovers", "crew", "squad", "club", "nation", "insider", "insiders", "style", "world", "tips", "studio", "store", "shop", "events", "partner", "partners", "ambassador", "ambassadors", "global", "usa", "us", "uk", "firm", "group", "agency", "media", "brand", "moments", "daily", "fans"]);
+/** Words a brand's own tag puts before its name: #teammoburst, #ilovecalm. */
+const BRAND_TAG_BEFORE = new Set(["team", "the", "my", "i", "we", "love", "ilove", "welove", "official", "inside", "at", "with", "go", "ask", "by", "from", "only", "made", "madeby", "life"]);
+
+/**
+ * A hashtag is the brand's own: #baderlaw, #moburstlife, #teammoburst, or
+ * one whose written words name the brand (#CalmApp). QA 22 Nov 2026
+ * (P52-01): a brand name merely inside a tag is not the brand ("Calm" in
+ * #calmingmusic, "Nova" in #novascotia), as namesBrand already holds for a
+ * phrase; the substring rule refused on-topic tags and cost a second call.
+ */
 export function tagNamesBrand(tag: string, brand: string): boolean {
   const b = squash(brand);
   const t = squash(tag);
   if (!b) return false;
-  return b.length >= 4 ? t.includes(b) : t === b;
+  if (t === b) return true;
+  if (b.length < 4) return false;
+  if (t.startsWith(b) && BRAND_TAG_AFTER.has(t.slice(b.length))) return true;
+  if (t.endsWith(b) && BRAND_TAG_BEFORE.has(t.slice(0, t.length - b.length))) return true;
+  // The words the tag was written with, split at its capitals (#CalmApp is "Calm App").
+  return namesBrand(String(tag).replace(/^#/, "").replace(/(\p{Ll})(\p{Lu})/gu, "$1 $2"), brand);
 }
 
 function placesOf(e: ProfileEvidence): Set<string> {
