@@ -13,7 +13,7 @@
  * decides (calendar_stop_plan) and the band shows what it answered.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, CheckCircle2, Loader2, PenLine, Wand2 } from "lucide-react";
 import { queueCalendarWork } from "@/lib/calendarRequests";
 import { Button } from "@/components/ui/button";
@@ -135,11 +135,21 @@ export function WeekPlanBand({ plan, today, canAct, hasPosts, onChanged }: {
 }) {
   const [asking, setAsking] = useState<"stop" | "remove" | null>(null);
   const notYet = useNotYet();
+  // QA 22 Nov 2026: a question belongs to the plan as it stood when it was
+  // asked. The poll can finish the plan while "Stop planning" is open, and
+  // calendar_stop_plan on a finished plan removes it, so a stop question for a
+  // plan that is no longer being planned (or a remove question for one that is
+  // no longer removable) closes instead of sending.
+  const stillApplies = asking === "stop" ? canStop(plan) : asking === "remove" ? canRemove(plan, today) : false;
+  useEffect(() => {
+    if (asking && !stillApplies) setAsking(null);
+  }, [asking, stillApplies]);
   const view = weekPlanView(plan, today);
   if (!view) return null;
   const week = shortDate(plan.week_start);
 
   const stop = async () => {
+    if (!stillApplies) return setAsking(null);
     const removing = asking === "remove";
     notYet.clear();
     const data = await queueCalendarWork({ action: "stop_plan", plan_id: plan.id });
@@ -149,7 +159,7 @@ export function WeekPlanBand({ plan, today, canAct, hasPosts, onChanged }: {
   };
   const question = (
     <ConfirmDialog
-      open={asking !== null}
+      open={asking !== null && stillApplies}
       onOpenChange={(open) => !open && setAsking(null)}
       title={asking === "remove" ? "Remove this week's plan?" : `Stop planning the week of ${week}?`}
       description={asking === "remove"
