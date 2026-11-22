@@ -69,13 +69,16 @@ export function AutomaticBrandReferences({ clientId, savedVersion, onReady }: {
 
   const load = useCallback(async () => {
     if (!clientId) return;
-    const [{ data: client }, { data: row }, { data: chosen }] = await Promise.all([
+    const [{ data: client, error: clientError }, { data: row, error: rowError }, { data: chosen, error: chosenError }] = await Promise.all([
       supabase.from('clients').select('harvested_design_references, design_style_synthesis, social_voice, design_references').eq('id', clientId).maybeSingle(),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (supabase.from as any)('client_lifecycle_steps').select('status, done_at, attempted_at, result').eq('client_id', clientId).eq('step', 'design_refs').maybeSingle(),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (supabase.from as any)('design_reference_choices').select('path, choice').eq('client_id', clientId),
     ]);
+    // QA 22 Nov 2026: a read that did not answer leaves the card as it was (the next poll or visit reads
+    // again); reading only `data` blanked the library and the choices on one failed poll.
+    if (clientError || rowError || chosenError) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const c = (client ?? {}) as any;
     const uploads: string[] = Array.isArray(c.design_references) ? c.design_references.filter((p: unknown) => typeof p === 'string') : [];

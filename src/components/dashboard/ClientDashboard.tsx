@@ -48,7 +48,9 @@ export function ClientDashboard() {
   // A strategy-only client (no active account in Sprout): the one sentence stands where its overview and report links would.
   const strategyOnly = useStrategyOnlyClients();
 
-  const { data: latestReport } = useQuery({
+  // QA 22 Nov 2026: "No reports available yet" only once the read has answered; a read that fails is
+  // tried again quietly and the card says it is loading meanwhile, never that there is no report.
+  const { data: latestReport, isSuccess: latestReportRead } = useQuery({
     queryKey: ["client-dashboard-latest-report", clientId],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -63,6 +65,7 @@ export function ClientDashboard() {
       return data;
     },
     enabled: !!clientId,
+    retry: true,
   });
 
   if (isLoading || strategyOnly.isLoading) {
@@ -126,7 +129,7 @@ export function ClientDashboard() {
                 Generated on {formatDate(latestReport.created_at)}
               </p>
             ) : (
-              <p className="t-secondary">No reports available yet</p>
+              <p className="t-secondary">{latestReportRead ? "No reports available yet" : "Loading the latest report"}</p>
             )}
           </CardContent>
         </ClickableCard>
