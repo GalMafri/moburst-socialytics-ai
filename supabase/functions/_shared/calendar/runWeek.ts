@@ -642,9 +642,14 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
     };
 
     // A run cut off after writing the posts: finish the plan, don't write them twice.
+    // QA 22 Nov 2026: the plan keeps the copy rules its posts were checked under
+    // (stored before the posts are written, below). A plan written before that
+    // was stored is stamped here; finished with none, replan.ts read it as
+    // written before the rules and the app rewrote its posts.
     const written = await writtenSoFar();
     if (written) {
-      if (!(await markReady())) return STOPPED;
+      const rules = (plan.evidence as { rules?: unknown } | null)?.rules ? {} : { evidence: { ...((plan.evidence as Record<string, unknown> | null) ?? {}), rules: COPY_RULE } };
+      if (!(await markReady(rules))) return STOPPED;
       return { status: "done", result: { plan_id: plan.id, posts: written, finished: true } };
     }
     const { data: started, error: startError } = await admin.from("calendar_plans").update({ status: "planning", error: null, updated_at: now.toISOString() })
@@ -752,6 +757,8 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
     // A plan stopped after the check above takes none of them (calendar_posts_plan_open).
     const stories = storyPlan(gathered.stories, String(client.name ?? ""), posts);
     const rows = withStories(posts, stories.count, stories.reason).map((p) => ({ ...p, client_id: client.id, plan_id: plan.id, created_by: plan.requested_by ?? null }));
+    // What the posts were written under is kept before they are: a run that stops between the two finishes with it.
+    await must(admin.from("calendar_plans").update({ ...finishing, updated_at: new Date().toISOString() }).eq("id", plan.id).neq("status", "canceled"), "Could not keep the week's evidence");
     await must(admin.from("calendar_posts").insert(rows), "Could not add the week's posts");
     if (!(await markReady(finishing))) return STOPPED;
     return { status: "done", result: { plan_id: plan.id, posts: rows.length, input_tokens: tokens.input, output_tokens: tokens.output } };
