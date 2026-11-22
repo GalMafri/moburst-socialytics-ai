@@ -464,8 +464,9 @@ const waitForMoments = (now: Date): WeekJobOutcome => ({ status: "queued", reaso
 /**
  * The week's dated moments are judged before it is planned (week_moments,
  * runMoments.ts): queued here once per week, and waited for while queued or
- * running. A moments job that failed before this planning job was created
- * (an earlier week's plan, or a failure the code has since outgrown) is put
+ * running. A moments job that failed or was skipped before this planning job
+ * was created (an earlier week's plan, a stopped plan, or a failure the code
+ * has since outgrown) is put
  * back in the queue once and waited for. One that fails during this planning
  * job's own wait, or a queue that won't take the job, means the week is
  * planned with no moments rather than held, so nothing loops.
@@ -481,11 +482,15 @@ async function momentsPending(admin: Db, job: WeekJob, plan: { moments?: unknown
   const row = (data ?? []).find((r: { dedupe_key?: string }) => r.dedupe_key === key);
   if (row) {
     if (row.status === "queued" || row.status === "running") return true;
-    const failedBefore = row.status === "failed" && !!job.created_at && !!row.finished_at && Date.parse(row.finished_at) < Date.parse(job.created_at);
-    if (!failedBefore) return false;
+    // QA 22 Nov 2026: a moments job skipped because a person stopped the plan
+    // ("Stop planning", then "Plan next week") ended for a reason the re-plan
+    // undid, so it is put back like a failed one; before, the week was planned
+    // with no seasonal moments.
+    const endedBefore = (row.status === "failed" || row.status === "skipped") && !!job.created_at && !!row.finished_at && Date.parse(row.finished_at) < Date.parse(job.created_at);
+    if (!endedBefore) return false;
     const { error: requeueError } = await admin.from("scheduled_jobs")
       .update({ status: "queued", attempts: 0, available_at: now.toISOString(), lease_until: null, reason: null, finished_at: null })
-      .eq("dedupe_key", key).eq("status", "failed");
+      .eq("dedupe_key", key).in("status", ["failed", "skipped"]);
     if (requeueError) {
       console.warn("[calendar] the week's moments were left out:", requeueError.message);
       return false;
