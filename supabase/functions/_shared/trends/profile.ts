@@ -12,7 +12,7 @@ import { answerText, replyStopped, roomFor } from "../anthropicReply.ts";
 import { parseAnswer } from "../pipelines/competitive/analysis.ts";
 import { topCounts } from "../competitive/postSample.ts";
 import { textHash } from "../lifecycle/names.ts";
-import { HASHTAG } from "./hashtag.ts";
+import { HASHTAG, HASHTAG_IN_TEXT } from "./hashtag.ts";
 import { MAX_SEARCHES } from "./sources.ts";
 import { clip } from "./text.ts";
 import { HASHTAG_PLATFORMS, TREND_PLATFORMS, type HashtagPlatform, type Term, type TrendPlatform, type TrendProfile } from "./types.ts";
@@ -66,7 +66,7 @@ const str = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
 export function hashtagCounts(texts: string[]): Record<string, number> {
   const out: Record<string, number> = {};
   for (const t of texts) {
-    for (const tag of String(t ?? "").match(/#[\p{L}0-9_]+/gu) ?? []) {
+    for (const tag of String(t ?? "").match(HASHTAG_IN_TEXT) ?? []) {
       const k = tag.toLowerCase();
       out[k] = (out[k] ?? 0) + 1;
     }
