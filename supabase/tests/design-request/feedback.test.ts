@@ -70,6 +70,32 @@ describe("feedback", () => {
     expect(answer.body).toMatchObject({ ok: true, learnings: 1 });
   });
 
+  // QA 22 Nov 2026 (P56-03, fixed with P14-02): the quiet resend of a
+  // rejection whose reply was lost, the first send marking the design.
+  it("a resent rejection of the same design records its rules once", async () => {
+    const { db, d } = setup();
+    db.tables.design_learnings = [];
+    // As recordFeedback does: the design is marked rejected, and its rules are stored.
+    d.record.mockImplementation(async (it: Row) => {
+      const row = db.tables.post_iterations.find((r) => r.id === it.id)!;
+      row.rejected_at = "2026-11-20T10:00:00Z";
+      row.is_selected = false;
+      db.tables.design_learnings.push({ id: "dl-1", client_id: "c1", pattern_type: "avoid", pattern_description: "Avoid crowded scenes.", source_iteration_id: it.id });
+      return [{ id: "dl-1", pattern_type: "avoid", pattern_description: "Avoid crowded scenes." }];
+    });
+    const body = { iteration_id: "it-1", verdict: "rejected", reason: "wrong_style", note: "Too busy" };
+    await designFeedback(d, body);
+    const again = await designFeedback(d, body);
+    expect(d.record).toHaveBeenCalledTimes(1);
+    expect(again.body).toMatchObject({ ok: true, learnings: 1 });
+  });
+
+  it("deletes a design that was turned down before", async () => {
+    const { d } = setup({ rows: [design({ rejected_at: "2026-11-20T10:00:00Z", is_selected: false })] });
+    await designFeedback(d, { iteration_id: "it-1", verdict: "deleted" });
+    expect(d.record).toHaveBeenCalledWith(expect.anything(), "archived", undefined, undefined, "person-1");
+  });
+
   it("answers 404 for a row that is not a design option, and 400 for another verdict", async () => {
     const { d } = setup({ rows: [design({ variant_angle: "Reference creative 1" })] });
     expect(await designFeedback(d, { iteration_id: "it-1", verdict: "rejected" })).toMatchObject({ status: 404 });
