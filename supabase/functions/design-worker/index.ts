@@ -137,11 +137,18 @@ async function runPass(admin: any) {
   await endOverdueRequests(admin).then((ended) => {
     for (const id of ended) console.error(`[design-worker] request ${id} was still being prepared after ${REQUEST_MAX_MINUTES} minutes; closed.`);
   }).catch((e) => console.error("[design-worker] overdue requests:", e instanceof Error ? e.message : e));
+  // QA 22 Nov 2026: video jobs are the video worker's, and are left out in the
+  // query itself (P57-02: filtered after the limit, 40 waiting videos hid every
+  // design job). The jobs worked least recently come first (P57-01): a job that
+  // only waits (a carousel slide waiting for its cover) is due again every
+  // minute, and oldest-first gave the same 12 waiting slides every slot, pass
+  // after pass, while a newer request's job was never started. Claiming and
+  // every step write updated_at, so this takes turns.
   const { data: rows } = await admin.from("canva_finish_jobs").select("id, step, status, attempts, lease_until, kind:input->>kind")
     .in("status", ["queued", "running"])
     .or(`lease_until.is.null,lease_until.lt.${new Date().toISOString()}`)
-    .order("created_at").limit(40);
-  // Video jobs are the video worker's.
+    .or("input->>kind.is.null,input->>kind.neq.video")
+    .order("updated_at").order("created_at").limit(40);
   const due = (rows ?? []).filter((r: { kind: string | null }) => r.kind !== "video").slice(0, 12);
   const leased: string[] = [];
   for (const row of due) {
@@ -216,7 +223,13 @@ async function replanStalled(admin: any): Promise<void> {
   }
 }
 
-/** Start one leased job's own request; if it cannot be started, the job is released for the next pass. */
+/**
+ * Start one leased job's own request; if it cannot be started, the job is
+ * released for the next pass. QA 22 Nov 2026 (P57-06): a hand-out that timed
+ * out may still be running (the request reached the function, which answered
+ * late), so its lease is left to run out instead: releasing it let the next
+ * pass start the same step twice (a second paid image).
+ */
 async function handOut(admin: any, jobId: string): Promise<void> {
   try {
     const res = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/design-worker`, {
@@ -229,6 +242,8 @@ async function handOut(admin: any, jobId: string): Promise<void> {
     if (!res.ok) throw new Error(`advance answered ${res.status}`);
   } catch (e) {
     console.error(`[design-worker] could not hand out job ${jobId}:`, e instanceof Error ? e.message : e);
+    const name = e instanceof Error ? e.name : "";
+    if (name === "TimeoutError" || name === "AbortError") return;
     await admin.from("canva_finish_jobs").update({ lease_until: null }).eq("id", jobId);
   }
 }
