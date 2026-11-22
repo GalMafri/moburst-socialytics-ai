@@ -38,7 +38,9 @@ describe(FILE, () => {
   it("names the columns the app reads and writes for a parked account", () => {
     const steps = readFileSync(join(root, "supabase", "functions", "_shared", "lifecycle", "steps.ts"), "utf8");
     const run = readFileSync(join(root, "supabase", "functions", "_shared", "calendar", "runWeek.ts"), "utf8");
-    expect(steps).toContain('.select("client_id, sprout_profile_id, network_type, is_active, profile_name, native_name, assigned_at, parked_at, parked_reason")');
+    // The accounts step reads its rows in parts with one column list (P39-05).
+    expect(steps).toContain('const columns = "client_id, sprout_profile_id, network_type, is_active, profile_name, native_name, assigned_at, parked_at, parked_reason";');
+    expect(steps).toContain('.from("sprout_profiles").select(columns)');
     expect(run).toContain('.from("sprout_profiles").select("parked_at").eq("client_id", clientId).eq("is_active", false).not("parked_at", "is", null)');
   });
 
