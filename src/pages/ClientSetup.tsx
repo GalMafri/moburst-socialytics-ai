@@ -384,8 +384,9 @@ export default function ClientSetup() {
   // QA 22 Nov 2026: a client whose row did not load showed as a blank form
   // whose Save never turned on (nothing loaded to compare with). Until the
   // row is read the page says so, and a read that did not answer offers to
-  // try again.
-  if (clientId && (clientFailed || clientLoading)) {
+  // try again. A row already read stays on screen when a later read does not
+  // answer: the form, and what the person typed, are kept.
+  if (clientId && !client && (clientFailed || clientLoading)) {
     return (
       <AppLayout title="Client setup">
         {clientFailed
