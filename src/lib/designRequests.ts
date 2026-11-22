@@ -337,7 +337,9 @@ export const DESIGN_FEEDBACK_REASONS: Array<{ value: string; label: string }> = 
 
 /**
  * Turn a design down (its reason teaches the client's next designs, and a new
- * design is started unless makeNew is false) or delete it.
+ * design is started unless makeNew is false) or delete it. Sent again
+ * quietly when no reply came: the server records a design it already turned
+ * down once (design-request/feedback.ts, QA 22 Nov 2026).
  */
 export async function sendDesignFeedback(args: { iterationId: string; verdict: "rejected" | "deleted"; reason?: string; note?: string; makeNew?: boolean }): Promise<{ request: DesignRequest | null }> {
   const { data, error } = await sendQuietly(() => supabase.functions.invoke("design-request", {
