@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { writeResendable } from "@/lib/quietSend";
 
 /**
  * Action-level telemetry.
@@ -133,6 +134,40 @@ export function timed(event: string, props: Props = {}) {
     track(event, { ...props, ...extra, duration_ms: performance.now() - t0 });
 }
 
+// QA 22 Nov 2026: a batch the database refuses for good (a row-level rule on
+// client_id, an invalid value) was put back whole and resent every flush for
+// the life of the tab, taking every later event down with it. Now only a
+// failure worth another try (writeResendable) puts rows back, each row at
+// most MAX_TRIES times; a refused batch is halved until the refused rows are
+// found, and those are dropped.
+const MAX_TRIES = 5;
+const tries = new WeakMap<Row, number>();
+
+function putBack(rows: Row[]) {
+  const kept = rows.filter((r) => {
+    const n = (tries.get(r) ?? 0) + 1;
+    tries.set(r, n);
+    return n < MAX_TRIES;
+  });
+  // never let the buffer grow without bound
+  queue = [...kept, ...queue].slice(-200);
+}
+
+async function insertRows(rows: Row[]): Promise<void> {
+  let error: unknown;
+  try {
+    ({ error } = await supabase.from("app_events").insert(rows as never));
+  } catch {
+    return putBack(rows); // no answer: worth another try
+  }
+  if (!error) return;
+  if (writeResendable(error)) return putBack(rows);
+  if (rows.length === 1) return; // refused for good: dropped
+  const half = Math.ceil(rows.length / 2);
+  await insertRows(rows.slice(0, half));
+  await insertRows(rows.slice(half));
+}
+
 export async function flush(): Promise<void> {
   if (flushing || queue.length === 0) return;
   flushing = true;
@@ -141,13 +176,9 @@ export async function flush(): Promise<void> {
   try {
     const { data } = await supabase.auth.getSession();
     if (!data.session) return; // signed out: drop, the insert would be rejected
-    const { error } = await supabase.from("app_events").insert(batch as never);
-    if (error) {
-      // put it back, but never let the buffer grow without bound
-      queue = [...batch, ...queue].slice(-200);
-    }
+    await insertRows(batch);
   } catch {
-    queue = [...batch, ...queue].slice(-200);
+    putBack(batch);
   } finally {
     flushing = false;
   }
