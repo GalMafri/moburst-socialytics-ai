@@ -6,8 +6,10 @@
 // the image model at its rate limit or the picture service unavailable
 // (busy, down or slow after its one retry, or the database unable to open
 // or check the call), is a wait: the reason is kept on the job, its lease is
-// released and no try is spent, so the next pass tries again. Any other error spends a try; the
-// job fails on its last try or on a FINAL: reason.
+// released and no try is spent, so the next pass tries again. So is a call
+// that never reached its service (network, timeout). Any other error spends a
+// try, and the job rests a while before the next (retryPauseMs); the job
+// fails on its last try or on a FINAL: reason.
 //
 // A wait has an end. A job of a request ends with its request, at the
 // request's 90-minute limit (REQUEST_MAX_MINUTES, endOverdueRequests). A job
@@ -30,9 +32,36 @@ import { REQUEST_MAX_MINUTES } from "../design/requestRules.ts";
 /** A job is only ever moved on while it is active: a job stopped meanwhile stays stopped. */
 export const ACTIVE_JOB = ["queued", "running"];
 
-/** True when the error is a wait (busy image model, unavailable picture service), never a spent try. */
+/**
+ * True when a call never reached the service it was for: the network failed
+ * on the way (fetch's TypeError, Deno's connection errors). QA 22 Nov 2026:
+ * these spent a try each and left the job due at once, so a minute's outage
+ * of the model API or storage used every try of a job (a video's one
+ * candidate) in four passes. A call that timed out is not one of them: it
+ * reached its service, which may have worked (and been paid) for it, so it
+ * spends a try as before.
+ */
+export function unreachable(e: unknown): boolean {
+  if (!(e instanceof Error)) return false;
+  if (e.name === "ConnectionReset" || e.name === "ConnectionRefused" || e.name === "ConnectionAborted") return true;
+  return e instanceof TypeError && /fetch failed|error sending request|connection (reset|refused|closed|aborted)|network|dns error|tcp connect/i.test(e.message);
+}
+
+/** True when the error is a wait (busy image model, unavailable picture service, a service that could not be reached), never a spent try. */
 export function waitsOut(e: unknown): boolean {
-  return e instanceof ModelBusy || (e instanceof PictureError && e.transient);
+  return e instanceof ModelBusy || (e instanceof PictureError && e.transient) || unreachable(e);
+}
+
+/**
+ * How long a job rests after a spent try before the next one: one minute
+ * after the first, then twice as long each time (QA 22 Nov 2026). A job was
+ * due again at once, so a fault of a few minutes used all its tries.
+ * The rest is the job's lease, so no pass takes it meanwhile; it ends with
+ * the try's error still on the row, which is how claimJob (jobs.ts) tells it
+ * from a run that died.
+ */
+export function retryPauseMs(attempts: number): number {
+  return 60_000 * 2 ** Math.max(0, Math.min(attempts, 6) - 1);
 }
 
 export type StepJob = { id: string; step: string; attempts?: number; state: unknown; design_request_id?: string | null; created_at?: string | null; slide_index?: number | null };
@@ -61,15 +90,18 @@ export async function recordStepError(
   job: StepJob,
   e: unknown,
   opts: StepLimits,
+  /** The lease the run holds the row under (canva/hold.ts): the error is the row's only while the row still carries it. */
+  ownLease?: string,
 ): Promise<"wait" | "retry" | "failed"> {
   const msg = e instanceof Error ? e.message : String(e);
   const now = Date.now();
   const updated_at = new Date(now).toISOString();
-  const jobs = () => admin.from("canva_finish_jobs");
+  // A run whose lease ran out and whose job another pass took over writes nothing over the newer run's row (QA 22 Nov 2026).
+  const jobs = { update: (values: Record<string, unknown>) => { const q = admin.from("canva_finish_jobs").update(values).eq("id", job.id).in("status", ACTIVE_JOB); return ownLease ? q.eq("lease_until", ownLease) : q; } };
   const waits = waitsOut(e);
   if (waits && !waitOver(job, now)) {
     console.warn(`[${opts.worker}] job ${job.id} step ${job.step} waits:`, msg);
-    await landed(jobs().update({ step: job.step, state: job.state, error: msg, lease_until: null, updated_at }).eq("id", job.id).in("status", ACTIVE_JOB), job);
+    await landed(jobs.update({ step: job.step, state: job.state, error: msg, lease_until: null, updated_at }), job);
     return "wait";
   }
   // A wait that outlasted its limit ends the job with the reason, and is still no spent try.
@@ -77,6 +109,8 @@ export async function recordStepError(
   const failed = waits || attempts >= opts.maxAttempts || msg.startsWith("FINAL:");
   const error = waits ? `Still waiting after ${REQUEST_MAX_MINUTES} minutes: ${msg}` : msg.replace(/^FINAL:\s*/, "");
   console.error(`[${opts.worker}] job ${job.id} step ${job.step}:`, error);
-  await landed(jobs().update({ attempts, step: job.step, state: job.state, error, status: failed ? "failed" : "running", lease_until: null, updated_at }).eq("id", job.id).in("status", ACTIVE_JOB), job);
+  // A job that tries again rests first (retryPauseMs), under a lease no pass takes before it ends.
+  const lease_until = failed ? null : new Date(now + retryPauseMs(attempts)).toISOString();
+  await landed(jobs.update({ attempts, step: job.step, state: job.state, error, status: failed ? "failed" : "running", lease_until, updated_at }), job);
   return failed ? "failed" : "retry";
 }

@@ -184,9 +184,16 @@ export function parseLogoCheck(text: string): { clear: boolean; touching: string
   return { clear: clear[1].toLowerCase() === "true", touching: touching ? touching[1] : "" };
 }
 
-/** Text compared the way a reader sees it: case, quote style, dash style and spacing do not count, and a pictograph is no word (words.ts). */
+/**
+ * Text compared the way a reader sees it: case, quote style, dash style and spacing do not count, and a pictograph is
+ * no word (words.ts). QA 22 Nov 2026: neither do an ellipsis written as one sign or three dots, Hebrew and other
+ * quote signs (geresh, gershayim, low and angle quotes), the minus and non-breaking hyphens, or marks nobody can see
+ * and so no reader can return (direction marks, zero-width spaces, a soft hyphen).
+ */
 export function readable(s: string): string {
-  return wordsOnly(s).toLowerCase().replace(/[’‘`´]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, "-").replace(/\s+/g, " ").trim();
+  return wordsOnly(s).replace(/\p{Cf}/gu, "").toLowerCase()
+    .replace(/…/g, "...").replace(/[’‘‚`´׳]/g, "'").replace(/[“”„«»״]/g, '"').replace(/[–—‑−]/g, "-")
+    .replace(/\s+/g, " ").trim();
 }
 
 /** Whether the words on the post are the headline's words, in order, with nothing added or missing. */

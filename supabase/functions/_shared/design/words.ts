@@ -11,10 +11,15 @@
 
 /**
  * An emoji and what rides on one: a symbol shown as a picture, skin tones,
- * joiners and the keycap mark. The marks a brand name carries (the registered,
- * trademark and copyright signs) are text and stay.
+ * joiners, the variation selectors, the keycap mark and the tag letters of a
+ * flag such as England's. The marks a brand name carries (the registered,
+ * trademark and copyright signs) are text and stay. QA 22 Nov 2026: a
+ * pictograph that is text by default (❤ ✔ ☀ ✈ ➡) was kept when it came
+ * without U+FE0F and left out when it came with it, so a headline planned
+ * with a bare heart never matched the reader's heart; and a flag's tag
+ * letters, which nobody can read back, stayed in the headline.
  */
-const PICTOGRAPH = /\p{Extended_Pictographic}️|[\p{Emoji_Presentation}\u{1F000}-\u{1FAFF}‍️⃣]/gu;
+const PICTOGRAPH = /(?![©®™])\p{Extended_Pictographic}|\p{Emoji_Presentation}|[\u{1F000}-\u{1FAFF}\u{FE0E}\u{FE0F}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/gu;
 
 /** The text with its pictographs taken out and its spacing made single. */
 export function wordsOnly(s: string): string {

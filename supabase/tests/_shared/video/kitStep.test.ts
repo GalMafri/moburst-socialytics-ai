@@ -117,7 +117,8 @@ describe("the kit's cleaning through a call the picture service refused", () => 
     expect(MAX_VIDEO_ATTEMPTS).toBeGreaterThan(MAX_KIT_TRIES);
     for (let i = 1; i < MAX_VIDEO_ATTEMPTS; i++) {
       expect(await claim(r, refused.deps)).toBe("clean");
-      expect(r.row).toMatchObject({ status: "running", attempts: i, error: "The picture service refused the call (401): Not allowed.", lease_until: null });
+      // A spent try rests before the next one (canva/stepError.ts, retryPauseMs, QA 22 Nov 2026).
+      expect(r.row).toMatchObject({ status: "running", attempts: i, error: "The picture service refused the call (401): Not allowed.", lease_until: expect.any(String) });
       expect(r.row.state.kit_tries).toBe(0);
     }
     expect(await claim(r, refused.deps)).toBe("clean");

@@ -248,6 +248,15 @@ describe("planPass", () => {
     expect(out.runs.get("r1")?.[0].state).toBe("queued");
   });
 
+  it("says a video held for the Higgsfield balance waits for credits, and nothing once the balance covers a clip (P34-03, QA 22 Nov 2026)", () => {
+    const runs = [run("r1", "c1", [queued("v", { kind: "video", post_at: "2026-11-04T09:00:00.000Z" })])];
+    const f = new Map<string, PostFacts | null>([["c1|v", facts("v", {}, { format: "Reel", post_date: "2026-11-04" })]]);
+    const held = planPass(base({ runs, facts: f, clipAffordable: false }));
+    expect(held.runs.get("r1")?.[0]).toMatchObject({ state: "queued", waits_for: "credits" });
+    const again = planPass(base({ runs: [run("r1", "c1", held.runs.get("r1")!)], facts: f, clipAffordable: true, room: 0 }));
+    expect(again.runs.get("r1")?.[0].waits_for).toBeNull();
+  });
+
   it("leaves out a client's posts once its design settings are gone", () => {
     const runs = [run("r1", "c1", [queued("a")])];
     const out = planPass(base({ runs, facts: new Map([["c1|a", facts("a")]]), settings: new Set() }));

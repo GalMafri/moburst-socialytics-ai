@@ -23,6 +23,7 @@
 
 import { callPictureWithin, carriedOf, PictureError, type CallOpener, type Carried, type PictureDeps, type Worked } from "../picture/client.ts";
 import type { LocateResult, LogoFileName, PictureRequests, PictureResults, Placement, Rect, Rgb, SlotFileResult, SlotResult } from "../picture/contract.ts";
+import { PICTURE_MAX_ASKS } from "../picture/contract.ts";
 import { logoFound } from "./logoMatch.ts";
 import { jobLogos, stampList, type JobLogos, type LogoSet, type StampEntry } from "./logoTone.ts";
 
@@ -338,12 +339,19 @@ export function searchFailed(state: Record<string, unknown>, route: SlotRoute, e
  */
 export async function slotSearch<R extends SlotRoute>(admin: CallOpener, state: Record<string, unknown>, route: R, picture: string, body: PictureRequests[R], deps: PictureDeps = {}): Promise<{ result: PictureResults[R] | null; ms: number }> {
   let worked: Worked<R>;
+  const kept = searchKept(state, route, picture);
   try {
-    worked = await callPictureWithin(admin, route, body, searchKept(state, route, picture), deps);
+    worked = await callPictureWithin(admin, route, body, kept, deps);
   } catch (e) {
     // First what the failure is for the job (a route that is not there yet is a wait), then what it leaves kept.
     const failure = waitFor(e);
     searchFailed(state, route, failure);
+    // QA 22 Nov 2026: the call after PICTURE_MAX_ASKS carries no budget and works the search to its end. When it
+    // times out, the search's own length is the cause, not an outage, and the same call would time out on every
+    // pass until the request's limit: it spends a try (what was kept stays, so nothing is searched again).
+    if ((kept?.asks ?? 0) >= PICTURE_MAX_ASKS && failure instanceof PictureError && failure.transient && /did not answer: timeout/.test(failure.message)) {
+      throw new PictureError(`${failure.message.replace(/\.$/, "")} on the search's last call.`, route, "unusable");
+    }
     throw failure;
   }
   return { result: searchWorked(state, route, picture, worked), ms: worked.ms };

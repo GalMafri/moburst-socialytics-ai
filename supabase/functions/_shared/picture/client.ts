@@ -128,6 +128,9 @@ async function ask<R extends PictureRoute>(admin: CallOpener, route: R, body: Pi
       });
       // The body is read here, inside the try and under the call's own timeout: an answer cut off or timed out while it is read never arrived, so it is tried again like any other failure to reach the service.
       const body = jsonOf(await response.text());
+      // QA 22 Nov 2026: a 500 in the service's own JSON is a route that ran and failed on this call's input (an
+      // outage is the service's 503): its answer, which spends the job's try, never a wait that repeats it for ever.
+      if (response.status === 500 && fromService(body)) return { status: 500, ok: false, body };
       // The service says why it cannot work right now when the answer is its own (storage unavailable, say); a platform error page says nothing.
       if (response.status === 429 || response.status >= 500) return { transient: String(response.status), reason: serviceReason(body) };
       // Every answer of the service is its own JSON. A failure that is not (the platform's page for a path with no function yet, or a sign-in page put in front of it) never reached the service, so it is unavailable, and the job waits.
@@ -151,8 +154,10 @@ async function ask<R extends PictureRoute>(admin: CallOpener, route: R, body: Pi
 
   const answer = tried.body as PictureAnswer<R> | null;
   if (!tried.ok) {
-    // A refusal is the service's own answer: it names its status and the service's reason.
     const reason = serviceReason(answer);
+    // The service could not finish the call it was given: nothing it made is usable, and the job's try is spent.
+    if (tried.status === 500) throw new PictureError(reason ? `${reason}.` : "The picture service could not finish the call.", route, "unusable", 500);
+    // A refusal is the service's own answer: it names its status and the service's reason.
     throw new PictureError(`The picture service refused the call (${tried.status})${reason ? `: ${reason}` : ""}.`, route, "refused", tried.status);
   }
   // A body that was read to its end and is not the service's JSON is an answer the service should not give: no retry.
@@ -163,7 +168,7 @@ async function ask<R extends PictureRoute>(admin: CallOpener, route: R, body: Pi
 
 const SHOULD_NOT = "The picture service answered something it should not have.";
 
-/** One call to the picture service. Transient failures (a call the database could not open, network error, timeout, an answer cut off while it is read, 429, 5xx, a failure that is not the service's own answer) are tried once more after PICTURE_RETRY_AFTER_MS, with a call of their own; everything else fails at once. */
+/** One call to the picture service. Transient failures (a call the database could not open, network error, timeout, an answer cut off while it is read, 429, a 5xx other than the service's own 500, a failure that is not the service's own answer) are tried once more after PICTURE_RETRY_AFTER_MS, with a call of their own; everything else fails at once. */
 export async function callPicture<R extends PictureRoute>(admin: CallOpener, route: R, body: PictureRequests[R], deps: PictureDeps = {}): Promise<{ result: PictureResults[R]; ms: number }> {
   const answer = await ask(admin, route, body, {}, deps);
   // Only a call that sent a budget may be answered as unfinished.

@@ -78,7 +78,7 @@ export const sideOf = (color: Rgb): Ground => (contrast(color, LIGHT) <= contras
  * `exposed` whether one of its pixels is beside a pixel without ink or on the
  * file's edge, and `touches` the pixel edges it shares with each other part.
  */
-export interface Part { id: number; ink: number; color: Rgb; exposed: boolean; touches: Map<number, number> }
+export interface Part { id: number; ink: number; color: Rgb; exposed: boolean; touches: Map<number, number>; edges?: number }
 /** A file's parts, numbered in the order their first pixel is met row by row; `label` gives each pixel's part, or -1. */
 export interface Parts { label: Int32Array; parts: Part[]; ink: number }
 
@@ -116,6 +116,7 @@ export function partsOf(file: Raster): Parts {
     const x = p % w, y = (p - x) / w;
     for (let side = 0; side < 4; side++) {
       const q = side === 0 ? (x > 0 ? p - 1 : -1) : side === 1 ? (x < w - 1 ? p + 1 : -1) : side === 2 ? (y > 0 ? p - w : -1) : (y < h - 1 ? p + w : -1);
+      if (q < 0) parts[id].edges = (parts[id].edges ?? 0) | (1 << side);
       if (q < 0 || label[q] < 0) { parts[id].exposed = true; continue; }
       const other = label[q];
       if (other !== id) parts[id].touches.set(other, (parts[id].touches.get(other) ?? 0) + 1);
@@ -176,11 +177,31 @@ export function showsOn(parts: Parts, ground: Ground): boolean {
   return figure(parts, g) >= SHOWS && showsWhole(wholeExposedInks(parts).map((ink) => ink.color), g);
 }
 
-/** The whole exposed parts of a file, in part order, each with its color and its share of the file's ink. `colors` stands in for the parts' own colors (a recolored copy of the file). */
+/**
+ * The part of a file that is its own backdrop: an opaque box that reaches
+ * all four edges of the frame with the logo's other parts inside it, never
+ * beside a pixel without ink. QA 22 Nov 2026: a logo stored as its own white
+ * square had only that box as its whole exposed part, so it was refused on
+ * every light ground (its mark showing at 15:1 there) and taken for a logo
+ * made for dark pictures. The box carries the mark on whatever ground it
+ * sits on, so it is no part that must show on the picture. Null for any
+ * other file.
+ */
+export function backdropOf(parts: Parts): Part | null {
+  for (const p of parts.parts) {
+    if (p.edges !== 15 || isSmall(parts, p)) continue;
+    const inside = [...p.touches.keys()].some((id) => !parts.parts[id].exposed && !isSmall(parts, parts.parts[id]));
+    if (inside) return p;
+  }
+  return null;
+}
+
+/** The whole exposed parts of a file, in part order, each with its color and its share of the file's ink; a box that is the file's own backdrop is none of them (backdropOf). `colors` stands in for the parts' own colors (a recolored copy of the file). */
 export function wholeExposedInks(parts: Parts, colors?: Rgb[]): Ink[] {
   const inks: Ink[] = [];
+  const box = backdropOf(parts);
   for (const p of parts.parts) {
-    if (!p.exposed || isSmall(parts, p)) continue;
+    if (!p.exposed || isSmall(parts, p) || p === box) continue;
     const c = colors?.[p.id] ?? p.color;
     inks.push({ color: [c[0], c[1], c[2]], share: parts.ink ? p.ink / parts.ink : 0 });
   }

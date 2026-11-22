@@ -11,8 +11,7 @@
 // the design would quietly vanish later. Downloading here costs one hop and
 // removes that whole class of failure.
 
-import { McpClient } from "./mcp.ts";
-import { MCP_URL, accessTokenFor } from "./oauth.ts";
+import { higgsfieldMcp } from "./oauth.ts";
 import {
   HiggsfieldError,
   IMAGE_MODEL,
@@ -77,8 +76,8 @@ export async function renderImageWithHiggsfield(args: RenderImageArgs): Promise<
   const budgetMs = args.budgetMs ?? 100_000;
   const startedAt = Date.now();
 
-  const token = await accessTokenFor(args.supabase);
-  const mcp = new McpClient({ url: MCP_URL, accessToken: token, timeoutMs: 30_000 });
+  // The token is renewed once if it runs out mid-render (oauth.ts, higgsfieldMcp; QA 22 Nov 2026).
+  const mcp = await higgsfieldMcp(args.supabase);
 
   const balance = await creditBalance(mcp);
   if (balance && balance.credits < CREDIT_FLOOR) {

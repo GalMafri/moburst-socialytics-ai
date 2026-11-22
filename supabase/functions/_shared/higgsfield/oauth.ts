@@ -17,6 +17,7 @@
 
 import { AuthzError } from "../auth/authz.ts";
 import { returnOriginFor, settingsUrl } from "../auth/appOrigin.ts";
+import { McpClient } from "./mcp.ts";
 
 export const CLERK_ISSUER = "https://clerk.higgsfield.ai";
 export const AUTHORIZE_URL = `${CLERK_ISSUER}/oauth/authorize`;
@@ -102,13 +103,32 @@ export interface TokenResponse {
   scope?: string;
 }
 
+/**
+ * How long the token endpoint is given. QA 22 Nov 2026: the call had no limit,
+ * so a slow answer outlived the 30-second refresh lease and a second caller
+ * spent the same refresh token. Well inside the lease (LEASE_MS).
+ */
+export const TOKEN_TIMEOUT_MS = 15_000;
+
 async function postToken(body: Record<string, string>, fetchImpl: typeof fetch): Promise<TokenResponse> {
-  const resp = await fetchImpl(TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams(body).toString(),
-  });
-  const text = await resp.text();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), TOKEN_TIMEOUT_MS);
+  let resp: Response;
+  let text: string;
+  try {
+    resp = await fetchImpl(TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(body).toString(),
+      signal: ctrl.signal,
+    });
+    text = await resp.text();
+  } catch (e) {
+    if (ctrl.signal.aborted) throw new Error("The Higgsfield token endpoint did not answer in time.");
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
   if (!resp.ok) {
     const message = `Token endpoint ${resp.status}: ${text.slice(0, 300)}`;
     // A refusal of the grant itself (400, 401, 403) is final; a busy or broken provider is not.
@@ -199,12 +219,19 @@ const WAIT_TRIES = 12;
  * refreshing_until: two simple claims (nobody holds it, or the hold ran out),
  * each one atomic in the database.
  */
-async function claimRefresh(supabase: Db, now: Date): Promise<boolean> {
+async function claimRefresh(supabase: Db, now: Date): Promise<string | null> {
   const until = new Date(now.getTime() + LEASE_MS).toISOString();
   const free = await supabase.from("integration_tokens").update({ refreshing_until: until }).eq("provider", PROVIDER).is("refreshing_until", null).select("provider");
-  if (free.data?.length) return true;
+  if (free.data?.length) return until;
   const expired = await supabase.from("integration_tokens").update({ refreshing_until: until }).eq("provider", PROVIDER).lt("refreshing_until", now.toISOString()).select("provider");
-  return !!expired.data?.length;
+  return expired.data?.length ? until : null;
+}
+
+/** The lease renewed for one more LEASE_MS, only while it is still the one this caller holds: the new value, or null when another caller holds it by now. */
+async function keepRefresh(supabase: Db, until: string): Promise<string | null> {
+  const next = new Date(Date.now() + LEASE_MS).toISOString();
+  const kept = await supabase.from("integration_tokens").update({ refreshing_until: next }).eq("provider", PROVIDER).eq("refreshing_until", until).select("provider");
+  return kept.data?.length ? next : null;
 }
 
 /**
@@ -223,7 +250,11 @@ export async function accessTokenFor(
   supabase: Db,
   fetchImpl: typeof fetch = fetch,
   sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  /** An access token Higgsfield has just rejected (McpClient, on a 401): while the stored one is still it, it is refreshed whatever its expiry says. */
+  rejected?: string,
 ): Promise<string> {
+  const stale = (t: { access_token: string | null } | null | undefined, expires_at: string | null | undefined) =>
+    !t?.access_token || needsRefresh({ access_token: t.access_token, expires_at: expires_at ?? null }) || (!!rejected && t.access_token === rejected);
   const read = async () => {
     const { data: row } = await supabase
       .from("integration_tokens")
@@ -237,17 +268,19 @@ export async function accessTokenFor(
     if (!tokens?.refresh_token || !row?.client_id) {
       throw new Error("Higgsfield is not connected. An admin needs to link the team account in Settings.");
     }
-    if (!needsRefresh({ access_token: tokens.access_token, expires_at: row.expires_at })) return tokens.access_token as string;
+    if (!stale(tokens, row.expires_at)) return tokens.access_token as string;
 
-    if (!(await claimRefresh(supabase, new Date()))) {
+    let until = await claimRefresh(supabase, new Date());
+    if (!until) {
       await sleep(WAIT_MS);
       continue;
     }
-    const release = () => supabase.from("integration_tokens").update({ refreshing_until: null }).eq("provider", PROVIDER);
+    // QA 22 Nov 2026: only this caller's own lease is let go; one that ran out and was taken by another caller is theirs.
+    const release = () => (until ? supabase.from("integration_tokens").update({ refreshing_until: null }).eq("provider", PROVIDER).eq("refreshing_until", until) : Promise.resolve());
     try {
       // The holder before us may have finished between our read and our claim.
       const latest = await read();
-      if (latest.tokens?.refresh_token && !needsRefresh({ access_token: latest.tokens.access_token, expires_at: latest.row?.expires_at })) {
+      if (latest.tokens?.refresh_token && !stale(latest.tokens, latest.row?.expires_at)) {
         return latest.tokens.access_token as string;
       }
       const current = latest.tokens?.refresh_token ? latest.tokens : tokens;
@@ -258,13 +291,17 @@ export async function accessTokenFor(
         if (e instanceof TokenRefused) {
           // A caller outside this lease (an older deploy) may have rotated the token a moment ago, which makes ours the old one; that is not a refusal.
           const again = await read();
-          if (again.tokens?.refresh_token && again.tokens.refresh_token !== current.refresh_token && !needsRefresh({ access_token: again.tokens.access_token, expires_at: again.row?.expires_at })) {
+          if (again.tokens?.refresh_token && again.tokens.refresh_token !== current.refresh_token && !stale(again.tokens, again.row?.expires_at)) {
             return again.tokens.access_token as string;
           }
           await supabase.from("integration_tokens").update({ last_refresh_refused_at: new Date().toISOString() }).eq("provider", PROVIDER);
         }
         throw e;
       }
+      // The pair is kept only while the lease is still this caller's: a caller that took it over meanwhile keeps
+      // the newer pair, and this one's older pair never lands over it (QA 22 Nov 2026). Its access token still works.
+      until = await keepRefresh(supabase, until);
+      if (!until) return grant.access_token;
       await saveTokens(supabase, { refresh_token: grant.refresh_token ?? (current.refresh_token as string), access_token: grant.access_token });
       const now = new Date().toISOString();
       await supabase.from("integration_tokens").update({ expires_at: expiryFrom(grant.expires_in), last_refresh_ok_at: now, updated_at: now }).eq("provider", PROVIDER);
@@ -480,4 +517,21 @@ export async function handleAuthRequest(req: Request, deps: AuthDeps): Promise<R
     console.error("[higgsfield-auth]", err instanceof Error ? err.message : String(err));
     return json({ error: UNEXPECTED_FAILURE }, 500);
   }
+}
+
+/**
+ * A Higgsfield MCP client for the team's session. QA 22 Nov 2026: a caller
+ * holds one client for a whole render (up to two minutes), longer than the
+ * minute before expiry a token is refreshed at, so a token could run out
+ * mid-render and the paid image was lost with an error asking for a new
+ * sign-in. Higgsfield's 401 now gets one refresh of that token and the call
+ * is sent again.
+ */
+export async function higgsfieldMcp(supabase: Db, timeoutMs = 30_000): Promise<McpClient> {
+  return new McpClient({
+    url: MCP_URL,
+    accessToken: await accessTokenFor(supabase),
+    timeoutMs,
+    renewToken: (rejected) => accessTokenFor(supabase, undefined, undefined, rejected),
+  });
 }

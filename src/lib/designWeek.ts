@@ -29,8 +29,8 @@ export interface WeekRunPost {
   post_at: string | null;
   state: "queued" | "started" | "filming" | "left_out";
   why?: WeekLeftOut | null;
-  /** A queued post whose copy is not written yet. */
-  waits_for?: "copy" | null;
+  /** A queued post whose copy is not written yet, or a queued video held while the clip balance is too low. */
+  waits_for?: "copy" | "credits" | null;
   added_by: string;
   added_at: string;
   request_id?: string | null;
@@ -206,13 +206,13 @@ export function weekProgress(run: WeekRun, requests: Map<string, Pick<DesignRequ
   return { total: counted.length, ready, active };
 }
 
-/** Where a post waiting in a running week stands: queued for design, or waiting for its copy. */
-export function weekStateOf(runs: WeekRun[], postKey: string | undefined): "queued" | "copy" | null {
+/** Where a post waiting in a running week stands: queued for design, waiting for its copy, or a video waiting for video credits. */
+export function weekStateOf(runs: WeekRun[], postKey: string | undefined): "queued" | "copy" | "credits" | null {
   if (!postKey) return null;
   for (const r of runs) {
     if (r.status !== "running") continue;
     const p = r.posts.find((x) => x.post_key === postKey && x.state === "queued");
-    if (p) return p.waits_for === "copy" ? "copy" : "queued";
+    if (p) return p.waits_for === "copy" || p.waits_for === "credits" ? p.waits_for : "queued";
   }
   return null;
 }

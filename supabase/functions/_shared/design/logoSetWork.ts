@@ -66,12 +66,19 @@ export function liveIo(admin: any): PictureIo {
  * The files of a client's set, from its stored logo: `site` are the stored
  * paths of the website's other logo files (already converted to PNG),
  * `person` a person's second file, `out` where the two copies are written.
- * A person's file that is gone from storage is not sent, and the set is
- * made without it.
+ * A person's file or a website file that is gone from storage is not sent,
+ * and the set is made without it; the facts' website index is the one in
+ * `site` as given.
  */
 export async function askLogoSet(io: PictureIo, a: { clientId: string; logoPath: string; site: string[]; person: string | null; out: { other: string; white: string } }): Promise<{ facts: LogoSetResult; ms: number }> {
+  // QA 22 Nov 2026: a website file gone from storage is left out like a person's, instead of failing the
+  // set on every look. `sent` keeps each sent file's place in `a.site`, so the facts name the caller's own index.
   const site: string[] = [];
-  for (const path of a.site) site.push(await io.read(LOGOS, path));
+  const sent: number[] = [];
+  for (const [i, path] of a.site.entries()) {
+    const link = await readIfThere(io, LOGOS, path);
+    if (link) { site.push(link); sent.push(i); }
+  }
   const person = a.person ? await readIfThere(io, LOGOS, a.person) : null;
   const { result, ms } = await io.call("logo-set", {
     job: a.clientId, step: STEP,
@@ -80,7 +87,8 @@ export async function askLogoSet(io: PictureIo, a: { clientId: string; logoPath:
     ...(person ? { person } : {}),
     out: { other: await io.write(LOGOS, a.out.other), white: await io.write(LOGOS, a.out.white) },
   });
-  return { facts: result, ms };
+  const facts = result.site && sent[result.site.index] !== undefined ? { ...result, site: { ...result.site, index: sent[result.site.index] } } : result;
+  return { facts, ms };
 }
 
 /** One read of posts: what the first `posts.length` of the posts asked for gave, how far the service got in the one after them, and the call's time. */

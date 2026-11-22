@@ -148,7 +148,28 @@ const STILL_SCALES: [number, number] = [0.9, 1.1];
  */
 export function* stillDrawnSteps(picture: Raster, template: { raster: Raster; ground: Rgb }, rect: Rect, from?: SearchAt): Generator<SearchAt, { score: number; found: boolean }, void> {
   const f = yield* findLogoSteps(picture.data, picture.width, picture.height, template.raster.data, template.raster.width, template.raster.height, rect, template.ground, { reach: STILL_REACH, scales: STILL_SCALES, either: true, from });
-  return { score: f.score, found: f.score >= LOGO_MIN_SCORE };
+  // QA 22 Nov 2026: the score reads shape only, whatever its strength, so a soft shade of the logo's size left by
+  // cleaning (3 or 4 grey levels, invisible) matched a compact logo. A drawing is still there only where the
+  // picture itself shows one: its own contrast at the match reaches STILL_MIN_SPREAD.
+  return { score: f.score, found: f.score >= LOGO_MIN_SCORE && spreadAt(picture, f) >= STILL_MIN_SPREAD };
+}
+
+/** The least spread of the picture's luminance (its standard deviation, in grey levels) at a match for a drawing to be one a person sees. */
+export const STILL_MIN_SPREAD = 3;
+
+/** The standard deviation of the picture's luminance over a rectangle (clipped to the picture). */
+function spreadAt(picture: Raster, at: Rect): number {
+  const x0 = Math.max(0, Math.floor(at.x)), y0 = Math.max(0, Math.floor(at.y));
+  const x1 = Math.min(picture.width, Math.ceil(at.x + at.width)), y1 = Math.min(picture.height, Math.ceil(at.y + at.height));
+  let n = 0, sum = 0, sq = 0;
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const i = (y * picture.width + x) * 4, a = picture.data[i + 3] / 255;
+      const v = (0.299 * picture.data[i] + 0.587 * picture.data[i + 1] + 0.114 * picture.data[i + 2]) * a;
+      n += 1; sum += v; sq += v * v;
+    }
+  }
+  return n ? Math.sqrt(Math.max(0, sq / n - (sum / n) ** 2)) : 0;
 }
 
 /** The same look run to its end in one go (stillDrawnSteps). */
