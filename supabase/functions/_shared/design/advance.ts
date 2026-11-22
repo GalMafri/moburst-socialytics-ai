@@ -24,6 +24,14 @@ export const MAX_DESIGN_ATTEMPTS = 4;
 /** The design worker's limits for the shared step-error rule and the hold. */
 export const DESIGN_LIMITS: StepLimits = { maxAttempts: MAX_DESIGN_ATTEMPTS, worker: "design-worker" };
 
+/**
+ * Steps that hold image-model work for minutes (canva/hold.ts) inside the edge
+ * run that starts them. QA 22 Nov 2026 (P32-3, P57-05): started late in a run,
+ * after other steps, that work could outlive the runtime's wall clock; the run
+ * was cut off, a try spent and the image paid for again.
+ */
+export const HOLDING_STEPS = new Set(["generate", "unlogo"]);
+
 /** A job that has nothing left to do because its option is over: it stops, which is not a failure of its own. */
 export class Stopped extends Error {}
 
@@ -36,11 +44,17 @@ export async function advanceDesignJob(
   job: StepJob & { state: any },
   runStep: () => Promise<StepResult>,
   timeLeft: () => boolean,
+  /** Whether the run is too far along to start a step in HOLDING_STEPS; the first step of a run always starts. */
+  lateForHold: () => boolean = () => false,
 ): Promise<void> {
   const jobs = () => admin.from("canva_finish_jobs");
   try {
     let result: StepResult = "next";
+    let first = true;
     while (result === "next" && timeLeft()) {
+      // The step is saved and the job freed (below), so the next pass starts it at the top of its own run.
+      if (!first && HOLDING_STEPS.has(job.step) && lateForHold()) break;
+      first = false;
       const from = job.step;
       result = await runStep();
       if (result !== "held") {

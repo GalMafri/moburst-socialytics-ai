@@ -68,6 +68,13 @@ const corsHeaders = {
 };
 const PASS_BUDGET_MS = 50_000;
 const LEASE_MS = 120_000;
+/**
+ * How far into a run a step that holds image-model work may still start
+ * (_shared/design/advance.ts, HOLDING_STEPS). The held work can take up to
+ * the image edit's 360 s, close to the runtime's 400 s wall clock, so it
+ * starts near the top of a run (QA 22 Nov 2026, P32-3, P57-05).
+ */
+const HOLD_START_MS = 15_000;
 /** The image model can take minutes; its call is held under a longer lease. */
 const MODEL_LEASE_MS = 420_000;
 const MAX_ATTEMPTS = MAX_DESIGN_ATTEMPTS;
@@ -253,7 +260,7 @@ async function advanceOne(admin: any, jobId: string) {
   const { data: job } = await admin.from("canva_finish_jobs").select(JOB_COLUMNS).eq("id", jobId).in("status", ["queued", "running"]).maybeSingle();
   if (!job) return;
   const started = Date.now();
-  await advanceDesignJob(admin, job as Job, () => runStep(admin, job as Job), () => Date.now() - started < PASS_BUDGET_MS);
+  await advanceDesignJob(admin, job as Job, () => runStep(admin, job as Job), () => Date.now() - started < PASS_BUDGET_MS, () => Date.now() - started > HOLD_START_MS);
   if (job.design_request_id) {
     await settleRequest(admin, job.design_request_id).catch((e) => console.error(`[design-worker] request ${job.design_request_id}:`, e instanceof Error ? e.message : e));
   }
