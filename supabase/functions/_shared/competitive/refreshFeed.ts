@@ -13,6 +13,7 @@ import {collectOwnedCompetitive,mergeOwnedCompetitivePosts} from './ownedSource.
 import { checkFeedLandscape, isTrackingProblem, landscapeClient, recordTrackingCheck } from "./landscapeCheck.ts";
 import { readSelection } from "./selectionTracking.ts";
 import { selectedFeedSources, collectLinkedInSource } from "./linkedinSource.ts";
+import { matchingClientCompanies } from "./rivaliqLandscape.ts";
 import { rivalIqFetch } from "./rivaliqFetch.ts";
 import { harvestedPaths, type HarvestedRef } from "../design-prompts/designRefs.ts";
 import { rulesLibrary } from "../brand-references/corpus.ts";
@@ -455,11 +456,24 @@ export async function refreshCompetitorFeed(admin: any, clientId: string, env: F
   // RivalIQ caps socialposts at 100 unless `limit` is sent (verified 2026-09-06: limit=500 returned 357).
   const PAGE_LIMIT = 500;
   const resp = await rivaliq(`/landscapes/${landscapeId}/socialposts?mainPeriodStart=${window.start}&mainPeriodEnd=${window.end}&limit=${PAGE_LIMIT}`, key);
-  const rivalPosts: any[] = Array.isArray(resp?.socialPosts) ? resp.socialPosts : [];
+  // QA 22 Nov 2026 (P30-07): an answer with no post list is not an empty
+  // week. It is thrown, so the feed job asks again, instead of saving a week
+  // with no competitor posts as a finished refresh.
+  if (!Array.isArray(resp?.socialPosts)) throw new Error('The feed source answered without its post list. No partial refresh was saved.');
+  const rivalPosts: any[] = resp.socialPosts;
   if (rivalPosts.length >= PAGE_LIMIT) throw new Error('The feed source reached its result limit. No partial refresh was saved.');
-  const {data: selected, error: selectionError} = await admin.from("competitors").select("*,competitor_handles(*)").eq("set_id",set?.id).eq("is_selected",true);
+  // QA 22 Nov 2026 (P30-04): with no confirmed set there is no selection to
+  // read; asking for set_id undefined was a uuid error and a failed refresh.
+  const {data: selected, error: selectionError} = set?.id
+    ? await admin.from("competitors").select("*,competitor_handles(*)").eq("set_id",set.id).eq("is_selected",true)
+    : { data: [], error: null };
   if (selectionError) throw new Error('Could not load reviewed feed profiles.');
-  const plan = selectedFeedSources(match.companies, match.client_company_id, selected || [], []);
+  // QA 22 Nov 2026 (P30-03): the feed's gate is a landscape that tracks the
+  // client. A confirmed competitor the landscape does not hold yet (tracking
+  // catches up on its own) is left out of this pull; the tracked companies'
+  // posts are saved, where before the whole refresh failed until it was added.
+  const tracked = (selected || []).filter((c: any) => matchingClientCompanies(match.companies, c.name, c.website_url).length > 0);
+  const plan = selectedFeedSources(match.companies, match.client_company_id, tracked, []);
   const {data: setting, error: settingError} = await admin.from("app_settings").select("value").eq("key","competitive_linkedin_webhook_url").maybeSingle();
   if (settingError) throw new Error('Could not load the LinkedIn source connection.');
   // The LinkedIn source's engine switch (report_engines; reading it never
@@ -511,7 +525,9 @@ export async function refreshCompetitorFeed(admin: any, clientId: string, env: F
   const found = await saveFeedTopics(admin, clientId, client.name, socialPosts, window, env.anthropicKey, savedSnapshot?.id ?? null);
 
   return {
-    client_id: clientId, landscape_id: landscapeId, window, posts: socialPosts.length, truncated: socialPosts.length >= PAGE_LIMIT, alerts: found.alerts, design_refs: harvest,
+    // QA 22 Nov 2026 (P30-06): never capped. RivalIQ at its limit throws above, and the merged
+    // count (Sprout and LinkedIn posts added) said "capped" when RivalIQ was not.
+    client_id: clientId, landscape_id: landscapeId, window, posts: socialPosts.length, truncated: false, alerts: found.alerts, design_refs: harvest,
     // Set only when the feed was saved but its topic pass gave no answer.
     // snapshot_id is the saved feed whose topics the feed job's retry finds.
     ...(found.notDetected ? { topics_not_detected: true as const, snapshot_id: found.snapshotId } : {}),
