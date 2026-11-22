@@ -60,6 +60,12 @@ export function useTrackView(name: string, entityId?: string | null, props: Reco
         scroll_pct: maxScroll.current,
         ...propsRef.current,
       });
+      // QA 22 Nov 2026: the page stays mounted when it shows another report, so the next one starts
+      // its own count. Kept for the page, only the first report shown was ever recorded.
+      opened.current = false;
+      activeMs.current = 0;
+      lastResume.current = 0;
+      maxScroll.current = 0;
     };
   }, [name, entityId]);
 }
