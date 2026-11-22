@@ -35,7 +35,8 @@ export function PlanNextWeekButton({ clientId, week, onRequested }: { clientId: 
   const plan = async () => {
     setBusy(true);
     notYet.clear();
-    const data = await queueCalendarWork({ action: "plan_next_week", client_id: clientId });
+    // The week the button names (QA 22 Nov 2026): sent again after a lost reply, it plans that same week, not the one after it.
+    const data = await queueCalendarWork({ action: "plan_next_week", client_id: clientId, week });
     setBusy(false);
     if (!data) notYet.say(NOT_YET.start);
     // The week's band shows the planning from here on.

@@ -17,8 +17,12 @@ export const SEND_WAITS_MS = QUIET_WAITS_MS;
 /**
  * Send a calendar-posts request that queues work. Resolves with the reply,
  * or null when it could not be sent or the server turned it down. The server
- * queues a week once however often it is asked, so a server failure is worth
- * asking again; a refusal (4xx) won't change by asking again.
+ * answers each of these the same however often it is asked, so a server
+ * failure is worth asking again; a refusal (4xx) won't change by asking again.
+ * That holds because "Plan the week of …" names its week, and a revision
+ * whose note is already under way is answered as queued (calendar-posts,
+ * QA 22 Nov 2026); without those a lost reply planned a second week, or
+ * called a queued revision not sent.
  */
 export async function queueCalendarWork(
   body: Record<string, unknown>,
