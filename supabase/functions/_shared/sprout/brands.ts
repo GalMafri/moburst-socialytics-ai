@@ -347,7 +347,9 @@ export function matchBrand(brand: Brand, index: ClientIndex): BrandMatch | null 
   const rules: Array<[MatchRule, () => KnownClient[]]> = [
     ["assigned", () => pick(ids.flatMap((id) => index.assigned.get(id) ?? []))],
     ["removed", () => pick(ids.flatMap((id) => index.removed.get(id) ?? []))],
-    ["name", () => [...real.values()].filter((c) => sameName(c.name, brand.name) || sameName(c.name, brand.group?.name) || brand.profiles.some((p) => sameName(c.name, p.name)))],
+    // QA 22 Nov 2026: every part of a split group shares the group's label, so
+    // for a split part the label names its sibling too; only its own names count.
+    ["name", () => [...real.values()].filter((c) => sameName(c.name, brand.name) || (!brand.split && sameName(c.name, brand.group?.name)) || brand.profiles.some((p) => sameName(c.name, p.name)))],
     ["site_link", () => [...real.values()].filter((c) => { const linked = siteLinkSet(c.site_profiles); return keys.some((k) => linksTo(linked, k)); })],
   ];
   for (const [by, find] of rules) {
