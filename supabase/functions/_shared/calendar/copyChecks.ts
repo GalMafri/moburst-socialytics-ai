@@ -69,11 +69,39 @@ const HASHTAG = /#[\p{L}\p{N}_]+/gu;
  * is not a letter or a digit read as a space.
  */
 export function copyWords(text: string): string[] {
-  return String(text ?? "").toLowerCase()
+  return casedWords(String(text ?? "").toLowerCase());
+}
+
+/** The same words with their case kept. */
+function casedWords(text: string): string[] {
+  return String(text ?? "")
     .replace(LINK, " ").replace(HANDLE, " ").replace(HASHTAG, " ")
     .replace(/['\u2018\u2019\u02BC`]/g, "")
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .split(" ").filter(Boolean);
+}
+
+/**
+ * Calls to action every brand writes, set aside like the client's own
+ * wording. QA 22 Nov 2026: "Let us know in the comments" is exactly
+ * SHARED_RUN_WORDS long, so a competitor's or trend's caption ending with it
+ * refused every post that ended the same way.
+ */
+export const STOCK_PHRASES = [
+  "let us know in the comments", "let me know in the comments", "tell us in the comments", "share your thoughts in the comments",
+  "drop your thoughts in the comments", "drop a comment below", "tag a friend who needs this", "tag someone who needs this",
+  "follow for more", "save this for later", "save this post for later", "double tap if you agree", "link in bio",
+].map((p) => p.split(" "));
+
+function withoutStockWording(words: string[]): string[] {
+  const out = [...words];
+  for (const phrase of STOCK_PHRASES) {
+    for (let i = 0; i + phrase.length <= words.length; i++) {
+      if (!phrase.every((w, k) => words[i + k] === w)) continue;
+      for (let k = i; k < i + phrase.length; k++) out[k] = `\u0001${k}`;
+    }
+  }
+  return out;
 }
 
 const trigramsOf = (words: string[]): Set<string> => {
@@ -154,18 +182,36 @@ const POSSESSIVE = /['\u2018\u2019\u02BC]s(?![\p{L}\p{N}])/giu;
 export function borrowedFrom(copy: string, outside: OutsideSource[], own?: OwnFacts): { id: string; why: string } | null {
   const words = copyWords(copy);
   if (!words.length) return null;
-  const compared = withoutOwnWording(words, own);
+  const compared = withoutStockWording(withoutOwnWording(words, own));
   // For a name, a possessive is the name: "Northwind's video" names Northwind.
-  const spaced = ` ${copyWords(String(copy ?? "").replace(POSSESSIVE, "")).join(" ")} `;
+  const cased = casedWords(String(copy ?? "").replace(POSSESSIVE, ""));
+  const lower = cased.map((w) => w.toLowerCase());
   for (const s of outside) {
-    const { run, trigrams } = sharedWords(compared, copyWords(s.text));
+    const { run, trigrams } = sharedWords(compared, withoutStockWording(copyWords(s.text)));
     if (run >= SHARED_RUN_WORDS || trigrams >= SHARED_TRIGRAMS) return { id: s.id, why: `shares wording with ${s.id}` };
-    const author = copyWords(String(s.author ?? "").replace(/^@+/, "")).join(" ");
-    if (author.length < AUTHOR_MIN_CHARS || !spaced.includes(` ${author} `)) continue;
+    const rawAuthor = String(s.author ?? "").trim();
+    const author = copyWords(rawAuthor.replace(/^@+/, "")).join(" ");
+    if (author.length < AUTHOR_MIN_CHARS || !namesAuthor(cased, lower, author.split(" "), properName(rawAuthor))) continue;
     if (own && (own.handles.includes(author.replace(/ /g, "")) || ownWording(own).words.includes(` ${author} `))) continue;
     return { id: s.id, why: `names who posted ${s.id}` };
   }
   return null;
+}
+
+/**
+ * A display name written with a capital ("Target", "Square") is a name only
+ * where the copy capitalizes it too. QA 22 Nov 2026: a competitor named with
+ * a common word refused every post using that word ("your target audience").
+ * A handle ("@olive") is matched whatever its case.
+ */
+const properName = (author: string) => !author.startsWith("@") && /^\p{Lu}/u.test(author);
+
+function namesAuthor(cased: string[], lower: string[], name: string[], proper: boolean): boolean {
+  for (let i = 0; i + name.length <= lower.length; i++) {
+    if (!name.every((w, k) => lower[i + k] === w)) continue;
+    if (!proper || cased.slice(i, i + name.length).every((w) => !/^\p{Ll}/u.test(w))) return true;
+  }
+  return false;
 }
 
 // A time as a video chapter or a clock writes it: 0:45, 12:30, 1:02:03.
