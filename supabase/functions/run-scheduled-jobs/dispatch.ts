@@ -350,6 +350,9 @@ export interface DispatchMemory {
 }
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** A dispatch that cannot be made until a person sets something up (its webhook): blocked, not tried again. */
+class NotConfigured extends Error {}
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
 
@@ -486,9 +489,14 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
       return false;
     }
   };
-  /** A run of the report starts. The occurrence's first run that counts (lateRuns) sets when its alert is due. */
+  /**
+   * A run of the report starts. The occurrence's first run that counts
+   * (lateRuns) sets when its alert is due, unless the occurrence already
+   * alerted: it alerts once (QA 22 Nov 2026, P60-1: the first run after a
+   * tracking wait armed it again, and the job span until its next run).
+   */
   const startRun = (reportId: string, startedAt: string) => {
-    if (!lateRuns().length && d.alert) memory.alert_due_at = new Date(Date.parse(startedAt) + ALERT_AFTER_MINUTES * MINUTE).toISOString();
+    if (!lateRuns().length && d.alert && !memory.alerted_at) memory.alert_due_at = new Date(Date.parse(startedAt) + ALERT_AFTER_MINUTES * MINUTE).toISOString();
     runs.push({ report_id: reportId, started_at: startedAt });
   };
   /**
@@ -499,7 +507,9 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
    * wait: the runs that ended in it, and those before it, are not counted.
    */
   const alertIfLate = async (end: RunEnd | undefined): Promise<boolean> => {
-    if (memory.alerted_at || !d.alert || d.dryRun) return false;
+    // Already alerted: no alert is due again, so the job is not leased for one (P60-1).
+    if (memory.alerted_at) { delete memory.alert_due_at; return false; }
+    if (!d.alert || d.dryRun) return false;
     const first = Math.min(...lateRuns().map((r) => Date.parse(r.started_at)).filter(Number.isFinite));
     // No run counts (each one ended waiting for tracking): no alert is due, so the job is not leased for one either.
     if (!Number.isFinite(first)) { delete memory.alert_due_at; return false; }
@@ -511,13 +521,15 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
   };
   /**
    * When the job is next leased: at the next run, or at the alert's time
-   * when that comes first, with the next run's time kept as retry_at.
+   * when that comes first, with the next run's time kept as retry_at. Never
+   * at once: an alert whose time has come was checked in this lease, so one
+   * still kept is looked at again a minute on, not in the same tick (P60-1).
    */
   const leaseAt = (next: Date, kept: DispatchMemory): string => {
     const due = Date.parse(kept.alert_due_at ?? "");
     if (!Number.isFinite(due) || due >= next.getTime()) return next.toISOString();
     kept.retry_at = next.toISOString();
-    return new Date(Math.max(due, now.getTime())).toISOString();
+    return new Date(Math.min(next.getTime(), Math.max(due, now.getTime() + MINUTE))).toISOString();
   };
 
   /** The run with this report ended (why for the logs, end for the alert); the occurrence runs again later, or closes. */
@@ -826,7 +838,7 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
     if (route.engine === "app") target = { engine: "app", pipeline: route.pipeline, refused: route.refused, unreadable: route.unreadable };
     else if (url) target = { engine: route.engine, pipeline: route.pipeline, url };
     // Only a request to n8n needs its webhook. Without it: blocked, before anything is made.
-    else throw new Error(competitive ? "competitive webhook URL not configured" : "n8n webhook URL not configured");
+    else throw new NotConfigured(competitive ? "competitive webhook URL not configured" : "n8n webhook URL not configured");
 
     if (competitive) {
       const set = await d.store.competitorSet(client.id);
@@ -959,6 +971,16 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
     // A report this job opened is taken away and the occurrence runs again.
     if (reportId) return runAgain(reportId, msg, "error");
     await note(`error: ${msg}`);
+    // QA 22 Nov 2026 (P60-2): anything else that stops the dispatch before a
+    // report exists (a dropped connection on a read, say) is tried again
+    // shortly while it has tries left, as the worker does for a thrown job.
+    // Every error used to block it, and only the next day's enqueue released
+    // a blocked dispatch.
+    if (!(err instanceof NotConfigured) && job.attempts < job.max_attempts) {
+      return { status: "queued", reason: `${msg}; it is tried again shortly.`, available_at: new Date(now.getTime() + RETRY_MINUTES * MINUTE).toISOString() };
+    }
+    // Blocked: a social report held for this competitive one is not held any longer.
+    if (competitive) await d.store.releaseHeldSocial(client.id).catch(() => undefined);
     return { status: "blocked", reason: msg };
   }
 }

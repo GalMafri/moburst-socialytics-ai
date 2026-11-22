@@ -63,7 +63,9 @@ export function topPostsRequest(profileIds: Array<number | string>, network: str
     timezone: "UTC",
     filters: [`customer_profile_id.eq(${profileIds.join(", ")})`, `created_time.in(${start}T00:00:00...${end}T23:59:59)`],
     metrics: ["lifetime.impressions", "lifetime.reactions", "lifetime.comments_count", "lifetime.shares_count", "lifetime.post_link_clicks", "lifetime.video_views"],
-    fields: ["created_time", "perma_link", "text", "post_type", "visual_media"],
+    // QA 22 Nov 2026: without customer_profile_id a row cannot say whose post it
+    // is, and Analytics showed every top post with no network or profile name.
+    fields: ["created_time", "perma_link", "text", "post_type", "visual_media", "customer_profile_id"],
     sort: [`${sortMeasure(network)}:desc`],
     page: 1,
     limit: PER_NETWORK,
@@ -89,7 +91,7 @@ export function topPostFromRow(row: Any, network: string): TopPost {
     text: row.text || "",
     posted_at: row.created_time || null,
     post_type: row.post_type || null,
-    profile_id: row.dimensions?.customer_profile_id ?? row.customer_profile_id ?? null,
+    profile_id: row.customer_profile_id ?? row.dimensions?.customer_profile_id ?? null,
     impressions,
     reactions: num(row.metrics?.["lifetime.reactions"]),
     comments: num(row.metrics?.["lifetime.comments_count"]),

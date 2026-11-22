@@ -43,7 +43,7 @@ function store(already: string | null = null, opts: { settleFails?: boolean } = 
     async alreadySent(q) {
       asked.push(q);
       if (already) return already;
-      const hit = rows.find((r) => r.calendar_post_key === q.calendarPostKey && r.status === q.status && (!q.at || r.scheduled_time === q.at));
+      const hit = rows.find((r) => r.calendar_post_key === q.calendarPostKey && r.profile_id === q.profileId && r.status === q.status && (!q.at || r.scheduled_time === q.at));
       return hit ? String(hit.scheduled_time) : null;
     },
     async claim(row) {
@@ -126,7 +126,7 @@ describe("scheduling a post to Sprout", () => {
     const { asked, s } = store("2026-11-09T23:45:00Z");
     const reply = await sendToSprout(request, s, { fetchImpl, ...NO_WAIT });
     expect(reply.body).toMatchObject({ success: true, already: true, scheduled_time: "2026-11-09T23:45:00Z" });
-    expect(asked).toEqual([{ clientId: "moburst-client", calendarPostKey: request.calendarPostKey, status: "scheduled", at: "2026-11-09T23:45:00Z" }]);
+    expect(asked).toEqual([{ clientId: "moburst-client", calendarPostKey: request.calendarPostKey, profileId: "sp-li", status: "scheduled", at: "2026-11-09T23:45:00Z" }]);
     expect(sent).toHaveLength(0);
   });
 
@@ -309,7 +309,7 @@ describe("sending a post to Sprout now", () => {
     expect(reply.body).toMatchObject({ success: true, status: "sent_now", scheduled_time: "2026-11-02T14:01:00Z", draft: true });
     // A second press, or a resend, finds this one.
     // Looked for before the files go to Sprout, and again once the row is written.
-    const ask = { clientId: "moburst-client", calendarPostKey: request.calendarPostKey, status: "sent_now", since: "2026-11-02T13:45:00.000Z" };
+    const ask = { clientId: "moburst-client", calendarPostKey: request.calendarPostKey, profileId: "sp-li", status: "sent_now", since: "2026-11-02T13:45:00.000Z" };
     expect(asked).toEqual([ask, ask]);
   });
 

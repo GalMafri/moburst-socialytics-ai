@@ -46,7 +46,11 @@ Deno.serve(async (req) => {
     });
   } catch (err) {
     if (err instanceof ResearchError) {
-      return jsonResponse({ error: err.message }, err.code === "model" ? 502 : 400);
+      // QA 22 Nov 2026 (P58-03): a model that did not finish the read was
+      // answered 502, which the setup page sends again (any 5xx), paying for a
+      // crawl and a model call each time. It is answered as a refusal the page
+      // does not resend; the page says the site has not been read yet.
+      return jsonResponse({ error: err.message, code: err.code }, err.code === "model" ? 422 : 400);
     }
     return jsonResponse({ error: err instanceof Error ? err.message : String(err) }, 500);
   }

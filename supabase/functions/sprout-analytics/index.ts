@@ -128,22 +128,28 @@ Deno.serve(async (req) => {
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     // Access check runs as the caller: RLS decides whether they may see this client. A server call reads it directly.
+    // QA 22 Nov 2026 (P61-04): a read that failed was taken for "not accessible"
+    // (403) or "no profiles" (422), which the Analytics page treats as final.
+    // A failed read is answered 500, which the page asks again.
     let visible: { id: string; name: string; sprout_customer_id: string | null } | null = null;
+    let readError: { message: string } | null = null;
     if (server) {
-      visible = (await admin.from("clients").select("id, name, sprout_customer_id").eq("id", clientId).maybeSingle()).data;
+      ({ data: visible, error: readError } = await admin.from("clients").select("id, name, sprout_customer_id").eq("id", clientId).maybeSingle());
     } else {
       const asUser = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: auth } } });
       const { data: who } = await asUser.auth.getUser(auth.slice(7));
       if (!who?.user) return json({ error: "Invalid or expired session." }, 401);
-      visible = (await asUser.from("clients").select("id, name, sprout_customer_id").eq("id", clientId).maybeSingle()).data;
+      ({ data: visible, error: readError } = await asUser.from("clients").select("id, name, sprout_customer_id").eq("id", clientId).maybeSingle());
     }
+    if (readError) return json({ error: `The client could not be read: ${readError.message}` }, 500);
     if (!visible) return json({ error: "Client not found or not accessible." }, 403);
 
-    const { data: profiles } = await admin
+    const { data: profiles, error: profilesError } = await admin
       .from("sprout_profiles")
       .select("sprout_profile_id, profile_name, native_name, network_type")
       .eq("client_id", clientId)
       .eq("is_active", true);
+    if (profilesError) return json({ error: `The client's Sprout profiles could not be read: ${profilesError.message}` }, 500);
     const profileIds = (profiles || []).map((p: any) => Number(p.sprout_profile_id)).filter((n: number) => Number.isFinite(n));
     if (profileIds.length === 0) return json({ error: "No Sprout profiles are assigned to this client." }, 422);
 

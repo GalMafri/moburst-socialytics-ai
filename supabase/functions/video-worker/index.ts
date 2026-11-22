@@ -81,18 +81,32 @@ async function workRemains(admin: any): Promise<boolean> {
   return !!count;
 }
 
+/** The pause after a step error that spent a try, growing with the tries spent: 1, 2, then 4 minutes. */
+export const retryPauseMs = (attempts: number) => Math.min(4, 2 ** Math.max(0, attempts - 1)) * 60_000;
+
+/**
+ * A job whose last step failed and spent a try waits retryPauseMs before its
+ * next one. QA 22 Nov 2026 (P61-05): it was due again on the next pass,
+ * about 15 seconds later, so a dependency down for a minute used all four
+ * tries and ended the video (after a paid clip, too). A step that moved on
+ * clears the job's error, so a job that is working is never paused.
+ */
+export const dueAfterError = (job: { attempts?: number | null; error?: string | null; updated_at?: string | null }, now: number) =>
+  !(job.error && (job.attempts ?? 0) > 0 && now - Date.parse(String(job.updated_at)) < retryPauseMs(job.attempts ?? 0));
+
 /** Advance every due video job until it waits or the pass's budget is spent. Returns how many moved on. */
 // deno-lint-ignore no-explicit-any
 async function pass(admin: any): Promise<number> {
   const started = Date.now();
   const now = new Date();
-  const { data: due } = await admin.from("canva_finish_jobs").select("id")
+  const { data: rows } = await admin.from("canva_finish_jobs").select("id, attempts, error, updated_at")
     .in("status", ["queued", "running"]).eq("input->>kind", "video")
     .or(`lease_until.is.null,lease_until.lt.${now.toISOString()}`)
-    .order("created_at").limit(20);
+    .order("created_at").limit(40);
+  const due = (rows ?? []).filter((r: { attempts?: number; error?: string | null; updated_at?: string }) => dueAfterError(r, now.getTime())).slice(0, 20);
   let advanced = 0;
   const requests = new Set<string>();
-  for (const { id } of due ?? []) {
+  for (const { id } of due) {
     if (Date.now() - started > PASS_BUDGET_MS) break;
     const { data: rows } = await admin.from("canva_finish_jobs")
       .update({ lease_until: new Date(Date.now() + JOB_LEASE_MS).toISOString(), status: "running", updated_at: new Date().toISOString() })

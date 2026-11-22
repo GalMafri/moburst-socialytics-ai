@@ -167,6 +167,28 @@ describe("the Sprout onboarding job", () => {
     expect(db.tables.scheduled_jobs.filter((j) => j.kind === "sprout_onboarding")).toHaveLength(1);
   });
 
+  // QA 22 Nov 2026 (P60-3): a brand started near the end of the budget could
+  // carry the request past the edge's wall clock before the rest was queued.
+  it("leaves a brand still being looked at past its stop for the next run, reading no more sites for it", async () => {
+    const db = world();
+    let t = 0;
+    const homepages: string[] = [];
+    const base = deps();
+    // Moburst Careers is looked at quickly; Olo's posts take until past the stop.
+    const d = deps({
+      budgetMs: 60_000,
+      clock: () => t,
+      posts: async (ids) => { t += ids.includes("7001") ? 90_000 : 10_000; return base.posts(ids, NOW, NOW); },
+      reader: { resolve: base.reader.resolve, homepage: async (url) => { homepages.push(url); return base.reader.homepage(url); } },
+    });
+    const out = await runSproutOnboardingJob(db, job(), d);
+    const report = out.result as { results: Array<{ brand: string; decision: string }>; left: string[] };
+    expect(decisions(report.results).Olo).toBe("later");
+    expect(db.tables.clients.filter((c) => c.name === "Olo" && !c.demo_job_id)).toHaveLength(0);
+    expect(homepages.some((u) => /olo/.test(u))).toBe(false);
+    expect(db.tables.scheduled_jobs.find((j) => j.kind === "sprout_onboarding")?.payload.left).toEqual(report.left);
+  });
+
   it("writes nothing in a dry run, and says for every brand what it would do, why, and what the website search found", async () => {
     const db = world();
     const before = snapshot(db);

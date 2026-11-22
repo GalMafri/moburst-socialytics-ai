@@ -118,7 +118,11 @@ Deno.serve(async (req) => {
       const { data: found } = await admin.from("calendar_plans").select("id, client_id").eq("id", planId).maybeSingle();
       if (!found) return json({ error: "No such plan." }, 404);
       const userId = await requireMember(req, found.client_id);
-      const { data: plan, error } = await admin.rpc("calendar_stop_plan", { p_plan: planId, p_user: userId });
+      // QA 22 Nov 2026 (P56-07): which button was pressed, intent "stop" or
+      // "remove". "stop" on a plan that finished meanwhile leaves it planned and
+      // answers it (20261122131000_calendar_stop_plan_intent.sql); no intent, as before.
+      const intent = body.intent === "stop" || body.intent === "remove" ? body.intent : null;
+      const { data: plan, error } = await admin.rpc("calendar_stop_plan", { p_plan: planId, p_user: userId, ...(intent ? { p_intent: intent } : {}) });
       if (error) return json({ error: error.message }, 409);
       return json({ plan });
     }

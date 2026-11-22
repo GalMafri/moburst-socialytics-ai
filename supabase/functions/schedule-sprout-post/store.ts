@@ -24,9 +24,9 @@ export function sentStore(db: Db, opts: { waits?: number[]; now?: () => number }
   // 20261113103300_scheduled_posts_supersedes.sql), so no run has to survive for the post to keep reading as
   // unconfirmed. Nothing here closes or reopens the earlier row.
   return {
-    async alreadySent({ clientId, calendarPostKey, status, at, since }) {
+    async alreadySent({ clientId, calendarPostKey, profileId, status, at, since }) {
       let q = db.from("scheduled_posts").select("scheduled_time")
-        .eq("client_id", clientId).eq("calendar_post_key", calendarPostKey).eq("status", status);
+        .eq("client_id", clientId).eq("calendar_post_key", calendarPostKey).eq("profile_id", profileId).eq("status", status);
       if (at) q = q.eq("scheduled_time", at);
       if (since) q = q.gte("created_at", since);
       const { data } = await q.limit(1);

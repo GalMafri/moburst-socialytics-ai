@@ -14,7 +14,8 @@
 //        to it, designed like the post's own design once the brand's designs
 //        are set up (story.ts).
 //   POST {action:"close_filming"}   (operational secret, as the system) filming
-//        requests closed when their footage arrived or cannot come in time; spends nothing
+//        requests closed when their footage arrived or cannot come in time; a
+//        shot brief that was not written is written again, a few times at most
 //   POST {action:"week_preview"|"week_start"|"week_stop"|"week_continue", ...}
 //        The week's design button: a whole week's posts designed on request,
 //        never automatically (week.ts).
@@ -281,8 +282,13 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
   // gets the filming path, never a generated video in some other style.
   const filmedBy = generatedVideo ? filmedNeed(videoStyle?.profile) : null;
   if (filmedBy) {
-    await admin.from("design_requests").update({ status: "needs_filming", stage: "ready", options_wanted: 0, on_camera: filmedBy, updated_at: new Date().toISOString() }).eq("id", request.id);
-    await writeShotBrief(admin, request.id).catch((e) => console.error("[design-request] shot brief:", e instanceof Error ? e.message : e));
+    // QA 22 Nov 2026 (P56-06): only a request still being prepared turns into
+    // one waiting for filming; one a person stopped while it waited for the
+    // plan lease stays stopped, and gets no shot brief.
+    const { data: turned } = await admin.from("design_requests").update({ status: "needs_filming", stage: "ready", options_wanted: 0, on_camera: filmedBy, updated_at: new Date().toISOString() })
+      .eq("id", request.id).eq("status", "preparing").select("id");
+    if (!turned?.length) return;
+    await briefOrNote(admin, request.id);
     return;
   }
   const brand = client?.name ?? "the brand";
@@ -295,7 +301,19 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
     paths: videoStyle ? videoStyle.frames as string[] : settings.reference_paths, harvested: client?.harvested_design_references, platform: request.platform ?? null,
     max: videoStyle ? Infinity : MAX_LIBRARY, stills: !!videoStyle,
   });
-  if (!library.length) throw new Error("None of the client's reference posts could be read.");
+  if (!library.length) {
+    // QA 22 Nov 2026 (P56-09): settings with no reference posts at all can
+    // never be planned, and were planned again and again until the 90-minute
+    // limit with the card on "preparing". Ended now, as planning that cannot
+    // go on ends. Posts that are there but could not be read this time may
+    // be a passing storage hiccup: planned again as before.
+    const sources = videoStyle ? videoStyle.frames : settings.reference_paths;
+    if (!Array.isArray(sources) || !sources.some((p: unknown) => typeof p === "string" && p)) {
+      await endRequest(admin, request.id, "no_progress", "The client's design settings have no reference posts.");
+      return;
+    }
+    throw new Error("None of the client's reference posts could be read.");
+  }
   const recentList = await recentDesigns(admin, request.client_id);
   const recent = recentLines(recentList, library);
   // What people who turned down this client's earlier designs asked for.
@@ -427,11 +445,41 @@ async function recordFilming(admin: any, p: { clientId: string; postKey: string;
     row = data as DesignRequest;
   }
   // What to film, for Moburst staff, written while the answer goes back.
-  const work = writeShotBrief(admin, row.id).catch((e) => console.error("[design-request] shot brief:", e instanceof Error ? e.message : e));
+  const work = briefOrNote(admin, row.id);
   // deno-lint-ignore no-explicit-any
   const runtime = (globalThis as any).EdgeRuntime;
   if (runtime?.waitUntil) runtime.waitUntil(work); else await work;
   return row;
+}
+
+/** How many times a shot brief is written before it is left to staff's "write it again" (shotBrief.ts). */
+const BRIEF_TRIES = 4;
+/** A brief not written yet is tried again by the filming sweep once its request is this old. */
+const BRIEF_RETRY_AFTER_MS = 5 * 60_000;
+/** Briefs the sweep writes in one pass, so the pass ends well inside the function's time. */
+const BRIEF_SWEEP_MAX = 3;
+const BRIEF_NOTE = /^Shot brief not written \(try (\d+)\)/;
+/** The tries a request's shot brief has had that did not write it, from the note on the request. */
+const briefTries = (error: unknown) => Number(BRIEF_NOTE.exec(String(error ?? ""))?.[1] ?? 0);
+
+/**
+ * Write the shot brief, and when it is not written keep that on the request
+ * with the try it was. QA 22 Nov 2026 (P56-08): a brief that failed (a model
+ * hiccup, an unreadable reply) left no trace and nothing asked again, so the
+ * post panel said "being written" for good. The filming sweep writes it again
+ * (closeFilming), up to BRIEF_TRIES.
+ */
+async function briefOrNote(admin: any, requestId: string): Promise<void> {
+  try {
+    await writeShotBrief(admin, requestId);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[design-request] shot brief:", msg);
+    const { data: row } = await admin.from("design_requests").select("error").eq("id", requestId).maybeSingle();
+    const tries = briefTries(row?.error) + 1;
+    await admin.from("design_requests").update({ error: `Shot brief not written (try ${tries}): ${msg}`.slice(0, 1000), updated_at: new Date().toISOString() })
+      .eq("id", requestId).eq("status", "needs_filming");
+  }
 }
 
 /**
@@ -548,29 +596,49 @@ const FILMING_LOOKBACK_DAYS = 31;
  * week's design button then designs that post from the client's posts.
  */
 async function closeFilming(admin: any, now: Date): Promise<number> {
-  const { data: waiting } = await admin.from("design_requests").select("id, client_id, calendar_post_key").eq("status", "needs_filming").limit(500);
+  const { data: waiting } = await admin.from("design_requests").select("id, client_id, calendar_post_key, created_at, error").eq("status", "needs_filming").limit(500);
   if (!waiting?.length) return 0;
   const clientIds = [...new Set((waiting as Array<{ client_id: string }>).map((w) => w.client_id))];
   const since = new Date(now.getTime() - FILMING_LOOKBACK_DAYS * 86400000).toISOString().slice(0, 10);
   const [{ data: zones }, { data: posts }, { data: footage }] = await Promise.all([
     admin.from("clients").select("id, timezone").in("id", clientIds),
     admin.from("calendar_posts").select("client_id, post_key, post_date, posting_time").in("client_id", clientIds).gte("post_date", since).limit(10000),
-    admin.from("design_requests").select("client_id, calendar_post_key").in("client_id", clientIds).not("footage_path", "is", null).limit(10000),
+    admin.from("design_requests").select("client_id, calendar_post_key, status, created_at").in("client_id", clientIds).not("footage_path", "is", null).limit(10000),
   ]);
   // Matched in code: a report post's key is JSON text, which an in() filter does not survive.
   const zone = new Map<string, string | null>((zones ?? []).map((c: any) => [c.id, c.timezone ?? null]));
   const postOf = new Map((posts ?? []).map((p: any) => [`${p.client_id}|${p.post_key}`, p]));
-  const filmed = new Set((footage ?? []).map((r: any) => `${r.client_id}|${r.calendar_post_key}`));
+  // QA 22 Nov 2026 (P56-05): footage counts for this wait when it came after
+  // the post was asked to be filmed, or its video is still being made. An
+  // older clip whose video ended closed a new filming request at once.
+  const clips = new Map<string, Array<{ status: string; created_at: string | null }>>();
+  for (const r of (footage ?? []) as any[]) {
+    const key = `${r.client_id}|${r.calendar_post_key}`;
+    clips.set(key, [...(clips.get(key) ?? []), r]);
+  }
+  const footageFor = (key: string, askedAt: string | null) => (clips.get(key) ?? []).some((c) =>
+    c.status === "preparing" || Date.parse(String(c.created_at)) >= Date.parse(String(askedAt)));
   let closed = 0;
-  for (const w of waiting as Array<{ id: string; client_id: string; calendar_post_key: string }>) {
+  const kept: Array<{ id: string; created_at: string | null; error: string | null }> = [];
+  for (const w of waiting as Array<{ id: string; client_id: string; calendar_post_key: string; created_at: string | null; error: string | null }>) {
     const key = `${w.client_id}|${w.calendar_post_key}`;
     const post = postOf.get(key) as { post_date: string; posting_time: string | null } | undefined;
-    const outcome = filmingOutcome(post ? postInstant(post.post_date, post.posting_time, zone.get(w.client_id)) : null, now, filmed.has(key));
-    if (outcome === "keep") continue;
+    const outcome = filmingOutcome(post ? postInstant(post.post_date, post.posting_time, zone.get(w.client_id)) : null, now, footageFor(key, w.created_at));
+    if (outcome === "keep") { kept.push(w); continue; }
     await endRequest(admin, w.id, outcome);
     closed++;
   }
+  await retryShotBriefs(admin, kept, now);
   return closed;
+}
+
+/** The shot briefs of posts still waiting for filming that were not written, written again (P56-08). */
+async function retryShotBriefs(admin: any, kept: Array<{ id: string; created_at: string | null; error: string | null }>, now: Date): Promise<void> {
+  const due = kept.filter((w) => briefTries(w.error) < BRIEF_TRIES && now.getTime() - Date.parse(String(w.created_at)) >= BRIEF_RETRY_AFTER_MS);
+  if (!due.length) return;
+  const { data: briefs } = await admin.from("design_shot_briefs").select("request_id").in("request_id", due.map((w) => w.id));
+  const written = new Set((briefs ?? []).map((b: { request_id: string }) => b.request_id));
+  for (const w of due.filter((x) => !written.has(x.id)).slice(0, BRIEF_SWEEP_MAX)) await briefOrNote(admin, w.id);
 }
 
 /**
