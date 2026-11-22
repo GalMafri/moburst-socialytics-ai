@@ -95,7 +95,13 @@ export function matchRoute(routes: Route[], method: string, pathname: string): M
       continue;
     }
     const params: Record<string, string> = {};
-    names.forEach((n, i) => (params[n] = decodeURIComponent(m[i + 1])));
+    // QA 22 Nov 2026 (P24-03): a broken percent escape threw out of the
+    // handler (a bare 500, no CORS, no audit); such a path names nothing.
+    try {
+      names.forEach((n, i) => (params[n] = decodeURIComponent(m[i + 1])));
+    } catch {
+      continue;
+    }
     return { route, params };
   }
   return allowed.length ? { error: "method_not_allowed", allowed } : { error: "not_found" };

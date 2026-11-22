@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { handleRequest, type AuditRow, type CoreDeps } from "./core";
 import { ApiError } from "./errors";
 import { hashKey } from "./keys";
@@ -131,5 +133,28 @@ describe("handleRequest", () => {
     expect(d.audits[0].client_id).toBe("11111111-2222-4333-8444-555555555555");
     await handleRequest(req("GET", "/v1/clients/not-an-id", { Authorization: `Bearer ${GOOD}` }), d.deps);
     expect(d.audits[1].client_id).toBeNull();
+  });
+
+  // QA 22 Nov 2026 (P24-03): a broken percent escape threw out of handleRequest (a bare 500, no CORS, no audit).
+  it("answers a path with a broken percent escape with the JSON 404 and an audit row", async () => {
+    const d = await deps();
+    const res = await handleRequest(req("GET", "/v1/clients/%E0%A4%A", { Authorization: `Bearer ${GOOD}` }), d.deps).catch((e) => e);
+    expect(res).toBeInstanceOf(Response);
+    expect(res.status).toBe(404);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
+    expect((await res.json()).error.code).toBe("not_found");
+    expect(d.audits).toHaveLength(1);
+  });
+
+  // QA 22 Nov 2026 (P24-06): the internal secrets are compared in constant time, never with ===.
+  it("compares the internal secrets in constant time, and refuses a near miss or a missing secret", async () => {
+    const source = readFileSync(join(__dirname, "core.ts"), "utf8");
+    expect(source).not.toMatch(/\bcron\s*===|===\s*`Bearer|===\s*deps\.(cronSecret|serviceKey)/);
+    const d = await deps();
+    expect((await handleRequest(req("POST", "/internal/w", { "X-Cron-Secret": "cron-t" }, {}), d.deps)).status).toBe(401);
+    expect((await handleRequest(req("POST", "/internal/w", { Authorization: "Bearer svc-" }, {}), d.deps)).status).toBe(401);
+    expect((await handleRequest(req("POST", "/internal/w", { Authorization: "Bearer svc-k" }, {}), d.deps)).status).toBe(200);
+    const none = await deps({ cronSecret: null, serviceKey: null });
+    expect((await handleRequest(req("POST", "/internal/w", { "X-Cron-Secret": "" }, {}), none.deps)).status).toBe(401);
   });
 });

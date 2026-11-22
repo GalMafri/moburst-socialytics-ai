@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { deliverCallback, deliverOnce, signBody } from "./callback";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import { CALLBACK_TIMEOUT_MS, deliverCallback, deliverOnce, signBody } from "./callback";
 
 function fakeFetch(statuses: Array<number | Error>) {
   const calls: Array<{ url: string; init: RequestInit }> = [];
@@ -75,5 +75,34 @@ describe("deliverOnce", () => {
     expect(await deliverOnce("https://moburst.ai/hook", {}, null, fakeFetch([200]).fetchImpl)).toEqual({ status: 200, error: null });
     expect(await deliverOnce("https://moburst.ai/hook", {}, null, fakeFetch([new Error("ECONNRESET")]).fetchImpl)).toEqual({ status: null, error: "ECONNRESET" });
     expect(await deliverOnce("http://plain", {}, null, fakeFetch([200]).fetchImpl)).toEqual({ status: null, error: "callback_url must be https" });
+  });
+});
+
+// QA 22 Nov 2026 (P24-02): a receiver that takes the connection and never
+// answers held the attempt open past the worker's wall clock, so the attempt
+// was never counted and the demo job never finished.
+describe("a receiver that never answers", () => {
+  afterEach(() => vi.useRealTimers());
+  const silent = ((_url: string, init?: RequestInit) =>
+    new Promise<Response>((_, reject) => init?.signal?.addEventListener("abort", () => reject(new Error("aborted"))))) as typeof fetch;
+  const deaf = (() => new Promise<Response>(() => {})) as unknown as typeof fetch;
+
+  it("deliverOnce gives up after CALLBACK_TIMEOUT_MS, as an attempt nothing answered", async () => {
+    vi.useFakeTimers();
+    for (const f of [silent, deaf]) {
+      let settled: { status: number | null; error: string | null } | "pending" = "pending";
+      void deliverOnce("https://receiver.example/hook", { job_id: "j1" }, null, f).then((r) => { settled = r; });
+      await vi.advanceTimersByTimeAsync(CALLBACK_TIMEOUT_MS + 1);
+      expect(settled).toMatchObject({ status: null, error: expect.stringMatching(/no answer/) });
+    }
+    expect(CALLBACK_TIMEOUT_MS).toBeLessThanOrEqual(30_000);
+  });
+
+  it("deliverCallback counts each attempt that timed out", async () => {
+    vi.useFakeTimers();
+    let settled: unknown = "pending";
+    void deliverCallback("https://receiver.example/hook", {}, null, { fetchImpl: deaf, sleep: async () => {} }).then((r) => { settled = r; });
+    await vi.advanceTimersByTimeAsync(3 * CALLBACK_TIMEOUT_MS + 10);
+    expect(settled).toMatchObject({ delivered: false, attempts: 3, last_status: null });
   });
 });

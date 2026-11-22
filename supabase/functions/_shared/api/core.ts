@@ -44,11 +44,23 @@ const CORS: Record<string, string> = {
 const NO_AUTH: AuthContext = { kind: "none", keyId: null, keyHash: null, scopes: [], clients: scopeAll() };
 const INTERNAL: AuthContext = { kind: "internal", keyId: null, keyHash: null, scopes: ["read", "demo", "admin"], clients: scopeAll() };
 
-function isInternal(req: Request, deps: CoreDeps): boolean {
-  const cron = req.headers.get("X-Cron-Secret");
-  if (deps.cronSecret && cron === deps.cronSecret) return true;
-  const auth = req.headers.get("Authorization") ?? "";
-  return !!deps.serviceKey && auth === `Bearer ${deps.serviceKey}`;
+/**
+ * True when the candidate is the secret, in time that does not depend on how
+ * much of it was right: both are hashed, then every byte is compared. A
+ * missing secret matches nothing.
+ * QA 22 Nov 2026 (P24-06): === stopped at the first differing character.
+ */
+async function sameSecret(candidate: string | null, secret: string | null | undefined): Promise<boolean> {
+  if (!secret || candidate == null) return false;
+  const [a, b] = await Promise.all([hashKey(candidate), hashKey(secret)]);
+  let diff = a.length ^ b.length;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+async function isInternal(req: Request, deps: CoreDeps): Promise<boolean> {
+  if (await sameSecret(req.headers.get("X-Cron-Secret"), deps.cronSecret)) return true;
+  return !!deps.serviceKey && (await sameSecret(req.headers.get("Authorization") ?? "", `Bearer ${deps.serviceKey}`));
 }
 
 async function keyAuth(req: Request, deps: CoreDeps, now: Date): Promise<{ auth: AuthContext; row: KeyRow }> {
@@ -69,11 +81,11 @@ function secondsToNextMinute(now: Date): number {
 async function authenticate(req: Request, route: Route, deps: CoreDeps, now: Date): Promise<{ auth: AuthContext; retryAfter?: number }> {
   if (route.auth === "none") return { auth: NO_AUTH };
   if (route.auth === "internal") {
-    if (isInternal(req, deps)) return { auth: INTERNAL };
+    if (await isInternal(req, deps)) return { auth: INTERNAL };
     throw unauthorized("The worker route takes the internal secret only");
   }
   if (route.auth === "admin") {
-    if (isInternal(req, deps)) return { auth: INTERNAL };
+    if (await isInternal(req, deps)) return { auth: INTERNAL };
     const raw = bearerFrom(req.headers);
     if (!raw) throw unauthorized("An admin session or an admin key is required");
     if (/^(adv|soc)_/.test(raw)) {

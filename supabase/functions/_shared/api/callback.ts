@@ -25,6 +25,37 @@ export const CALLBACK_DELAYS_MS = [0, 60_000, 300_000];
 export const CALLBACK_DELAYS_S = [0, 60, 300];
 export const CALLBACK_MAX_ATTEMPTS = CALLBACK_DELAYS_S.length;
 
+/**
+ * How long one attempt waits for the receiver to answer.
+ *
+ * QA 22 Nov 2026 (P24-02): a receiver that took the connection and never
+ * answered held the attempt open past the worker's wall clock, so the
+ * attempt was never counted and the demo job never finished. An attempt
+ * that outlives this is one nothing answered.
+ */
+export const CALLBACK_TIMEOUT_MS = 10_000;
+
+/** The receiver's answer, or an error once CALLBACK_TIMEOUT_MS passed; the request is aborted then. */
+async function postWithTimeout(fetchImpl: typeof fetch, url: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      const err = new Error(`no answer within ${CALLBACK_TIMEOUT_MS / 1000} s`);
+      controller.abort(err);
+      reject(err);
+    }, CALLBACK_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([fetchImpl(url, { ...init, signal: controller.signal }), timedOut]);
+  } catch (e) {
+    // The fetch's own abort error says less than why it was aborted.
+    throw controller.signal.aborted ? controller.signal.reason : e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** One delivery attempt: the HTTP status, or null with the error when nothing answered. */
 export async function deliverOnce(url: string, payload: unknown, keyHash: string | null, fetchImpl: typeof fetch = fetch): Promise<{ status: number | null; error: string | null }> {
   if (!/^https:\/\//i.test(url)) return { status: null, error: "callback_url must be https" };
@@ -32,7 +63,7 @@ export async function deliverOnce(url: string, payload: unknown, keyHash: string
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (keyHash) headers["X-Demo-Signature"] = await signBody(body, keyHash);
   try {
-    const res = await fetchImpl(url, { method: "POST", headers, body });
+    const res = await postWithTimeout(fetchImpl, url, { method: "POST", headers, body });
     return { status: res.status, error: res.ok ? null : `HTTP ${res.status}` };
   } catch (e) {
     return { status: null, error: e instanceof Error ? e.message : String(e) };
@@ -58,7 +89,7 @@ export async function deliverCallback(
     if (delays[i] > 0) await sleep(delays[i]);
     status.attempts += 1;
     try {
-      const res = await doFetch(url, { method: "POST", headers, body });
+      const res = await postWithTimeout(doFetch, url, { method: "POST", headers, body });
       status.last_status = res.status;
       if (res.ok) {
         status.delivered = true;
