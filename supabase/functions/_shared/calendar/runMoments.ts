@@ -25,7 +25,7 @@ import { learnFromSignal, loadClientVoice } from "../voice/load.ts";
 import { clientCompanyId, isClientPost, platformName, type OwnPost } from "./evidence.ts";
 import {
   belongsToSpace, blockedCategories, checkJudgement, clientCountries, competitorMentions, filterMoments, judgePrompt, momentHistory, momentsListPrompt,
-  parseMomentsList, GLOBAL, JUDGE_SCHEMA, LIST_WEEKS, SENSITIVE_CATEGORIES, type DroppedMoment, type HistoryPost, type JudgeInput, type JudgeOwnPost, type Moment,
+  parseMomentsList, readsAsMoments, GLOBAL, JUDGE_SCHEMA, LIST_WEEKS, SENSITIVE_CATEGORIES, type DroppedMoment, type HistoryPost, type JudgeInput, type JudgeOwnPost, type Moment,
   type MomentHistory,
 } from "./moments.ts";
 import { CLIENT_COLUMNS, feedSnapshots, retryWait, type WeekJob, type WeekJobOutcome } from "./runWeek.ts";
@@ -108,13 +108,15 @@ export async function runMomentsList(admin: Db, job: WeekJob, now = new Date()):
       const u = usageOf(result.raw);
       used.input += u.input; used.output += u.output; used.searches += u.searches;
       if (result.stopReason === "refusal") throw new Error("The moments list was declined.");
+      // QA 22 Nov 2026: a list cut off at its token limit is half a list; asked again, never recorded as found none.
+      if (result.stopReason === "max_tokens") throw new Error("The moments list was cut off.");
       if (result.stopReason !== "pause_turn") { text = result.text; break; }
       // A long search pauses; the turn is sent back as it came so the search goes on.
       if (turn + 1 >= MAX_TURNS) throw new Error("The moments search did not finish.");
       messages = [...messages, { role: "assistant", content: (result.raw as Any)?.content ?? [] }];
     }
     const moments = parseMomentsList(text, { country, from: week, through });
-    if (!moments.length && !/"moments"\s*:\s*\[/.test(text)) throw new Error("The moments list could not be read.");
+    if (!readsAsMoments(text)) throw new Error("The moments list could not be read.");
     const at = now.toISOString();
     if (moments.length) {
       const { error } = await admin.from("moments").upsert(moments.map((m) => ({ ...m, listed_for: week, updated_at: at })), { onConflict: "key,date" });
@@ -364,7 +366,7 @@ export async function runWeekMoments(admin: Db, job: WeekJob, now = new Date()):
       } });
       const u = usageOf(result.raw);
       used.input += u.input; used.output += u.output;
-      if (result.stopReason === "refusal" || !/"moments"\s*:\s*\[/.test(result.text)) continue;
+      if (result.stopReason === "refusal" || result.stopReason === "max_tokens" || !readsAsMoments(result.text)) continue;
       checked = checkJudgement(result.text, input, best);
     }
     if (!checked) throw new Error("The moments' judgement could not be read.");

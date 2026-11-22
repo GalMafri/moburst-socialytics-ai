@@ -82,6 +82,16 @@ function jsonObject(text: string): Record<string, unknown> | null {
   try { return JSON.parse(text.slice(start, end + 1)); } catch { return null; }
 }
 
+/**
+ * True when a reply is a whole moments answer: its JSON reads and holds a
+ * moments array. QA 22 Nov 2026: a reply cut off at max_tokens still matched
+ * a `"moments":[` regex, so a half list was recorded as "found none" and a
+ * half judgement dropped every moment as unanswered, both for good.
+ */
+export function readsAsMoments(text: string): boolean {
+  return Array.isArray(jsonObject(text)?.moments);
+}
+
 /** Lowercase words with accents, punctuation and years removed. */
 function words(s: string): string {
   return String(s || "").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/&/g, " and ")
