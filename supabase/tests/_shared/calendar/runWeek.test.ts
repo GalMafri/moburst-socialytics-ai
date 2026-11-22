@@ -613,7 +613,8 @@ describe("runWeekRevise", () => {
 
     it("rewrites only the posts nobody worked on, and keeps what a person's own revision rewrote", async () => {
       const { out, prompt, asked, entry } = await run(null);
-      expect(asked.sort()).toEqual(["k1", "k2", "k3"]);
+      // k1 is asked again right before its rewrite is written (QA 22 Nov 2026: a design started during the call keeps its copy).
+      expect(asked.sort()).toEqual(["k1", "k1", "k2", "k3"]);
       // Only p1 is sent to be rewritten; the others are shown as the week's other posts.
       expect(prompt).toContain("- [p1] ");
       expect(prompt).not.toContain("- [p2] ");

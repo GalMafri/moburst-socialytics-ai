@@ -934,10 +934,18 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
       refused = [...second.refused, ...first.refused.filter((r) => !rewrittenNow.has(r.id) && !second.refused.some((x) => x.id === r.id))];
     }
 
+    // QA 22 Nov 2026: asked again right before writing. A person who pressed
+    // Design or scheduled a post during the model call changed nothing the
+    // update below is guarded on, and the design or the Sprout post was left
+    // with copy the calendar no longer showed.
+    const workedSince = await workedOn(admin, client.id, planPosts.filter((p) => !worked.has(p.id)));
+    for (const id of workedSince) if (targets.some((t) => t.id === id)) kept.push(id);
+
     const replaced: Array<Record<string, unknown>> = [];
     /** The new copy of each post rewritten, by its key. */
     const rewrote = new Map<string, string>();
     for (const r of revised) {
+      if (workedSince.has(String(r.id))) continue;
       const was = targets.find((p) => p.id === r.id)!;
       const patch: Record<string, unknown> = { copy: r.copy, hashtags: r.hashtags, cta: r.cta, visual_direction: r.visual_direction, ...(r.pillar ? { pillar: r.pillar } : {}), ...(r.reason ? { reasons: [r.reason] } : {}) };
       // Only if nobody changed the copy or moved the post since it was read, and it is still the plan's.
@@ -949,7 +957,7 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
       }
     }
     // A planned Story takes its post's new copy, the message its frame is written from, only when nobody worked on the Story.
-    for (const st of planPosts.filter((p) => isStoryPost(p) && p.story_of && rewrote.has(p.story_of) && !worked.has(p.id))) {
+    for (const st of planPosts.filter((p) => isStoryPost(p) && p.story_of && rewrote.has(p.story_of) && !worked.has(p.id) && !workedSince.has(p.id))) {
       const { data: updated, error: updateError } = await admin.from("calendar_posts").update({ copy: rewrote.get(st.story_of) }).eq("id", st.id).eq("copy", st.copy ?? "").is("touched_at", null).eq("plan_id", plan.id).select("id");
       if (updateError) throw new Error(`Could not rewrite a Story: ${updateError.message}`);
       if (updated?.length) replaced.push({ id: st.id, copy: st.copy, hashtags: st.hashtags, cta: st.cta, pillar: st.pillar, visual_direction: st.visual_direction, reasons: st.reasons });
