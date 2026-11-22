@@ -34,6 +34,17 @@ function readBrokerReply(data: unknown, requestId: string): BrokerReply | null {
   };
 }
 
+/** localStorage when it can be read; undefined when the browser blocks it. */
+function usableLocalStorage(): Storage | undefined {
+  try {
+    const storage = window.localStorage;
+    storage.getItem('sb-storage-check');
+    return storage;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * On a Lovable preview surface, broker the auth session to the editor over
  * postMessage so the project's preview surfaces share one login; else localStorage.
@@ -55,7 +66,9 @@ export function brokeredPreviewStorage(): PreviewAuthStorage | undefined {
   // detached frame has no parent and not every browser implements ancestorOrigins.
   const parentWindow = window.parent as Window | null;
   const framed = parentWindow !== null && parentWindow !== window;
-  if (!projectId || !framed) return localStorage;
+  // QA 22 Nov 2026: with site data blocked, reading localStorage throws, and this runs while the client
+  // module loads, so the app never drew. Undefined lets supabase-js keep the session for the tab instead.
+  if (!projectId || !framed) return usableLocalStorage();
 
   // Post only to the real editor ancestor, validated as a Lovable origin, so the
   // session token can never reach an untrusted embedder.
