@@ -44,6 +44,11 @@ async function readBody(ctx: InvokeContext | undefined): Promise<Record<string, 
   }
 }
 
+/** The plain sentence for a code the functions send with a failure, or null for a code with none. */
+export function codeSentence(code: string | null | undefined): string | null {
+  return code && Object.prototype.hasOwnProperty.call(BY_CODE, code) ? BY_CODE[code] : null;
+}
+
 /** The code the function sent with a non-2xx reply (its body's `code`), or null when the reply has none. */
 export async function invokeErrorCode(error: unknown): Promise<string | null> {
   const body = await readBody((error as { context?: unknown } | null)?.context as InvokeContext | undefined);
