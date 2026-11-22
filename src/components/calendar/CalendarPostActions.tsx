@@ -15,7 +15,16 @@ import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
-export function CalendarPostActions({ postId, clientId, date, onDone }: { postId: string; clientId?: string; date: string; onDone: () => void }) {
+type Props = { postId: string; clientId?: string; date: string; onDone: () => void };
+
+// QA 22 Nov 2026: the post panel stays mounted when it switches to another
+// post, and the move date, "not moved yet" and "not deleted yet" belong to the
+// post they were set for. Each post (and each date it is on) gets its own.
+export function CalendarPostActions(props: Props) {
+  return <PostActions key={`${props.postId}:${props.date}`} {...props} />;
+}
+
+function PostActions({ postId, clientId, date, onDone }: Props) {
   const qc = useQueryClient();
   const [moveTo, setMoveTo] = useState(date);
   const [moving, setMoving] = useState(false);
