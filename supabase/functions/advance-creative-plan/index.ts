@@ -34,6 +34,7 @@ import { artworkQuestionV2, heroPromptV2, isLibraryV2, pickV2, templateV2 } from
 import { FORMAT_DIMENSIONS } from '../_shared/design-system/types.ts';
 import { bytesToDataUrl, urlToDataUrl } from '../_shared/render/hero.ts';
 import { counterText, wholePostCorrection, wholePostExpectedText, wholePostPrompt, wholePostQuestion } from '../_shared/design-prompts/wholePost.ts';
+import { STALE_PENDING_MS, submittedGivenUp } from './stale.ts';
 
 const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-socialytics-secret' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -70,7 +71,6 @@ async function imagePartFromUrl(url: string) {
   return { type: 'image', source: { type: 'base64', media_type: mime, data: btoa(binary) } };
 }
 const REVIEWS_PER_TICK = 2;
-const STALE_PENDING_MS = 5 * 60 * 1000;
 
 type Job = { id: string; status: string; request_id: string | null; output_url: string | null; error: string | null; review: any; input: any; post_iteration_id: string | null; created_at: string };
 type Prepared = { hero_url: string; soft_url: string; width: number; height: number };
@@ -253,8 +253,14 @@ async function advancePlan(db: any, creative: any, budget: { reviews: number }):
           job = { ...job, status: 'failed', error: snapshot.error };
         }
       } catch (err) {
-        // A lookup failure is not evidence about the render; try again next tick.
+        // A lookup failure is not evidence about the render; try again next tick, until the job is
+        // too old for a render still to be on its way (QA 22 Nov 2026, P37-03: it was asked about for ever).
         console.warn('[advance-creative-plan] provider check failed:', err instanceof Error ? err.message : err);
+        if (submittedGivenUp(job.created_at, Date.now())) {
+          const error = 'The image service could not say where this image stands.';
+          await db.from('media_jobs').update({ status: 'failed', error, updated_at: new Date().toISOString() }).eq('id', job.id);
+          job = { ...job, status: 'failed', error };
+        }
       }
     }
     if (job.status === 'completed' && job.output_url && !job.review && budget.reviews > 0) {
