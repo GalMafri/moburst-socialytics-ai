@@ -13,7 +13,17 @@ Deno.serve(async (req) => {
     if (!plan_id || !client_id) return json({ error: 'plan_id and client_id are required' }, 400);
     await requireStaff(req, { writeClientId: client_id });
     const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-    const creative = await loadCreativePlan(db, plan_id, client_id);
+    // QA 22 Nov 2026 (P57-03): a plan that can never load again (not this
+    // client's, or its client's references changed) was answered with the
+    // same 500 as an outage, so the post panel asked for it on every render.
+    // loadCreativePlan throws only those refusals: answered 409 with a code
+    // the caller can stop on.
+    let creative: Awaited<ReturnType<typeof loadCreativePlan>>;
+    try {
+      creative = await loadCreativePlan(db, plan_id, client_id);
+    } catch (e) {
+      return json({ code: 'plan_unavailable', error: e instanceof Error ? e.message : 'This creative direction can no longer be loaded.' }, 409);
+    }
     const { data: client } = await db.from('clients').select('logo_url,brand_identity').eq('id', client_id).maybeSingle();
     const previews = await Promise.all(creative.reference_paths.map(async (p: string) => {
       const { data, error } = await db.storage.from('design-references').createSignedUrl(p, 3600);
