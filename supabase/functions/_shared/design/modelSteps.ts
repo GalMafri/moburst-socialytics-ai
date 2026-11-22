@@ -18,6 +18,7 @@
 
 import { notePicture } from "../picture/client.ts";
 import { jobFolder } from "./coverDesign.ts";
+import { siblingStands } from "./carouselLogo.ts";
 
 /** Designs made for one job before it fails (a design with wrong words, a ground no logo file shows on, a mark that cannot be cleaned out or something across the logo is made again); a carousel's slide after the cover may use more that its option's other slides left (slideAllowance). */
 export const MAX_GENERATIONS = 3;
@@ -79,7 +80,9 @@ export function endedFor(redesigns: unknown): string {
  * are finished (the option was over, every slide thrown away, and a new
  * option designed every slide from the start). The facts are the counts on
  * the option's rows for the same cover design (coverDesign.ts, for_cover):
- *   more: a design that a finished slide left unused is free;
+ *   more: a design that a finished slide left unused is free (a slide
+ *         whose checks passed and that waits for the cover's logo
+ *         decision is finished for this);
  *   wait: none is free yet, and a slide still at work may leave one;
  *   over: none is free and none can be; the job ends as before.
  * Two slides that read the same free design at once may both use it, so the
@@ -104,10 +107,16 @@ export function slideAllowance(job: Pick<ModelJob, "id" | "state">, slides: Slid
   if (others.some((r) => r.status !== "done" && r.status !== "queued" && r.status !== "running")) return "over";
   let free = -Math.max(0, made(job.state) - MAX_GENERATIONS);
   let mayLeave = false;
+  // QA 22 Nov 2026: a slide whose checks have passed for the cover design this slide is drawn from waits only for
+  // the cover's logo decision, and the cover waits for this slide: its count is as final as a done slide's. Counted
+  // as one that may still leave a design, it kept the cover, it and this slide waiting on each other until the
+  // 90-minute cut.
+  const coverPath = typeof job.state?.cover_path === "string" ? job.state.cover_path : null;
+  const final = (r: SlideRow) => r.status === "done" || (coverPath !== null && siblingStands({ status: r.status, step: "", state: r.state ?? null }, coverPath) === "ready");
   for (const r of others) {
     const n = made(r.state);
     // A finished slide's count is final: what it left is free, and what it used past its share is already spent.
-    if (r.status === "done") free += MAX_GENERATIONS - n;
+    if (final(r)) free += MAX_GENERATIONS - n;
     else {
       free -= Math.max(0, n - MAX_GENERATIONS);
       if (n < MAX_GENERATIONS) mayLeave = true;

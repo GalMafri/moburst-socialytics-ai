@@ -79,7 +79,10 @@
 // that are each going on by themselves to an end of their own (checks
 // passed and place settled, done, failed or canceled), and a slide waits
 // only for a cover that is alive, on the same design and has not decided.
-// Settling the place waits for nothing.
+// Settling the place waits for nothing. A slide that has used its own
+// designs and waits for one a sibling may leave (modelSteps.ts,
+// slideAllowance) counts a sibling that is ready here as finished, so it
+// never waits on a slide that waits on the cover (QA 22 Nov 2026).
 //
 // A single design, a video and a legacy video card are no carousel
 // (inCarousel): none of this runs for them, and their state has none of
