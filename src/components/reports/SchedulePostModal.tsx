@@ -467,6 +467,10 @@ export function SchedulePostModal({
             </ul>
           )}
           {/* The outcome of this press. With no earlier send, the post is not in Sprout; with one, only this press failed. */}
+          {/* QA 22 Nov 2026 (P61-02): Sprout drafts cannot be changed or removed from here, so a second send adds a second draft. */}
+          {sendState === "sent" && !notScheduled && (
+            <p className="t-secondary">Sending again makes a second draft in Sprout. The first draft stays there until it is removed in Sprout.</p>
+          )}
           {notScheduled && (
             <p role="status" className="t-secondary">
               {sendState === "none" ? "Not sent to Sprout yet. Everything above is kept as it is." : "This send did not go through. Everything above is kept as it is."}

@@ -53,6 +53,16 @@ describe("one post's send state on the Schedule tab and in the dialog", () => {
     expect(await within(dialog).findByText("Sprout did not confirm this post. Send it again to be sure it is there.")).toBeTruthy();
   });
 
+  it("says in the dialog that sending a sent post again adds a second draft (P61-02)", async () => {
+    f.rows = [{ id: "row-9", status: "scheduled", created_at: new Date().toISOString(), calendar_post_key: "post:abc", scheduled_time: "2030-09-21T15:00:00Z", sprout_post_id: "sp-1" }];
+    mount();
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Schedule" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Schedule" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Send to Sprout|Send again/ }));
+    const dialog = await screen.findByRole("dialog", { name: /Send to Sprout/ });
+    expect(await within(dialog).findByText(/Sending again makes a second draft in Sprout/)).toBeTruthy();
+  });
+
   it("says being sent in both while that send can still be running", async () => {
     f.rows = [{ id: "row-9", status: "asked", created_at: new Date().toISOString(), calendar_post_key: "post:abc", scheduled_time: "2030-09-21T15:00:00Z" }];
     mount();
