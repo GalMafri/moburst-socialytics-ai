@@ -50,7 +50,7 @@ export function NoteBox({ value, onChange, onSubmit, onCancel, busy, kept, place
 }
 
 /** What a note taught the brand, under the regeneration it made, with Undo when there is something to take back. */
-export function LearnedNote({ text, onUndo, undoing }: { text: string; onUndo?: () => void; undoing?: boolean }) {
+export function LearnedNote({ text, onUndo, undoing, notUndone }: { text: string; onUndo?: () => void; undoing?: boolean; notUndone?: boolean }) {
   return (
     <p role="status" className="t-secondary">
       {text}
@@ -62,6 +62,8 @@ export function LearnedNote({ text, onUndo, undoing }: { text: string; onUndo?: 
           </button>
         </>
       )}
+      {/* QA 22 Nov 2026: an Undo that did not get through says so, and Undo stays to press again. */}
+      {notUndone && !undoing && <> Not undone yet.</>}
     </p>
   );
 }

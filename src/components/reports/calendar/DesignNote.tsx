@@ -15,6 +15,7 @@ import { useDesignRequests } from "./DesignRequestsContext";
 export function DesignNote({ request, brand, made = false }: { request: Pick<DesignRequest, "id" | "note" | "note_learned">; brand?: string | null; made?: boolean }) {
   const ctx = useDesignRequests();
   const [undoing, setUndoing] = useState(false);
+  const [notUndone, setNotUndone] = useState(false);
   /** The request as Undo answered it, until the shared list catches up. */
   const [answered, setAnswered] = useState<DesignRequest | null>(null);
   const note = request.note?.trim();
@@ -23,15 +24,17 @@ export function DesignNote({ request, brand, made = false }: { request: Pick<Des
   const line = designLearnedLine(learned, brand);
   const undo = async () => {
     setUndoing(true);
+    setNotUndone(false);
     const updated = await undoDesignNote(request.id);
     if (updated) setAnswered(updated);
+    setNotUndone(!updated);
     setUndoing(false);
     ctx?.refresh();
   };
   return (
     <div className="space-y-1">
       <p className="t-secondary">{made ? "Made with your note" : "Your note"}: "{note}"</p>
-      {line && <LearnedNote text={line.text} onUndo={line.undo ? () => void undo() : undefined} undoing={undoing} />}
+      {line && <LearnedNote text={line.text} onUndo={line.undo ? () => void undo() : undefined} undoing={undoing} notUndone={notUndone} />}
     </div>
   );
 }

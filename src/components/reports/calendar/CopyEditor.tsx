@@ -46,6 +46,7 @@ export function CopyEditor({ post, clientId, reportId, brand, onCopySaved }: Pro
   const [notRewritten, setNotRewritten] = useState(false);
   const [noteResult, setNoteResult] = useState<NoteResult | null>(null);
   const [undoing, setUndoing] = useState(false);
+  const [notUndone, setNotUndone] = useState(false);
   useEffect(() => {
     setDisplayCopy(initialCopy);
     setEditedCopy(initialCopy);
@@ -56,6 +57,7 @@ export function CopyEditor({ post, clientId, reportId, brand, onCopySaved }: Pro
     setNote("");
     setNotRewritten(false);
     setNoteResult(null);
+    setNotUndone(false);
   }, [post._calendarPostKey]);
 
   const saveRevision = async (copy: string, generated?: any, rewriteNote?: string): Promise<{ updated: CalendarPost; learned: { changes?: LearnedChange[] } | null }> => {
@@ -205,6 +207,7 @@ export function CopyEditor({ post, clientId, reportId, brand, onCopySaved }: Pro
         setNote("");
         // A rewrite with a note says what the note taught the brand, with Undo.
         setNoteResult(rewriteNote ? { learned, undone: false } : null);
+        setNotUndone(false);
         toast.success(story ? "Message regenerated" : "Copy regenerated");
       }
     } catch (err: any) {
@@ -229,8 +232,11 @@ export function CopyEditor({ post, clientId, reportId, brand, onCopySaved }: Pro
     const changes = noteResult?.learned?.changes;
     if (!clientId || !changes?.length) return;
     setUndoing(true);
-    // Sent again quietly; the line changes once the server has taken it back.
-    if (await undoCopyNote(clientId, changes)) setNoteResult((r) => (r ? { ...r, undone: true } : r));
+    setNotUndone(false);
+    // Sent again quietly; the line changes once the server has taken it back, and says when it has not.
+    const undone = await undoCopyNote(clientId, changes);
+    if (undone) setNoteResult((r) => (r ? { ...r, undone: true } : r));
+    setNotUndone(!undone);
     setUndoing(false);
   };
   const learnedLine = noteResult ? copyLearnedLine(noteResult.learned, brand, { undone: noteResult.undone }) : null;
@@ -287,7 +293,7 @@ export function CopyEditor({ post, clientId, reportId, brand, onCopySaved }: Pro
               </div>
             )}
           </div>
-          {learnedLine && <LearnedNote text={learnedLine.text} onUndo={learnedLine.undo ? () => void undoNote() : undefined} undoing={undoing} />}
+          {learnedLine && <LearnedNote text={learnedLine.text} onUndo={learnedLine.undo ? () => void undoNote() : undefined} undoing={undoing} notUndone={notUndone} />}
           {clientId && noteOpen && (
             <NoteBox
               value={note}
