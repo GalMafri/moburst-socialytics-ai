@@ -7,6 +7,7 @@
 
 import { quoteVideo, VIDEO_MODEL, type ToolCaller, type VideoRequest } from "../higgsfield/generate.ts";
 import { CLIP_CREDIT_FLOOR } from "./credits.ts";
+import { CLIP_LOST_MS } from "./clipWindow.ts";
 import { VERTICAL, type VideoFrame } from "./videoSize.ts";
 
 /**
@@ -123,8 +124,8 @@ export function clipOrderDecision(
   return { action: "order" };
 }
 
-/** A clip not back this long after its order is taken as lost (Seedance usually takes 3 to 10 minutes). */
-export const CLIP_LOST_MS = 3 * 60 * 60_000;
+/** A clip not back this long after its order is taken as lost: see clipWindow.ts. */
+export { CLIP_LOST_MS };
 
 /** A clip's end other than ready. "completed" is not one: completed without its file is asked about again. */
 const ENDED = new Set(["failed", "nsfw", "canceled", "timed_out"]);

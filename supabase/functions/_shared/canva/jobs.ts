@@ -15,6 +15,7 @@ import { jobLogos, restGround, stampList, type JobLogos, type LogoSet, type Stam
 import { jobShape, pagePlacement } from "../design/platformSize.ts";
 import { isVertical, videoFrameOf } from "../video/videoSize.ts";
 import { stampFor } from "../video/logoGround.ts";
+import { clipStillRendering } from "../video/clipWindow.ts";
 import { type CoverJob, forSameCover } from "../design/coverDesign.ts";
 
 export const BUCKET = "generated-media";
@@ -485,7 +486,10 @@ export async function endOverdueRequests(admin: any, now: Date = new Date()): Pr
     if (!requestOverdue(r, now)) continue;
     // QA 22 Nov 2026: a design that finished just before the limit, not handed to the post yet, was lost with its
     // request. A request with a finished option is settled first: the design reaches the post, the request ends ready.
-    const { data: jobs } = await admin.from("canva_finish_jobs").select("status, option_index, slide_count").eq("design_request_id", r.id);
+    const { data: jobs } = await admin.from("canva_finish_jobs").select("status, option_index, slide_count, clip_order").eq("design_request_id", r.id);
+    // QA 22 Nov 2026 (P53-06): a video whose paid clip is still rendering keeps its request open until the clip
+    // is back or taken as lost (CLIP_LOST_MS); closing it at 90 minutes threw the paid clip away.
+    if ((jobs ?? []).some((j: { status?: string; clip_order?: unknown }) => (j.status === "queued" || j.status === "running") && clipStillRendering(j.clip_order, now))) continue;
     const finished = optionStates((jobs ?? []) as Array<JobState & { option_index: number; slide_count?: number | null }>).some((o) => o.status === "done");
     if (finished) {
       try {
