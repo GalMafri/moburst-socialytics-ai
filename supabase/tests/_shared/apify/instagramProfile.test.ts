@@ -43,4 +43,16 @@ describe("readInstagramBio", () => {
     expect(await readInstagramBio(apify, "olo.hq")).toEqual({ state: "failed", run_id: "r1", status: "FAILED" });
     expect(calls.some((c) => c.startsWith("items"))).toBe(false);
   });
+
+  // QA 22 Nov 2026 (P24-05): a run that found no profile read the same as a profile with no bio.
+  it("answers a run whose dataset holds no item for the handle, or only an error item, as failed", async () => {
+    for (const items of [[], [{ error: "not_found", errorDescription: "Profile does not exist" }], [{ ...ITEM, username: "someone.else" }]]) {
+      const { apify } = fake([run("SUCCEEDED")], items);
+      expect(await readInstagramBio(apify, "olo.hq", { runId: "r1" })).toEqual({ state: "failed", run_id: "r1", status: "EMPTY" });
+    }
+  });
+  it("still answers a profile that was read and has no bio as read, with no bio", async () => {
+    const { apify } = fake([run("SUCCEEDED")], [{ username: "olo.hq", biography: "" }]);
+    expect(await readInstagramBio(apify, "olo.hq", { runId: "r1" })).toMatchObject({ state: "read", bio: null });
+  });
 });

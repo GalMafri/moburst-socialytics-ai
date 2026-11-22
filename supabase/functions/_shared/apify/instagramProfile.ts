@@ -52,8 +52,21 @@ export function bioFromItem(item: unknown, handle: string): InstagramBio | null 
   return { handle: handle.replace(/^@/, ""), biography: biography.slice(0, 600), links: [...links].slice(0, 5), full_name: clean(o.fullName), category: clean(o.businessCategoryName) };
 }
 
+/** An item the actor wrote for this profile: not an error item, and for the handle asked about. */
+function isProfileItem(item: unknown, handle: string): boolean {
+  if (!item || typeof item !== "object") return false;
+  const o = item as Record<string, unknown>;
+  if (o.error) return false;
+  const username = clean(o.username)?.toLowerCase();
+  return !username || username === handle.toLowerCase().replace(/^@/, "");
+}
+
 async function finished(apify: ApifyClient, runId: string, datasetId: string, handle: string, usd: unknown): Promise<BioRead> {
   const items = await apify.datasetItems(datasetId, { pageSize: 10, maxItems: 10 });
+  // QA 22 Nov 2026 (P24-05): a run that found no profile (blocked, private,
+  // not found: nothing, or only an error item) is a read that did not happen,
+  // for the caller to try again; a profile read with no bio is a read.
+  if (!items.some((i) => isProfileItem(i, handle))) return { state: "failed", run_id: runId, status: "EMPTY" };
   const bio = items.map((i) => bioFromItem(i, handle)).find(Boolean) ?? null;
   return { state: "read", bio, run_id: runId, usd: typeof usd === "number" ? usd : null };
 }
