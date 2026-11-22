@@ -64,9 +64,18 @@ export interface DesignRequest {
 
 export { pngSize } from "../picture/headers.ts";
 
+/** The client's logo file is not in storage: no option can be started from it until someone stores a logo again. */
+export class LogoGone extends Error {}
+
 async function logoBytes(admin: any, path: string): Promise<Uint8Array> {
   const { data, error } = await admin.storage.from(BUCKET).download(path);
-  if (error || !data) throw new Error(`Could not read the logo file: ${error?.message ?? "missing"}`);
+  if (error || !data) {
+    // QA 22 Nov 2026: storage's "not found" is told from a read that failed right now, which is tried again.
+    const status = String(error?.statusCode ?? error?.status ?? error?.originalError?.status ?? "");
+    const gone = !error || status === "404" || /not.?found|missing|does not exist/i.test(String(error?.message ?? ""));
+    const why = `Could not read the logo file: ${error?.message ?? "missing"}`;
+    throw gone ? new LogoGone(why) : new Error(why);
+  }
   return new Uint8Array(await data.arrayBuffer());
 }
 
@@ -321,21 +330,28 @@ async function wasInUse(admin: any, iterationId: string): Promise<boolean> {
  * chose other media for the post), start a
  * replacement for any option that did not finish, and record the stage.
  */
-export async function settleRequest(admin: any, requestId: string): Promise<void> {
+export async function settleRequest(admin: any, requestId: string, overdue = false): Promise<boolean> {
   // The Canva worker and the video worker both settle requests; one at a time
   // per request, so a finished design is handed to its post once.
   const holder = crypto.randomUUID();
   const lease = `settle:${requestId}`;
   const { data: claimed } = await admin.rpc("claim_worker_lease", { p_name: lease, p_holder: holder, p_seconds: 60 });
-  if (!claimed) return;
+  if (!claimed) return false;
   try {
-    await settleRequestNow(admin, requestId);
+    await settleRequestNow(admin, requestId, overdue);
   } finally {
     await admin.rpc("release_worker_lease", { p_name: lease, p_holder: holder });
   }
+  return true;
 }
 
-async function settleRequestNow(admin: any, requestId: string): Promise<void> {
+/**
+ * `overdue`: the request is past REQUEST_MAX_MINUTES (endOverdueRequests).
+ * Its finished options are still handed to the post, then it ends: ready
+ * with the designs it made, its other jobs stopped, or closed as
+ * "no_progress" when it made none. Nothing more is started for it.
+ */
+async function settleRequestNow(admin: any, requestId: string, overdue = false): Promise<void> {
   const { data: req } = await admin.from("design_requests").select("*").eq("id", requestId).maybeSingle();
   if (!req || req.status !== "preparing") return;
   const { data: jobs } = await admin.from("canva_finish_jobs").select("id, status, step, option_index, slide_index, slide_count, output_path, state, input, error").eq("design_request_id", requestId).order("created_at");
@@ -391,6 +407,16 @@ async function settleRequestNow(admin: any, requestId: string): Promise<void> {
   }
 
   const options = optionStates(list);
+  if (overdue) {
+    const ready = options.filter((o) => o.status === "done").length;
+    if (!ready) return endRequest(admin, requestId, "no_progress", `No design after ${REQUEST_MAX_MINUTES} minutes.`);
+    const now = new Date().toISOString();
+    await admin.from("canva_finish_jobs").update({ status: "canceled", lease_until: null, updated_at: now })
+      .eq("design_request_id", requestId).in("status", ["queued", "running"]);
+    await admin.from("design_requests").update({ status: "ready", stage: "ready", options_ready: ready, ended_at: now, updated_at: now })
+      .eq("id", requestId).eq("status", "preparing");
+    return;
+  }
   // A video starts one option only (each buys a clip), so it is never replaced.
   const progress = requestProgress(options, req.options_wanted, (req.briefs ?? []).length, candidatesFor(req.kind));
   // Every option tried and none finished: closed, and made again later. A
@@ -404,7 +430,14 @@ async function settleRequestNow(admin: any, requestId: string): Promise<void> {
     const { data: settings } = await admin.from("design_brand_settings").select("*").eq("client_id", req.client_id).maybeSingle();
     if (!settings) return endRequest(admin, requestId, "no_design", "The client's design settings are gone.");
     const { data: client } = await admin.from("clients").select("name").eq("id", req.client_id).maybeSingle();
-    await startOption(admin, req, settings, client?.name ?? "the brand", progress.start_brief, started);
+    try {
+      await startOption(admin, req, settings, client?.name ?? "the brand", progress.start_brief, started);
+    } catch (e) {
+      // QA 22 Nov 2026: a replacement that cannot start because the logo file is gone ends the request with the
+      // reason, instead of failing every pass until the 90-minute cut. A read that failed right now is tried again.
+      if (e instanceof LogoGone) return endRequest(admin, requestId, "no_design", "The client's logo file is gone from storage.");
+      throw e;
+    }
     started += 1;
   }
   await admin.from("design_requests").update({
@@ -438,7 +471,8 @@ export async function endRequest(admin: any, requestId: string, reason: EndReaso
  * End every request that has been prepared for longer than REQUEST_MAX_MINUTES
  * (requestOverdue), the way a request whose planning stopped ends: quietly, as
  * "no_progress", its jobs stopped, the post counted again by the week's design
- * button. Run at the start of every worker pass, so a request is never handed
+ * button. A request with a finished option ends ready instead, with its
+ * designs handed to the post (settleRequest, overdue). Run at the start of every worker pass, so a request is never handed
  * more work after its time is up and no stuck step can keep it open. Returns
  * the ids it ended.
  */
@@ -449,6 +483,21 @@ export async function endOverdueRequests(admin: any, now: Date = new Date()): Pr
   const ended: string[] = [];
   for (const r of data ?? []) {
     if (!requestOverdue(r, now)) continue;
+    // QA 22 Nov 2026: a design that finished just before the limit, not handed to the post yet, was lost with its
+    // request. A request with a finished option is settled first: the design reaches the post, the request ends ready.
+    const { data: jobs } = await admin.from("canva_finish_jobs").select("status, option_index, slide_count").eq("design_request_id", r.id);
+    const finished = optionStates((jobs ?? []) as Array<JobState & { option_index: number; slide_count?: number | null }>).some((o) => o.status === "done");
+    if (finished) {
+      try {
+        // Another worker settling it now: it is ended by a later pass.
+        if (!(await settleRequest(admin, r.id, true))) continue;
+        ended.push(r.id);
+        continue;
+      } catch (e) {
+        // A design that cannot be handed over ends with its request, as before; the request is never kept open by it.
+        console.error(`[design] request ${r.id}: its finished design could not be handed to the post:`, e instanceof Error ? e.message : e);
+      }
+    }
     await endRequest(admin, r.id, "no_progress", `No design after ${REQUEST_MAX_MINUTES} minutes.`);
     ended.push(r.id);
   }
