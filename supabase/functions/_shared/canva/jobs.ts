@@ -17,6 +17,7 @@ import { isVertical, videoFrameOf } from "../video/videoSize.ts";
 import { stampFor } from "../video/logoGround.ts";
 import { clipStillRendering } from "../video/clipWindow.ts";
 import { type CoverJob, forSameCover } from "../design/coverDesign.ts";
+import { holdRenewal } from "./hold.ts";
 
 export const BUCKET = "generated-media";
 
@@ -522,6 +523,9 @@ export type Claim = "claimed" | "lost" | "failed";
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function renewJobLease(admin: any, job: CoverJob, now: Date, ms: number): Promise<void> {
+  // Held work renews the hold's own lease, never one beside it (canva/hold.ts, holdRenewal).
+  const held = holdRenewal(job);
+  if (held) return held();
   await forSameCover(admin.from("canva_finish_jobs").update({ lease_until: new Date(now.getTime() + ms).toISOString(), updated_at: now.toISOString() })
     .eq("id", job.id).in("status", ["queued", "running"]), job);
 }

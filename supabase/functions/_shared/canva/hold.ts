@@ -28,6 +28,21 @@ import { ACTIVE_JOB, recordStepError, type StepJob, type StepLimits } from "./st
 /** How often a held job's lease is renewed while its work runs. */
 export const HOLD_RENEW_MS = 60_000;
 
+/**
+ * The renewal of each job held in this runtime, by the job object its work
+ * runs with. A step that renews its job's lease from inside held work
+ * (video/frame.ts before its picture call, through canva/jobs.ts
+ * renewJobLease) renews the hold's own lease: a lease written beside it was
+ * no longer the hold's, so neither its renewals nor its end landed, and the
+ * step's work was lost and run again until the job failed (QA 22 Nov 2026).
+ */
+const holds = new WeakMap<object, () => Promise<void>>();
+
+/** The renewal of the hold this job is under in this runtime, or null when it is not held. */
+export function holdRenewal(job: object): (() => Promise<void>) | null {
+  return holds.get(job) ?? null;
+}
+
 /** Runs an update of the job's row and says whether it changed the row; for a slide after the cover, only while the row is for the cover design the run read (design/coverDesign.ts). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function changedRow(update: any, job: StepJob): Promise<boolean> {
@@ -52,13 +67,16 @@ export async function heldWork(
   // A job stopped meanwhile, or a slide whose row is another cover design's by now: the work is not started, so nothing is paid for it.
   if (!held) return;
   let renewing: Promise<void> = Promise.resolve();
-  const timer = setInterval(() => {
+  const renew = () => {
     renewing = renewing.then(async () => {
       const next = new Date(Date.now() + opts.leaseMs).toISOString();
       const renewed = await changedRow(rows().update({ lease_until: next, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE_JOB).eq("lease_until", lease), job).catch(() => false);
       if (renewed) lease = next;
     });
-  }, opts.renewEveryMs ?? HOLD_RENEW_MS);
+    return renewing;
+  };
+  const timer = setInterval(() => void renew(), opts.renewEveryMs ?? HOLD_RENEW_MS);
+  holds.set(job, renew);
   let failure: { e: unknown } | null = null;
   try {
     await work();
@@ -66,6 +84,7 @@ export async function heldWork(
     failure = { e };
   } finally {
     clearInterval(timer);
+    holds.delete(job);
     await renewing;
   }
   if (failure) {
