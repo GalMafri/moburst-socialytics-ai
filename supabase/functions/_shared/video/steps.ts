@@ -58,7 +58,7 @@ import { VIDEO_LIMITS } from "./advance.ts";
 import { type TitleDeps, runTitle, runTitleCheck } from "./titleStep.ts";
 import { runFrame } from "./frame.ts";
 import { FRAME_JPEG_QUALITY, KIT_JPEG_QUALITY } from "../picture/contract.ts";
-import { checkScript, endScript, startScript } from "./sandbox.ts";
+import { type ScriptState, checkScript, endScript, startScript } from "./sandbox.ts";
 import { isVertical, jobVideoFrame } from "./videoSize.ts";
 import { pagePlacement } from "../design/platformSize.ts";
 import { type GroundDeps, type VideoLogoPick, centeredIn, pickVideoLogo } from "./logoGround.ts";
@@ -71,6 +71,27 @@ const CHECK_TOKENS = roomFor(2000);
 export const VIDEO_POLL_MS = 30_000;
 const MAX_COMPOSE = 3;
 const MAX_CLIPS = 3;
+/**
+ * A sandbox script's longest run: the sandbox allows its script 900 seconds,
+ * so one still "running" after this never answers. It is given up as a
+ * failed run, as one that answered FAILED is (QA 22 Nov 2026, P53-04: the
+ * waits had no limit of their own, and a join that never answered held a
+ * paid clip until the request's 90-minute limit closed it).
+ */
+export const SCRIPT_MAX_MS = 30 * 60_000;
+
+/**
+ * A script's state with its time limit: timed from its start (startedKey in
+ * state), or from its first check for a session started before the limit was
+ * kept.
+ */
+function withinLimit(r: ScriptState, s: Record<string, unknown>, startedKey: string): ScriptState {
+  if (typeof s[startedKey] !== "number") s[startedKey] = Date.now();
+  if (r.state === "running" && Date.now() - (s[startedKey] as number) > SCRIPT_MAX_MS) {
+    return { state: "failed", reason: `The sandbox did not finish in ${SCRIPT_MAX_MS / 60_000} minutes.` };
+  }
+  return r;
+}
 /** Where filmed clips are kept, privately. */
 const FOOTAGE_BUCKET = "post-footage";
 const REFERENCES = "design-references";
@@ -138,22 +159,30 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       const { data: up, error } = await admin.storage.from(BUCKET).createSignedUploadUrl(audioPath, { upsert: true });
       if (error || !up?.signedUrl) throw new Error(`Could not prepare the sound's upload: ${error?.message ?? "no URL"}`);
       s.audio_path = audioPath;
+      delete s.clip_seconds;
       s.audio_session = await startScript(audioScript({ clipUrl: await signedUrl(admin, FOOTAGE_BUCKET, input.footage_upload), uploadUrl: up.signedUrl }), `Socialytics clip sound ${job.id}`);
-      s.audio_checked_at = Date.now();
+      s.audio_started_at = s.audio_checked_at = Date.now();
       job.step = "transcribe_wait"; return "next";
     }
     case "transcribe_wait": {
-      if (recently(s.audio_checked_at)) return "wait";
-      s.audio_checked_at = Date.now();
-      const r = await checkScript(s.audio_session);
-      if (r.state === "running") return "wait";
-      await endScript(s.audio_session);
-      const got = r.state === "finished" ? parseAudio(r.reply) : null;
-      if (!got) {
-        console.error(`[video-worker] job ${job.id} sound:`, r.state === "failed" ? r.reason : r.reply.slice(0, 300));
-        job.step = "transcribe"; return "next";
+      // The sound's length is kept once read, before its session is ended: a
+      // later error (the sound's download, the transcription) never asks the
+      // ended session again (QA 22 Nov 2026, P54-01).
+      if (typeof s.clip_seconds !== "number") {
+        if (recently(s.audio_checked_at)) return "wait";
+        s.audio_checked_at = Date.now();
+        const r = withinLimit(await checkScript(s.audio_session), s, "audio_started_at");
+        if (r.state === "running") return "wait";
+        const got = r.state === "finished" ? parseAudio(r.reply) : null;
+        if (!got) {
+          await endScript(s.audio_session);
+          console.error(`[video-worker] job ${job.id} sound:`, r.state === "failed" ? r.reason : r.reply.slice(0, 300));
+          job.step = "transcribe"; return "next";
+        }
+        s.clip_seconds = got.seconds;
+        await saveJobProgress(admin, job);
+        await endScript(s.audio_session);
       }
-      s.clip_seconds = got.seconds;
       const { data, error } = await admin.storage.from(BUCKET).download(s.audio_path);
       if (error || !data) throw new Error(`Could not read the clip's sound: ${error?.message ?? "missing"}`);
       const said = await transcribeWords(await openaiKey(admin), data);
@@ -208,7 +237,7 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       const seen = await footageWriting(admin, [s.frame_path], BUCKET);
       const content = await jpegBlocks(admin, BUCKET, [s.frame_path]);
       content.push({ type: "text", text: marksPrompt(input.brand_name) });
-      const result = await anthropicMessages({ apiKey: anthropicKey(), body: { model: "claude-opus-5-5", max_tokens: CHECK_TOKENS, messages: [{ role: "user", content }] } });
+      const result = await askVision({ apiKey: anthropicKey(), body: { model: "claude-opus-5-5", max_tokens: CHECK_TOKENS, messages: [{ role: "user", content }] } });
       const marks = parseMarks(answerText(result));
       if (!marks) throw new Error(`The opening frame could not be read for other brands' marks: ${replySample(result)}`);
       s.frame_check = { writing: seen, marks };
@@ -343,8 +372,9 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       const [lw, lh] = pick?.size ?? [sw, sh];
       // A file of another shape keeps the slot's middle (logoGround.ts, centeredIn).
       const box = centeredIn(placeLogo(lw, lh), [lw, lh], slot, [sw, sh]);
-      s.composes = (s.composes ?? 0) + 1;
-      if (s.composes > MAX_COMPOSE) throw new Error("FINAL: The video could not be put together.");
+      // A join is counted once it has started: a sandbox that could not start
+      // one (busy or down, a wait) spends none (QA 22 Nov 2026, P54-02).
+      if ((s.composes ?? 0) >= MAX_COMPOSE) throw new Error("FINAL: The video could not be put together.");
       // Each finished file has a name of its own, so a video made again is never shown from a cached copy.
       const out = `${base}/video-${Date.now().toString(36)}.mp4`;
       const { data: signed, error } = await admin.storage.from(BUCKET).createSignedUploadUrl(out, { upsert: true });
@@ -381,24 +411,37 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
         }),
         `Socialytics video ${job.id}`,
       );
-      s.compose_checked_at = Date.now();
+      s.composes = (s.composes ?? 0) + 1;
+      delete s.composed;
+      s.compose_started_at = s.compose_checked_at = Date.now();
       s.video_path = out;
       job.step = "assemble_wait"; return "next";
     }
     case "assemble_wait": {
-      if (recently(s.compose_checked_at)) return "wait";
-      s.compose_checked_at = Date.now();
-      const r = await checkScript(s.compose_session);
-      if (r.state === "running") return "wait";
-      await endScript(s.compose_session);
-      const made = r.state === "finished" ? parseComposed(r.reply) : null;
-      if (!made) {
-        const why = r.state === "failed" ? r.reason : r.reply.slice(0, 300);
-        console.error(`[video-worker] job ${job.id} assemble:`, why);
-        // Kept with the job: a join that never came back left no reason on 14 Oct.
-        s.compose_errors = [...(Array.isArray(s.compose_errors) ? s.compose_errors : []), String(why ?? "").slice(0, 300)].slice(-3);
-        job.step = "assemble"; return "next";
+      // The join's outcome is kept once read, and saved, before its session
+      // is ended: a later error (a still that could not be read, the vision
+      // model busy) never asks the ended session again, whose answer can only
+      // be an error that spends the job's tries (QA 22 Nov 2026, P54-01: one
+      // such error threw away the finished video and its paid clip).
+      if (!s.composed) {
+        if (recently(s.compose_checked_at)) return "wait";
+        s.compose_checked_at = Date.now();
+        const r = withinLimit(await checkScript(s.compose_session), s, "compose_started_at");
+        if (r.state === "running") return "wait";
+        const got = r.state === "finished" ? parseComposed(r.reply) : null;
+        if (!got) {
+          await endScript(s.compose_session);
+          const why = r.state === "failed" ? r.reason : r.reply.slice(0, 300);
+          console.error(`[video-worker] job ${job.id} assemble:`, why);
+          // Kept with the job: a join that never came back left no reason on 14 Oct.
+          s.compose_errors = [...(Array.isArray(s.compose_errors) ? s.compose_errors : []), String(why ?? "").slice(0, 300)].slice(-3);
+          job.step = "assemble"; return "next";
+        }
+        s.composed = got;
+        await saveJobProgress(admin, job);
+        await endScript(s.compose_session);
       }
+      const made = s.composed as { seconds: number; audio: number };
       if (input.footage_upload) {
         s.video_seconds = made.seconds;
         s.final_path = s.video_path;
@@ -487,7 +530,7 @@ function titleDeps(admin: any, job: VideoJob): TitleDeps {
       out: await signedWrite(admin, BUCKET, readPath),
     }),
     read: async (readPath) => {
-      const result = await anthropicMessages({
+      const result = await askVision({
         apiKey: anthropicKey(),
         body: {
           model: "claude-opus-5-5", max_tokens: CHECK_TOKENS,
@@ -506,6 +549,23 @@ function anthropicKey(): string {
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
   return apiKey;
+}
+
+/**
+ * A check by the vision model (the opening frame, the title's words, the
+ * clip's stills, the client's style). The model at its rate limit or
+ * overloaded (429, 5xx, 529) is a wait of the job, as the image model busy
+ * is, never a spent try (QA 22 Nov 2026, P54-02: after the paid clip, a few
+ * minutes of overload ended the video).
+ */
+async function askVision(args: Parameters<typeof anthropicMessages>[0]): ReturnType<typeof anthropicMessages> {
+  try {
+    return await anthropicMessages(args);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/^Anthropic API error (429|5\d\d)\b/.test(msg)) throw new ModelBusy(msg);
+    throw e;
+  }
 }
 
 /** One picture drawn by the image model from a prompt alone, at exactly the size asked for; transparent for a title layer. */
@@ -535,7 +595,7 @@ async function footageWriting(admin: any, paths: string[], bucket = BUCKET): Pro
   content.push({ type: "text", text: footageTextPrompt() });
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
-  const result = await anthropicMessages({ apiKey, body: { model: "claude-opus-5-5", max_tokens: CHECK_TOKENS, messages: [{ role: "user", content }] } });
+  const result = await askVision({ apiKey, body: { model: "claude-opus-5-5", max_tokens: CHECK_TOKENS, messages: [{ role: "user", content }] } });
   const seen = parseFootageText(answerText(result));
   if (!seen) throw new Error(`The footage's stills could not be read: ${replySample(result)}`);
   return seen;
@@ -803,13 +863,13 @@ async function runStyleStep(admin: any, job: VideoJob): Promise<VideoStepResult>
       }
       s.frames = frames;
       s.style_session = await startScript(framesScript(parts), `Socialytics video style ${job.client_id}`);
-      s.style_checked_at = Date.now();
+      s.style_started_at = s.style_checked_at = Date.now();
       job.step = "style_wait"; return "next";
     }
     case "style_wait": {
       if (recently(s.style_checked_at)) return "wait";
       s.style_checked_at = Date.now();
-      const r = await checkScript(s.style_session);
+      const r = withinLimit(await checkScript(s.style_session), s, "style_started_at");
       if (r.state === "running") return "wait";
       await endScript(s.style_session);
       if (!(r.state === "finished" && parseFrames(r.reply, s.frames.length))) {
@@ -823,7 +883,7 @@ async function runStyleStep(admin: any, job: VideoJob): Promise<VideoStepResult>
       content.push({ type: "text", text: videoStylePrompt(client?.name ?? "the brand", videos.length, STYLE_FRAMES) });
       const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
       if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
-      const result = await anthropicMessages({ apiKey, body: { model: "claude-opus-5-5", max_tokens: roomFor(4000), messages: [{ role: "user", content }] } });
+      const result = await askVision({ apiKey, body: { model: "claude-opus-5-5", max_tokens: roomFor(4000), messages: [{ role: "user", content }] } });
       const style = parseVideoStyle(answerText(result));
       if (!style) throw new Error(`The client's videos could not be read: ${replySample(result)}`);
       // A style learned again gets a new kit, made next from these stills.

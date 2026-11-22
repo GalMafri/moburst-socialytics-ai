@@ -5,7 +5,13 @@
 // and a small agent whose only tool is bash; each join is one session that
 // runs one script. Hosted, never on a laptop. Nothing waits here: a session
 // is started, and later asked whether it has finished.
+//
+// The sandbox at its rate limit or briefly down (429, 5xx, 529 overloaded)
+// is a wait of the job (ModelBusy, canva/stepError.ts), never a spent try
+// (QA 22 Nov 2026, P54-02: three passes of outage after the clip was paid
+// for ended the video).
 import { anthropicFetch } from "../anthropic.ts";
+import { ModelBusy } from "../media/modelBusy.ts";
 
 const BETA = "managed-agents-2026-04-01";
 const ENVIRONMENT = "socialytics-video";
@@ -29,7 +35,10 @@ function headers(): Record<string, string> {
 async function call<T = any>(method: string, path: string, body?: unknown): Promise<T> {
   const resp = await anthropicFetch(path, { method, headers: headers(), body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(60_000) });
   const text = await resp.text();
-  if (!resp.ok) throw new Error(`Hosted sandbox ${method} ${path.split("?")[0]} ${resp.status}: ${text.slice(0, 300)}`);
+  if (!resp.ok) {
+    const message = `Hosted sandbox ${method} ${path.split("?")[0]} ${resp.status}: ${text.slice(0, 300)}`;
+    throw resp.status === 429 || resp.status >= 500 ? new ModelBusy(message) : new Error(message);
+  }
   return (text ? JSON.parse(text) : {}) as T;
 }
 
@@ -105,10 +114,14 @@ export async function checkScript(sessionId: string): Promise<ScriptState> {
   const events: any = await call("GET", `/v1/sessions/${sessionId}/events?limit=200`);
   const replies = (events.data ?? []).filter((e: any) => e.type === "agent.message")
     .map((e: any) => (e.content ?? []).map((c: any) => c.text ?? "").join(" ").trim()).filter(Boolean);
-  // A session that has not answered yet is still starting its container.
+  // A session that has not answered yet is still starting its container,
+  // unless its turn has ended: then no answer is coming (QA 22 Nov 2026,
+  // P53-04: one that ended its turn without a word was read as running on
+  // every check, and the join waited on it until the request's limit).
   if (session.status === "idle" && !replies.length) {
     const stop = session.stop_reason?.type;
-    if (stop && stop !== "end_turn") return { state: "failed", reason: `The sandbox stopped: ${stop}` };
+    if (stop === "end_turn") return { state: "failed", reason: "The sandbox ended its turn without an answer." };
+    if (stop) return { state: "failed", reason: `The sandbox stopped: ${stop}` };
     return { state: "running" };
   }
   const reply = replies[replies.length - 1] ?? "";
