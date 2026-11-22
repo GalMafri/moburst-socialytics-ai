@@ -70,9 +70,11 @@ export function hookPlacement(box: HookBox, layer: { width: number; height: numb
   if (width > maxWidth) { height = Math.round((height * maxWidth) / width); width = maxWidth; }
   const x = Math.round((frame.width - width) / 2);
   const style = textStyle.toLowerCase();
+  // "upper" as a place only: uppercase type says how the letters look, not where they go
+  // (QA 22 Nov 2026, P53-05: a centered uppercase title was moved under the logo).
   const y = /lower third|bottom|lower part|lower half/.test(style)
     ? Math.round(frame.height * 0.78) - height
-    : /\btop\b|upper/.test(style)
+    : /\btop\b|\bupper\b(?![- ]?case)/.test(style)
       ? Math.max(Math.round(logoBottom + frame.height * 0.03), Math.round(frame.height * 0.12))
       : Math.round((frame.height - height) / 2);
   return { x, y, width, height };

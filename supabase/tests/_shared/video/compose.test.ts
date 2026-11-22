@@ -137,6 +137,16 @@ describe("hook placement", () => {
     const c = hookPlacement(box, layer, "centered over the footage", 200);
     expect(c.y).toBe(Math.round((VIDEO_SIZE.height - c.height) / 2));
   });
+  it("keeps a centered title described as uppercase in the middle, and still reads an upper third as the top", () => {
+    // QA 22 Nov 2026 (P53-05): "upper" matched "uppercase", so a centered title sat under the logo.
+    const middle = Math.round((VIDEO_SIZE.height - hookPlacement(box, layer, "centered", 200).height) / 2);
+    for (const style of ["Bold white uppercase sans-serif, centered", "upper-case serif, centered", "all upper case letters in the middle"]) {
+      expect(hookPlacement(box, layer, style, 200).y).toBe(middle);
+    }
+    const top = Math.round(400 + VIDEO_SIZE.height * 0.03);
+    expect(hookPlacement(box, layer, "uppercase type in the upper third", 400).y).toBe(top);
+    expect(hookPlacement(box, layer, "UPPERCASE, at the top", 400).y).toBe(top);
+  });
   it("crops the lettering out of its layer and overlays it at its place", () => {
     const script = composeScript({
       footageUrl: "https://s/f.mp4", overlayUrl: "https://s/hook.png", logoUrl: "https://s/logo.png",
