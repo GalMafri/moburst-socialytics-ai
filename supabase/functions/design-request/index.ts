@@ -548,24 +548,33 @@ const FILMING_LOOKBACK_DAYS = 31;
  * week's design button then designs that post from the client's posts.
  */
 async function closeFilming(admin: any, now: Date): Promise<number> {
-  const { data: waiting } = await admin.from("design_requests").select("id, client_id, calendar_post_key").eq("status", "needs_filming").limit(500);
+  const { data: waiting } = await admin.from("design_requests").select("id, client_id, calendar_post_key, created_at").eq("status", "needs_filming").limit(500);
   if (!waiting?.length) return 0;
   const clientIds = [...new Set((waiting as Array<{ client_id: string }>).map((w) => w.client_id))];
   const since = new Date(now.getTime() - FILMING_LOOKBACK_DAYS * 86400000).toISOString().slice(0, 10);
   const [{ data: zones }, { data: posts }, { data: footage }] = await Promise.all([
     admin.from("clients").select("id, timezone").in("id", clientIds),
     admin.from("calendar_posts").select("client_id, post_key, post_date, posting_time").in("client_id", clientIds).gte("post_date", since).limit(10000),
-    admin.from("design_requests").select("client_id, calendar_post_key").in("client_id", clientIds).not("footage_path", "is", null).limit(10000),
+    admin.from("design_requests").select("client_id, calendar_post_key, status, created_at").in("client_id", clientIds).not("footage_path", "is", null).limit(10000),
   ]);
   // Matched in code: a report post's key is JSON text, which an in() filter does not survive.
   const zone = new Map<string, string | null>((zones ?? []).map((c: any) => [c.id, c.timezone ?? null]));
   const postOf = new Map((posts ?? []).map((p: any) => [`${p.client_id}|${p.post_key}`, p]));
-  const filmed = new Set((footage ?? []).map((r: any) => `${r.client_id}|${r.calendar_post_key}`));
+  // QA 22 Nov 2026 (P56-05): footage counts for this wait when it came after
+  // the post was asked to be filmed, or its video is still being made. An
+  // older clip whose video ended closed a new filming request at once.
+  const clips = new Map<string, Array<{ status: string; created_at: string | null }>>();
+  for (const r of (footage ?? []) as any[]) {
+    const key = `${r.client_id}|${r.calendar_post_key}`;
+    clips.set(key, [...(clips.get(key) ?? []), r]);
+  }
+  const footageFor = (key: string, askedAt: string | null) => (clips.get(key) ?? []).some((c) =>
+    c.status === "preparing" || Date.parse(String(c.created_at)) >= Date.parse(String(askedAt)));
   let closed = 0;
-  for (const w of waiting as Array<{ id: string; client_id: string; calendar_post_key: string }>) {
+  for (const w of waiting as Array<{ id: string; client_id: string; calendar_post_key: string; created_at: string | null }>) {
     const key = `${w.client_id}|${w.calendar_post_key}`;
     const post = postOf.get(key) as { post_date: string; posting_time: string | null } | undefined;
-    const outcome = filmingOutcome(post ? postInstant(post.post_date, post.posting_time, zone.get(w.client_id)) : null, now, filmed.has(key));
+    const outcome = filmingOutcome(post ? postInstant(post.post_date, post.posting_time, zone.get(w.client_id)) : null, now, footageFor(key, w.created_at));
     if (outcome === "keep") continue;
     await endRequest(admin, w.id, outcome);
     closed++;
