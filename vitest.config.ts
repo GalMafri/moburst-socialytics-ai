@@ -49,8 +49,9 @@ export default defineConfig({
       // Edge function tests sit beside, never inside, the deployed folders:
       // a deploy uploads a function's folder and all of _shared as they are.
       "supabase/tests/**/*.{test,spec}.{ts,tsx}",
-      // Except the API core's own tests, synced verbatim from AdVisor.
+      // Except the shared cores' own tests, synced verbatim from AdVisor.
       "supabase/functions/_shared/api/*.test.ts",
+      "supabase/functions/_shared/cost/*.test.ts",
       "api/**/*.{test,spec}.{ts,tsx}",
       // The picture service (server/) is a Node project of its own.
       "server/**/*.{test,spec}.ts",

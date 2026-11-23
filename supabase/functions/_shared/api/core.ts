@@ -6,7 +6,7 @@
  */
 import { ApiError, errorBody, forbidden, unauthorized } from "./errors.ts";
 import { bearerFrom, hashKey, hasScope, keyIsLive, resolveScope, scopeAll, type KeyRow } from "./keys.ts";
-import { matchRoute, apiPath, type AuthContext, type Route, type RouteContext } from "./router.ts";
+import { matchRoute, apiPath, SCOPES, type AuthContext, type Route, type RouteContext, type Scope } from "./router.ts";
 
 export interface AuditRow {
   key_id: string | null;
@@ -42,7 +42,7 @@ const CORS: Record<string, string> = {
 };
 
 const NO_AUTH: AuthContext = { kind: "none", keyId: null, keyHash: null, scopes: [], clients: scopeAll() };
-const INTERNAL: AuthContext = { kind: "internal", keyId: null, keyHash: null, scopes: ["read", "demo", "admin"], clients: scopeAll() };
+const INTERNAL: AuthContext = { kind: "internal", keyId: null, keyHash: null, scopes: [...SCOPES], clients: scopeAll() };
 
 /**
  * True when the candidate is the secret, in time that does not depend on how
@@ -69,7 +69,7 @@ async function keyAuth(req: Request, deps: CoreDeps, now: Date): Promise<{ auth:
   const keyHash = await hashKey(raw);
   const row = await deps.touchKey(keyHash);
   if (!row || !keyIsLive(row, now)) throw unauthorized();
-  const scopes = (row.scopes ?? []).filter((s): s is AuthContext["scopes"][number] => s === "read" || s === "demo" || s === "admin");
+  const scopes = (row.scopes ?? []).filter((s): s is Scope => (SCOPES as readonly string[]).includes(s));
   const clients = row.client_ids?.length || row.company_slugs?.length ? resolveScope(row, await deps.clientsForScope()) : scopeAll();
   return { auth: { kind: "key", keyId: row.id, keyHash, scopes, clients }, row };
 }
@@ -96,7 +96,7 @@ async function authenticate(req: Request, route: Route, deps: CoreDeps, now: Dat
     }
     const admin = await deps.verifyAdminJwt(raw);
     if (!admin) throw unauthorized("An admin session is required");
-    return { auth: { kind: "admin", keyId: null, keyHash: null, scopes: ["read", "demo", "admin"], clients: scopeAll(), userId: admin.userId } };
+    return { auth: { kind: "admin", keyId: null, keyHash: null, scopes: [...SCOPES], clients: scopeAll(), userId: admin.userId } };
   }
   const { auth, row } = await keyAuth(req, deps, now);
   if ((row.minute_count ?? 0) > row.rate_limit_per_minute) {

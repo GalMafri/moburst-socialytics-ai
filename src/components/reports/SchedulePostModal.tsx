@@ -449,7 +449,7 @@ export function SchedulePostModal({
               <div className={mediaUrls.length > 1 ? "grid grid-cols-2 gap-2" : ""}>
                 {mediaUrls.map((url, i) => {
                   const isDataImage = url.startsWith("data:image/");
-                  const isVideo = !isDataImage && (url.startsWith("data:video/") || url.startsWith("blob:") || /\.(mp4|webm|mov)(\?|#|$)/i.test(url) || url.includes("generativelanguage.googleapis.com") || url.includes("video"));
+                  const isVideo = !isDataImage && (url.startsWith("data:video/") || url.startsWith("blob:") || /\.(mp4|webm|mov)(\?|#|$)/i.test(url) || url.includes("generativelanguage.googleapis.com") || url.includes("video")); // cost-guard: not a call (a Gemini file URL is recognised as a video)
                   return isVideo ? (
                     <video key={i} src={url} controls className="w-full max-h-48 rounded-md border object-contain" />
                   ) : (
