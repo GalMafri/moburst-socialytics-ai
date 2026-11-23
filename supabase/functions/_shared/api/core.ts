@@ -66,6 +66,10 @@ async function isInternal(req: Request, deps: CoreDeps): Promise<boolean> {
 async function keyAuth(req: Request, deps: CoreDeps, now: Date): Promise<{ auth: AuthContext; row: KeyRow }> {
   const raw = bearerFrom(req.headers);
   if (!raw) throw unauthorized();
+  return keyAuthOf(raw, deps, now);
+}
+
+async function keyAuthOf(raw: string, deps: Pick<CoreDeps, "touchKey" | "clientsForScope">, now: Date): Promise<{ auth: AuthContext; row: KeyRow }> {
   const keyHash = await hashKey(raw);
   const row = await deps.touchKey(keyHash);
   if (!row || !keyIsLive(row, now)) throw unauthorized();
@@ -76,6 +80,21 @@ async function keyAuth(req: Request, deps: CoreDeps, now: Date): Promise<{ auth:
 
 function secondsToNextMinute(now: Date): number {
   return Math.max(1, 60 - now.getUTCSeconds());
+}
+
+/**
+ * A key presented outside the API function (the MCP server): the same lookup,
+ * liveness, scopes, client reach and per-minute limit a request to the API gets.
+ * Throws the API's 401 or 429.
+ */
+export async function authenticateKey(raw: string, deps: Pick<CoreDeps, "touchKey" | "clientsForScope">, now: Date = new Date()): Promise<AuthContext> {
+  const { auth, row } = await keyAuthOf(raw, deps, now);
+  if ((row.minute_count ?? 0) > row.rate_limit_per_minute) {
+    const e = new ApiError(429, "rate_limited", "Too many requests this minute");
+    (e as ApiError & { retryAfter?: number }).retryAfter = secondsToNextMinute(now);
+    throw e;
+  }
+  return auth;
 }
 
 async function authenticate(req: Request, route: Route, deps: CoreDeps, now: Date): Promise<{ auth: AuthContext; retryAfter?: number }> {

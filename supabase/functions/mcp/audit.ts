@@ -10,7 +10,8 @@ import type { AuditRow } from "../_shared/api/core.ts";
 export const RATE_LIMIT_PER_MINUTE = 120;
 
 export interface McpAuditRow extends AuditRow {
-  user_id: string;
+  /** The person; null for a call made with an API key (the api_requests trigger then writes the key's owner). */
+  user_id: string | null;
   oauth_client_id: string | null;
   /** What a save wrote (a note id, a post key, a section key, a deck id); null for a read or a save that wrote nothing. Never the text. */
   target: string | null;
@@ -18,9 +19,9 @@ export interface McpAuditRow extends AuditRow {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export function auditRow(a: { tool: string; status: number; durationMs: number; clientId?: unknown; errorCode: string | null; userId: string; oauthClientId: string | null; ip: string | null; target?: string | null }): McpAuditRow {
+export function auditRow(a: { tool: string; status: number; durationMs: number; clientId?: unknown; errorCode: string | null; userId: string | null; oauthClientId: string | null; ip: string | null; target?: string | null; keyId?: string | null }): McpAuditRow {
   return {
-    key_id: null, method: "MCP", path: `mcp/${a.tool}`, status: a.status, duration_ms: Math.max(0, Math.round(a.durationMs)),
+    key_id: a.keyId ?? null, method: "MCP", path: `mcp/${a.tool}`, status: a.status, duration_ms: Math.max(0, Math.round(a.durationMs)),
     client_id: typeof a.clientId === "string" && UUID.test(a.clientId) ? a.clientId : null, job_id: null, ip: a.ip, error_code: a.errorCode,
     user_id: a.userId, oauth_client_id: a.oauthClientId, target: typeof a.target === "string" && a.target ? a.target.slice(0, 300) : null,
   };

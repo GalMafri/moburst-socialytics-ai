@@ -1,9 +1,13 @@
 /**
  * A person's own API keys: make one, list them, revoke one, from their
- * signed-in Socialytics session. Only Moburst staff (an admin or a Moburst
- * user) have them. A personal key is read only at 120 calls a minute and
- * lasts 90 days. Its row stores no client scope: api_key_touch works out what
- * it reaches from the owner's roles on every call.
+ * signed-in Socialytics session (the API page's Tokens tab). Only Moburst
+ * staff (an admin or a Moburst user) have them. A personal key is read only
+ * ({read}) or read and write ({read,run}, which starts work through the
+ * public actions, acting as its owner), at 120 calls a minute, and lasts at
+ * most 90 days (90 unless the person picks an earlier end). It may name the
+ * companies it is for; api_key_touch works out what it reaches from the
+ * owner's roles on every call and narrows that to those companies' clients
+ * (migration 20261123160000).
  *
  * To the core these routes are auth "none", because the core checks API keys
  * and admin sessions only; each handler checks the person's session itself,
@@ -28,6 +32,39 @@ const AT_LIMIT = `You have ${LIVE_LIMIT} active keys. Revoke one to make another
 const NAME_RULE = `Give the key a name of 1 to ${NAME_MAX} characters.`;
 const NO_CONTROL = "A key name can't have line breaks or tabs.";
 const VISIBLE = "Give the key a name with at least one visible character.";
+const ACCESS_RULE = "Choose read only or read and write for the key.";
+const COMPANY_RULE = "Choose companies from the list, or all companies.";
+const UNKNOWN_COMPANY = "One of the companies chosen is not in Socialytics. Choose from the list.";
+const EXPIRY_RULE = `Choose an end date in the next ${LIFETIME_DAYS} days.`;
+const COMPANIES_MAX = 50;
+const SLUG = /^[a-z0-9][a-z0-9-]{0,99}$/;
+
+/** The access a person chose: read only, or read and write. */
+function accessOf(raw: unknown): string[] {
+  if (raw == null) return ["read"];
+  if (!Array.isArray(raw) || raw.some((s) => typeof s !== "string")) throw invalid(ACCESS_RULE, { field: "scopes" });
+  const set = new Set(raw as string[]);
+  if (set.size === 1 && set.has("read")) return ["read"];
+  if (set.size === 2 && set.has("read") && set.has("run")) return ["read", "run"];
+  throw invalid(ACCESS_RULE, { field: "scopes" });
+}
+
+/** The companies a key is for, or null for all of them. */
+function companiesOf(raw: unknown): string[] | null {
+  if (raw == null) return null;
+  if (!Array.isArray(raw) || raw.length > COMPANIES_MAX || raw.some((s) => typeof s !== "string" || !SLUG.test(s.trim()))) throw invalid(COMPANY_RULE, { field: "company_slugs" });
+  const slugs = [...new Set((raw as string[]).map((s) => s.trim()))].sort();
+  return slugs.length ? slugs : null;
+}
+
+/** When a key ends: the date the person picked, at most 90 days ahead, or 90 days from now. */
+function expiryOf(raw: unknown, now: Date): string {
+  const latest = now.getTime() + LIFETIME_DAYS * DAY_MS;
+  if (raw == null || raw === "") return new Date(latest).toISOString();
+  const at = typeof raw === "string" ? Date.parse(raw) : NaN;
+  if (Number.isNaN(at) || at <= now.getTime() || at > latest + 60_000) throw invalid(EXPIRY_RULE, { field: "expires_at" });
+  return new Date(Math.min(at, latest)).toISOString();
+}
 
 // Control characters (Cc: line breaks, tabs, NUL, DEL and the C1 range) are refused anywhere in a name, ends included.
 const CONTROL = /\p{Cc}/u;
@@ -54,11 +91,13 @@ export interface MeDeps {
   /** This request's bearer token, or null when it has none. */
   sessionToken(): string | null;
   now(): Date;
+  /** Every company slug in Socialytics, to refuse a key for a company that does not exist; without it any well-formed slug is taken (the key then reaches nothing there). */
+  companySlugs?(): Promise<string[]>;
 }
 
 /** What a person sees of their own key: never the hash, the owner or the reach. */
 const personalKey = (k: StoredKey) => ({
-  id: k.id, name: k.name, key_prefix: k.key_prefix, scopes: k.scopes, created_at: k.created_at, expires_at: k.expires_at, last_used_at: k.last_used_at, revoked_at: k.revoked_at,
+  id: k.id, name: k.name, key_prefix: k.key_prefix, scopes: k.scopes, company_slugs: k.company_slugs?.length ? k.company_slugs : null, created_at: k.created_at, expires_at: k.expires_at, last_used_at: k.last_used_at, revoked_at: k.revoked_at,
 });
 
 export function meRoutes(deps: MeDeps): Route[] {
@@ -80,18 +119,25 @@ export function meRoutes(deps: MeDeps): Route[] {
       },
     },
     {
-      method: "POST", path: "/v1/me/keys", auth: "none", doc: { summary: "Make a personal API key, read only for 90 days (the key is returned once; needs your signed-in Socialytics session)", tag: "Personal keys", body: "PersonalKeyCreate", response: "PersonalKeyCreated", status: 201 },
+      method: "POST", path: "/v1/me/keys", auth: "none", doc: { summary: "Make a personal API key, read only or read and write, for all your companies or some, for up to 90 days (the key is returned once; needs your signed-in Socialytics session)", tag: "Personal keys", body: "PersonalKeyCreate", response: "PersonalKeyCreated", status: 201 },
       handler: async (ctx) => {
         const userId = await staffUserId();
         const b = (ctx.body && typeof ctx.body === "object" ? ctx.body : {}) as Record<string, unknown>;
         const name = keyName(b.name);
+        const scopes = accessOf(b.scopes);
+        const companies = companiesOf(b.company_slugs);
         const now = deps.now();
+        const expires = expiryOf(b.expires_at, now);
+        if (companies && deps.companySlugs) {
+          const known = new Set(await deps.companySlugs());
+          if (companies.some((c) => !known.has(c))) throw invalid(UNKNOWN_COMPANY, { field: "company_slugs" });
+        }
         // Counted here, not locked: two makes at the same moment could reach 11, still bounded by revoking and expiry.
         if ((await deps.keys.countLive(userId, now)) >= LIVE_LIMIT) throw new ApiError(409, "conflict", AT_LIMIT);
         const { key, key_prefix } = generateKey("soc");
         const row = await deps.keys.insert({
-          name, key_prefix, key_hash: await hashKey(key), scopes: ["read"], company_slugs: null, client_ids: null, rate_limit_per_minute: 120,
-          created_by: userId, owner_user_id: userId, expires_at: new Date(now.getTime() + LIFETIME_DAYS * DAY_MS).toISOString(), note: null,
+          name, key_prefix, key_hash: await hashKey(key), scopes, company_slugs: companies, client_ids: null, rate_limit_per_minute: 120,
+          created_by: userId, owner_user_id: userId, expires_at: expires, note: null,
         });
         return { status: 201, body: { data: { ...personalKey(row), key } } };
       },

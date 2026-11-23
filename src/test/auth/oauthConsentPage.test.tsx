@@ -5,7 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 const ID = "k7q2m4n6p3r5t7v2x4z6b3d5f7h2j4l6";
 const f = vi.hoisted(() => ({
-  auth: { isLoading: false, isAuthenticated: true },
+  auth: { isLoading: false, isAuthenticated: true, isClient: false } as { isLoading: boolean; isAuthenticated: boolean; isClient?: boolean },
   session: true as boolean,
   roles: vi.fn(async () => ({ data: [{ role: "moburst_user" }] as unknown, error: null as unknown })),
   details: null as unknown,
@@ -48,7 +48,7 @@ function open(origin = "https://socialytics.moburst.ai", search = `?authorizatio
 let replace: ReturnType<typeof vi.spyOn>;
 let assign: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
-  f.auth = { isLoading: false, isAuthenticated: true };
+  f.auth = { isLoading: false, isAuthenticated: true, isClient: false };
   f.session = true;
   f.details = claude();
   f.detailsError = null;
@@ -81,7 +81,7 @@ describe("the consent page", () => {
   it("shows Claude's request with where it goes back to, who is signed in, and what Claude can do", async () => {
     open();
     expect(await screen.findByText("Connect Claude to Socialytics")).toBeInTheDocument();
-    expect(screen.getByText("Claude will be able to read reports, analytics, trends, the calendar and, for Moburst staff, client notes and the strategy. Staff can also save client notes, approved copy, strategy edits and finished decks.")).toBeInTheDocument();
+    expect(screen.getByText("Claude will be able to read reports, analytics, trends, the calendar, client notes and the strategy of the clients you can see, and start work for them. It asks you before anything that costs money.")).toBeInTheDocument();
     expect(screen.getByText(/sinead@moburst\.com/)).toBeInTheDocument();
     expect(screen.getByText(/claude\.ai/)).toBeInTheDocument();
     expect(f.get).toHaveBeenCalledWith(ID);
@@ -118,6 +118,23 @@ describe("the consent page", () => {
     expect(await screen.findByText("Socialytics isn't available to your account")).toBeInTheDocument();
     await waitFor(() => expect(f.deny).toHaveBeenCalledWith(ID, { skipBrowserRedirect: true }));
     expect(f.get).not.toHaveBeenCalled();
+  });
+
+  it("refuses a signed-in client user: the connector is for Moburst staff only", async () => {
+    f.auth = { isLoading: false, isAuthenticated: true, isClient: true };
+    open();
+    expect(await screen.findByRole("heading", { level: 1, name: "The Claude connector is for Moburst staff" })).toBeInTheDocument();
+    expect(f.deny).toHaveBeenCalledTimes(1);
+    expect(f.get).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Allow" })).toBeNull();
+  });
+
+  it("refuses a client user found in the roles table too", async () => {
+    f.auth = { isLoading: false, isAuthenticated: false };
+    f.roles.mockResolvedValue({ data: [{ role: "client" }], error: null });
+    open();
+    expect(await screen.findByText("The Claude connector is for Moburst staff")).toBeInTheDocument();
+    expect(f.deny).toHaveBeenCalledTimes(1);
   });
 
   it("saves its own address and sends a signed-out visitor to sign in", async () => {

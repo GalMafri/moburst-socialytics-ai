@@ -15,7 +15,6 @@ vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: f.toast }) }));
 vi.mock("@/components/layout/AppLayout", () => ({ AppLayout: ({ children }: any) => <div>{children}</div> }));
 vi.mock("@/components/HubCompanySync", () => ({ HubCompanySync: () => null }));
 vi.mock("@/components/settings/HiggsfieldConnection", () => ({ HiggsfieldConnection: () => null }));
-vi.mock("@/components/settings/ApiAccessCard", () => ({ ApiAccessCard: () => null }));
 vi.mock("@/lib/activeClients", () => ({ fetchActiveClients: async () => [] }));
 
 import Settings from "@/pages/Settings";

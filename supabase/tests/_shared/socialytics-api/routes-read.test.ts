@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { ALERT, CLIENT, COMPETITIVE_REPORT, COMPETITOR, COMPETITOR_SET, DESIGN_SETTINGS, DESIGN_SYSTEM, HANDLE, MEDIA_JOB, POST, REPORT, SCHEDULE, SCHEDULED_POST, SPROUT_PROFILE, TREND_POSTS, TREND_THEMES, TREND_WEEKS } from "../../../functions/_shared/socialytics-api/fixtures";
+import { ALERT, CLIENT, COMPETITIVE_REPORT, COMPETITOR, COMPETITOR_SET, DESIGN_SETTINGS, DESIGN_SYSTEM, HANDLE, MEDIA_JOB, POST, REPORT, SCHEDULE, SCHEDULED_POST, SPROUT_PROFILE, TREND_POSTS, TREND_THEMES, TREND_WEEKS } from "./fixtures";
 import { readRoutes } from "../../../functions/_shared/socialytics-api/routes-read";
-import { makeFakeStore, emptyData } from "../../../functions/_shared/socialytics-api/store.fake";
+import { makeFakeStore, emptyData } from "./store.fake";
 import { handleRequest, type CoreDeps } from "../../../functions/_shared/api/core";
 import { hashKey } from "../../../functions/_shared/api/keys";
 import { decodeCursor } from "../../../functions/_shared/api/cursor";

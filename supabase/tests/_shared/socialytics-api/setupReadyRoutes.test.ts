@@ -1,9 +1,9 @@
 // QA 22 Nov 2026 (P48-01): a client whose only report schedule is turned off. /v1/clients/:id/setup
 // says "schedule_missing" (not ready); /v1/clients/:id says the same client is ready.
 import { describe, it, expect } from "vitest";
-import { CLIENT, COMPETITOR, COMPETITOR_SET, DESIGN_SETTINGS, HANDLE, SCHEDULE, SPROUT_PROFILE } from "../../../functions/_shared/socialytics-api/fixtures";
+import { CLIENT, COMPETITOR, COMPETITOR_SET, DESIGN_SETTINGS, HANDLE, SCHEDULE, SPROUT_PROFILE } from "./fixtures";
 import { readRoutes } from "../../../functions/_shared/socialytics-api/routes-read";
-import { makeFakeStore, emptyData } from "../../../functions/_shared/socialytics-api/store.fake";
+import { makeFakeStore, emptyData } from "./store.fake";
 import { scopeAll } from "../../../functions/_shared/api/keys";
 
 describe("P48-01 client readiness", () => {

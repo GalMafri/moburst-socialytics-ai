@@ -4,7 +4,7 @@ import { API_VERSION, TOOL, socialyticsHandler } from "../../functions/api/opena
 import type { KeyStore, StoredKey } from "../../functions/api/routes-admin";
 import type { CoreDeps } from "../../functions/_shared/api/core";
 import { hashKey, keyIsLive, type KeyRow } from "../../functions/_shared/api/keys";
-import { emptyData, makeFakeStore } from "../../functions/_shared/socialytics-api/store.fake";
+import { emptyData, makeFakeStore } from "../_shared/socialytics-api/store.fake";
 
 const NOW = new Date("2026-11-10T09:00:00.000Z");
 const DAY = 86_400_000;
@@ -14,7 +14,7 @@ const AT_LIMIT = "You have 10 active keys. Revoke one to make another.";
 const NAME_RULE = "Give the key a name of 1 to 80 characters.";
 const NO_CONTROL = "A key name can't have line breaks or tabs.";
 const VISIBLE = "Give the key a name with at least one visible character.";
-const PERSONAL_FIELDS = ["created_at", "expires_at", "id", "key_prefix", "last_used_at", "name", "revoked_at", "scopes"];
+const PERSONAL_FIELDS = ["company_slugs", "created_at", "expires_at", "id", "key_prefix", "last_used_at", "name", "revoked_at", "scopes"];
 
 // App sessions: token to user, user to roles, user to the email on their profile.
 const USERS: Record<string, string> = { "jwt-lital": "u-lital", "jwt-admin": "u-admin", "jwt-client": "u-client", "jwt-norole": "u-norole", "jwt-both": "u-both" };
@@ -210,6 +210,25 @@ describe("POST /v1/me/keys", () => {
   });
 });
 
+describe("POST /v1/me/keys: access, companies and end date", () => {
+  it("makes a read and write key for some companies, ending on the date picked", async () => {
+    const { call, rows } = app();
+    const end = new Date(NOW.getTime() + 30 * DAY).toISOString();
+    const r = await call("POST", ME, as("jwt-lital"), { name: "AgentBurst", scopes: ["run", "read"], company_slugs: ["calm", "bader-law", "calm"], expires_at: end });
+    expect(r.status).toBe(201);
+    expect(r.body.data).toMatchObject({ scopes: ["read", "run"], company_slugs: ["bader-law", "calm"], expires_at: end });
+    expect(rows[0]).toMatchObject({ scopes: ["read", "run"], company_slugs: ["bader-law", "calm"], rate_limit_per_minute: 120, owner_user_id: "u-lital" });
+  });
+
+  it("refuses any other access, a malformed company, and an end date past 90 days or already gone", async () => {
+    const { call, rows } = app();
+    for (const scopes of [["admin"], ["read", "costs"], ["run"], "read", [1]]) expect((await call("POST", ME, as("jwt-lital"), { name: "x", scopes })).status, JSON.stringify(scopes)).toBe(400);
+    for (const company_slugs of ["calm", ["Calm Co"], [7]]) expect((await call("POST", ME, as("jwt-lital"), { name: "x", company_slugs })).status, JSON.stringify(company_slugs)).toBe(400);
+    for (const expires_at of [new Date(NOW.getTime() + 91 * DAY).toISOString(), new Date(NOW.getTime() - DAY).toISOString(), "soon"]) expect((await call("POST", ME, as("jwt-lital"), { name: "x", expires_at })).status, expires_at).toBe(400);
+    expect(rows).toEqual([]);
+  });
+});
+
 describe("GET /v1/me/keys", () => {
   it("lists only the person's own keys, newest first, without the hash, the key or the owner", async () => {
     const { call, personal, tool } = app();
@@ -225,7 +244,7 @@ describe("GET /v1/me/keys", () => {
     const text = JSON.stringify(l.body);
     expect(text).not.toContain(made.body.data.key);
     expect(text).not.toContain("f".repeat(64));
-    expect(text).not.toMatch(/key_hash|"key"|owner|created_by|company_slugs|client_ids/);
+    expect(text).not.toMatch(/key_hash|"key"|owner|created_by|client_ids/);
   });
 });
 

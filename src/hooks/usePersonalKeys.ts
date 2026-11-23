@@ -17,6 +17,8 @@ export interface PersonalKey {
   name: string;
   key_prefix: string;
   scopes: string[];
+  /** The companies the key is for; null (or absent, from an older answer) for every company its owner can see. */
+  company_slugs?: string[] | null;
   created_at: string;
   expires_at: string | null;
   last_used_at: string | null;
@@ -24,6 +26,14 @@ export interface PersonalKey {
 }
 
 export type CreatedPersonalKey = PersonalKey & { key: string };
+
+/** What a new key is made with: read only or read and write, all companies or some, and an end date within 90 days. */
+export interface NewPersonalKey {
+  name: string;
+  scopes?: ["read"] | ["read", "run"];
+  company_slugs?: string[] | null;
+  expires_at?: string | null;
+}
 
 const BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/api/v1/me/keys`;
 const LIST_KEY = ["personal_api_keys"] as const;
@@ -75,7 +85,10 @@ export function usePersonalKeys(enabled = true) {
 export function useCreatePersonalKey() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (name: string) => (await request<{ data: CreatedPersonalKey }>(BASE, { method: "POST", body: JSON.stringify({ name }) })).data,
+    mutationFn: async (input: string | NewPersonalKey) => {
+      const body = typeof input === "string" ? { name: input } : Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined && v !== null));
+      return (await request<{ data: CreatedPersonalKey }>(BASE, { method: "POST", body: JSON.stringify(body) })).data;
+    },
     // The answer holds the plaintext key: dropped from the mutation cache as
     // soon as the screen lets go of it (reset), not kept for five minutes.
     gcTime: 0,

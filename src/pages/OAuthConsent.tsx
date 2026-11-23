@@ -25,11 +25,12 @@ type View =
   | { kind: "ask"; host: string; email: string; busy: boolean }
   | { kind: "not-claude" }
   | { kind: "no-role" }
+  | { kind: "staff-only" }
   | { kind: "expired" };
 
 export default function OAuthConsent() {
   const entry = useMemo(() => consentEntry(browser.origin(), browser.search()), []);
-  const { isLoading, isAuthenticated } = useAuth();
+  const { isLoading, isAuthenticated, isClient } = useAuth();
   const [view, setView] = useState<View>(() => (entry.kind === "invalid" ? { kind: "expired" } : { kind: "loading" }));
 
   useEffect(() => {
@@ -66,11 +67,17 @@ export default function OAuthConsent() {
           // table itself, so a failed sign-in check is not taken for "no role".
           const roles = await settled(() => supabase.from("user_roles").select("role").eq("user_id", userId), writeResendable);
           if (!roles) return;
-          if (!strongestRole(((roles.data as Array<{ role: string }> | null) ?? []).map((r) => r.role))) {
+          const role = strongestRole(((roles.data as Array<{ role: string }> | null) ?? []).map((r) => r.role));
+          if (!role || role === "client") {
             await sendQuietly(() => supabase.auth.oauth.denyAuthorization(id, { skipBrowserRedirect: true }), { again: isTransient });
-            show({ kind: "no-role" });
+            show({ kind: role ? "staff-only" : "no-role" });
             return;
           }
+        } else if (isClient) {
+          // Client users have no API access at all: refuse before Claude is shown anything.
+          await sendQuietly(() => supabase.auth.oauth.denyAuthorization(id, { skipBrowserRedirect: true }), { again: isTransient });
+          show({ kind: "staff-only" });
+          return;
         }
         const reply = await settled(() => supabase.auth.oauth.getAuthorizationDetails(id), isTransient);
         if (!reply) return;
@@ -88,7 +95,7 @@ export default function OAuthConsent() {
       }
     })();
     return () => { cancelled = true; };
-  }, [entry, isLoading, isAuthenticated]);
+  }, [entry, isLoading, isAuthenticated, isClient]);
 
   const decide = async (allow: boolean) => {
     if (entry.kind !== "here" || view.kind !== "ask") return;
@@ -122,7 +129,7 @@ export default function OAuthConsent() {
           {view.kind === "ask" && (
             <>
               <h1 className="t-h1 text-white">Connect Claude to Socialytics</h1>
-              <p className="t-secondary">Claude will be able to read reports, analytics, trends, the calendar and, for Moburst staff, client notes and the strategy. Staff can also save client notes, approved copy, strategy edits and finished decks.</p>
+              <p className="t-secondary">Claude will be able to read reports, analytics, trends, the calendar, client notes and the strategy of the clients you can see, and start work for them. It asks you before anything that costs money.</p>
               <p className="t-label">Signed in as {view.email}. After you choose, you'll go back to {view.host}.</p>
               <div className="flex justify-center gap-3 pt-2">
                 <Button variant="outline" disabled={view.busy} onClick={() => decide(false)}>Cancel</Button>
@@ -140,6 +147,12 @@ export default function OAuthConsent() {
             <>
               <h1 className="t-h1 text-white">Socialytics isn't available to your account</h1>
               <p className="t-secondary">This account has no access to Socialytics, so Claude was not connected.</p>
+            </>
+          )}
+          {view.kind === "staff-only" && (
+            <>
+              <h1 className="t-h1 text-white">The Claude connector is for Moburst staff</h1>
+              <p className="t-secondary">Your account can use Socialytics in the browser, but not through Claude, so Claude was not connected.</p>
             </>
           )}
           {view.kind === "expired" && (

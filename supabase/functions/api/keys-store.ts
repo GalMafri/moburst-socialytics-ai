@@ -7,7 +7,7 @@ export const KEY_COLUMNS = "id, name, key_prefix, key_hash, scopes, company_slug
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-type KeyRow = Omit<StoredKey, "owner_email">;
+type KeyRow = Omit<StoredKey, "owner_email" | "created_by_email">;
 
 const rowsOf = async (query: PromiseLike<{ data: unknown; error: { message: string } | null }>): Promise<KeyRow[]> => {
   const { data, error } = await query;
@@ -27,14 +27,14 @@ export function makeKeyStore(db: SupabaseClient): KeyStore {
     // profiles through, so the emails are a second query.
     async list() {
       const rows = await rowsOf(db.from("api_keys").select(KEY_COLUMNS).order("created_at", { ascending: false }));
-      const owners = [...new Set(rows.map((r) => r.owner_user_id).filter((id): id is string => !!id))];
+      const owners = [...new Set(rows.flatMap((r) => [r.owner_user_id, r.created_by]).filter((id): id is string => !!id && UUID.test(id)))];
       const emails = new Map<string, string | null>();
       if (owners.length) {
         const { data, error } = await db.from("profiles").select("user_id, email").in("user_id", owners);
         if (error) throw new Error(error.message);
         for (const p of (data ?? []) as Array<{ user_id: string; email: string | null }>) emails.set(p.user_id, p.email);
       }
-      return rows.map((r) => ({ ...r, owner_email: r.owner_user_id ? emails.get(r.owner_user_id) ?? null : null }));
+      return rows.map((r) => ({ ...r, owner_email: r.owner_user_id ? emails.get(r.owner_user_id) ?? null : null, created_by_email: r.created_by ? emails.get(r.created_by) ?? null : null }));
     },
     async listByOwner(userId) {
       const rows = await rowsOf(db.from("api_keys").select(KEY_COLUMNS).eq("owner_user_id", userId).order("created_at", { ascending: false }));

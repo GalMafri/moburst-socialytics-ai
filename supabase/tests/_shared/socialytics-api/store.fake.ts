@@ -1,8 +1,8 @@
 /** An in-memory Store for the route tests: the same filters and keyset paging over fixture rows. */
-import type { ClientScope } from "../api/router.ts";
-import type { DesignStepRow } from "../design/setup.ts";
-import type { AlertRow, ClientRow, CompetitiveReportRow, CompetitorRow, CompetitorSetRow, DesignSettingsRow, DesignSystemRow, HandleRow, MediaJobRow, PostRow, ReportRow, ScheduledPostRow, ScheduleRow, SetWithCompetitors, SproutProfileRow, TrendPostRow, TrendThemeRow, TrendWeekRow } from "./serializers.ts";
-import type { ClientExtras, Page, Store } from "./store.ts";
+import type { ClientScope } from "../../../functions/_shared/api/router.ts";
+import type { DesignStepRow } from "../../../functions/_shared/design/setup.ts";
+import type { AlertRow, ClientRow, CompetitiveReportRow, CompetitorRow, CompetitorSetRow, DesignSettingsRow, DesignSystemRow, HandleRow, MediaJobRow, PostRow, ReportRow, ScheduledPostRow, ScheduleRow, SetWithCompetitors, SproutProfileRow, TrendPostRow, TrendThemeRow, TrendWeekRow } from "../../../functions/_shared/socialytics-api/serializers.ts";
+import type { ClientExtras, Page, Store } from "../../../functions/_shared/socialytics-api/store.ts";
 
 export interface FakeData {
   clients: ClientRow[]; sproutProfiles: SproutProfileRow[]; sets: CompetitorSetRow[]; competitors: CompetitorRow[]; handles: HandleRow[]; reports: ReportRow[]; competitiveReports: CompetitiveReportRow[];

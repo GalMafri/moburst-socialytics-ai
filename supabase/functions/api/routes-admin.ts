@@ -14,10 +14,12 @@ export interface StoredKey {
   owner_user_id: string | null;
   /** The owner's email from their profile, filled by list() for the admin list only and never written; null everywhere else and for a tool key. */
   owner_email: string | null;
+  /** The email of the person who made the key (the admin list only). */
+  created_by_email?: string | null;
 }
 
 export interface KeyStore {
-  insert(k: Omit<StoredKey, "id" | "created_at" | "last_used_at" | "revoked_at" | "owner_email">): Promise<StoredKey>;
+  insert(k: Omit<StoredKey, "id" | "created_at" | "last_used_at" | "revoked_at" | "owner_email" | "created_by_email">): Promise<StoredKey>;
   /** Every key, newest first, with owner_email. */
   list(): Promise<StoredKey[]>;
   /** One person's own keys, newest first. */

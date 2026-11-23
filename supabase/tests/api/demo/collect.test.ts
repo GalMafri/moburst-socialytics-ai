@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { CLIENT, COMPETITIVE_REPORT, COMPETITOR, COMPETITOR_SET, DESIGN_SYSTEM, HANDLE, POST, REPORT } from "../../../functions/_shared/socialytics-api/fixtures";
+import { CLIENT, COMPETITIVE_REPORT, COMPETITOR, COMPETITOR_SET, DESIGN_SYSTEM, HANDLE, POST, REPORT } from "../../_shared/socialytics-api/fixtures";
 import { buildOutputs } from "../../../functions/api/demo/collect";
 import { APP_URL } from "../../../functions/_shared/socialytics-api/serializers";
 

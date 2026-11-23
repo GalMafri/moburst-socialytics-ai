@@ -1,7 +1,6 @@
 /**
- * The connector's eight read-only tools. Names follow
- * api/mcp/socialytics-tools.json, so a skill written for either works with
- * both. Each tool runs the route handler the matching GET /v1/... of the
+ * The connector's eight read-only tools. The list of every tool, and the
+ * manifest api/mcp/socialytics-tools.json generated from it, is catalog.ts. Each tool runs the route handler the matching GET /v1/... of the
  * Socialytics API runs (_shared/socialytics-api/routes-read.ts), in process, with the person's
  * client scope where a key's reach would be: the same queries, serializers
  * and fields, capped by limits.ts. The trend themes come from
@@ -40,7 +39,10 @@ export interface ToolSpec {
   run(args: Record<string, unknown>, at: ToolAt): Promise<unknown>;
 }
 
-interface ToolAt { person: Person; deps: ToolDeps; routes: Route[]; requestId: string }
+/** Who a read runs for: a person's reach, or an API key's (server.ts), as the API would apply it. */
+export type Reader = Pick<Person, "userId" | "scope">;
+
+interface ToolAt { person: Reader; deps: ToolDeps; routes: Route[]; requestId: string }
 
 const REPORT_SECTIONS = ["analysis", "calendar", "performance", "trends"] as const;
 const COMPETITIVE_SECTIONS = ["analysis", "aggregates"] as const;
@@ -187,7 +189,7 @@ export function failure(e: unknown, tool: string, requestId: string): ToolResult
 }
 
 /** Runs one tool for a person. The arguments were checked against the tool's schema by the SDK. */
-export async function runTool(name: string, args: Record<string, unknown>, person: Person, deps: ToolDeps, requestId: string): Promise<ToolResult> {
+export async function runTool(name: string, args: Record<string, unknown>, person: Reader, deps: ToolDeps, requestId: string): Promise<ToolResult> {
   const tool = TOOLS.find((t) => t.name === name);
   if (!tool) return { ok: false, status: 404, code: "not_found", text: "There is no such Socialytics tool." };
   // The connector's report read stays as it was: industry_trends is the API's (Trends Task 12).

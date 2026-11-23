@@ -2,11 +2,77 @@
 
 <!-- Generated from the route table by `npm run api:gen`. Do not edit by hand: change the routes and regenerate. -->
 
-Everything Socialytics holds for the clients a key may see (clients with their brand, pillars and design, social and competitive reports with their decks, competitor sets, generated posts and media, schedules, scheduled posts, competitive alerts, design systems, Sprout performance, health), plus the ad-hoc demo job that onboards any brand from a name and a website and runs every feature for it, and what Socialytics' paid providers cost per client, service and period (the costs scope). Authenticate with `Authorization: Bearer <key>`. The personal key routes under /v1/me take a Socialytics sign-in session instead, for Moburst staff only. Lists are paginated with `limit` and `cursor`.
+Everything Socialytics holds for the clients a key may see (clients with their brand, pillars and design, social and competitive reports with their decks, competitor sets, generated posts and media, schedules, scheduled posts, competitive alerts, design systems, Sprout performance, health), the actions people start in the app (start a social or competitive report, draft a post, write a post's copy again, start a post's designs, propose competitors, refresh the competitor feed, plan a calendar week; the run scope, with an optional idempotency_key), plus the ad-hoc demo job that onboards any brand from a name and a website and runs every feature for it, and what Socialytics' paid providers cost per client, service and period (the costs scope). Authenticate with `Authorization: Bearer <key>`. The personal key routes under /v1/me take a Socialytics sign-in session instead, for Moburst staff only. Lists are paginated with `limit` and `cursor`.
 
 Version 1. The live copy of this document is `GET /v1/openapi.json` on the deployed API.
 
 ## Operations
+
+### Actions
+
+#### `POST /v1/clients/{id}/calendar-weeks`
+
+Plan a week of a client's content calendar (the calendar's Plan next week): the week named, or the earliest unplanned one. Scope: `run`.
+
+Body: [PlanWeekInput](#planweekinput)
+
+Returns: [WeekPlanned](#weekplanned)
+
+#### `POST /v1/clients/{id}/competitive-reports`
+
+Start a client's competitive report on its confirmed competitors (default the last 30 complete days). Scope: `run`.
+
+Body: [StartReportInput](#startreportinput)
+
+Returns: [ReportStarted](#reportstarted)
+
+#### `POST /v1/clients/{id}/competitor-feed`
+
+Collect the client's competitors' recent posts again and detect the topics they share. Scope: `run`.
+
+Body: [RefreshFeedInput](#refreshfeedinput)
+
+Returns: [FeedRefreshed](#feedrefreshed)
+
+#### `POST /v1/clients/{id}/competitor-proposals`
+
+Propose a new draft set of competitors for a client, for the team to review and confirm in the app. Scope: `run`.
+
+Body: [IdentifyCompetitorsInput](#identifycompetitorsinput)
+
+Returns: [CompetitorProposal](#competitorproposal)
+
+#### `POST /v1/clients/{id}/copy-drafts`
+
+Write a calendar post's copy again, optionally following a note; nothing is saved. Scope: `run`.
+
+Body: [RewriteCopyInput](#rewritecopyinput)
+
+Returns: [RewrittenCopy](#rewrittencopy)
+
+#### `POST /v1/clients/{id}/post-designs`
+
+Start the design options for one of a client's calendar posts (the post's Create design). Scope: `run`.
+
+Body: [DesignPostInput](#designpostinput)
+
+Returns: [DesignStarted](#designstarted)
+
+#### `POST /v1/clients/{id}/post-drafts`
+
+Draft one post for a client from a topic, in its voice and pillars; nothing is saved. Scope: `run`.
+
+Body: [DraftPostInput](#draftpostinput)
+
+Returns: [DraftedPost](#draftedpost)
+
+#### `POST /v1/clients/{id}/reports`
+
+Start a client's social report for a period (default the last 30 days); answers the run already open instead of starting a second. Scope: `run`.
+
+Body: [StartReportInput](#startreportinput)
+
+Returns: [ReportStarted](#reportstarted)
 
 ### Admin
 
@@ -246,7 +312,7 @@ Returns: [PersonalKeyList](#personalkeylist)
 
 #### `POST /v1/me/keys`
 
-Make a personal API key, read only for 90 days (the key is returned once; needs your signed-in Socialytics session).
+Make a personal API key, read only or read and write, for all your companies or some, for up to 90 days (the key is returned once; needs your signed-in Socialytics session).
 
 Body: [PersonalKeyCreate](#personalkeycreate)
 
@@ -498,6 +564,7 @@ Returns: [Status](#status)
 | `data.client_ids` |  |  |
 | `data.company_slugs` |  |  |
 | `data.created_at` |  |  |
+| `data.created_by_email` |  |  |
 | `data.expires_at` |  |  |
 | `data.id` |  |  |
 | `data.key` |  |  |
@@ -519,6 +586,7 @@ Returns: [Status](#status)
 | `client_ids` |  |  |
 | `company_slugs` |  |  |
 | `created_at` |  |  |
+| `created_by_email` |  |  |
 | `expires_at` |  |  |
 | `id` |  |  |
 | `key` |  |  |
@@ -541,6 +609,7 @@ Returns: [Status](#status)
 | `data[].client_ids` |  |  |
 | `data[].company_slugs` |  |  |
 | `data[].created_at` |  |  |
+| `data[].created_by_email` |  |  |
 | `data[].expires_at` |  |  |
 | `data[].id` |  |  |
 | `data[].key_prefix` |  |  |
@@ -561,6 +630,7 @@ Returns: [Status](#status)
 | `client_ids` |  |  |
 | `company_slugs` |  |  |
 | `created_at` |  |  |
+| `created_by_email` |  |  |
 | `expires_at` |  |  |
 | `id` |  |  |
 | `key_prefix` |  |  |
@@ -954,6 +1024,41 @@ Returns: [Status](#status)
 | `status` |  |  |
 | `totals` |  |  |
 
+### CompetitorProposal
+
+| Field | Required | Values |
+|---|---|---|
+| `data` | yes |  |
+| `data.client_id` |  |  |
+| `data.competitors` |  |  |
+| `data.competitors[].id` |  |  |
+| `data.competitors[].name` |  |  |
+| `data.competitors[].rationale` |  |  |
+| `data.competitors[].similarity_score` |  |  |
+| `data.competitors[].website` |  |  |
+| `data.links` |  |  |
+| `data.links.set` |  |  |
+| `data.rejected` |  |  |
+| `data.set_id` |  |  |
+| `data.status` |  | `draft` |
+
+### CompetitorProposalObject
+
+| Field | Required | Values |
+|---|---|---|
+| `client_id` |  |  |
+| `competitors` |  |  |
+| `competitors[].id` |  |  |
+| `competitors[].name` |  |  |
+| `competitors[].rationale` |  |  |
+| `competitors[].similarity_score` |  |  |
+| `competitors[].website` |  |  |
+| `links` |  |  |
+| `links.set` |  |  |
+| `rejected` |  |  |
+| `set_id` |  |  |
+| `status` |  | `draft` |
+
 ### CompetitorSet
 
 | Field | Required | Values |
@@ -1271,6 +1376,35 @@ Returns: [Status](#status)
 | `tool` |  |  |
 | `updated_at` |  |  |
 
+### DesignPostInput
+
+| Field | Required | Values |
+|---|---|---|
+| `idempotency_key` |  |  |
+| `note` |  |  |
+| `post_key` | yes |  |
+
+### DesignStarted
+
+| Field | Required | Values |
+|---|---|---|
+| `data` | yes |  |
+| `data.client_id` |  |  |
+| `data.design` |  |  |
+| `data.filmed_by` |  |  |
+| `data.post_key` |  |  |
+| `data.status` |  |  |
+
+### DesignStartedObject
+
+| Field | Required | Values |
+|---|---|---|
+| `client_id` |  |  |
+| `design` |  |  |
+| `filmed_by` |  |  |
+| `post_key` |  |  |
+| `status` |  |  |
+
 ### DesignSystemList
 
 | Field | Required | Values |
@@ -1342,6 +1476,50 @@ Returns: [Status](#status)
 | `removed.posts` |  |  |
 | `removed.reports` |  |  |
 
+### DraftedPost
+
+| Field | Required | Values |
+|---|---|---|
+| `data` | yes |  |
+| `data.client_id` |  |  |
+| `data.post` |  |  |
+| `data.post.concept` |  |  |
+| `data.post.copy` |  |  |
+| `data.post.cta` |  |  |
+| `data.post.format` |  |  |
+| `data.post.hashtags` |  |  |
+| `data.post.hook` |  |  |
+| `data.post.pillar` |  |  |
+| `data.post.platform` |  |  |
+| `data.post.visual_direction` |  |  |
+| `data.saved` |  |  |
+
+### DraftedPostObject
+
+| Field | Required | Values |
+|---|---|---|
+| `client_id` |  |  |
+| `post` |  |  |
+| `post.concept` |  |  |
+| `post.copy` |  |  |
+| `post.cta` |  |  |
+| `post.format` |  |  |
+| `post.hashtags` |  |  |
+| `post.hook` |  |  |
+| `post.pillar` |  |  |
+| `post.platform` |  |  |
+| `post.visual_direction` |  |  |
+| `saved` |  |  |
+
+### DraftPostInput
+
+| Field | Required | Values |
+|---|---|---|
+| `format` |  |  |
+| `idempotency_key` |  |  |
+| `platform` | yes |  |
+| `topic` | yes |  |
+
 ### Empty
 
 `object`
@@ -1355,6 +1533,33 @@ Returns: [Status](#status)
 | `error.details` |  |  |
 | `error.message` | yes |  |
 
+### FeedRefreshed
+
+| Field | Required | Values |
+|---|---|---|
+| `data` | yes |  |
+| `data.alerts` |  |  |
+| `data.client_id` |  |  |
+| `data.linkedin_pending` |  |  |
+| `data.links` |  |  |
+| `data.links.alerts` |  |  |
+| `data.posts` |  |  |
+| `data.topics_pending` |  |  |
+| `data.window` |  |  |
+
+### FeedRefreshedObject
+
+| Field | Required | Values |
+|---|---|---|
+| `alerts` |  |  |
+| `client_id` |  |  |
+| `linkedin_pending` |  |  |
+| `links` |  |  |
+| `links.alerts` |  |  |
+| `posts` |  |  |
+| `topics_pending` |  |  |
+| `window` |  |  |
+
 ### Health
 
 | Field | Required | Values |
@@ -1364,6 +1569,12 @@ Returns: [Status](#status)
 | `time` |  |  |
 | `tool` |  |  |
 | `version` |  |  |
+
+### IdentifyCompetitorsInput
+
+| Field | Required | Values |
+|---|---|---|
+| `idempotency_key` |  |  |
 
 ### Links
 
@@ -1416,13 +1627,17 @@ Returns: [Status](#status)
 
 | Field | Required | Values |
 |---|---|---|
+| `company_slugs` |  |  |
+| `expires_at` |  |  |
 | `name` | yes |  |
+| `scopes` |  | `read`, `run` |
 
 ### PersonalKeyCreated
 
 | Field | Required | Values |
 |---|---|---|
 | `data` | yes |  |
+| `data.company_slugs` |  |  |
 | `data.created_at` |  |  |
 | `data.expires_at` |  |  |
 | `data.id` |  |  |
@@ -1431,12 +1646,13 @@ Returns: [Status](#status)
 | `data.last_used_at` |  |  |
 | `data.name` |  |  |
 | `data.revoked_at` |  |  |
-| `data.scopes` |  | `read` |
+| `data.scopes` |  | `read`, `run` |
 
 ### PersonalKeyCreatedObject
 
 | Field | Required | Values |
 |---|---|---|
+| `company_slugs` |  |  |
 | `created_at` |  |  |
 | `expires_at` |  |  |
 | `id` |  |  |
@@ -1445,13 +1661,14 @@ Returns: [Status](#status)
 | `last_used_at` |  |  |
 | `name` |  |  |
 | `revoked_at` |  |  |
-| `scopes` |  | `read` |
+| `scopes` |  | `read`, `run` |
 
 ### PersonalKeyList
 
 | Field | Required | Values |
 |---|---|---|
 | `data` | yes |  |
+| `data[].company_slugs` |  |  |
 | `data[].created_at` |  |  |
 | `data[].expires_at` |  |  |
 | `data[].id` |  |  |
@@ -1459,13 +1676,14 @@ Returns: [Status](#status)
 | `data[].last_used_at` |  |  |
 | `data[].name` |  |  |
 | `data[].revoked_at` |  |  |
-| `data[].scopes` |  | `read` |
+| `data[].scopes` |  | `read`, `run` |
 | `next_cursor` | yes |  |
 
 ### PersonalKeyObject
 
 | Field | Required | Values |
 |---|---|---|
+| `company_slugs` |  |  |
 | `created_at` |  |  |
 | `expires_at` |  |  |
 | `id` |  |  |
@@ -1473,7 +1691,7 @@ Returns: [Status](#status)
 | `last_used_at` |  |  |
 | `name` |  |  |
 | `revoked_at` |  |  |
-| `scopes` |  | `read` |
+| `scopes` |  | `read`, `run` |
 
 ### PersonalKeyRevoked
 
@@ -1489,6 +1707,13 @@ Returns: [Status](#status)
 |---|---|---|
 | `id` | yes |  |
 | `revoked_at` | yes |  |
+
+### PlanWeekInput
+
+| Field | Required | Values |
+|---|---|---|
+| `idempotency_key` |  |  |
+| `week` |  |  |
 
 ### Post
 
@@ -1588,6 +1813,13 @@ Returns: [Status](#status)
 | `variant_group_id` |  |  |
 | `version` |  |  |
 | `visual_direction` |  |  |
+
+### RefreshFeedInput
+
+| Field | Required | Values |
+|---|---|---|
+| `days` |  |  |
+| `idempotency_key` |  |  |
 
 ### Report
 
@@ -1700,6 +1932,76 @@ Returns: [Status](#status)
 | `type` |  |  |
 | `warnings` |  |  |
 
+### ReportStarted
+
+| Field | Required | Values |
+|---|---|---|
+| `data` | yes |  |
+| `data.client_id` |  |  |
+| `data.kind` |  | `social`, `competitive` |
+| `data.links` |  |  |
+| `data.links.report` |  |  |
+| `data.links.reports` |  |  |
+| `data.range` |  |  |
+| `data.report_id` |  |  |
+| `data.requested_at` |  |  |
+| `data.resumed` |  |  |
+| `data.status` |  | `queued`, `running` |
+| `data.waiting_for` |  |  |
+
+### ReportStartedObject
+
+| Field | Required | Values |
+|---|---|---|
+| `client_id` |  |  |
+| `kind` |  | `social`, `competitive` |
+| `links` |  |  |
+| `links.report` |  |  |
+| `links.reports` |  |  |
+| `range` |  |  |
+| `report_id` |  |  |
+| `requested_at` |  |  |
+| `resumed` |  |  |
+| `status` |  | `queued`, `running` |
+| `waiting_for` |  |  |
+
+### RewriteCopyInput
+
+| Field | Required | Values |
+|---|---|---|
+| `concept` |  |  |
+| `copy` |  |  |
+| `cta` |  |  |
+| `format` |  |  |
+| `idempotency_key` |  |  |
+| `note` |  |  |
+| `pillar` |  |  |
+| `platform` |  |  |
+| `post_key` |  |  |
+
+### RewrittenCopy
+
+| Field | Required | Values |
+|---|---|---|
+| `data` | yes |  |
+| `data.client_id` |  |  |
+| `data.copy` |  |  |
+| `data.cta` |  |  |
+| `data.hashtags` |  |  |
+| `data.post_key` |  |  |
+| `data.saved` |  |  |
+
+### RewrittenCopyObject
+
+| Field | Required | Values |
+|---|---|---|
+| `client_id` |  |  |
+| `copy` |  |  |
+| `cta` |  |  |
+| `hashtags` |  |  |
+| `post_key` |  |  |
+| `saved` |  |  |
+
 ### ScheduledPostList
 
 | Field | Required | Values |
@@ -1793,6 +2095,14 @@ Returns: [Status](#status)
 | `issues[].text` |  |  |
 | `ready` | yes |  |
 
+### StartReportInput
+
+| Field | Required | Values |
+|---|---|---|
+| `end` |  |  |
+| `idempotency_key` |  |  |
+| `start` |  |  |
+
 ### Status
 
 | Field | Required | Values |
@@ -1835,3 +2145,20 @@ Returns: [Status](#status)
 | `findings[].severity` |  |  |
 | `time` |  |  |
 | `tool` |  |  |
+
+### WeekPlanned
+
+| Field | Required | Values |
+|---|---|---|
+| `data` | yes |  |
+| `data.client_id` |  |  |
+| `data.plan` |  |  |
+| `data.week` |  |  |
+
+### WeekPlannedObject
+
+| Field | Required | Values |
+|---|---|---|
+| `client_id` |  |  |
+| `plan` |  |  |
+| `week` |  |  |

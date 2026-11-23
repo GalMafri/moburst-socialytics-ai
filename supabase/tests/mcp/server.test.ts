@@ -6,8 +6,8 @@
 // the audit rows. No API key of the project is involved anywhere.
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createLocalJWKSet } from "npm:jose@6.2.12";
-import { CLIENT, REPORT } from "../../functions/_shared/socialytics-api/fixtures";
-import { emptyData, makeFakeStore } from "../../functions/_shared/socialytics-api/store.fake";
+import { CLIENT, REPORT } from "../_shared/socialytics-api/fixtures";
+import { emptyData, makeFakeStore } from "../_shared/socialytics-api/store.fake";
 import { connectorFetch, type ConnectorDeps } from "../../functions/mcp/server";
 import type { McpAuditRow } from "../../functions/mcp/audit";
 import type { NoteWrites, TypedNoteRow } from "../../functions/_shared/notes/add";
@@ -20,9 +20,10 @@ const ENDPOINT = `${PROJECT}/mcp`; // the gateway strips /functions/v1 before th
 const ADMIN = "00000000-0000-4000-8000-00000000000a";
 const BADER_USER = "00000000-0000-4000-8000-00000000000b";
 const NO_ROLE = "00000000-0000-4000-8000-00000000000c";
+const BADER_STAFF = "00000000-0000-4000-8000-00000000000d";
 const OAUTH_CLIENT = "9b1f0c4e-3f8a-4c55-9d7e-2a6b1c0d4e5f";
 const CALM = { ...CLIENT, id: "c-calm", name: "Calm", company_slug: "calm", created_at: "2026-09-01T00:00:00.000Z" };
-const PEOPLE: Record<string, { roles: string[]; clients: string[] }> = { [ADMIN]: { roles: ["admin"], clients: ["c-bader", "c-calm"] }, [BADER_USER]: { roles: ["client"], clients: ["c-bader"] }, [NO_ROLE]: { roles: [], clients: [] } };
+const PEOPLE: Record<string, { roles: string[]; clients: string[] }> = { [ADMIN]: { roles: ["admin"], clients: ["c-bader", "c-calm"] }, [BADER_USER]: { roles: ["client"], clients: ["c-bader"] }, [NO_ROLE]: { roles: [], clients: [] }, [BADER_STAFF]: { roles: ["moburst_user"], clients: ["c-bader"] } };
 const BADER_ID = "00000000-0000-4000-8000-000000000001";
 
 const b64u = (b: ArrayBuffer | string) => Buffer.from(typeof b === "string" ? b : new Uint8Array(b)).toString("base64url");
@@ -113,19 +114,22 @@ describe("the handshake", () => {
     "socialytics_competitive_reports_list", "socialytics_competitive_report_get", "socialytics_client_analytics", "socialytics_trend_themes",
     "socialytics_calendar_posts",
   ];
+  const API = ["socialytics_api_schema", "socialytics_api"];
+  const WORK = ["socialytics_report_start", "socialytics_post_draft", "socialytics_post_design_start", "socialytics_competitors_identify", "socialytics_competitor_feed_refresh", "socialytics_calendar_week_plan"];
   type Listed = { name: string; inputSchema: { type: string; properties: object }; annotations: Record<string, boolean> };
 
-  it("lists 16 tools for staff: the reads, then the five saves with the hints Claude asks for approval by", async () => {
+  it("lists 25 tools for an admin: the reads, the five saves with the hints Claude asks for approval by, the API tools, the work tools and the costs", async () => {
     const tools = (await rpc("tools/list", {}, await oauth(ADMIN))).message.result.tools as Listed[];
     expect(tools.map((t) => t.name)).toEqual([
       ...READS, "socialytics_strategy_get", "socialytics_client_notes",
       "socialytics_note_save", "socialytics_post_copy_save", "socialytics_strategy_section_save", "socialytics_report_deck_upload", "socialytics_report_deck_save",
+      ...API, ...WORK, "socialytics_cost_summary",
     ]);
     for (const t of tools.slice(0, 11)) {
       expect(t.annotations, t.name).toEqual({ readOnlyHint: true, openWorldHint: false });
       expect(t.inputSchema.type, t.name).toBe("object");
     }
-    const hints = Object.fromEntries(tools.slice(11).map((t) => [t.name, t.annotations]));
+    const hints = Object.fromEntries(tools.slice(11, 16).map((t) => [t.name, t.annotations]));
     expect(hints).toEqual({
       socialytics_note_save: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       socialytics_post_copy_save: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
@@ -137,10 +141,10 @@ describe("the handshake", () => {
     expect(Object.keys(tools.find((t) => t.name === "socialytics_note_save")!.inputSchema.properties)).toEqual(["client_id", "client_name", "text", "title", "date"]);
   });
 
-  it("lists 9 read tools for a client user: no strategy, no notes, no saves", async () => {
-    const tools = (await rpc("tools/list", {}, await oauth(BADER_USER))).message.result.tools as Listed[];
-    expect(tools.map((t) => t.name)).toEqual(READS);
-    for (const t of tools) expect(t.annotations.readOnlyHint, t.name).toBe(true);
+  it("refuses a client user: the API and the connector are for Moburst staff only", async () => {
+    const r = await rpc("tools/list", {}, await oauth(BADER_USER));
+    expect(r.status).toBe(403);
+    expect(r.message).toEqual({ error: "The Socialytics connector is for Moburst staff only." });
   });
 });
 
@@ -198,7 +202,7 @@ describe("tool calls", () => {
     expect(all.isError).toBeUndefined();
     expect(all.content).toHaveLength(1);
     expect(JSON.parse(all.content[0].text).data.map((c: { name: string }) => c.name).sort()).toEqual(["Bader Law", "Calm"]);
-    const mine = await callTool(await oauth(BADER_USER), "socialytics_clients_list", {});
+    const mine = await callTool(await oauth(BADER_STAFF), "socialytics_clients_list", {});
     expect(JSON.parse(mine.content[0].text).data.map((c: { name: string }) => c.name)).toEqual(["Bader Law"]);
     expect(audit).toHaveLength(2);
     expect(audit[0]).toMatchObject({ method: "MCP", path: "mcp/socialytics_clients_list", status: 200, user_id: ADMIN, oauth_client_id: OAUTH_CLIENT, ip: "203.0.113.9", error_code: null, key_id: null });
@@ -206,7 +210,7 @@ describe("tool calls", () => {
   });
 
   it("answer outside the person's clients as not found, marked as an error", async () => {
-    const r = await callTool(await oauth(BADER_USER), "socialytics_client_get", { client_id: "c-calm" });
+    const r = await callTool(await oauth(BADER_STAFF), "socialytics_client_get", { client_id: "c-calm" });
     expect(r).toEqual({ content: [{ type: "text", text: "No client with that id among the clients you can see." }], isError: true });
     expect(audit[0]).toMatchObject({ status: 404, error_code: "not_found" });
   });
@@ -222,10 +226,9 @@ describe("tool calls", () => {
     expect(JSON.stringify(audit)).not.toMatch(/cheap|Launch/);
   });
 
-  it("offer a client user no save: calling one by name writes nothing and records nothing", async () => {
+  it("refuse a client user's call by name: it writes nothing and records nothing", async () => {
     const res = await rpc("tools/call", { name: "socialytics_note_save", arguments: { client_id: BADER_ID, client_name: "Bader Law", text: "x" } }, await oauth(BADER_USER));
-    const failed = res.message.error ?? (res.message.result?.isError ? res.message.result : null);
-    expect(failed).toBeTruthy();
+    expect(res.status).toBe(403);
     expect(notes).toEqual([]);
     expect(audit).toEqual([]);
   });
