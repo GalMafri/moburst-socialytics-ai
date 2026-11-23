@@ -11,6 +11,8 @@
 // the design would quietly vanish later. Downloading here costs one hop and
 // removes that whole class of failure.
 
+import type { CostContext } from "../cost/context.ts";
+import { paid } from "../paid/index.ts";
 import { higgsfieldMcp } from "./oauth.ts";
 import {
   HiggsfieldError,
@@ -57,6 +59,8 @@ export interface RenderedImage {
 export interface RenderImageArgs {
   /** Service-role client: reads the stored token and signs references. */
   supabase: any;
+  /** Who the image is for: the MCP calls go through the paying desk, and the finished generation is recorded against it. */
+  cost: CostContext;
   prompt: string;
   /** The ratio the Gemini path computed, e.g. "4:5". */
   aspectRatio: string;
@@ -77,7 +81,7 @@ export async function renderImageWithHiggsfield(args: RenderImageArgs): Promise<
   const startedAt = Date.now();
 
   // The token is renewed once if it runs out mid-render (oauth.ts, higgsfieldMcp; QA 22 Nov 2026).
-  const mcp = await higgsfieldMcp(args.supabase);
+  const mcp = await higgsfieldMcp(args.supabase, args.cost);
 
   const balance = await creditBalance(mcp);
   if (balance && balance.credits < CREDIT_FLOOR) {
@@ -105,6 +109,12 @@ export async function renderImageWithHiggsfield(args: RenderImageArgs): Promise<
   const spent = Date.now() - startedAt;
   const waited = await awaitJobs(mcp, jobs, { budgetMs: Math.max(budgetMs - spent - 15_000, 10_000) });
   const done = firstResult(waited);
+  const jobId = waited.outcomes.find((o) => o.status === "completed")?.job_id ?? null;
+  // The generation is done, so it is paid for: recorded once, as one image (Higgsfield's answers carry no
+  // price; the credits are on the account's own ledger), keyed by its job so a second record is ignored.
+  if (jobId) {
+    await paid.record(args.cost, "higgsfield", { resource: done.model ?? IMAGE_MODEL, quantities: { images: 1 }, providerRef: jobId, idempotencyKey: `higgsfield:${jobId}` });
+  }
 
   const resp = await doFetch(done.url);
   if (!resp.ok) {
@@ -119,6 +129,6 @@ export async function renderImageWithHiggsfield(args: RenderImageArgs): Promise<
     textResponse: null,
     model: done.model ?? IMAGE_MODEL,
     creditsBefore: balance?.credits ?? null,
-    jobId: waited.outcomes.find((o) => o.status === "completed")?.job_id ?? null,
+    jobId,
   };
 }

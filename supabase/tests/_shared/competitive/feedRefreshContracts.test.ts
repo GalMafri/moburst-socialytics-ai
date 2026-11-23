@@ -24,7 +24,7 @@ vi.mock("../../../functions/_shared/competitive/ownedSource", async (original) =
 const { refreshCompetitorFeed } = await import("../../../functions/_shared/competitive/refreshFeed");
 
 const CLIENT = "client-1";
-const ENV = { rivaliqKey: "rq", anthropicKey: undefined, secret: "s" };
+const ENV = { rivaliqKey: "rq", by: { actor: "system" as const }, secret: "s" };
 function db(opts: { set?: boolean; competitors?: Array<Record<string, unknown>> } = {}) {
   const d = fakeDb({
     clients: [{ id: CLIENT, name: "Bader Law", website_url: "https://baderlaw.com", harvested_design_references: [] }],

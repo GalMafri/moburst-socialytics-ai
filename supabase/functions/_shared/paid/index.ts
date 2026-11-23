@@ -91,6 +91,30 @@ export async function authHeaders(provider: ProviderId): Promise<Record<string, 
   }
 }
 
+/**
+ * Billing-API credentials for the daily reconciliation (cost/reconcile.ts):
+ * the headers, or the name of the missing secret. Admin keys live only in the
+ * function's secrets, never in app_settings.
+ */
+export function billingCredentials(provider: ProviderId): { headers: Record<string, string> } | { missing: string } {
+  const pick = (name: string) => env(name);
+  switch (provider) {
+    case "anthropic": {
+      const k = pick("ANTHROPIC_ADMIN_KEY");
+      return k ? { headers: { "x-api-key": k } } : { missing: "ANTHROPIC_ADMIN_KEY" };
+    }
+    case "openai": {
+      const k = pick("OPENAI_ADMIN_KEY");
+      return k ? { headers: { Authorization: `Bearer ${k}` } } : { missing: "OPENAI_ADMIN_KEY" };
+    }
+    case "apify": {
+      const k = pick("APIFY_API_TOKEN");
+      return k ? { headers: { Authorization: `Bearer ${k}` } } : { missing: "APIFY_API_TOKEN" };
+    }
+    default: throw new Error(`Socialytics reads no billing API for ${provider}`);
+  }
+}
+
 /** Whether a provider's credentials are set, for features that skip a step when they are not. */
 export async function hasKey(provider: ProviderId): Promise<boolean> {
   try {
@@ -128,6 +152,10 @@ let skipAuth = false;
 async function withAuth(provider: ProviderId, init?: RequestInit): Promise<RequestInit> {
   if (skipAuth) return init ?? {};
   const headers = new Headers(init?.headers);
+  // A call that already carries its own Authorization (Higgsfield's MCP, with
+  // the team's OAuth token from higgsfield/oauth.ts) keeps it: the desk adds
+  // nothing and does not ask for a key that call does not use.
+  if (headers.has("authorization")) return { ...init, headers };
   for (const [k, v] of Object.entries(await authHeaders(provider))) if (!headers.has(k)) headers.set(k, v);
   return { ...init, headers };
 }

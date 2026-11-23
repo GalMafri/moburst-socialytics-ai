@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { REPORT_TEXT_MODEL, sonnetCompletion } from "../../../functions/_shared/reports/correctText";
 import { checkCorrection, parseCorrection } from "../../../functions/_shared/reports/reportText";
 import { roomFor } from "../../../functions/_shared/anthropicReply";
+import { TEST_COST } from "../../paid/testMeter";
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
@@ -18,7 +19,7 @@ describe("sonnetCompletion", () => {
       sent.push(JSON.parse(String(init?.body)));
       return new Response(JSON.stringify({ content: [{ type: "thinking", thinking: "" }, { type: "text", text: '{"sentences":[]}' }], stop_reason: stop }));
     });
-    const complete = sonnetCompletion("k");
+    const complete = sonnetCompletion(TEST_COST);
     expect(await complete("system", "message")).toBe('{"sentences":[]}');
     expect([sent[0].model, sent[0].max_tokens]).toEqual([REPORT_TEXT_MODEL, roomFor(4000)]);
     for (stop of ["max_tokens", "refusal"]) expect(await complete("system", "message")).toBe("");

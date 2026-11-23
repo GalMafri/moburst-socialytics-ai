@@ -17,13 +17,13 @@
 
 import { AuthzError } from "../auth/authz.ts";
 import { returnOriginFor, settingsUrl } from "../auth/appOrigin.ts";
+import type { CostContext } from "../cost/context.ts";
 import { McpClient } from "./mcp.ts";
 
 export const CLERK_ISSUER = "https://clerk.higgsfield.ai";
 export const AUTHORIZE_URL = `${CLERK_ISSUER}/oauth/authorize`;
 export const TOKEN_URL = `${CLERK_ISSUER}/oauth/token`;
 export const REGISTER_URL = `${CLERK_ISSUER}/oauth/register`;
-export const MCP_URL = "https://mcp.higgsfield.ai/mcp";
 export const SCOPES = "openid email offline_access";
 export const PROVIDER = "higgsfield";
 
@@ -548,9 +548,9 @@ export async function handleAuthRequest(req: Request, deps: AuthDeps): Promise<R
  * sign-in. Higgsfield's 401 now gets one refresh of that token and the call
  * is sent again.
  */
-export async function higgsfieldMcp(supabase: Db, timeoutMs = 30_000): Promise<McpClient> {
+export async function higgsfieldMcp(supabase: Db, cost: CostContext, timeoutMs = 30_000): Promise<McpClient> {
   return new McpClient({
-    url: MCP_URL,
+    cost,
     accessToken: await accessTokenFor(supabase),
     timeoutMs,
     renewToken: (rejected) => accessTokenFor(supabase, undefined, undefined, rejected),

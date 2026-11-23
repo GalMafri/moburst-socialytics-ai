@@ -342,7 +342,8 @@ export function comparableCompetitors<T extends { posts: number }>(rows: T[]): T
   return rows.filter((r) => r.posts >= COMPETITOR_MIN_POSTS);
 }
 
-export type ApifyFactory = () => ApifyClient | null;
+/** The Apify client the read runs its actors with, or null when Apify cannot be used (no token). */
+export type ApifyFactory = () => ApifyClient | null | Promise<ApifyClient | null>;
 
 /** One step of the read: start the runs, or look at them; done when every run has ended or the read needs none. */
 export async function stepRead(state: PublicReadState | null, targets: Target[], apify: ApifyFactory, now: Date): Promise<PublicReadState> {
@@ -353,7 +354,7 @@ export async function stepRead(state: PublicReadState | null, targets: Target[],
   if (state && state.key === key && (fresh(state) || state.status === "reading")) {
     if (state.status === "reading") return await look(state, apify, now);
     if (!state.runs.some(failedRun) || (state.rereads ?? 0) >= REREAD_FAILED) return state;
-    const client = apify();
+    const client = await apify();
     if (!client) return state;
     const again: PublicReadState["runs"] = [];
     for (const r of state.runs.filter(failedRun)) {
@@ -372,7 +373,7 @@ export async function stepRead(state: PublicReadState | null, targets: Target[],
   }
   const base: PublicReadState = { version: READ_VERSION, key, status: "done", started_at: now.toISOString(), read_at: now.toISOString(), window, runs: [], posts: [] };
   if (!targets.length) return base;
-  const client = apify();
+  const client = await apify();
   if (!client) return { ...base, skipped: "no_token" };
   const runs: PublicReadState["runs"] = [];
   for (const [platform, reader] of Object.entries(PUBLIC_READERS)) {
@@ -390,7 +391,7 @@ export async function stepRead(state: PublicReadState | null, targets: Target[],
 }
 
 async function look(state: PublicReadState, apify: ApifyFactory, now: Date): Promise<PublicReadState> {
-  const client = apify();
+  const client = await apify();
   const late = now.getTime() - Date.parse(state.started_at) > GIVE_UP_MS;
   if (!client) return { ...state, status: "done", read_at: now.toISOString(), skipped: "no_token" };
   const runs = [];

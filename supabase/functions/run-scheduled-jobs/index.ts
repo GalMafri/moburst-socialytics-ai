@@ -144,6 +144,11 @@ import { runReportText, sonnetCompletion } from "../_shared/reports/correctText.
 import { runReportInsights } from "../_shared/reports/insights.ts";
 import { repairStoredReports } from "../_shared/reports/repairStored.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
+import { costCtx, hasKey } from "../_shared/paid/index.ts";
+import type { CostContext } from "../_shared/cost/context.ts";
+
+/** A scheduled job's paid calls: its client, the job as the execution, the schedule as the one who asked. */
+const jobCost = (job: ScheduledJob, feature: string): CostContext => costCtx({ clientId: job.client_id, feature, actor: "schedule", executionId: job.id });
 import { runNotesRead } from "../_shared/notes/run.ts";
 import { closeAbandonedAll, closeStalledDecks, runStrategyDeck } from "../_shared/strategy/deckJob.ts";
 import { googleConfig, keepAlive } from "../_shared/google/oauth.ts";
@@ -230,7 +235,7 @@ Deno.serve(async (req) => {
       log: makeStepLog(db),
       services: makeStepServices(db, env),
     };
-    const refreshFeed = bindRefreshFeed(db, { rivaliqKey, anthropicKey: Deno.env.get("ANTHROPIC_API_KEY"), secret });
+    const refreshFeed = bindRefreshFeed(db, { rivaliqKey, secret });
 
     // One worker pass: lease and run due jobs (the per-minute tick, and the sweep's repair).
     // First, each competitive schedule's note about tracking is brought in line with its client's set
@@ -248,19 +253,17 @@ Deno.serve(async (req) => {
           // One stored report's figures and text (_shared/reports/correctText.ts).
           case "report_text": return runReportText(db, job, {
             now: () => new Date(),
-            complete: (system, message) => {
-              const key = Deno.env.get("ANTHROPIC_API_KEY");
-              if (!key) throw new Error("ANTHROPIC_API_KEY is not configured.");
-              return sonnetCompletion(key)(system, message);
+            complete: async (system, message) => {
+              if (!(await hasKey("anthropic"))) throw new Error("ANTHROPIC_API_KEY is not configured.");
+              return sonnetCompletion(jobCost(job, "report.text_correct"))(system, message);
             },
           });
           // One finished report's insights from its figures (_shared/reports/insights.ts).
           case "report_insights": return runReportInsights(db, job, {
             now: () => new Date(),
-            complete: (body) => {
-              const key = Deno.env.get("ANTHROPIC_API_KEY");
-              if (!key) throw new Error("ANTHROPIC_API_KEY is not configured.");
-              return anthropicMessages({ apiKey: key, body });
+            complete: async (body) => {
+              if (!(await hasKey("anthropic"))) throw new Error("ANTHROPIC_API_KEY is not configured.");
+              return anthropicMessages({ cost: jobCost(job, "report.insights"), body });
             },
           });
           case "dispatch": return runDispatch(job, dispatchDeps(job, false));
@@ -457,14 +460,15 @@ Deno.serve(async (req) => {
       const runId = typeof body.run_id === "string" ? body.run_id : "";
       const saveAs = typeof body.save_as === "string" && /^qa_[a-z0-9_]{1,60}$/i.test(body.save_as) ? body.save_as : "";
       if (!runId || !saveAs) return json({ error: "run_id and save_as (qa_ and a plain name) are required" }, 400);
-      const { data: run } = await db.from("report_pipeline_runs").select("kind").eq("id", runId).maybeSingle();
+      const { data: run } = await db.from("report_pipeline_runs").select("kind, client_id").eq("id", runId).maybeSingle();
       if (run?.kind !== "trends") return json({ error: "No trends run has that id." }, 404);
-      const apiKey = env("ANTHROPIC_API_KEY");
-      if (!apiKey) return json({ error: "ANTHROPIC_API_KEY is not set" }, 503);
+      if (!(await hasKey("anthropic"))) return json({ error: "ANTHROPIC_API_KEY is not set" }, 503);
+      // A QA check, so its spend is development & QA; still the run's client and the run.
+      const cost = costCtx({ clientId: run.client_id ?? null, feature: "trends.filter_check", actor: "user", executionId: runId, qa: true });
       const payloads = makePayloadStore(db, runId);
       const built = await filterCheckRequest(payloads, body.posts);
       if ("error" in built) return json(built, 400);
-      const work = runClaudeDirect(payloads, { apiKey, body: built.body, saveAs, start: 1 });
+      const work = runClaudeDirect(payloads, { cost, body: built.body, saveAs, start: 1 });
       // deno-lint-ignore no-explicit-any
       const runtime = (globalThis as any).EdgeRuntime;
       if (runtime?.waitUntil) runtime.waitUntil(work);

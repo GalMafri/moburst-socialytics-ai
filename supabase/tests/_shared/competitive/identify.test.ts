@@ -16,7 +16,7 @@ afterEach(() => { asked.prompts = []; });
 describe("proposeCompetitors", () => {
   it("reads the top posts' text where the homepage's would be, for a client with no website", async () => {
     const out = await proposeCompetitors({
-      anthropicKey: "k", siteText: "",
+      cost: { tool: "socialytics", clientId: "c1", feature: "competitors.identify", actor: "user" }, siteText: "",
       client: { name: "Olo", geo: "US,GB", content_pillars: [{ name: "Order ahead" }], social_keywords: ["online ordering"], brief_text: "Drafted from the client's posts" },
       postsText: "[Instagram, 2.4x its platform's median for carousels] Skip the line: order ahead",
     });

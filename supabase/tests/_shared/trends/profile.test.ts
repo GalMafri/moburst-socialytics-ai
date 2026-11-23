@@ -11,6 +11,8 @@ import { deps, STEPS } from "../../../functions/_shared/lifecycle/steps";
 import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
 import type { StepRow } from "../../../functions/_shared/lifecycle/policy";
 
+const COST = { tool: "socialytics" as const, clientId: "c1", feature: "lifecycle.test", actor: "schedule" as const };
+
 const original = { ...deps };
 afterEach(() => Object.assign(deps, original));
 
@@ -176,7 +178,7 @@ describe("the lifecycle steps", () => {
   it("writes the profile and its terms from Claude's answer", async () => {
     deps.trendIO = () => io();
     deps.now = () => NOW;
-    deps.anthropicKey = async () => "key";
+    deps.anthropicReady = async () => true;
     deps.claudeMessages = answer(profile());
     const db = fakeDb({ clients: [client()] });
     const out = await STEPS.trend_profile.run(db, client(), { force: false, previous: null, rows: settledRows });
@@ -187,7 +189,7 @@ describe("the lifecycle steps", () => {
 
   it("asks once more after a bad answer, then fails quietly for the lifecycle to retry", async () => {
     deps.trendIO = () => io();
-    deps.anthropicKey = async () => "key";
+    deps.anthropicReady = async () => true;
     let calls = 0;
     deps.claudeMessages = async () => { calls++; return { text: JSON.stringify(profile({ topics: topics(2) })), stopReason: "end_turn", raw: {} }; };
     const db = fakeDb({ clients: [client()] });
@@ -200,7 +202,7 @@ describe("the lifecycle steps", () => {
   it("refreshes hashtags once a month and leaves the rest of the profile alone", async () => {
     deps.trendIO = () => io();
     deps.now = () => NOW;
-    deps.anthropicKey = async () => "key";
+    deps.anthropicReady = async () => true;
     const base = () => fakeDb({
       clients: [client()],
       trend_profiles: [{ client_id: "c1", audience: "a", fit_rubric: "f", platforms: [], search_overrides: {}, inputs_key: "k", written_at: "2026-09-01T00:00:00Z", hashtags_at: "2026-11-01T05:00:00Z" }],
@@ -232,7 +234,7 @@ describe("the lifecycle steps", () => {
     // Ruled 2 Nov 2026: a refresh rewrites exactly what Instagram searches, so a rewrite made from the old tags goes.
     deps.trendIO = () => io();
     deps.now = () => NOW;
-    deps.anthropicKey = async () => "key";
+    deps.anthropicReady = async () => true;
     deps.claudeMessages = async () => ({ text: JSON.stringify({ hashtags: { instagram: [term("#new")], tiktok: [], linkedin: [] } }), stopReason: "end_turn", raw: {} });
     const overrides = { instagram: ["#rewritten"], tiktok: ["rewritten search"] };
     const withOverrides = (hashtagsAt: string) => fakeDb({
@@ -261,28 +263,28 @@ describe("askTwice", () => {
   const parse = (text: string) => (text.includes("{") ? { value: JSON.parse(text) as { ok: boolean } } : { error: text ? "The answer is not valid JSON." : "The answer is empty." });
   const calls = (replies: Array<{ text: string; stopReason?: string }>) => {
     const bodies: Array<Record<string, unknown>> = [];
-    const call = async (a: { apiKey: string; body: Record<string, unknown> }) => { bodies.push(a.body); return replies.shift()!; };
+    const call = async (a: { cost: unknown; body: Record<string, unknown> }) => { bodies.push(a.body); return replies.shift()!; };
     return { bodies, call };
   };
 
   it("names the problems of a finished answer that does not parse", async () => {
     const { bodies, call } = calls([{ text: "Here is the profile.", stopReason: "end_turn" }, { text: '{"ok":true}', stopReason: "end_turn" }]);
-    expect(await askTwice(call, "k", body, parse)).toEqual({ value: { ok: true } });
+    expect(await askTwice(call, COST, body, parse)).toEqual({ value: { ok: true } });
     expect((bodies[1].messages as unknown[]).length).toBe(3);
   });
 
   it("sends the same request again after an answer that was cut off, never half an answer to correct", async () => {
     const { bodies, call } = calls([{ text: '{"ok":tr', stopReason: "max_tokens" }, { text: '{"ok":true}', stopReason: "end_turn" }]);
-    expect(await askTwice(call, "k", body, parse)).toEqual({ value: { ok: true } });
+    expect(await askTwice(call, COST, body, parse)).toEqual({ value: { ok: true } });
     expect(bodies).toEqual([body, body]);
   });
 
   it("fails after two answers that did not finish, and never reads a cut-off answer that happens to parse", async () => {
     const twice = calls([{ text: "", stopReason: "max_tokens" }, { text: '{"ok":true}', stopReason: "max_tokens" }]);
-    expect(await askTwice(twice.call, "k", body, parse)).toEqual({ error: "The answer is empty." });
+    expect(await askTwice(twice.call, COST, body, parse)).toEqual({ error: "The answer is empty." });
     expect(twice.bodies).toHaveLength(2);
     const second = calls([{ text: "Not JSON.", stopReason: "end_turn" }, { text: "", stopReason: "refusal" }]);
-    expect(await askTwice(second.call, "k", body, parse)).toEqual({ error: "The answer is empty." });
+    expect(await askTwice(second.call, COST, body, parse)).toEqual({ error: "The answer is empty." });
     expect(second.bodies).toHaveLength(2);
   });
 });

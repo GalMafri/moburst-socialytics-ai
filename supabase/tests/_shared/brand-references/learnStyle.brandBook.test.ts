@@ -3,12 +3,12 @@
 // style is learned from: a file the upload accepted is never skipped for being
 // over a smaller number written in this function.
 import { readFileSync } from "node:fs";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { base64Bytes, BRAND_BOOK_MAX_BYTES, brandBookFitsRequest, MODEL_REQUEST_MAX_BYTES } from "../../../functions/_shared/brand/brandBookLimits";
 
 const sent: Array<{ content: Array<{ type: string }> }> = [];
 vi.mock("../../../functions/_shared/anthropic.ts", () => ({
-  anthropicFetch: async (_path: string, init: { body: string }) => {
+  anthropicFetch: async (_cost: unknown, _path: string, init: { body: string }) => {
     sent.push(JSON.parse(init.body).messages[0]);
     const text = JSON.stringify(Object.fromEntries(["composition_patterns", "typography_treatment", "imagery_style", "color_usage", "surface_and_texture", "logo_and_marks_treatment", "mood_and_voice_visual", "anti_patterns", "platform_adaptations"].map((f) => [f, "x"])));
     return new Response(JSON.stringify({ content: [{ text }] }));
@@ -27,7 +27,9 @@ function fakeDb(bookBytes: number, path = "c1/book.pdf", refs: string[] = []) {
 }
 
 describe("learning a style from the brand book", () => {
-  beforeEach(() => { sent.length = 0; });
+  // The AI connection is set: the paying desk finds its key in the function's environment.
+  beforeEach(() => { sent.length = 0; vi.stubGlobal("Deno", { env: { get: (k: string) => (k === "ANTHROPIC_API_KEY" ? "key" : undefined) } }); });
+  afterEach(() => { vi.unstubAllGlobals(); });
 
   it("reads a brand book between 4 MB and the upload limit", async () => {
     const out = await learnBrandStyle(fakeDb(6 * 1024 * 1024) as never, "c1", { discover: false });

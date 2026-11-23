@@ -1,17 +1,19 @@
 // supabase/functions/_shared/net/firecrawl.ts
 //
 // A page's main text as markdown through Firecrawl (one credit), for the
-// client lifecycle's site brief.
+// client lifecycle's site brief, and a web search. Both go through the paying
+// desk (_shared/paid), which adds the key and records the credits against
+// `cost`. Without the key (FIRECRAWL_API_KEY) the desk refuses the call, and
+// each answers nothing, as before.
 
-export async function scrapeMarkdown(url: string, opts: { apiKey?: string | null; fetchImpl?: typeof fetch } = {}): Promise<{ markdown: string; title: string | null } | null> {
-  const env = (globalThis as { Deno?: { env: { get(k: string): string | undefined } } }).Deno?.env;
-  const key = opts.apiKey ?? env?.get("FIRECRAWL_API_KEY");
-  if (!key) return null;
-  const f = opts.fetchImpl ?? fetch;
+import type { CostContext } from "../cost/context.ts";
+import { paid } from "../paid/index.ts";
+
+export async function scrapeMarkdown(cost: CostContext, url: string): Promise<{ markdown: string; title: string | null } | null> {
   try {
-    const response = await f("https://api.firecrawl.dev/v1/scrape", {
+    const response = await paid.fetch(cost, "firecrawl", "/v1/scrape", {
       method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url: /^https?:\/\//i.test(url) ? url : `https://${url}`, formats: ["markdown"], onlyMainContent: true }),
       signal: AbortSignal.timeout(60000),
     });
@@ -30,15 +32,11 @@ export async function scrapeMarkdown(url: string, opts: { apiKey?: string | null
  * website step searches a brand's name this way, as competitive/
  * detectHandles.ts searches for profiles.
  */
-export async function searchWeb(query: string, opts: { apiKey?: string | null; fetchImpl?: typeof fetch; limit?: number } = {}): Promise<string[]> {
-  const env = (globalThis as { Deno?: { env: { get(k: string): string | undefined } } }).Deno?.env;
-  const key = opts.apiKey ?? env?.get("FIRECRAWL_API_KEY");
-  if (!key) return [];
-  const f = opts.fetchImpl ?? fetch;
+export async function searchWeb(cost: CostContext, query: string, opts: { limit?: number } = {}): Promise<string[]> {
   try {
-    const response = await f("https://api.firecrawl.dev/v1/search", {
+    const response = await paid.fetch(cost, "firecrawl", "/v1/search", {
       method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query: query.replace(/[\r\n]+/g, " ").slice(0, 200), limit: opts.limit ?? 10 }),
       signal: AbortSignal.timeout(20000),
     });

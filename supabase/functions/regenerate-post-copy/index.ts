@@ -16,6 +16,7 @@ import { competitiveBrief } from "../_shared/competitive/brief.ts";
 import { AuthzError } from "../_shared/auth/requireStaff.ts";
 import { requireMember } from "../_shared/auth/requireMember.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
+import { costCtx, hasKey } from "../_shared/paid/index.ts";
 import { answerText, PERSON_WAIT_MS, roomFor } from "../_shared/anthropicReply.ts";
 import { COPY_MODEL, loadClientVoice } from "../_shared/voice/load.ts";
 import { voicePromptBlock } from "../_shared/voice/voice.ts";
@@ -42,10 +43,9 @@ Deno.serve(async (req) => {
       );
     }
     // Before anything is read or spent.
-    await requireMember(req, String(client_id));
+    const userId = await requireMember(req, String(client_id));
 
-    const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
-    if (!anthropicKey) {
+    if (!(await hasKey("anthropic"))) {
       return jsonResp({ error: "ANTHROPIC_API_KEY not configured" }, 400);
     }
 
@@ -71,7 +71,7 @@ Deno.serve(async (req) => {
     });
 
     const result = await anthropicMessages({
-      apiKey: anthropicKey,
+      cost: costCtx({ clientId: String(client_id), feature: "post.copy_regenerate", actor: "user", userId }),
       body: { model: COPY_MODEL, max_tokens: roomFor(2000), messages: [{ role: "user", content: prompt }] },
       waitMs: PERSON_WAIT_MS,
     });

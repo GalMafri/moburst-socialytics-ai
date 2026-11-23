@@ -71,12 +71,12 @@ describe('reference review protocol',()=>{
         expect(body.messages[0].content.at(-1).text).toContain('calling record_review exactly once');
         return new Response(JSON.stringify({content:[{type:'tool_use',name:'record_review',input:verdict}],stop_reason:'tool_use'}));
       };
-      expect(await validateDesignImage('data:image/jpeg;base64,ZmFrZQ==',{apiKey:'fixture',creative:true})).toEqual(verdict);
+      expect(await validateDesignImage('data:image/jpeg;base64,ZmFrZQ==',{cost:{tool:'socialytics',clientId:'client-1',feature:'design.review',actor:'user'},creative:true})).toEqual(verdict);
       // a verdict written as JSON text instead of a tool call is read too
       globalThis.fetch=async()=>new Response(JSON.stringify({content:[{type:'text',text:'Here is my review:\n'+JSON.stringify({...verdict,off_brand:true,reason:'flat bands'})}],stop_reason:'end_turn'}));
-      expect(await validateDesignImage('data:image/jpeg;base64,ZmFrZQ==',{apiKey:'fixture',creative:true})).toEqual({...verdict,off_brand:true,reason:'flat bands'});
+      expect(await validateDesignImage('data:image/jpeg;base64,ZmFrZQ==',{cost:{tool:'socialytics',clientId:'client-1',feature:'design.review',actor:'user'},creative:true})).toEqual({...verdict,off_brand:true,reason:'flat bands'});
       globalThis.fetch=async()=>new Response(JSON.stringify({error:{message:'Image exceeds size limit'}}),{status:400});
-      const failed=await validateDesignImage('data:image/jpeg;base64,ZmFrZQ==',{apiKey:'fixture',creative:true});
+      const failed=await validateDesignImage('data:image/jpeg;base64,ZmFrZQ==',{cost:{tool:'socialytics',clientId:'client-1',feature:'design.review',actor:'user'},creative:true});
       expect(failed.skipped).toBe(true);expect(failed.reason).toContain('size limit');
     } finally {globalThis.fetch=original;AbortSignal.timeout=originalTimeout;}
   });

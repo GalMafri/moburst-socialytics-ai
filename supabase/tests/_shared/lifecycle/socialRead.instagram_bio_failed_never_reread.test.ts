@@ -15,9 +15,9 @@ function io(now: Date, calls: string[]): SocialIO {
     followers: async () => [],
     customerProfiles: async () => [],
     image: async () => null,
-    instagram: async (handle) => { calls.push(handle); return { state: "failed", run_id: "run1", status: "TIMED-OUT" }; },
+    instagram: async (_cost, handle) => { calls.push(handle); return { state: "failed", run_id: "run1", status: "TIMED-OUT" }; },
     linkedinPage: async () => { throw new Error("no page"); },
-    openaiKey: async () => null,
+    openaiReady: async () => false,
     brandRead: async () => { throw new Error("not asked"); },
   };
 }

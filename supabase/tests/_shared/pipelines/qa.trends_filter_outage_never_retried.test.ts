@@ -16,6 +16,7 @@ import { TREND_SOURCES } from "../../../functions/_shared/trends/sources";
 import { TREND_PLATFORMS, type TrendPlatform } from "../../../functions/_shared/trends/types";
 import { trendsPipeline } from "../../../functions/_shared/pipelines/definitions/trends";
 import { recollectDecision, recollectWaitMs, runTrendJob, startTrendWeek, type TrendRunRow, type TrendWeekRow } from "../../../functions/run-scheduled-jobs/trends";
+import { viaTestMeter } from "../../paid/testMeter";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -69,7 +70,7 @@ it("a week whose filter met a short Claude outage is collected again", async () 
   }, () => clock.now());
   const requests: Any[] = [];
   const outage = { on: true };
-  const pipeline = trendsPipeline({ apify: apify(), claudeFetch: claudeOverloaded(requests, outage) });
+  const pipeline = trendsPipeline({ apify: apify(), ...viaTestMeter(claudeOverloaded(requests, outage)) });
   const { run_id } = await startPipelineRun(db, { mode: "app", pipeline, clientId: "c1", realTable: "trend_weeks", realId: "w1", input: { week_start: "2026-10-26" }, dedupe: "trends:c1:2026-10-26" });
   const registry = makeRegistry([pipeline], () => true);
   await drivePipeline(db, registry, run_id, { clock, env: ENV, maxCalls: 2000 });

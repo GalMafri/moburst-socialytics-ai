@@ -5,16 +5,21 @@
 // run's payload store: the answer, or why there is none. The step reads it
 // the next time it looks; until then its message batch stands beside it.
 //
-// POST {"run_id","save_as","body","start"[,"keep_days"]} with the operational
-// secret (X-Socialytics-Secret). Only for a pipeline run that is running.
+// POST {"run_id","save_as","body","start"[,"keep_days","feature"]} with the
+// operational secret (X-Socialytics-Secret). Only for a pipeline run that is
+// running. The call's cost goes to the run's client and the run itself, under
+// the asking step's feature.
 
 import { createClient } from "../_shared/supabase.ts";
 import { secretEquals } from "../_shared/auth/secretEquals.ts";
 import { CLAUDE_DIRECT_DEADLINE_MS, directFailedKey, runClaudeDirect, type DirectFailure } from "../_shared/pipelines/claudeDirect.ts";
 import { makePayloadStore } from "../_shared/pipelines/store.ts";
+import { runCost } from "../_shared/pipelines/cost.ts";
+import { hasKey } from "../_shared/paid/index.ts";
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const SAVE_AS = /^[a-z0-9][a-z0-9_.-]{0,100}$/i;
+const FEATURE = /^[a-z][a-z0-9_]*(\.[a-z0-9_]+){0,5}$/;
 
 // Calls still under way when the runtime shuts this worker down are kept as
 // failures, so the step asks for the call once more rather than waiting.
@@ -35,11 +40,11 @@ Deno.serve(async (req) => {
   const body = a?.body && typeof a.body === "object" && !Array.isArray(a.body) ? a.body as Record<string, unknown> : null;
   if (!runId || !saveAs || !body || !Number.isInteger(start) || start < 1 || start > 5) return json({ error: "run_id, save_as, body and start are required" }, 400);
   if (typeof body.model !== "string" || !Array.isArray(body.messages)) return json({ error: "body is not a Messages API request" }, 400);
-  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!apiKey) return json({ error: "ANTHROPIC_API_KEY is not set" }, 503);
+  if (!(await hasKey("anthropic"))) return json({ error: "ANTHROPIC_API_KEY is not set" }, 503);
+  const feature = typeof a?.feature === "string" && FEATURE.test(a.feature) ? a.feature : "report.claude_direct";
 
   const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-  const { data: run, error } = await db.from("report_pipeline_runs").select("id, status").eq("id", runId).maybeSingle();
+  const { data: run, error } = await db.from("report_pipeline_runs").select("id, status, client_id, job_id").eq("id", runId).maybeSingle();
   if (error) return json({ error: "the run could not be read" }, 503);
   if (!run || run.status !== "running") return json({ error: "no running pipeline run has that id" }, 409);
 
@@ -47,7 +52,7 @@ Deno.serve(async (req) => {
   const keepDays = Number(a?.keep_days) > 0 ? Number(a.keep_days) : undefined;
   const w = { put: (f: DirectFailure) => store.put(directFailedKey(saveAs), f), t0: Date.now(), start };
   underWay.add(w);
-  const work = runClaudeDirect(store, { apiKey, body, saveAs, start, keepDays, deadlineMs: CLAUDE_DIRECT_DEADLINE_MS }).finally(() => underWay.delete(w));
+  const work = runClaudeDirect(store, { cost: runCost({ run }, feature), body, saveAs, start, keepDays, deadlineMs: CLAUDE_DIRECT_DEADLINE_MS }).finally(() => underWay.delete(w));
   // deno-lint-ignore no-explicit-any
   const runtime = (globalThis as any).EdgeRuntime;
   if (runtime?.waitUntil) runtime.waitUntil(work);

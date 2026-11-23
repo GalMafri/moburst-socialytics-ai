@@ -16,13 +16,16 @@
 // error and the report says the deck did not complete.
 
 import { sproutAccessToken } from "../../sprout/profiles.ts";
+import type { CostContext } from "../../cost/context.ts";
+import { paid } from "../../paid/index.ts";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
 export const SPROUT_API = "https://api.sproutsocial.com/v1";
-export const GAMMA_API = "https://public-api.gamma.app/v1.0";
+/** Gamma's API version, under the provider's base (cost/registry.ts). */
+export const GAMMA_API_PATH = "/v1.0";
 /** The deck template, as "Create Gamma Presentation" names it. */
 export const GAMMA_TEMPLATE_ID = "g_ix9srva6gx7iiso";
 /** The wait between two looks at a generation (n8n's Wait node). */
@@ -116,14 +119,19 @@ export interface GammaClient {
   read(generationId: string): Promise<Any>;
 }
 
-export function gammaClient(o: { apiKey: string; signal?: AbortSignal; fetchImpl?: Fetch; sleep?: (ms: number) => Promise<void> }): GammaClient {
-  const f: Fetch = o.fetchImpl ?? ((url, init) => fetch(url, init));
+/**
+ * Gamma through the paying desk, which adds the key and records a generation's
+ * credits once, the first time a read sees it completed.
+ */
+export function gammaClient(o: { cost: CostContext; signal?: AbortSignal; sleep?: (ms: number) => Promise<void> }): GammaClient {
+  const f = (path: string, init: RequestInit) => paid.fetch(o.cost, "gamma", `${GAMMA_API_PATH}${path}`, init);
   const sleep = o.sleep ?? sleepMs;
-  const headers = { "X-API-KEY": o.apiKey, "Content-Type": "application/json" };
-  const redact = (t: string) => (o.apiKey ? t.split(o.apiKey).join("[redacted]") : t);
+  const headers = { "Content-Type": "application/json" };
+  // The client never holds the key, so one an answer echoes is recognized by its shape (sk-gamma-...).
+  const redact = (t: string) => t.replace(/sk-gamma-[A-Za-z0-9_-]+/g, "[redacted]");
   return {
     async create(prompt) {
-      const r = await f(`${GAMMA_API}/generations/from-template`, {
+      const r = await f(`/generations/from-template`, {
         method: "POST", headers,
         body: JSON.stringify({ gammaId: GAMMA_TEMPLATE_ID, prompt, sharingOptions: { workspaceAccess: "view" } }),
         ...(o.signal ? { signal: o.signal } : {}),
@@ -135,7 +143,7 @@ export function gammaClient(o: { apiKey: string; signal?: AbortSignal; fetchImpl
       let last = "";
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-          const r = await f(`${GAMMA_API}/generations/${encodeURIComponent(generationId)}`, { headers, ...(o.signal ? { signal: o.signal } : {}) });
+          const r = await f(`/generations/${encodeURIComponent(generationId)}`, { headers, ...(o.signal ? { signal: o.signal } : {}) });
           if (r.ok) return await r.json();
           last = `Gamma answered ${r.status}: ${redact(await r.text().catch(() => "")).slice(0, 300)}`;
         } catch (e) {

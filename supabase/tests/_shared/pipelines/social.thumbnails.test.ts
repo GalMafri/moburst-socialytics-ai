@@ -11,6 +11,7 @@ import { startReportPipeline } from "../../../functions/_shared/pipelines/shadow
 import { drivePipeline, pipelineDb, testClock } from "../../../functions/_shared/pipelines/testDriver";
 import type { GammaClient, SproutReader } from "../../../functions/_shared/pipelines/social/providers";
 import { socialPipeline, type SocialDeps } from "../../../functions/_shared/pipelines/definitions/social";
+import { viaTestMeter } from "../../paid/testMeter";
 
 // deno-lint-ignore no-explicit-any
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Sprout answers untyped JSON.
@@ -35,7 +36,7 @@ function deps(): SocialDeps {
       },
     } satisfies SproutReader),
     gamma: () => ({ async create() { return MOBURST.gamma_create; }, async read() { return looks[Math.min(i++, looks.length - 1)]; } } satisfies GammaClient),
-    claudeFetch: async (url: string, init?: RequestInit) => {
+    ...viaTestMeter(async (url: string, init?: RequestInit) => {
       if (init?.method === "POST") {
         const req = JSON.parse(String(init.body)).requests[0];
         requests.push(req);
@@ -49,7 +50,7 @@ function deps(): SocialDeps {
         return new Response(JSON.stringify({ custom_id: req.custom_id, result: { type: "succeeded", message: { content: [{ type: "text", text }], stop_reason: "end_turn" } } }) + "\n");
       }
       return new Response(JSON.stringify({ processing_status: "ended", results_url: `https://api.anthropic.com/v1/messages/batches/batch-${n}/results` }));
-    },
+    }),
     insights: () => async (body) => {
       const content = String((body.messages as Any[])[0].content);
       const facts = [...content.matchAll(/^(F\d+) \([a-z]+\): (.+?) \((.+)\)$/gm)].map((m) => ({ id: m[1], sentence: m[2] }));

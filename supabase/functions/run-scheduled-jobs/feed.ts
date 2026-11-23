@@ -21,9 +21,10 @@ export const TOPICS_NOT_DETECTED = "Topics were not detected.";
 export const bindRefreshFeed = (
   // deno-lint-ignore no-explicit-any
   db: any,
-  keys: { rivaliqKey: string | undefined; anthropicKey: string | undefined; secret: string | null | undefined },
+  keys: { rivaliqKey: string | undefined; secret: string | null | undefined },
   refresh: typeof refreshCompetitorFeed = refreshCompetitorFeed,
-): FeedDeps["refreshFeed"] => (clientId, opts) => refresh(db, clientId, { ...keys, topicsSnapshotId: opts?.topicsSnapshotId });
+): FeedDeps["refreshFeed"] => (clientId, opts) =>
+  refresh(db, clientId, { ...keys, by: { actor: "schedule", executionId: opts?.jobId ?? null }, topicsSnapshotId: opts?.topicsSnapshotId });
 
 export interface FeedDeps {
   now(): Date;
@@ -34,7 +35,7 @@ export interface FeedDeps {
    * saved but its topic pass gave no answer. topicsSnapshotId asks for that
    * pass only, on that saved snapshot.
    */
-  refreshFeed(clientId: string, opts?: { topicsSnapshotId?: string }): Promise<Record<string, unknown> & { linkedin_not_collected?: boolean; topics_not_detected?: boolean; snapshot_id?: string | null }>;
+  refreshFeed(clientId: string, opts?: { topicsSnapshotId?: string; jobId?: string }): Promise<Record<string, unknown> & { linkedin_not_collected?: boolean; topics_not_detected?: boolean; snapshot_id?: string | null }>;
 }
 
 export async function runFeedJob(job: ScheduledJob, d: FeedDeps): Promise<JobOutcome> {
@@ -45,7 +46,7 @@ export async function runFeedJob(job: ScheduledJob, d: FeedDeps): Promise<JobOut
   // A retry of a topic pass carries the snapshot it runs on (this job's payload).
   const pending = job.payload?.topics_snapshot_id;
   try {
-    result = typeof pending === "string" && pending ? await d.refreshFeed(job.client_id, { topicsSnapshotId: pending }) : await d.refreshFeed(job.client_id);
+    result = typeof pending === "string" && pending ? await d.refreshFeed(job.client_id, { topicsSnapshotId: pending, jobId: job.id }) : await d.refreshFeed(job.client_id, { jobId: job.id });
   } catch (e) {
     const err = e as { message?: string; status?: number; code?: string };
     const reason = err?.message ?? String(e);

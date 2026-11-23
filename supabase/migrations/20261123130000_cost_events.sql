@@ -6,17 +6,12 @@
 -- reconciles it against the Mesh card, so a row is never changed or removed. A
 -- correction is a new row.
 --
--- The bucket a cost lands in is worked out when it is read (cost_ledger), so
--- flagging a client as a test client later (clients.cost_bucket = 'dev_qa')
--- moves its whole history to the dev/QA bucket.
+-- The bucket a cost lands in is worked out when it is read (cost_ledger). A
+-- client marked as a test account (clients.exclude_from_reporting, the flag the
+-- gOS usage contract already uses) reports under development & QA, and
+-- marking one later moves its whole history there.
 --
 -- Additive only. Service role writes; nobody reads the table from a browser.
-
-ALTER TABLE public.clients
-  ADD COLUMN IF NOT EXISTS cost_bucket TEXT NOT NULL DEFAULT 'client'
-  CHECK (cost_bucket IN ('client', 'dev_qa'));
-COMMENT ON COLUMN public.clients.cost_bucket IS
-  'dev_qa for internal test clients: their spend is reported under the development & QA bucket.';
 
 CREATE TABLE IF NOT EXISTS public.cost_events (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -52,6 +47,14 @@ CREATE INDEX IF NOT EXISTS cost_events_execution_idx ON public.cost_events (exec
 ALTER TABLE public.cost_events ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.cost_events FROM anon, authenticated;
 
+-- The Claude connector's sign-ins (OAuth sessions) never write here, as on every table (see the mcp migrations).
+DROP POLICY IF EXISTS "OAuth sessions cannot insert" ON public.cost_events;
+CREATE POLICY "OAuth sessions cannot insert" ON public.cost_events AS RESTRICTIVE FOR INSERT TO authenticated WITH CHECK (NOT (SELECT public.is_oauth_session()));
+DROP POLICY IF EXISTS "OAuth sessions cannot update" ON public.cost_events;
+CREATE POLICY "OAuth sessions cannot update" ON public.cost_events AS RESTRICTIVE FOR UPDATE TO authenticated USING (NOT (SELECT public.is_oauth_session())) WITH CHECK (NOT (SELECT public.is_oauth_session()));
+DROP POLICY IF EXISTS "OAuth sessions cannot delete" ON public.cost_events;
+CREATE POLICY "OAuth sessions cannot delete" ON public.cost_events AS RESTRICTIVE FOR DELETE TO authenticated USING (NOT (SELECT public.is_oauth_session()));
+
 CREATE OR REPLACE FUNCTION public.cost_events_append_only() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
@@ -70,7 +73,7 @@ SELECT
   c.company_slug AS company_slug,
   CASE
     WHEN e.bucket_hint <> 'client' THEN e.bucket_hint
-    WHEN c.cost_bucket = 'dev_qa' THEN 'dev_qa'
+    WHEN coalesce(c.exclude_from_reporting, false) THEN 'dev_qa'
     ELSE 'client'
   END AS bucket
 FROM public.cost_events e

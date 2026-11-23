@@ -54,7 +54,9 @@ import { loadDesignLearnings } from "../_shared/design-prompts/learnings.ts";
 import { discoverVideoReferences } from "../_shared/brand-references/videos.ts";
 import { creditBalance } from "../_shared/higgsfield/generate.ts";
 import { McpClient } from "../_shared/higgsfield/mcp.ts";
-import { MCP_URL, accessTokenFor } from "../_shared/higgsfield/oauth.ts";
+import { accessTokenFor } from "../_shared/higgsfield/oauth.ts";
+import type { CostContext } from "../_shared/cost/context.ts";
+import { costCtx, hasKey } from "../_shared/paid/index.ts";
 import { needsClipPrice, quoteClip } from "../_shared/video/clip.ts";
 import { readVideoSize } from "../_shared/video/videoSizeDb.ts";
 import { videoFrameOf, type VideoUploadSize } from "../_shared/video/videoSize.ts";
@@ -77,6 +79,19 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-socialytics-secret, x-socialytics-user",
 };
 const PLANNER_MODEL = "claude-opus-5-5";
+
+/**
+ * Who a design request's paid calls are for: its client, the request as the
+ * execution (design_requests.id), the person who asked.
+ */
+function requestCost(request: { id: string; client_id: string; requested_by?: string | null }, feature: string): CostContext {
+  return costCtx({ clientId: request.client_id, feature, actor: "user", executionId: request.id, userId: request.requested_by ?? null });
+}
+/**
+ * The team's Higgsfield account itself: its balance and a clip's price (get_cost), reads that spend nothing and
+ * serve every client's week at once.
+ */
+const HIGGSFIELD_ACCOUNT = costCtx({ clientId: null, feature: "higgsfield.account", actor: "system" });
 /** Most of the client's posts the planner is shown. */
 const MAX_LIBRARY = 16;
 /** How many of the client's recent designs the planner is told about. */
@@ -319,8 +334,8 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
   // What people who turned down this client's earlier designs asked for.
   const guidance = learningLines(await loadDesignLearnings(admin, request.client_id));
 
-  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
+  if (!(await hasKey("anthropic"))) throw new Error("ANTHROPIC_API_KEY is not set.");
+  const cost = requestCost(request, "design.plan");
   const carousel = request.kind === "carousel";
   const video = request.kind === "video";
   const common = { brand, platform: request.platform ?? "social", copy: request.post_copy, voice, count: BRIEFS_PLANNED, postCount: library.length, recent, guidance, otherPlatforms, note: request.note ?? null };
@@ -332,7 +347,7 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
   let briefs = [] as ReturnType<typeof parseBriefs>;
   for (let attempt = 0; attempt < 2 && briefs.length < OPTIONS_WANTED; attempt++) {
     const result = await anthropicMessages({
-      apiKey,
+      cost,
       body: {
         model: PLANNER_MODEL,
         // The size of the plan itself, and room for the planner to think first (anthropicReply.ts, roomFor).
@@ -386,12 +401,11 @@ async function recentDesigns(admin: any, clientId: string): Promise<RecentDesign
  * Decided from the post's copy and planned visual by a model that only
  * answers this question.
  */
-async function personOnCamera(copy: string, visual: string): Promise<string | null> {
-  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!apiKey) return null;
+async function personOnCamera(clientId: string, copy: string, visual: string): Promise<string | null> {
+  if (!(await hasKey("anthropic"))) return null;
   try {
     const result = await anthropicMessages({
-      apiKey,
+      cost: costCtx({ clientId, feature: "design.film_check", actor: "user" }),
       body: {
         model: PLANNER_MODEL, max_tokens: roomFor(2000),
         messages: [{ role: "user", content: [{ type: "text", text:
@@ -420,7 +434,7 @@ async function filmedReason(admin: any, clientId: string, copy: string, visual: 
   const { data: client } = await admin.from("clients").select("video_style").eq("id", clientId).maybeSingle();
   const byStyle = filmedNeed(client?.video_style?.profile);
   if (byStyle) return byStyle;
-  const person = await personOnCamera(copy, visual);
+  const person = await personOnCamera(clientId, copy, visual);
   return person ? `it needs ${person} on camera` : null;
 }
 
@@ -495,9 +509,9 @@ async function writeShotBrief(admin: any, requestId: string) {
   const { data: client } = await admin.from("clients").select("name, brand_identity, video_style").eq("id", request.client_id).maybeSingle();
   const profile = client?.video_style?.profile;
   const format = profile?.filmed?.what ?? (profile?.generatable === false ? profile?.format : undefined);
-  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
-  const result = await anthropicMessages({ apiKey, body: { model: "claude-opus-5-5", max_tokens: roomFor(2000), messages: [{ role: "user", content: shotBriefPrompt({
+  if (!(await hasKey("anthropic"))) throw new Error("ANTHROPIC_API_KEY is not set.");
+  const cost = costCtx({ clientId: request.client_id, feature: "design.shot_brief", actor: "user", executionId: request.id });
+  const result = await anthropicMessages({ cost, body: { model: "claude-opus-5-5", max_tokens: roomFor(2000), messages: [{ role: "user", content: shotBriefPrompt({
     brand: client?.name ?? "the brand", platform: request.platform ?? "social", copy: request.post_copy ?? "", visual: request.visual_direction,
     reason: request.on_camera || "it needs footage filmed for it", format, voice: client?.brand_identity?.tone_of_voice ?? null, frame,
   }) }] } });
@@ -541,7 +555,7 @@ async function startRequest(admin: any, settings: Settings, p: { clientId: strin
     : await readUploadSize(admin, { platform: p.platform, format: p.format });
   // A generated video is approved at Higgsfield's live price for its one clip in the aspect it is made in, read at
   // its own click unless the week's press handed one in (priced in the same aspect); a still and a filmed clip have none.
-  const approvedCredits = needsClipPrice(kind, p.footagePath, p.approvedCredits) ? await clipPrice(admin, videoFrameOf(uploadSize).aspect) : (kind === "video" && !p.footagePath ? p.approvedCredits ?? null : null);
+  const approvedCredits = needsClipPrice(kind, p.footagePath, p.approvedCredits) ? await clipPrice(admin, costCtx({ clientId: p.clientId, feature: "video.price", actor: "user", userId: p.requestedBy }), videoFrameOf(uploadSize).aspect) : (kind === "video" && !p.footagePath ? p.approvedCredits ?? null : null);
 
   const { data: created, error } = await admin.from("design_requests").insert({
     client_id: p.clientId, report_id: p.reportId, calendar_post_key: p.postKey,
@@ -671,9 +685,9 @@ async function startWeekPost(admin: any, s: PassStart & { batchId: string; setti
  * is spent), or null when it could not be read. Failing to read it never
  * stops a press or a request: the price is then unknown.
  */
-async function clipPrice(admin: any, aspect?: string): Promise<number | null> {
+async function clipPrice(admin: any, cost: CostContext, aspect?: string): Promise<number | null> {
   try {
-    const mcp = new McpClient({ url: MCP_URL, accessToken: await accessTokenFor(admin), timeoutMs: 30_000 });
+    const mcp = new McpClient({ cost, accessToken: await accessTokenFor(admin), timeoutMs: 30_000 });
     return await quoteClip(mcp, aspect);
   } catch {
     return null;
@@ -691,13 +705,13 @@ function weekDeps(admin: any, req: Request): WeekDeps {
     isSystem: () => (system ??= requireStaffOrSystem(req).then((c) => c.system)),
     balance: async () => {
       try {
-        const mcp = new McpClient({ url: MCP_URL, accessToken: await accessTokenFor(admin), timeoutMs: 30_000 });
+        const mcp = new McpClient({ cost: HIGGSFIELD_ACCOUNT, accessToken: await accessTokenFor(admin), timeoutMs: 30_000 });
         return (await creditBalance(mcp))?.credits ?? null;
       } catch {
         return null;
       }
     },
-    quoteClip: (aspect) => clipPrice(admin, aspect),
+    quoteClip: (aspect) => clipPrice(admin, HIGGSFIELD_ACCOUNT, aspect),
     startPost: (s) => startWeekPost(admin, s as PassStart & { batchId: string; settings: Settings; post: any; approvedCredits: number | null; uploadSize?: VideoUploadSize | null }),
     // A press starts the first posts at once, as the system would on its next pass.
     wake: () => background(weekContinue({ ...deps, isSystem: async () => true })),

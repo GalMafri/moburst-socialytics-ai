@@ -21,6 +21,7 @@ export const QA_PATHS = ["scripts/qa/", "scripts/smoke"];
 export const SHARED_FEATURES: ReadonlySet<string> = new Set([
   "platform_sizes.refresh",    // the platform image-size table, the same for every client
   "moments.list",              // the shared calendar of cultural moments
+  "higgsfield.account",        // the team account's credit balance and price quotes: free reads, no client's work
 ]);
 
 /** Strings that look like model ids but are not models (labels, step names). */

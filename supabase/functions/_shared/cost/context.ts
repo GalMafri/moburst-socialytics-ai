@@ -9,8 +9,8 @@
  *   dev_qa  testing and internal spend: QA scripts, smoke runs, and any call
  *           that arrived without a client (flagged unattributed, never dropped)
  *
- * A client flagged as a test client (clients.cost_bucket = 'dev_qa') is
- * re-bucketed at read time, so flagging one later moves its history too.
+ * A client marked as a test account (clients.exclude_from_reporting) is
+ * re-bucketed at read time, so marking one later moves its history too.
  *
  * Shared between the Moburst tools: written in AdVisor, copied by
  * scripts/sync-api-core.sh. Never edit the copy in another repo.

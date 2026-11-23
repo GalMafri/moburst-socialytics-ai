@@ -14,6 +14,7 @@
 // wrote for a part is cleared before the part is read again.
 
 import { anthropicMessages } from "../anthropic.ts";
+import { anthropicCost } from "../anthropicCost.ts";
 import { answerText, roomFor } from "../anthropicReply.ts";
 import { MEMORY_MODEL } from "../voice/load.ts";
 import { retryWait } from "../calendar/runWeek.ts";
@@ -80,12 +81,6 @@ const usage = (raw: unknown) => {
   return { input: Number(u?.input_tokens) || 0, output: Number(u?.output_tokens) || 0 };
 };
 
-function apiKey(): string {
-  const key = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!key) throw new Error("ANTHROPIC_API_KEY is not configured.");
-  return key;
-}
-
 async function must<T = unknown>(p: PromiseLike<{ data?: T; error: { message: string } | null }>, what: string): Promise<T> {
   const { data, error } = await p;
   if (error) throw new Error(`${what}: ${error.message}`);
@@ -123,7 +118,7 @@ export async function runNotesRead(admin: Db, job: NotesJob, deps: NotesDeps, no
       return { status: "queued", available_at: now.toISOString(), resetAttempts: true, result: { note_id: note.id, state, why } };
     }
     await must(admin.from("client_notes").update({ read_tries: tries + 1 }).eq("id", note.id), "Could not count the try");
-    const read = await readOnePart(admin, client, note, deps, now, today);
+    const read = await readOnePart(admin, client, note, deps, now, today, job.id);
     return { status: "queued", available_at: now.toISOString(), resetAttempts: true, result: { note_id: note.id, ...read } };
   } catch (e) {
     // Whatever went wrong (a provider error, a reply that could not be read), the note stays Reading and is read again later.
@@ -168,7 +163,7 @@ async function finishNote(admin: Db, noteId: string, patch: Record<string, unkno
   return state;
 }
 
-async function readOnePart(admin: Db, client: Client, note: WaitingNote, deps: NotesDeps, now: Date, today: string): Promise<Record<string, unknown>> {
+async function readOnePart(admin: Db, client: Client, note: WaitingNote, deps: NotesDeps, now: Date, today: string, jobId: string | null = null): Promise<Record<string, unknown>> {
   const source = await noteSource(admin, note, deps);
   if (source.kind === "nothing") {
     console.log(`[notes] ${note.id}: nothing to read (${source.why}${source.detail ? ` ${source.detail}` : ""})`);
@@ -196,7 +191,7 @@ async function readOnePart(admin: Db, client: Client, note: WaitingNote, deps: N
     : source.kind === "image"
       ? [{ type: "image", source: { type: "base64", media_type: source.mediaType, data: source.data } }, { type: "text", text: prompt }]
       : prompt;
-  const result = await anthropicMessages({ apiKey: apiKey(), body: { model: MEMORY_MODEL, max_tokens: READ_MAX_TOKENS, messages: [{ role: "user", content }] } });
+  const result = await anthropicMessages({ cost: await anthropicCost({ clientId: client.id, feature: "notes.run", actor: "schedule", executionId: jobId }), body: { model: MEMORY_MODEL, max_tokens: READ_MAX_TOKENS, messages: [{ role: "user", content }] } });
   const u = usage(result.raw);
   const tokens = { input_tokens: note.input_tokens + u.input, output_tokens: note.output_tokens + u.output };
   // A reply that was cut off or declined is a reply that could not be read.

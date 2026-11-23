@@ -13,6 +13,7 @@ import { drivePipeline, pipelineDb, testClock } from "../../../../functions/_sha
 import { linkedInSourceAnswer, prepareSourceRequest, verifyLinkedInRows } from "../../../../functions/_shared/pipelines/linkedin/sources";
 import { fakeActor, linkedInRows, POSTS } from "../../../../fixtures/pipelines/moburst";
 import { linkedInSourcePipeline } from "../../../../functions/_shared/pipelines/definitions/linkedinSource";
+import { apifyWhenToken } from "../../../paid/testMeter";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -27,9 +28,9 @@ async function shadowRun(o: { statuses: ApifyRunStatus[]; tokenAfterMinutes?: nu
   const clock = testClock("2026-09-29T06:00:00Z");
   const db = pipelineDb({ rivaliq_snapshots: [], report_engines: [] }, clock.now);
   const calls: string[] = [];
-  const pipeline = linkedInSourcePipeline({ apify: fakeActor(o.statuses, calls) });
   const start = clock.now().getTime();
   const env = (n: string) => (n === "APIFY_API_TOKEN" && clock.now().getTime() >= start + (o.tokenAfterMinutes ?? 0) * 60_000 ? "token" : undefined);
+  const pipeline = linkedInSourcePipeline({ apify: apifyWhenToken(env, fakeActor(o.statuses, calls)) });
   const runId = await shadowLinkedInSource(db, { engine: "shadow", pipeline }, { clientId: MOBURST, sources: SOURCES, period: PERIOD, real: n8nAnswer(), now: clock.now });
   const result = await drivePipeline(db, makeRegistry([pipeline]), runId!, { clock, env });
   return { db, calls, result, runId: runId! };

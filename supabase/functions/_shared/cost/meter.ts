@@ -18,7 +18,7 @@
 import { bucketOf, checkContext, type BucketHint, type CostContext, type Tool } from "./context.ts";
 import { priceUsage, type PriceRow } from "./price.ts";
 import { PROVIDERS, providerUrl, type ProviderId } from "./registry.ts";
-import { READERS, readAnswer, requestResource, type Usage } from "./usage.ts";
+import { carriesNoUsage, READERS, readAnswer, requestResource, type Usage } from "./usage.ts";
 
 export interface CostEventRow {
   occurred_at: string;
@@ -145,6 +145,7 @@ export function createMeter(deps: MeterDeps): Meter {
       const reqResource = opts?.hint?.resource ?? requestResource(provider, new URL(url).pathname, init?.body);
       const started = Date.now();
       const res = await send(url, init);
+      if (carriesNoUsage(provider, new URL(url).pathname)) return res;
       const copy = res.clone();
       const streaming = (res.headers.get("content-type") ?? "").includes("text/event-stream");
       const pending = recordAnswer(ctx, provider, new URL(url).pathname, method, reqResource, copy, started, opts);

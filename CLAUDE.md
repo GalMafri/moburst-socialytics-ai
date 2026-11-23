@@ -19,7 +19,7 @@ const res = await paid.fetch(ctx, "anthropic", "/v1/messages", { method: "POST",
 - `feature` is a stable lowercase label for the work (`post.image`, `report.social.brief`). Keep it when you refactor; the costs page groups by it.
 - `executionId` is the id the gOS usage events use for the same unit of work (see `supabase/migrations/20260820180000_gos_usage_contract.sql`; in pipelines, the run id).
 - QA and smoke scripts pass `qa: true`, so their spend is dev/QA.
-- A test client is marked with `clients.cost_bucket = 'dev_qa'`; its spend, past and future, then reports under development & QA.
+- A test client is marked with `clients.exclude_from_reporting = true` (the same flag the gOS usage contract uses); its spend, past and future, then reports under development & QA.
 
 ### Adding a paid provider
 1. Add it to `PROVIDERS` in `supabase/functions/_shared/cost/registry.ts` (base URL, hosts, key names) and a usage reader in `usage.ts`. These files are the shared core: make the change in the AdVisor repo and sync it here with its `scripts/sync-api-core.sh`. Never edit them in this repo.

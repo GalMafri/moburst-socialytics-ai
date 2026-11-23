@@ -89,6 +89,13 @@ describe("the meter", () => {
     expect(h.rows.map((r) => [r.idempotency_key, r.cost_usd])).toEqual([["anthropic-batch:msgbatch_9:a", 1]]);
   });
 
+  it("reads a one-request batch, whose results are a single line that parses as plain JSON", async () => {
+    const one = JSON.stringify({ custom_id: "only", result: { type: "succeeded", message: { id: "m9", model: "claude-opus-5-5", usage: { input_tokens: 1_000_000, output_tokens: 0 } } } });
+    const h = harness(PRICES, () => new Response(one, { headers: { "content-type": "application/json" } }));
+    await h.meter.fetch(ctx(), "anthropic", "/v1/messages/batches/msgbatch_1/results");
+    expect(h.rows.map((r) => [r.idempotency_key, r.cost_usd])).toEqual([["anthropic-batch:msgbatch_1:only", 2]]);
+  });
+
   it("records an Apify run once, when it is seen finished, with the dollars Apify reports", async () => {
     let status = "RUNNING";
     const h = harness(PRICES, () => json({ data: { id: "run_7", actId: "JJghSZmShuco4j9gJ", status, usageTotalUsd: 0.4321 } }));
@@ -118,6 +125,15 @@ describe("the meter", () => {
     const res = await h.meter.fetch(ctx(), "anthropic", "/v1/messages", { method: "POST" });
     expect(res.status).toBe(200);
     expect(h.logs[0]).toMatch(/^COST_EVENT_DROPPED .*"idempotency_key":"anthropic:m3"/);
+  });
+
+  it("does not read a copy of answers that never carry usage (Apify datasets)", async () => {
+    let read = 0;
+    const big = { clone: () => { read++; return new Response("[]"); }, headers: new Headers({ "content-type": "application/json" }), status: 200 } as unknown as Response;
+    const h = harness(PRICES, () => big);
+    await h.meter.fetch(ctx(), "apify", "/v2/datasets/ds_1/items?format=json");
+    expect(read).toBe(0);
+    expect(h.rows).toEqual([]);
   });
 
   it("records no event for a failed call", async () => {

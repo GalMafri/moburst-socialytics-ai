@@ -17,7 +17,7 @@
 // accounts, schedules or plans are taken for a prospect.
 
 import { decide, rowAfter, STALE_RUN_MS, type StepOutcome, type StepRow } from "./policy.ts";
-import { CLIENT_COLUMNS, STEPS, type ClientRow } from "./steps.ts";
+import { CLIENT_COLUMNS, STEPS, type ClientRow, type StepBy } from "./steps.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -117,7 +117,7 @@ export async function runLifecycle(db: Db, job: LifecycleJob, now = new Date()):
 }
 
 /** Run a claimed step and store its outcome. The row before the claim is the one to compare with. */
-async function execute(db: Db, client: ClientRow, rows: Map<string, StepRow>, step: string, inputsKey: string, force: boolean): Promise<{ row: StepRow; outcome: StepOutcome }> {
+async function execute(db: Db, client: ClientRow, rows: Map<string, StepRow>, step: string, inputsKey: string, force: boolean, by: StepBy): Promise<{ row: StepRow; outcome: StepOutcome }> {
   const def = STEPS[step];
   const prev = rows.get(step) ?? null;
   const base = { client_id: client.id, step, inputs_key: inputsKey };
@@ -129,7 +129,7 @@ async function execute(db: Db, client: ClientRow, rows: Map<string, StepRow>, st
   const last: StepRow | null = prev?.status === "running" && prev.error ? { ...prev, status: "failed" } : prev;
   let outcome: StepOutcome;
   try {
-    outcome = await def.run(db, client, { force, previous: last && last.inputs_key === inputsKey ? last : null, rows });
+    outcome = await def.run(db, client, { force, previous: last && last.inputs_key === inputsKey ? last : null, rows, by });
   } catch (e) {
     outcome = { status: "failed", error: e instanceof Error ? e.message : String(e) };
   }
@@ -154,7 +154,8 @@ export async function runLifecycleStep(db: Db, job: LifecycleJob, now = new Date
     await saveRow(db, rowAfter(prev, { client_id: client.id, step, inputs_key: "" }, { status: "waiting", reason: "input" }, now));
     return { status: "done", reason: `${step}: waiting for its input.` };
   }
-  const { outcome } = await execute(db, client, rows, step, inputsKey, job.payload?.force === true);
+  // The step's paid calls are the schedule's work, under the lifecycle_step job that ran it.
+  const { outcome } = await execute(db, client, rows, step, inputsKey, job.payload?.force === true, { actor: "schedule", executionId: job.id });
   return { status: "done", reason: `${step}: ${outcome.status}`, result: { step, outcome: outcome.status } };
 }
 
@@ -185,7 +186,7 @@ const view = (row: StepRow | null, ran: boolean, status?: StepView["status"]): S
  * and every client share one onboarding path. A step another run holds
  * answers "running".
  */
-export async function runStepNow(db: Db, clientId: string, step: string, now = new Date()): Promise<StepView> {
+export async function runStepNow(db: Db, clientId: string, step: string, now = new Date(), by: StepBy = { actor: "api" }): Promise<StepView> {
   const def = STEPS[step];
   if (!def) throw new Error(`Unknown lifecycle step ${step}.`);
   const client = await readClient(db, clientId);
@@ -198,6 +199,6 @@ export async function runStepNow(db: Db, clientId: string, step: string, now = n
   const continuing = row?.status === "waiting" && row.inputs_key === inputsKey && (row.result as Record<string, unknown> | null)?.waiting_for === "in_progress";
   if (!d.due && !continuing) return view(row, false, row?.status === "running" ? "running" : undefined);
   if (!(await claimStep(db, row, client.id, step, now))) return view(row, false, "running");
-  const { row: after } = await execute(db, client, rows, step, inputsKey, d.force);
+  const { row: after } = await execute(db, client, rows, step, inputsKey, d.force, by);
   return view(after, true);
 }

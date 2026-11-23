@@ -72,7 +72,7 @@ function anthropicUsage(u: Record<string, unknown>): Record<string, number> {
 
 const anthropic: Reader = (call, a) => {
   if (a.status >= 400) return [];
-  if (a.kind === "json") {
+  if (a.kind === "json" && !/\/batches\/[^/]+\/results/.test(call.path)) {
     const b = obj(a.body);
     if (!b.usage) return [];
     const id = str(b.id) ?? requestId(a.headers);
@@ -97,11 +97,13 @@ const anthropic: Reader = (call, a) => {
     }
     return Object.keys(q).length ? [{ resource: model, quantities: clean(q), providerRef: id, idempotencyKey: id ? `anthropic:${id}` : null }] : [];
   }
-  if (a.kind === "jsonl") {
+  // A one-request batch answers with a single JSONL line, which parses as plain JSON.
+  const batchLines = a.kind === "jsonl" ? (a.body as unknown[]) : /\/batches\/[^/]+\/results/.test(call.path) && a.kind === "json" ? [a.body] : null;
+  if (batchLines) {
     // Message Batches results: one record per request, billed at the batch rate.
     const batchId = /batches\/([^/]+)\/results/.exec(call.path)?.[1] ?? "batch";
     const out: Usage[] = [];
-    for (const rec of a.body as unknown[]) {
+    for (const rec of batchLines) {
       const r = obj(rec);
       const res = obj(r.result);
       if (res.type !== "succeeded") continue;
@@ -247,6 +249,16 @@ export const READERS: Record<ProviderId, Reader> = {
   // Higgsfield runs through its MCP transport; the app records its credits explicitly when a generation finishes.
   higgsfield: () => [],
 };
+
+/**
+ * Paths whose answers never carry usage, so the meter does not read a copy of
+ * them: Apify datasets (often megabytes of scraped items) and file transfers.
+ */
+export function carriesNoUsage(provider: ProviderId, path: string): boolean {
+  if (provider === "apify") return /\/datasets\/|\/key-value-stores\//.test(path);
+  if (provider === "gemini") return /\/upload\//.test(path) || /\/files\//.test(path);
+  return false;
+}
 
 /** Parses an answer once, by its content type, for the readers. Never throws. */
 export async function readAnswer(res: Response): Promise<Answer> {

@@ -19,19 +19,59 @@
 
 import { replyStopped, TIMED_OUT } from "./anthropicReply.ts";
 import { wellFormedBody } from "./text/clip.ts";
-
-export const ANTHROPIC_API = "https://api.anthropic.com";
+import type { CostContext } from "./cost/context.ts";
+import { paid } from "./paid/index.ts";
 
 /**
  * fetch for the Anthropic API, and the one place a function reaches it: `path`
- * under the API, with any half emoji in a JSON body dropped before it is sent
- * (the Messages and Batches APIs refuse such a request). Everything else about
- * the request is the caller's. `base` is the fetch to send with; tests pass
- * their own.
+ * under the API (or a full URL on its host, a batch's results), with any half
+ * emoji in a JSON body dropped before it is sent (the Messages and Batches
+ * APIs refuse such a request). The paying desk adds the key and records what
+ * the call cost against `cost`; everything else about the request is the
+ * caller's. Tests replace the desk's meter (setMeterForTests).
  */
-export function anthropicFetch(path: string, init?: RequestInit, base?: (url: string, init?: RequestInit) => Promise<Response>): Promise<Response> {
-  const send = base ?? globalThis.fetch;
-  return send(`${ANTHROPIC_API}${path}`, init && typeof init.body === "string" ? { ...init, body: wellFormedBody(init.body) } : init);
+export function anthropicFetch(cost: CostContext, path: string, init?: RequestInit): Promise<Response> {
+  return paid.fetch(cost, "anthropic", path, init && typeof init.body === "string" ? { ...init, body: wellFormedBody(init.body) } : init);
+}
+
+/** One line of a Message Batches result, as far as its cost goes. */
+export interface BatchResultRow {
+  custom_id?: string;
+  result?: { type?: string; message?: { id?: string; model?: string; usage?: Record<string, unknown> } };
+}
+
+/**
+ * Records one Message Batches answer at the batch price. The desk reads a
+ * batch's results itself when they arrive as several JSON lines; a
+ * one-request batch (every batch this app sends) answers with a single line,
+ * which reads as plain JSON and carries no usage where the desk looks. So
+ * the reader of the results records it here, under the key the desk would
+ * use, and the ledger keeps one of the two. Never throws.
+ */
+export async function recordBatchAnswer(cost: CostContext, batchId: string, row: BatchResultRow): Promise<void> {
+  try {
+    const m = row.result?.message;
+    const u = m?.usage ?? {};
+    const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+    const server = (u.server_tool_use ?? {}) as Record<string, unknown>;
+    const quantities = Object.fromEntries(Object.entries({
+      input_tokens: n(u.input_tokens),
+      cache_write_tokens: n(u.cache_creation_input_tokens),
+      cache_read_tokens: n(u.cache_read_input_tokens),
+      output_tokens: n(u.output_tokens),
+      web_searches: n(server.web_search_requests),
+    }).filter(([, v]) => v > 0));
+    if (!Object.keys(quantities).length) return;
+    await paid.record(cost, "anthropic", {
+      resource: m?.model ?? "unknown",
+      quantities,
+      providerRef: m?.id ?? null,
+      idempotencyKey: `anthropic-batch:${batchId}:${String(row.custom_id ?? m?.id)}`,
+      modifier: "batch",
+    });
+  } catch (e) {
+    console.warn(`[anthropic] batch ${batchId} cost not recorded: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 /** Parameters the request cannot lose. Anything else is negotiable. */
@@ -109,7 +149,8 @@ export type AnthropicResult = { text: string; stopReason: string; raw: unknown }
  * it always did.
  */
 export async function anthropicMessages(args: {
-  apiKey: string;
+  /** Who the call is for: the paying desk records its cost against this. */
+  cost: CostContext;
   body: Record<string, unknown>;
   /** Called when a parameter is dropped, so the caller can log it. */
   onDropped?: (param: string) => void;
@@ -145,17 +186,13 @@ function outOfTime(body: Record<string, unknown>, waitMs: number): AnthropicResu
   return { text: "", stopReason: TIMED_OUT, raw: null };
 }
 
-async function send(args: { apiKey: string; body: Record<string, unknown>; onDropped?: (param: string) => void }, signal: AbortSignal | undefined): Promise<AnthropicResult> {
+async function send(args: { cost: CostContext; body: Record<string, unknown>; onDropped?: (param: string) => void }, signal: AbortSignal | undefined): Promise<AnthropicResult> {
   const body: Record<string, unknown> = { ...args.body };
 
   for (let attempt = 0; attempt < 3; attempt++) {
-    const resp = await anthropicFetch("/v1/messages", {
+    const resp = await anthropicFetch(args.cost, "/v1/messages", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": args.apiKey,
-        "anthropic-version": "2023-06-01",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
       ...(signal ? { signal } : {}),
     });

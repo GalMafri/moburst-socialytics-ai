@@ -366,7 +366,8 @@ export function makeServiceWriter(db: Db): ServiceWriter {
     },
     notes,
     copy: copyWrites(db),
-    learn: (clientId, signal) => learnFromSignal(db, clientId, signal),
+    // An agent's save through the MCP server: the public API's work.
+    learn: (clientId, signal) => learnFromSignal(db, clientId, signal, { actor: "api" }),
     strategy: async (clientId) => {
       const [row, edits] = await Promise.all([
         must<StrategyRows["row"]>(db.from("content_strategies").select("written_at, sections, section_texts, platforms, pillars").eq("client_id", clientId).maybeSingle(), "Could not read the strategy"),

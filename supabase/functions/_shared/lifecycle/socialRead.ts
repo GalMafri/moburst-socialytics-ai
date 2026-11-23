@@ -55,6 +55,8 @@ import { lifecycleMayWrite, setBy, sourceOf, writeClientFields } from "./fields.
 import { textHash } from "./names.ts";
 import type { StepOutcome, StepRow } from "./policy.ts";
 import { clipText } from "../text/clip.ts";
+import type { Actor, CostContext } from "../cost/context.ts";
+import { costCtx } from "../paid/index.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -492,11 +494,12 @@ export interface SocialIO {
   /** A picture's bytes, or null. */
   image(url: string): Promise<Uint8Array | null>;
   /** The Instagram profile's bio through Apify, or the answer of a run started earlier. Throws when no run can be made. */
-  instagram(handle: string, runId: string | null): Promise<BioRead>;
+  instagram(cost: CostContext, handle: string, runId: string | null): Promise<BioRead>;
   /** The client's LinkedIn company page through Apify, or the answer of a run started earlier. Throws when no run can be made. */
-  linkedinPage(url: string, runId: string | null): Promise<PageRead>;
-  openaiKey(db: Db): Promise<string | null>;
-  brandRead(input: Omit<SocialBrandInput, "fetchImpl">): Promise<SocialBrandRead>;
+  linkedinPage(cost: CostContext, url: string, runId: string | null): Promise<PageRead>;
+  /** Whether the AI connection for the brand read is set. */
+  openaiReady(): Promise<boolean>;
+  brandRead(input: SocialBrandInput): Promise<SocialBrandRead>;
 }
 
 export interface InstagramState {
@@ -567,7 +570,7 @@ async function storePageLogo(db: Db, client: Row, url: string, io: SocialIO): Pr
  * Apify's keep time) is dropped with the read time, so the next look starts a
  * new read; the older bio is kept meanwhile.
  */
-async function readBio(profiles: ProfileRef[], pictures: Picture[], prev: InstagramState | null, io: SocialIO, now: Date): Promise<InstagramState | null> {
+async function readBio(profiles: ProfileRef[], pictures: Picture[], prev: InstagramState | null, io: SocialIO, now: Date, cost: CostContext): Promise<InstagramState | null> {
   const ig = profiles.find((p) => platformName(ownedNetwork(p.network_type)) === "Instagram" && p.native_name);
   if (!ig) return null;
   const key = `${ig.id}:${ig.native_name.toLowerCase()}:${pictures.find((p) => p.profileId === ig.id)?.hash ?? ""}`;
@@ -579,7 +582,7 @@ async function readBio(profiles: ProfileRef[], pictures: Picture[], prev: Instag
   const sameAccount = !!prev && String(prev.profile_id) === String(ig.id);
   const base = { profile_id: ig.id, handle: ig.native_name, key };
   try {
-    const got = await io.instagram(ig.native_name, pending);
+    const got = await io.instagram(cost, ig.native_name, pending);
     if (got.state === "pending") return { ...base, read_at: same ? prev.read_at ?? null : null, bio: sameAccount ? prev.bio ?? null : null, run_id: got.run_id };
     // A failed run is read again on the next look, as the LinkedIn page is (QA 22 Nov 2026, P39-02: its read
     // time made it a finished read, never asked again while the account stayed the same).
@@ -605,7 +608,7 @@ async function readBio(profiles: ProfileRef[], pictures: Picture[], prev: Instag
  * read time, so the next look starts a new read. Not part of the evidence
  * version.
  */
-async function readPage(profiles: ProfileRef[], prev: LinkedInPageState | null, io: SocialIO, now: Date): Promise<LinkedInPageState | null> {
+async function readPage(profiles: ProfileRef[], prev: LinkedInPageState | null, io: SocialIO, now: Date, cost: CostContext): Promise<LinkedInPageState | null> {
   const li = profiles.find((p) => p.network_type === "linkedin_company" && p.native_name);
   if (!li) return null;
   const key = `${li.id}:${li.native_name.toLowerCase()}`;
@@ -616,7 +619,7 @@ async function readPage(profiles: ProfileRef[], prev: LinkedInPageState | null, 
   const base = { profile_id: li.id, url, key };
   const last = same ? prev : null;
   try {
-    const got = await io.linkedinPage(url, same ? prev.run_id ?? null : null);
+    const got = await io.linkedinPage(cost, url, same ? prev.run_id ?? null : null);
     if (got.state === "pending") return { ...base, read_at: last?.read_at ?? null, page: last?.page ?? null, run_id: got.run_id };
     // A failed read, or one that found no page, is read again on the next look; the 30 days are for a page that was read.
     if (got.state === "failed") return { ...base, read_at: null, page: last?.page ?? null, status: got.status };
@@ -673,7 +676,9 @@ function multiplesOf(posts: SocialPost[], scored: ReturnType<typeof scoreOwnPost
 }
 
 /** The social_read step's run. `prev` is the step's last result, whatever its inputs were: the version lives across them. */
-export async function runSocialRead(db: Db, client: Row, ctx: { rows: Map<string, StepRow> }, io: SocialIO): Promise<StepOutcome> {
+export async function runSocialRead(db: Db, client: Row, ctx: { rows: Map<string, StepRow>; by?: { actor: Actor; executionId?: string | null } }, io: SocialIO): Promise<StepOutcome> {
+  // The step's paid reads (Apify for the bio and the page, OpenAI for the brand read) are the client's, under the job that ran the step.
+  const cost = costCtx({ clientId: String(client.id), feature: "lifecycle.social_read", actor: ctx.by?.actor ?? "schedule", executionId: ctx.by?.executionId ?? null });
   const profiles = await profilesOf(db, client.id);
   if (!profiles.length) return { status: "waiting", reason: "social_accounts" };
   const now = io.now();
@@ -703,8 +708,8 @@ export async function runSocialRead(db: Db, client: Row, ctx: { rows: Map<string
   const profileAddresses = local.map((x) => x.address);
   // The bio and the page are read together: each may wait up to a minute for its run, and each keeps its own failure.
   const [instagram, linkedin_page] = await Promise.all([
-    readBio(profiles, pictures, (prev?.instagram ?? null) as InstagramState | null, io, now),
-    readPage(profiles, (prev?.linkedin_page ?? null) as LinkedInPageState | null, io, now),
+    readBio(profiles, pictures, (prev?.instagram ?? null) as InstagramState | null, io, now, cost),
+    readPage(profiles, (prev?.linkedin_page ?? null) as LinkedInPageState | null, io, now, cost),
   ]);
   const langs = languageCounts(posts);
   const snapshot = snapshotOf(posts, now, {
@@ -765,12 +770,11 @@ export async function runSocialRead(db: Db, client: Row, ctx: { rows: Map<string
   const exactRank = exact.source && exact.source !== "country" ? SOURCE_RANK[exact.source] : 99;
   const zoneMay = may("timezone") && storedRank > SOURCE_RANK.post_read && fillRank > SOURCE_RANK.post_read && exactRank > SOURCE_RANK.post_text;
   let read: SocialBrandRead | null = null;
-  const key = identityMay || zoneMay ? await io.openaiKey(db) : null;
-  if (key) {
+  if ((identityMay || zoneMay) && (await io.openaiReady())) {
     const modelPosts = [...top.map((t) => t.post), ...textPosts(posts)].filter((p, i, all) => p.hasText && all.findIndex((x) => x.id === p.id) === i).slice(0, MODEL_POSTS);
     try {
       read = await io.brandRead({
-        clientName: String(client.name ?? ""), openaiKey: key, images: await readImages(db, client, logo, multiples), bio: bio || null,
+        clientName: String(client.name ?? ""), cost, images: await readImages(db, client, logo, multiples), bio: bio || null,
         postsText: modelPosts.map((p) => `[${p.platform}, ${p.publishedAt.slice(0, 10)}] ${plainTextKeepLinks(p.text).slice(0, 400)}`).join("\n"),
       });
     } catch (e) {

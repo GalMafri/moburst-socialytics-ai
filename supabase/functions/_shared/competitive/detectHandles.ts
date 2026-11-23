@@ -15,13 +15,15 @@
 
 import { extractIndexedProfiles, extractSocialHandles, mergeHandles, type DetectedHandle } from "./extractSocialHandles.ts";
 import { fetchWithRateLimitRetry } from "./fetchWithRateLimitRetry.ts";
+import type { Actor, CostContext } from "../cost/context.ts";
+import { costCtx, hasKey, paid } from "../paid/index.ts";
 
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
-function env(k: string): string | undefined {
-  return (globalThis as { Deno?: { env: { get(k: string): string | undefined } } }).Deno?.env.get(k);
-}
+/** Firecrawl through the paying desk, with the rate-limit retry: `path` is under Firecrawl's API. */
+const firecrawl = (cost: CostContext, path: string, init: RequestInit, timeoutMs: number) =>
+  fetchWithRateLimitRetry(path, init, timeoutMs, { fetch: ((p: string, i?: RequestInit) => paid.fetch(cost, "firecrawl", p, i)) as typeof fetch, sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)) });
 
 function normalizeUrl(websiteUrl: string): string {
   const url = websiteUrl.trim();
@@ -44,13 +46,12 @@ async function fetchDirect(url: string): Promise<SiteRead> {
  * The rendered page plus the links Firecrawl found on it. Firecrawl's
  * onlyMainContent would drop the footer, where a brand puts its social links.
  */
-async function fetchRendered(url: string): Promise<SiteRead> {
-  const firecrawlKey = env("FIRECRAWL_API_KEY");
-  if (!firecrawlKey) return { html: "", ok: false, warning: "Rendered website lookup is not configured." };
+async function fetchRendered(cost: CostContext, url: string): Promise<SiteRead> {
+  if (!(await hasKey("firecrawl"))) return { html: "", ok: false, warning: "Rendered website lookup is not configured." };
   try {
-    const fcResp = await fetchWithRateLimitRetry("https://api.firecrawl.dev/v1/scrape", {
+    const fcResp = await firecrawl(cost, "/v1/scrape", {
       method: "POST",
-      headers: { Authorization: `Bearer ${firecrawlKey}`, "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url, formats: ["rawHtml", "links"], onlyMainContent: false, waitFor: 4000, timeout: 20000 }),
     }, 25000);
     if (!fcResp.ok) return { html: "", ok: false, warning: `Rendered website lookup returned HTTP ${fcResp.status}.` };
@@ -69,13 +70,12 @@ async function fetchRendered(url: string): Promise<SiteRead> {
 const FALLBACK_PATHS = ["/contact", "/about", "/about-us", "/company"];
 const ALL_PLATFORMS = ["instagram", "facebook", "tiktok", "linkedin", "youtube", "x"];
 
-async function searchProfiles(name: string): Promise<{ handles: DetectedHandle[]; ok: boolean }> {
-  const key = env("FIRECRAWL_API_KEY");
-  if (!key) return { handles: [], ok: false };
+async function searchProfiles(cost: CostContext, name: string): Promise<{ handles: DetectedHandle[]; ok: boolean }> {
+  if (!(await hasKey("firecrawl"))) return { handles: [], ok: false };
   try {
-    const response = await fetchWithRateLimitRetry("https://api.firecrawl.dev/v1/search", {
+    const response = await firecrawl(cost, "/v1/search", {
       method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query: `"${name.replace(/["\r\n]/g, " ")}" (site:instagram.com OR site:facebook.com OR site:linkedin.com OR site:youtube.com OR site:tiktok.com OR site:x.com)`, limit: 10 }),
     }, 20000);
     if (!response.ok) return { handles: [], ok: false };
@@ -86,18 +86,18 @@ async function searchProfiles(name: string): Promise<{ handles: DetectedHandle[]
   }
 }
 
-export async function detectForSite(websiteUrl: string, brandName?: string) {
+export async function detectForSite(cost: CostContext, websiteUrl: string, brandName?: string) {
   const base = normalizeUrl(websiteUrl);
   const direct = await fetchDirect(base);
   const groups = [extractSocialHandles(direct.html, brandName)];
   const reads: SiteRead[] = [direct];
   if (ALL_PLATFORMS.some((p) => !groups[0].some((h) => h.platform === p))) {
-    const more = await Promise.all([fetchRendered(base), ...FALLBACK_PATHS.map((path) => fetchDirect(new URL(path, base).toString()))]);
+    const more = await Promise.all([fetchRendered(cost, base), ...FALLBACK_PATHS.map((path) => fetchDirect(new URL(path, base).toString()))]);
     reads.push(...more);
     groups.push(...more.map((r) => extractSocialHandles(r.html, brandName)));
   }
   const websiteHandles = mergeHandles(...groups);
-  const indexed = websiteHandles.length || !brandName ? { handles: [], ok: false } : await searchProfiles(brandName);
+  const indexed = websiteHandles.length || !brandName ? { handles: [], ok: false } : await searchProfiles(cost, brandName);
   return {
     handles: mergeHandles(websiteHandles, indexed.handles),
     searchedIndex: indexed.ok,
@@ -137,12 +137,15 @@ function validWebsite(websiteUrl: string): boolean {
   }
 }
 
+/** Who asked for a lookup, for the cost of its Firecrawl reads (each competitor's client is the one charged). */
+export interface LookupBy { actor: Actor; executionId?: string | null; userId?: string | null }
+
 /**
  * Look up and save the profiles of these competitors, one after another
  * (target sites are third parties). `refresh` replaces earlier automatic
  * finds; without it only missing platforms are filled.
  */
-export async function detectCompetitorHandles(db: Db, competitors: DetectTarget[], opts: { refresh?: boolean } = {}): Promise<{ results: DetectResult[]; writeErrors: string[] }> {
+export async function detectCompetitorHandles(db: Db, competitors: DetectTarget[], opts: { refresh?: boolean; by: LookupBy }): Promise<{ results: DetectResult[]; writeErrors: string[] }> {
   const manual = new Set<string>();
   const rejected = new Set<string>();
   const writeErrors: string[] = [];
@@ -182,7 +185,8 @@ export async function detectCompetitorHandles(db: Db, competitors: DetectTarget[
     const previousWriteErrors = writeErrors.length;
     let discovery: Awaited<ReturnType<typeof detectForSite>>;
     try {
-      discovery = await detectForSite(comp.website_url, comp.name);
+      const cost = costCtx({ clientId: comp.client_id, feature: "competitors.detect_handles", actor: opts.by.actor, executionId: opts.by.executionId ?? null, userId: opts.by.userId ?? null });
+      discovery = await detectForSite(cost, comp.website_url, comp.name);
     } catch {
       await saveStatus("failed", [LOOKUP_FAILED]);
       results.push({ competitor_id: comp.id, detected: [], status: "failed", warnings: [LOOKUP_FAILED] });

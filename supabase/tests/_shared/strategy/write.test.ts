@@ -18,6 +18,8 @@ import type { PlatformFigures } from "../../../functions/_shared/strategy/basis"
 import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
 import { sectionLines } from "../../../functions/_shared/strategy/sections";
 
+const COST = { tool: "socialytics" as const, clientId: "c1", feature: "lifecycle.test", actor: "schedule" as const };
+
 const NOW = new Date("2026-11-02T10:00:00.000Z");
 
 const fig = (platform: string, over: Partial<PlatformFigures> = {}): PlatformFigures => ({
@@ -89,7 +91,7 @@ const goals = (title: string) => [{ ...draft().goals[0], title }, draft().goals[
 /** A stand-in for the Messages API: answers in order, and keeps every request. */
 function calls(...answers: Array<{ text: string; stopReason?: string; raw?: unknown }>) {
   const bodies: Array<Record<string, any>> = [];
-  const call = async ({ body }: { apiKey: string; body: Record<string, unknown> }) => {
+  const call = async ({ body }: { cost: unknown; body: Record<string, unknown> }) => {
     bodies.push(body);
     const next = answers.shift();
     if (!next) throw new Error("no more answers");
@@ -107,7 +109,7 @@ async function drive(...answers: Array<{ text: string; stopReason?: string; raw?
   for (let run = 0; run < 10; run++) {
     const before = bodies.length;
     phases.push(pending.phase);
-    const out: PhaseOutcome = await strategyPhase(call, "key", pending);
+    const out: PhaseOutcome = await strategyPhase(call, COST, pending);
     expect(bodies.length - before).toBe(1);
     if (out.kind !== "next") return { out, phases, bodies, kept };
     // What the next run reads back is what was stored, as JSON.
@@ -710,8 +712,8 @@ describe("the competitors stored with a platform", () => {
     expect(out.value.platforms[0].competitors.map((c) => c.company)).toEqual(["BenchApp"]);
     const call = calls(reply(draft()), clean);
     const withSmall = { ...startStrategy({ ...E, competitor_figures: [...E.competitor_figures, small] }, "k", NOW) };
-    const first = await strategyPhase(call.call, "key", withSmall);
-    const second = await strategyPhase(call.call, "key", (first as { pending: PendingStrategy }).pending);
+    const first = await strategyPhase(call.call, COST, withSmall);
+    const second = await strategyPhase(call.call, COST, (first as { pending: PendingStrategy }).pending);
     if (second.kind !== "passed") throw new Error("not passed");
     expect(second.value.platforms[0].competitors.map((c) => c.company)).toEqual(["BenchApp"]);
   });

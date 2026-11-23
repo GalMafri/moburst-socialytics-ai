@@ -5,6 +5,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CLAUDE_BATCH_POLL_SECONDS, CLAUDE_BATCH_RESUBMITS, CLAUDE_DIRECT_POLL_SECONDS, CLAUDE_INLINE_MAX_TOKENS, claudeBatchStep, claudeInline } from "../../../functions/_shared/pipelines/claude";
 import type { PipelineRun, StepContext } from "../../../functions/_shared/pipelines/types";
+import { TEST_COST, useTestMeter } from "../../paid/testMeter";
 
 const run = { id: "6f1c0d6e-0000-4000-8000-000000000001", kind: "social", input: {} } as unknown as PipelineRun;
 function ctx(over: Partial<StepContext> = {}): StepContext & { saved: Map<string, unknown> } {
@@ -18,7 +19,7 @@ function ctx(over: Partial<StepContext> = {}): StepContext & { saved: Map<string
 }
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); useTestMeter(); });
 
 describe("claudeInline", () => {
   it("passes the step's abort signal, joins every text block, and saves the answer", async () => {
@@ -28,7 +29,7 @@ describe("claudeInline", () => {
       return json({ content: [{ type: "thinking", thinking: "" }, { type: "text", text: "Part one." }, { type: "text", text: "Part two." }], stop_reason: "end_turn" });
     });
     const c = ctx();
-    const r = await claudeInline(c, { apiKey: "k", body: { model: "claude-sonnet-4-6", max_tokens: 4000, messages: [{ role: "user", content: "Summarize." }] }, saveAs: "brief.analysis" });
+    const r = await claudeInline(c, { cost: TEST_COST, body: { model: "claude-sonnet-4-6", max_tokens: 4000, messages: [{ role: "user", content: "Summarize." }] }, saveAs: "brief.analysis" });
     expect(r).toMatchObject({ key: "brief.analysis", stopReason: "end_turn" });
     expect(c.saved.get("brief.analysis")).toEqual({ text: "Part one.\nPart two.", stop_reason: "end_turn" });
     expect(seen[0].signal).toBe(c.signal);
@@ -38,18 +39,18 @@ describe("claudeInline", () => {
     const seen: RequestInit[] = [];
     vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => { seen.push(init); return json({ content: [{ type: "text", text: "ok" }], stop_reason: "end_turn" }); });
     const { anthropicMessages } = await import("../../../functions/_shared/anthropic");
-    await anthropicMessages({ apiKey: "k", body: { model: "m", max_tokens: 10, messages: [] } });
+    await anthropicMessages({ cost: TEST_COST, body: { model: "m", max_tokens: 10, messages: [] } });
     expect(Object.keys(seen[0]).sort()).toEqual(["body", "headers", "method"]);
   });
 
   it("sends a call that may not fit a step's time to a batch instead", async () => {
     vi.stubGlobal("fetch", async () => { throw new Error("must not be called"); });
-    await expect(claudeInline(ctx(), { apiKey: "k", body: { max_tokens: CLAUDE_INLINE_MAX_TOKENS + 1, messages: [] }, saveAs: "x" })).rejects.toThrow("message batch");
+    await expect(claudeInline(ctx(), { cost: TEST_COST, body: { max_tokens: CLAUDE_INLINE_MAX_TOKENS + 1, messages: [] }, saveAs: "x" })).rejects.toThrow("message batch");
   });
 
   it("returns a cut answer's stop reason to the step rather than paying for the same call again", async () => {
     vi.stubGlobal("fetch", async () => json({ content: [{ type: "text", text: "Half" }], stop_reason: "max_tokens" }));
-    const r = await claudeInline(ctx(), { apiKey: "k", body: { max_tokens: 100, messages: [] }, saveAs: "x" });
+    const r = await claudeInline(ctx(), { cost: TEST_COST, body: { max_tokens: 100, messages: [] }, saveAs: "x" });
     expect(r.stopReason).toBe("max_tokens");
   });
 });
@@ -78,12 +79,13 @@ describe("claudeBatchStep", () => {
       if (next === "in_progress") { statuses.shift(); return json({ id, processing_status: "in_progress" }); }
       return json({ id, processing_status: "ended", results_url: `https://api.anthropic.com/v1/messages/batches/${id}/results` });
     };
+    useTestMeter(fetchImpl);
     return { calls, fetchImpl };
   }
 
   it("submits, polls while the batch runs, saves the answer and moves on", async () => {
     const { calls, fetchImpl } = api(["in_progress", "succeeded"]);
-    const step = claudeBatchStep({ build: async () => ({ apiKey: "k", body }), saveAs: "analysis.text", next: "deck", fetchImpl });
+    const step = claudeBatchStep({ feature: "report.test", build: async () => ({ body }), saveAs: "analysis.text", next: "deck", fetchImpl });
 
     const c1 = ctx();
     const r1 = await step(c1);
@@ -102,7 +104,7 @@ describe("claudeBatchStep", () => {
 
   it("submits a new batch when one ends without an answer, then gives up to the runner's retries", async () => {
     const { calls, fetchImpl } = api(["errored", "errored", "errored"]);
-    const step = claudeBatchStep({ build: async () => ({ apiKey: "k", body }), saveAs: "analysis.text", next: null, fetchImpl });
+    const step = claudeBatchStep({ feature: "report.test", build: async () => ({ body }), saveAs: "analysis.text", next: null, fetchImpl });
     let state: Record<string, unknown> = {};
     let poll = { handle: { claude_batch_id: "msgbatch_0" }, polls: 1, since: "2026-11-07T07:20:00Z" };
     for (let i = 1; i <= CLAUDE_BATCH_RESUBMITS; i++) {
@@ -123,16 +125,16 @@ describe("claudeBatchStep", () => {
     it("queues the batch, asks for the direct call, and looks again soon", async () => {
       asked.length = 0;
       const { calls, fetchImpl } = api(["in_progress"]);
-      const step = claudeBatchStep({ build: async () => ({ apiKey: "k", body }), saveAs: "analysis.text", next: "deck", fetchImpl, direct });
+      const step = claudeBatchStep({ feature: "report.test", build: async () => ({ body }), saveAs: "analysis.text", next: "deck", fetchImpl, direct });
       const r = await step(ctx());
       expect(r).toMatchObject({ type: "poll", waitSeconds: CLAUDE_DIRECT_POLL_SECONDS, handle: { claude_batch_id: "msgbatch_1", direct_starts: 1, direct_started_at: "2026-11-07T07:20:00.000Z" }, detail: { direct: "asked", direct_start: 1 } });
-      expect(asked).toEqual([{ runId: run.id, saveAs: "analysis.text", body, start: 1 }]);
+      expect(asked).toEqual([{ runId: run.id, saveAs: "analysis.text", body, start: 1, feature: "report.test" }]);
       expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
     });
 
     it("takes the direct answer when it comes first, saves it once and cancels the batch", async () => {
       const { calls, fetchImpl } = api(["in_progress"]);
-      const step = claudeBatchStep({ build: async () => ({ apiKey: "k", body }), saveAs: "analysis.text", next: "deck", fetchImpl, direct });
+      const step = claudeBatchStep({ feature: "report.test", build: async () => ({ body }), saveAs: "analysis.text", next: "deck", fetchImpl, direct });
       const c = ctx({ poll: { handle: { claude_batch_id: "msgbatch_1", direct_starts: 1, direct_started_at: "2026-11-07T07:19:00Z" }, polls: 3, since: "x" } });
       answerDirect(c);
       expect(await step(c)).toMatchObject({ type: "next", step: "deck", detail: { saved: "analysis.text", answered_by: "direct", direct_seconds: 74 } });
@@ -142,7 +144,7 @@ describe("claudeBatchStep", () => {
 
     it("takes the batch's answer when it comes first", async () => {
       const { fetchImpl } = api(["succeeded"]);
-      const step = claudeBatchStep({ build: async () => ({ apiKey: "k", body }), saveAs: "analysis.text", next: null, fetchImpl, direct });
+      const step = claudeBatchStep({ feature: "report.test", build: async () => ({ body }), saveAs: "analysis.text", next: null, fetchImpl, direct });
       const c = ctx({ poll: { handle: { claude_batch_id: "msgbatch_1", direct_starts: 1, direct_started_at: "2026-11-07T07:19:00Z" }, polls: 3, since: "x" } });
       expect(await step(c)).toMatchObject({ type: "done", detail: { answered_by: "batch" } });
       expect(c.saved.get("analysis.text")).toEqual({ text: "The long analysis.", stop_reason: "end_turn", usage: { input_tokens: 900, output_tokens: 120 } });
@@ -151,7 +153,7 @@ describe("claudeBatchStep", () => {
     it("asks once more after a direct call failed outright, then leaves it to the batch", async () => {
       asked.length = 0;
       const { fetchImpl } = api(["in_progress", "in_progress"]);
-      const step = claudeBatchStep({ build: async () => ({ apiKey: "k", body }), saveAs: "analysis.text", next: null, fetchImpl, direct });
+      const step = claudeBatchStep({ feature: "report.test", build: async () => ({ body }), saveAs: "analysis.text", next: null, fetchImpl, direct });
       const c1 = ctx({ poll: { handle: { claude_batch_id: "msgbatch_1", direct_starts: 1, direct_started_at: "2026-11-07T07:19:00Z" }, polls: 2, since: "x" } });
       c1.saved.set("analysis.text.direct_failed", { message: "Claude did not take the request [529]", seconds: 3, start: 1 });
       const r1 = await step(c1);
@@ -167,7 +169,7 @@ describe("claudeBatchStep", () => {
     it("asks for a direct call for a batch queued before the direct call existed", async () => {
       asked.length = 0;
       const { fetchImpl } = api(["in_progress"]);
-      const step = claudeBatchStep({ build: async () => ({ apiKey: "k", body }), saveAs: "analysis.text", next: null, fetchImpl, direct });
+      const step = claudeBatchStep({ feature: "report.test", build: async () => ({ body }), saveAs: "analysis.text", next: null, fetchImpl, direct });
       const r = await step(ctx({ poll: { handle: { claude_batch_id: "msgbatch_7" }, polls: 30, since: "x" } }));
       expect(r).toMatchObject({ type: "poll", waitSeconds: CLAUDE_DIRECT_POLL_SECONDS, handle: { claude_batch_id: "msgbatch_7", direct_starts: 1 } });
       expect(asked.map((a) => a.start)).toEqual([1]);
@@ -176,7 +178,7 @@ describe("claudeBatchStep", () => {
     it("keeps a function that could not be reached as a failure, so the next look asks again", async () => {
       const { fetchImpl } = api(["in_progress"]);
       const refused = async () => { throw new Error("claude-direct did not take the request [503]"); };
-      const step = claudeBatchStep({ build: async () => ({ apiKey: "k", body }), saveAs: "analysis.text", next: null, fetchImpl, direct: refused });
+      const step = claudeBatchStep({ feature: "report.test", build: async () => ({ body }), saveAs: "analysis.text", next: null, fetchImpl, direct: refused });
       const c = ctx();
       expect(await step(c)).toMatchObject({ type: "poll", handle: { direct_starts: 1 }, detail: { direct: "not asked" } });
       expect(c.saved.get("analysis.text.direct_failed")).toMatchObject({ start: 1, message: expect.stringContaining("503") });
@@ -184,14 +186,14 @@ describe("claudeBatchStep", () => {
 
     it("waits for a direct call still under way when the batch has given out", async () => {
       const { fetchImpl } = api(["errored"]);
-      const step = claudeBatchStep({ build: async () => ({ apiKey: "k", body }), saveAs: "analysis.text", next: null, fetchImpl, direct });
+      const step = claudeBatchStep({ feature: "report.test", build: async () => ({ body }), saveAs: "analysis.text", next: null, fetchImpl, direct });
       const r = await step(ctx({ state: { "claude_batch_resubmits_analysis.text": CLAUDE_BATCH_RESUBMITS }, poll: { handle: { claude_batch_id: "msgbatch_3", direct_starts: 1, direct_started_at: "2026-11-07T07:19:00Z" }, polls: 9, since: "x" } }));
       expect(r).toMatchObject({ type: "poll", waitSeconds: CLAUDE_DIRECT_POLL_SECONDS, detail: { batch: expect.stringContaining("errored") } });
     });
 
     it("is the batch alone where the function cannot be reached (no address or secret)", async () => {
       const { calls, fetchImpl } = api(["in_progress"]);
-      const step = claudeBatchStep({ build: async () => ({ apiKey: "k", body }), saveAs: "analysis.text", next: null, fetchImpl });
+      const step = claudeBatchStep({ feature: "report.test", build: async () => ({ body }), saveAs: "analysis.text", next: null, fetchImpl });
       expect(await step(ctx())).toMatchObject({ type: "poll", waitSeconds: CLAUDE_BATCH_POLL_SECONDS, handle: { direct_starts: 0 } });
       expect(calls.map((c) => c.url)).toEqual(["https://api.anthropic.com/v1/messages/batches"]);
     });
@@ -199,7 +201,7 @@ describe("claudeBatchStep", () => {
 
   it("finishes the run when it is the last step", async () => {
     const { fetchImpl } = api(["succeeded"], "a");
-    const step = claudeBatchStep({ build: async () => ({ apiKey: "k", body }), saveAs: "a", next: null, fetchImpl });
+    const step = claudeBatchStep({ feature: "report.test", build: async () => ({ body }), saveAs: "a", next: null, fetchImpl });
     expect(await step(ctx({ poll: { handle: { claude_batch_id: "msgbatch_9" }, polls: 1, since: "x" } }))).toMatchObject({ type: "done" });
   });
 });

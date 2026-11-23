@@ -28,6 +28,7 @@ import { socialFigures } from "../../../../functions/_shared/reports/reportText"
 import { runReportInsights } from "../../../../functions/_shared/reports/insights";
 import { synthesisSystem } from "../../../../functions/_shared/pipelines/social/prompt";
 import { socialPipeline, type SocialDeps } from "../../../../functions/_shared/pipelines/definitions/social";
+import { viaTestMeter } from "../../../paid/testMeter";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -126,7 +127,7 @@ function deps(o: { calls?: Calls; requests?: Any[]; insights?: Any[]; synthesis?
   return {
     sprout: sprout(calls.sprout),
     gamma: gamma(calls.gamma, { refuse: o.refuseDeck }),
-    claudeFetch: claude({ brief: MOBURST.brief_analysis.output, synthesis: o.synthesis ?? MOBURST.ai.output }, o.requests ?? [], { failBrief: o.failBrief }),
+    ...viaTestMeter(claude({ brief: MOBURST.brief_analysis.output, synthesis: o.synthesis ?? MOBURST.ai.output }, o.requests ?? [], { failBrief: o.failBrief })),
     insights: insightsModel(o.insights ?? [], { fail: o.failInsights }),
   };
 }

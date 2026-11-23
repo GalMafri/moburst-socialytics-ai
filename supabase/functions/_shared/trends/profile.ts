@@ -9,6 +9,7 @@
 // (removed_at set), so a rewrite never brings it back.
 
 import { answerText, replyStopped, roomFor } from "../anthropicReply.ts";
+import type { CostContext } from "../cost/context.ts";
 import { parseAnswer } from "../pipelines/competitive/analysis.ts";
 import { topCounts } from "../competitive/postSample.ts";
 import { textHash } from "../lifecycle/names.ts";
@@ -346,7 +347,7 @@ export function parseHashtags(text: string, e: ProfileEvidence): { value: Record
   return problems.length ? { error: problems.join(" ") } : { value: tags };
 }
 
-export type ClaudeCall = (args: { apiKey: string; body: Record<string, unknown> }) => Promise<{ text: string; stopReason?: string }>;
+export type ClaudeCall = (args: { cost: CostContext; body: Record<string, unknown> }) => Promise<{ text: string; stopReason?: string }>;
 
 /**
  * One request, and one more with the problems named when the first answer
@@ -354,15 +355,15 @@ export type ClaudeCall = (args: { apiKey: string; body: Record<string, unknown> 
  * to correct: the same request is sent once more instead. Two calls at most
  * either way, and a second answer that did not finish is read as empty.
  */
-export async function askTwice<T>(call: ClaudeCall, apiKey: string, body: Record<string, unknown>, parse: (text: string) => { value: T } | { error: string }): Promise<{ value: T } | { error: string }> {
-  const first = await call({ apiKey, body });
-  if (replyStopped(first)) return parse(answerText(await call({ apiKey, body })));
+export async function askTwice<T>(call: ClaudeCall, cost: CostContext, body: Record<string, unknown>, parse: (text: string) => { value: T } | { error: string }): Promise<{ value: T } | { error: string }> {
+  const first = await call({ cost, body });
+  if (replyStopped(first)) return parse(answerText(await call({ cost, body })));
   const got = parse(first.text);
   if ("value" in got) return got;
   const messages = [...(body.messages as unknown[]), { role: "assistant", content: first.text }, {
     role: "user", content: `That answer has these problems: ${got.error} Send the whole JSON object again with them fixed.`,
   }];
-  const second = await call({ apiKey, body: { ...body, messages } });
+  const second = await call({ cost, body: { ...body, messages } });
   return parse(answerText(second));
 }
 

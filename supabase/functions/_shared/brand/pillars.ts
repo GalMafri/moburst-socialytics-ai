@@ -25,6 +25,8 @@
 // Keywords are kept when no pillar stands.
 
 import { anthropicMessages } from "../anthropic.ts";
+import type { CostContext } from "../cost/context.ts";
+import { hasKey } from "../paid/index.ts";
 import { answerText, roomFor } from "../anthropicReply.ts";
 import { clipText } from "../text/clip.ts";
 
@@ -171,7 +173,7 @@ export interface PillarClient {
  * client's LinkedIn page. When no pillar stands but the reading gave
  * keywords, the keywords come back with no pillars.
  */
-export async function derivePillars(db: Db, client: PillarClient, apiKey: string, opts: { siteText?: string | null; language?: string | null; posts?: PillarPost[] | null; briefFromPosts?: boolean; bio?: string | null; page?: PillarPage | null } = {}): Promise<DerivedPillars> {
+export async function derivePillars(db: Db, client: PillarClient, cost: CostContext, opts: { siteText?: string | null; language?: string | null; posts?: PillarPost[] | null; briefFromPosts?: boolean; bio?: string | null; page?: PillarPage | null } = {}): Promise<DerivedPillars> {
   // deno-lint-ignore no-explicit-any
   const content: any[] = [];
   const sources: PillarSource[] = [];
@@ -258,7 +260,7 @@ export async function derivePillars(db: Db, client: PillarClient, apiKey: string
   // thinking counts toward max_tokens, and at 3000 a pillars-and-brief answer
   // was cut off mid-JSON (Yangra, 3 Nov 2026).
   const { text, stopReason } = await anthropicMessages({
-    apiKey,
+    cost,
     body: {
       model: "claude-sonnet-5", max_tokens: 16000, system: PILLARS_SYSTEM, messages: [{ role: "user", content }],
       output_config: { format: { type: "json_schema", schema: pillarsSchema({ posts: given.length > 0, brief: wantBrief }) } },
@@ -317,15 +319,6 @@ export function parsePillarsReply(text: string): { pillars: Array<Pillar & { pos
   return { pillars, keywords, notes: clamp(parsed.notes, 300), brief };
 }
 
-/** The Anthropic key: the function environment first, then the workspace setting. */
-export async function anthropicKey(db: Db): Promise<string | null> {
-  const env = (globalThis as { Deno?: { env: { get(k: string): string | undefined } } }).Deno?.env;
-  const fromEnv = env?.get("ANTHROPIC_API_KEY");
-  if (fromEnv) return fromEnv;
-  const { data } = await db.from("app_settings").select("value").eq("key", "anthropic_api_key").maybeSingle();
-  return data?.value ? String(data.value) : null;
-}
-
 /** A strategy document in app storage (the brand-books bucket): its text, or the PDF to hand a model. Null when it is missing, too large or a kind no reader takes. */
 export async function readStrategyDoc(db: Db, path: string): Promise<{ kind: "text"; text: string } | { kind: "pdf"; bytes: Uint8Array } | null> {
   const { data: file } = await db.storage.from("brand-books").download(path);
@@ -369,17 +362,17 @@ const DOC_BRIEF_PROMPT = `Copy out this strategy document's text about the brand
  * it is, trimmed; a PDF is copied out by one model call, told to keep the
  * document's own sentences. Null when the document cannot be read here.
  */
-export async function briefFromStrategyDoc(db: Db, path: string, apiKey: string | null): Promise<{ text: string; via: "text" | "pdf" } | null> {
+export async function briefFromStrategyDoc(db: Db, path: string, cost: CostContext): Promise<{ text: string; via: "text" | "pdf" } | null> {
   const doc = await readStrategyDoc(db, path);
   if (!doc) return null;
   if (doc.kind === "text") {
     const text = trimBrief(doc.text);
     return text.length >= 80 ? { text, via: "text" } : null;
   }
-  if (!apiKey) throw new PillarsError("model", "The AI connection is not configured.");
+  if (!(await hasKey("anthropic"))) throw new PillarsError("model", "The AI connection is not configured.");
   // The copy's own size, and room for the model to think first. A copy that was cut off is no copy: half a brief is never kept.
   const reply = await anthropicMessages({
-    apiKey,
+    cost,
     body: {
       model: "claude-sonnet-5", max_tokens: roomFor(3000),
       messages: [{ role: "user", content: [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: base64(doc.bytes) } }, { type: "text", text: DOC_BRIEF_PROMPT }] }],

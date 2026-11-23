@@ -37,7 +37,8 @@ import { secretEquals } from "../_shared/auth/secretEquals.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
 import { answerText, roomFor } from "../_shared/anthropicReply.ts";
 import { imageEdit } from "../_shared/media/imageEdit.ts";
-import { openaiKey } from "../_shared/openai/key.ts";
+import type { CostContext } from "../_shared/cost/context.ts";
+import { costCtx, hasKey } from "../_shared/paid/index.ts";
 import { claimJob, endOverdueRequests, endRequest, renewJobLease, saveJobProgress, settleRequest, BUCKET } from "../_shared/canva/jobs.ts";
 import { MAX_PLAN_ATTEMPTS, NO_PROGRESS_MINUTES, REQUEST_MAX_MINUTES } from "../_shared/design/requestRules.ts";
 import { type GenerateInput, designPrompt } from "../_shared/canva/brief.ts";
@@ -135,6 +136,15 @@ function background(work: Promise<unknown>): Response {
 }
 
 type Job = { id: string; client_id: string; step: string; status: string; attempts: number; input: any; state: any; design_request_id: string | null; option_index: number | null; slide_index: number | null; slide_count: number | null; created_at: string };
+
+/**
+ * Who a design job's paid calls are for: the job's client, the design request
+ * it is part of as the execution (design_requests.id; the job's own id for a
+ * job without one), the queue as the actor, and the work as the feature.
+ */
+function jobCost(job: Job, feature: string): CostContext {
+  return costCtx({ clientId: job.client_id, feature, actor: "schedule", executionId: job.design_request_id ?? job.id });
+}
 const JOB_COLUMNS = "id, client_id, step, status, attempts, input, state, design_request_id, option_index, slide_index, slide_count, created_at";
 
 // ── The pass ────────────────────────────────────────────────────────────────
@@ -349,7 +359,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
           const g: GenerateInput = job.input.generate;
           const page = pageOf(job);
           const size = pictureSize([page.width, page.height]);
-          return imageEdit(await openaiKey(db()), [{ bytes: await download(admin, s.design_path), name: "design.png" }], removePrompt(g.brand_name, s.marks_where), size);
+          return imageEdit(jobCost(job, "design.unlogo"), [{ bytes: await download(admin, s.design_path), name: "design.png" }], removePrompt(g.brand_name, s.marks_where), size);
         },
         store: (path, png) => upload(admin, path, png, "image/png"),
         save: () => saveJobProgress(admin, job),
@@ -425,7 +435,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       });
       notePicture(s, "read", ms);
       const image = base64Encode((await download(admin, marksPath)) as unknown as ArrayBuffer);
-      const seen = await readCheck((wait) => askAbout("image/jpeg", image, marksPrompt(g.brand_name), wait), parseMarks, "The picture's logos and brand marks");
+      const seen = await readCheck((wait) => askAbout(job, "image/jpeg", image, marksPrompt(g.brand_name), wait), parseMarks, "The picture's logos and brand marks");
       s.marks_check = seen;
       if (!seen.marks) {
         delete s.marks_where;
@@ -485,7 +495,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       notePicture(s, "read", ms);
       const jpeg = base64Encode((await download(admin, `${stem}.jpg`)) as unknown as ArrayBuffer);
       // The post's own words and the lettering on objects in its picture are read apart (_shared/design/pipeline.ts, postReadPrompt).
-      const reading = await readCheck((wait) => askAbout("image/jpeg", jpeg, postReadPrompt(g.brand_name), wait), parseReading, "The words on the design");
+      const reading = await readCheck((wait) => askAbout(job, "image/jpeg", jpeg, postReadPrompt(g.brand_name), wait), parseReading, "The words on the design");
       const lines = reading.lines;
       s.read = lines;
       s.read_scene = reading.scene;
@@ -499,7 +509,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       // A Story's words all sit in Meta's band (_shared/design/story.ts): the band alone is read, and holds the whole copy.
       if (band) {
         const crop = base64Encode((await download(admin, `${stem}-band.jpg`)) as unknown as ArrayBuffer);
-        const inBand = await readCheck((wait) => askAbout("image/jpeg", crop, postReadPrompt(g.brand_name), wait), parseReading, "The words in the Story's band");
+        const inBand = await readCheck((wait) => askAbout(job, "image/jpeg", crop, postReadPrompt(g.brand_name), wait), parseReading, "The words in the Story's band");
         s.band_read = inBand.lines;
         const bandWrong = readingFails(inBand, job.input.copy);
         if (bandWrong) {
@@ -511,7 +521,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       // Nothing may touch or cross the logo, seen at full size around its known place.
       if (area) {
         const crop = base64Encode((await download(admin, `${stem}-area.png`)) as unknown as ArrayBuffer);
-        const seen = await readCheck((wait) => askAbout("image/png", crop, logoCheckPrompt(g.brand_name), wait), parseLogoCheck, "The area around the logo");
+        const seen = await readCheck((wait) => askAbout(job, "image/png", crop, logoCheckPrompt(g.brand_name), wait), parseLogoCheck, "The area around the logo");
         s.logo_check = seen;
         if (!seen.clear) {
           console.warn(`[design-worker] job ${job.id}: the logo is touched by ${seen.touching}; designing again.`);
@@ -620,7 +630,7 @@ async function logoClearAt(admin: any, job: Job, base: string, finalPath: string
   });
   notePicture(s, "read", ms);
   const crop = base64Encode((await download(admin, `${stem}-area.png`)) as unknown as ArrayBuffer);
-  const seen = await readCheck((wait) => askAbout("image/png", crop, logoCheckPrompt(g.brand_name), wait), parseLogoCheck, "The area around the logo");
+  const seen = await readCheck((wait) => askAbout(job, "image/png", crop, logoCheckPrompt(g.brand_name), wait), parseLogoCheck, "The area around the logo");
   if (!seen.clear) console.warn(`[design-worker] job ${job.id}: the carousel's logo would be touched by ${seen.touching}; this slide keeps its own.`);
   return seen.clear;
 }
@@ -722,7 +732,7 @@ function generateDeps(admin: any, job: Job): GenerateDeps {
       if (error || !data) throw new Error(`Could not read the client post ${p}: ${error?.message ?? "missing"}`);
       images.push({ bytes: new Uint8Array(await data.arrayBuffer()), name: `ref${i}${p.slice(p.lastIndexOf("."))}` });
     }
-    return imageEdit(await openaiKey(db()), images, designPrompt(g, job.input.copy, g.refs.length, slide), pictureSize([page.width, page.height]), await download(admin, maskPath));
+    return imageEdit(jobCost(job, "design.generate"), images, designPrompt(g, job.input.copy, g.refs.length, slide), pictureSize([page.width, page.height]), await download(admin, maskPath));
   };
   return {
     canvas,
@@ -934,11 +944,11 @@ async function slotFileRequest(admin: any, plan: StampPlan, a: { job: string; st
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 /** One image and one question to the reading model, waited for at most `waitMs`; its answer as text ("" for an answer that was cut off, declined or too long in coming, which readCheck asks again). */
-async function askAbout(mediaType: "image/jpeg" | "image/png", data: string, question: string, waitMs: number): Promise<string> {
-  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
+async function askAbout(job: Job, mediaType: "image/jpeg" | "image/png", data: string, question: string, waitMs: number): Promise<string> {
+  // No key is the plain error it always was (the job tries again).
+  if (!(await hasKey("anthropic"))) throw new Error("ANTHROPIC_API_KEY is not set.");
   const result = await anthropicMessages({
-    apiKey,
+    cost: jobCost(job, "design.read"),
     body: {
       model: READ_MODEL,
       max_tokens: CHECK_TOKENS,

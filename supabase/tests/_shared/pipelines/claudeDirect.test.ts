@@ -4,6 +4,10 @@
 import { describe, expect, it } from "vitest";
 import { claudeStream, directFailedKey, directKey, runClaudeDirect } from "../../../functions/_shared/pipelines/claudeDirect";
 import type { PayloadStore } from "../../../functions/_shared/pipelines/types";
+import { TEST_COST, useTestMeter } from "../../paid/testMeter";
+
+/** Sends the paying desk's calls to this fake (the call reads the spread as nothing). */
+const via = (f: (url: string, init?: RequestInit) => Promise<Response>) => { useTestMeter(f); return {}; };
 
 const sse = (events: Array<Record<string, unknown>>) => events.map((e) => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join("");
 /** A streamed response cut into uneven pieces, as the network delivers it. */
@@ -38,14 +42,14 @@ function store() {
 describe("claudeStream", () => {
   it("asks for a stream of the same request and joins the text blocks as a whole message is read", async () => {
     const sent: Array<Record<string, unknown>> = [];
-    const r = await claudeStream({ apiKey: "k", body: { model: "claude-opus-5-5", max_tokens: 32000, messages: [{ role: "user", content: "x" }] }, signal: new AbortController().signal,
-      fetchImpl: async (_u, init) => { sent.push(JSON.parse(String(init?.body))); return streamed(answer); } });
+    const r = await claudeStream({ cost: TEST_COST, body: { model: "claude-opus-5-5", max_tokens: 32000, messages: [{ role: "user", content: "x" }] }, signal: new AbortController().signal,
+      ...via(async (_u, init) => { sent.push(JSON.parse(String(init?.body))); return streamed(answer); }) });
     expect(sent[0]).toMatchObject({ model: "claude-opus-5-5", max_tokens: 32000, stream: true });
     expect(r).toEqual({ text: "{\"executive_summary\": \"Cadence: steady.\"}\nSecond block.", stopReason: "end_turn", usage: { input_tokens: 1200, output_tokens: 42 } });
   });
 
   it("throws on a refused request, an error in the stream, and a stream that ends early", async () => {
-    const call = (res: Response) => claudeStream({ apiKey: "k", body: {}, signal: new AbortController().signal, fetchImpl: async () => res });
+    const call = (res: Response) => claudeStream({ cost: TEST_COST, body: {}, signal: new AbortController().signal, ...via(async () => res) });
     await expect(call(new Response("overloaded", { status: 529 }))).rejects.toThrow("[529]");
     await expect(call(streamed(sse([{ type: "error", error: { type: "overloaded_error", message: "Overloaded" } }])))).rejects.toThrow("overloaded_error");
     await expect(call(streamed(sse([{ type: "content_block_start", index: 0, content_block: { type: "text", text: "Half" } }])))).rejects.toThrow("ended before");
@@ -56,14 +60,14 @@ describe("runClaudeDirect", () => {
   it("keeps the answer with how long it took, for the step to read", async () => {
     const { s, kept } = store();
     let t = 1_000;
-    await runClaudeDirect(s, { apiKey: "k", body: {}, saveAs: "analysis.text", start: 1, now: () => (t += 61_000), fetchImpl: async () => streamed(answer) });
+    await runClaudeDirect(s, { cost: TEST_COST, body: {}, saveAs: "analysis.text", start: 1, now: () => (t += 61_000), ...via(async () => streamed(answer)) });
     expect(kept.get(directKey("analysis.text"))).toMatchObject({ stop_reason: "end_turn", seconds: 61, start: 1, usage: { input_tokens: 1200, output_tokens: 42 } });
     expect(kept.has(directFailedKey("analysis.text"))).toBe(false);
   });
 
   it("keeps why there is no answer, and never throws", async () => {
     const { s, kept } = store();
-    await expect(runClaudeDirect(s, { apiKey: "k", body: {}, saveAs: "a", start: 2, fetchImpl: async () => new Response("no", { status: 500 }) })).resolves.toBeUndefined();
+    await expect(runClaudeDirect(s, { cost: TEST_COST, body: {}, saveAs: "a", start: 2, ...via(async () => new Response("no", { status: 500 })) })).resolves.toBeUndefined();
     expect(kept.get(directFailedKey("a"))).toMatchObject({ start: 2, message: expect.stringContaining("[500]") });
     expect(kept.has(directKey("a"))).toBe(false);
   });

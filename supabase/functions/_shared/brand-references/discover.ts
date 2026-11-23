@@ -20,6 +20,8 @@ import { type Candidate, kindClassification, REVIEW_SYSTEM, reviewQuestion, usab
 import { captionHash, type Review, REVIEW_RULE } from "./corpus.ts";
 import { StyleError } from "./errors.ts";
 import { anthropicFetch } from "../anthropic.ts";
+import type { CostContext } from "../cost/context.ts";
+import { hasKey } from "../paid/index.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -48,18 +50,15 @@ const REVIEW_MODEL = "claude-haiku-4-5-20251001";
 
 export interface CheckIO {
   now(): Date;
-  apiKey(db: Db): Promise<string>;
+  /** Throws StyleError("provider") when the AI connection is not configured. */
+  aiReady(): Promise<void>;
   /** The profiles' published posts in the window, every page, newest first. One Sprout read. With `stopAt` (a clock time), it throws once that time has passed with pages still to read. */
   // deno-lint-ignore no-explicit-any
   readPosts(args: { profileIds: string[]; customer: string; since: Date; until: Date; stopAt?: number }): Promise<any[]>;
   /** A post's image from the provider's own media host; throws when it cannot be read. */
   image(url: string): Promise<{ bytes: Uint8Array; mime: string }>;
   /** The model's answer on one post: is it a designed post, and was it made for an occasion. */
-  review(args: { apiKey: string; brand: string; imageUrl: string; platform: string; postedAt: string; caption: string }): Promise<unknown>;
-}
-
-function env(k: string): string | undefined {
-  return (globalThis as { Deno?: { env: { get(k: string): string | undefined } } }).Deno?.env.get(k);
+  review(args: { cost: CostContext; brand: string; imageUrl: string; platform: string; postedAt: string; caption: string }): Promise<unknown>;
 }
 
 async function responseJson(response: Response, label: string) {
@@ -150,24 +149,20 @@ export function reviewReply(result: any): unknown {
   }
 }
 
-async function review(args: { apiKey: string; brand: string; imageUrl: string; platform: string; postedAt: string; caption: string }): Promise<unknown> {
-  return reviewReply(await responseJson(await anthropicFetch("/v1/messages", {
-    method: "POST", headers: { "Content-Type": "application/json", "x-api-key": args.apiKey, "anthropic-version": "2023-06-01" },
+async function review(args: { cost: CostContext; brand: string; imageUrl: string; platform: string; postedAt: string; caption: string }): Promise<unknown> {
+  return reviewReply(await responseJson(await anthropicFetch(args.cost, "/v1/messages", {
+    method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify(reviewRequest(args, { type: "url", url: args.imageUrl })), signal: AbortSignal.timeout(20000),
   }), "Reference quality check"));
 }
 
-/** The Anthropic key: the function environment first, then the workspace setting. */
-export async function anthropicKeyFor(db: Db): Promise<string> {
-  const fromEnv = env("ANTHROPIC_API_KEY");
-  if (fromEnv) return fromEnv;
-  const { data } = await db.from("app_settings").select("value").eq("key", "anthropic_api_key").maybeSingle();
-  if (!data?.value) throw new StyleError("provider", "The AI connection is not configured.");
-  return String(data.value);
+/** The AI connection is set (the paying desk holds its key: the function environment first, then the workspace setting). */
+export async function aiReady(): Promise<void> {
+  if (!(await hasKey("anthropic"))) throw new StyleError("provider", "The AI connection is not configured.");
 }
 
 export function liveCheckIO(): CheckIO {
-  return { now: () => new Date(), apiKey: anthropicKeyFor, readPosts, image: imageBytes, review };
+  return { now: () => new Date(), aiReady, readPosts, image: imageBytes, review };
 }
 
 async function sha256(bytes: Uint8Array): Promise<string> {
@@ -198,7 +193,7 @@ export interface ReviewRun {
  * `failedBefore` is how many runs of this check failed in a row before this
  * one (GIVE_UP_AFTER_FAILURES).
  */
-export async function reviewPosts(db: Db, client: { id: string; name: string }, queue: Candidate[], known: Review[], io: CheckIO, apiKey: string, started = Date.now(), failedBefore = 0): Promise<ReviewRun> {
+export async function reviewPosts(db: Db, client: { id: string; name: string }, queue: Candidate[], known: Review[], io: CheckIO, cost: CostContext, started = Date.now(), failedBefore = 0): Promise<ReviewRun> {
   const rows: Review[] = [];
   const missed: string[] = [];
   let modelCalls = 0;
@@ -215,7 +210,7 @@ export async function reviewPosts(db: Db, client: { id: string; name: string }, 
   };
   // A post known only from its stored review has no caption or image here: it is never asked (the queue leaves it out; this holds it to that).
   queue = queue.filter((c) => !c.carried);
-  const ask = (c: Candidate, imageUrl: string) => io.review({ apiKey, brand: client.name, imageUrl, platform: c.platform, postedAt: c.posted_at, caption: c.text });
+  const ask = (c: Candidate, imageUrl: string) => io.review({ cost, brand: client.name, imageUrl, platform: c.platform, postedAt: c.posted_at, caption: c.text });
   // The first four are always reviewed, so a check whose reads took long (a whole year of posts) still moves forward every run.
   for (let at = 0; at < queue.length && (at === 0 || Date.now() - started < REVIEW_BUDGET_MS); at += 4) {
     const batch = queue.slice(at, at + 4);

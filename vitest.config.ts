@@ -41,7 +41,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
-    setupFiles: ["./src/test/setup.ts"],
+    setupFiles: ["./src/test/setup.ts", "./supabase/tests/paid/setup.ts"],
     // Room for a waitFor's 4 seconds (src/test/setup.ts) under the full parallel suite.
     testTimeout: 15_000,
     include: [

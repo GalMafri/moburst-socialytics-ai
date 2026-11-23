@@ -804,7 +804,7 @@ describe("display names the client's Sprout account lists with decorations", () 
     const [, clientId, posts, , opts] = m.buildVoiceProfile.mock.calls[0];
     expect(clientId).toBe("nw");
     expect(posts.map((p: { text: string }) => p.text)).toEqual(["Welcome Dana Reed to the firm."]);
-    expect(opts).toEqual({ names: NAMES });
+    expect(opts).toEqual({ names: NAMES, by: { actor: "schedule", executionId: expect.any(String) } });
   });
 
   it("saves a planned post and a rewritten post with the names written plainly", async () => {

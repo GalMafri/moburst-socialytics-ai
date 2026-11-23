@@ -142,7 +142,7 @@ describe("website", () => {
         deps.listBrandPosts = (async () => [{ text: "Happy Friday", created_time: T, perma_link: null, profile_id: "7" }]) as never;
         deps.siteReader = site({}) as never;
         const asked: string[] = [];
-        deps.searchWeb = (async (q: string) => { asked.push(q); return []; }) as never;
+        deps.searchWeb = (async (_cost: unknown, q: string) => { asked.push(q); return []; }) as never;
         const out = await STEPS.website.run(db, c, ctx({ rows: withPage("https://moburst.com/") }));
         expect(out).toMatchObject({ status: "waiting", reason: "website", result: { stated_site_of: "Moburst" } });
         expect(asked.length).toBeGreaterThan(0);
@@ -230,7 +230,7 @@ describe("brand_read", () => {
     const c = client({ field_sources: person("timezone"), timezone: "America/Chicago" });
     const db = dbWith({ clients: [c] });
     deps.fetchSiteHtml = async () => ({ html: "<html><body>Hi</body></html>", via: "direct" as const });
-    deps.openaiKey = async () => "sk";
+    deps.openaiReady = async () => true;
     let page: unknown = null;
     deps.researchBrand = (async (a: { page?: unknown }) => {
       page = a.page;
@@ -314,7 +314,7 @@ describe("brief_pillars", () => {
     const c = client();
     const db = dbWith({ clients: [c] });
     deps.scrapeMarkdown = async () => ({ markdown: "# Moburst helps the world's biggest apps grow with paid, organic and creative work.", title: "Moburst" });
-    deps.anthropicKey = async () => "key";
+    deps.anthropicReady = async () => true;
     deps.now = () => new Date(T);
     deps.derivePillars = (async (_db: unknown, evidence: { brief_text: string }) => {
       expect(evidence.brief_text).toMatch(/^Drafted from the website on 2026-10-19:/);
@@ -335,7 +335,7 @@ describe("brief_pillars", () => {
     const c = client({ brief_text: "A real brief about growth marketing for apps and games.", field_sources: person("brief_text"),
       content_pillars: ["Thought Leadership", "Product Education", "Client Wins", "Industry Trends", "Team Culture"].map((name) => ({ name, description: "" })) });
     deps.scrapeMarkdown = fail("the scrape");
-    deps.anthropicKey = async () => "key";
+    deps.anthropicReady = async () => true;
     deps.derivePillars = (async (_db: unknown, evidence: { brief_text: string }, _k: string, opts: { siteText: string | null }) => {
       expect(evidence.brief_text).toBe(c.brief_text);
       expect(opts.siteText).toBeNull();
@@ -349,7 +349,7 @@ describe("brief_pillars", () => {
     const { PillarsError } = await import("../../../functions/_shared/brand/pillars");
     deps.scrapeMarkdown = async () => null;
     deps.fetchSiteText = async () => "";
-    deps.anthropicKey = async () => "key";
+    deps.anthropicReady = async () => true;
     deps.derivePillars = async () => { throw new PillarsError("no_evidence", "There is nothing to read yet."); };
     const c = client();
     expect(await STEPS.brief_pillars.run(dbWith({ clients: [c] }), c, ctx())).toMatchObject({ status: "waiting", reason: "evidence", recheckDays: 7 });
@@ -367,7 +367,7 @@ describe("brief_pillars always leaves a brief (the reports send only brief_text)
     const db = dbWith({ clients: [c] });
     const docs: string[] = [];
     deps.now = () => new Date(T);
-    deps.anthropicKey = async () => "key";
+    deps.anthropicReady = async () => true;
     deps.briefFromStrategyDoc = (async (_db: unknown, path: string) => { docs.push(path); return { text: "Pay The Pyper is built around the Captain's biggest headaches: attendance, payments, open spots and subs.", via: "pdf" as const }; }) as never;
     deps.scrapeMarkdown = fail("the scrape");
     deps.derivePillars = fail("the derivation");
@@ -390,7 +390,7 @@ describe("brief_pillars always leaves a brief (the reports send only brief_text)
   it("drafts from the site when the document cannot be read here, a brief file id being no brief", async () => {
     const c = { ...ptp(), strategy_doc_file_path: "Pay-The-Pyper/strategy.docx" };
     deps.now = () => new Date(T);
-    deps.anthropicKey = async () => "key";
+    deps.anthropicReady = async () => true;
     deps.briefFromStrategyDoc = async () => null;
     deps.scrapeMarkdown = async () => ({ markdown: "Pay The Pyper keeps rec league captains from chasing payments and texts every week.", title: null });
     const out = await STEPS.brief_pillars.run(dbWith({ clients: [c] }), c, ctx({ rows: read }));
@@ -400,7 +400,7 @@ describe("brief_pillars always leaves a brief (the reports send only brief_text)
   it("tries again quietly when the document's read does not finish, and holds the first report until it has", async () => {
     const { PillarsError } = await import("../../../functions/_shared/brand/pillars");
     const c = ptp();
-    deps.anthropicKey = async () => "key";
+    deps.anthropicReady = async () => true;
     deps.briefFromStrategyDoc = async () => { throw new PillarsError("model", "The strategy document came back with almost no text."); };
     expect(await STEPS.brief_pillars.run(dbWith({ clients: [c] }), c, ctx({ rows: read }))).toEqual({ status: "failed", error: "The strategy document came back with almost no text." });
     const db = dbWith({ calendar_plans: [], reports: [], report_schedules: [] });
@@ -804,7 +804,7 @@ describe("competitors", () => {
   });
   it("identifies first, then picks the three closest with a website and confirms as the system", async () => {
     const db = dbWith({ competitor_sets: [], competitors: [] });
-    deps.anthropicKey = async () => "key";
+    deps.anthropicReady = async () => true;
     deps.identifyCompetitors = (async (d: typeof db) => {
       d.tables.competitor_sets.push({ id: "draft1", client_id: "c1", status: "draft", created_at: T });
       for (const [i, n] of ["Phiture", "Gummicube", "NoSite", "SplitMetrics", "Yodel"].entries()) {
@@ -942,7 +942,7 @@ describe("a page on another client's site is used for text only", () => {
     const c = kit({ language: "" });
     const db = dbWith({ clients: [moburst(), c] });
     deps.fetchSiteHtml = async () => ({ html: MOBURST_SITE.replace(' lang="en-US"', ""), via: "direct" as const });
-    deps.openaiKey = async () => "sk";
+    deps.openaiReady = async () => true;
     deps.researchBrand = (async () => ({ brand_identity: BRAND, headquarters: { city: "New York", region: "NY", country: "US" }, site_language: "en", logo: { url: "https://www.moburst.com/logo.svg" }, html: "", url: "", fetched_via: "direct", debug: {} })) as never;
     const out = await STEPS.brand_read.run(db, c, ctx());
     expect(out).toMatchObject({ status: "done", result: { model_read: true, written: ["language"], logo: "none", site_profiles: [], parent_page: true } });
@@ -994,8 +994,8 @@ describe("a page on another client's site is used for text only", () => {
     expect(await STEPS.competitors.inputs(db, kit(), rowsOf(row("brief_pillars")))).toMatch(/^site:moburst\.com\/services\/organic\/podcast-booking\|notes:/);
     const c = kit();
     const scraped: string[] = [];
-    deps.scrapeMarkdown = async (url: string) => { scraped.push(url); return { markdown: "# Kitcaster books founders, executives and experts on the podcasts their buyers already listen to every week.", title: "Kitcaster" }; };
-    deps.anthropicKey = async () => "key";
+    deps.scrapeMarkdown = async (_cost: unknown, url: string) => { scraped.push(url); return { markdown: "# Kitcaster books founders, executives and experts on the podcasts their buyers already listen to every week.", title: "Kitcaster" }; };
+    deps.anthropicReady = async () => true;
     deps.now = () => new Date(T);
     deps.derivePillars = (async () => ({ pillars: [{ name: "Podcast booking", description: "d", rationale: "r" }], keywords: ["podcast guesting"], notes: "", sources: ["brief"], source: "brief", derived_at: T })) as never;
     const out = await STEPS.brief_pillars.run(dbWith({ clients: [moburst(), c] }), c, ctx({ rows: rowsOf(row("brand_read")) }));
@@ -1023,7 +1023,7 @@ describe("a plain-domain client is unchanged by the parent-page rule", () => {
     const db = dbWith({ clients: [...others(), c], sprout_profiles: [], sprout_profile_removals: [], competitor_sets: [{ id: "s1", client_id: "c1", status: "confirmed", confirmed_at: T, created_at: T, rivaliq_landscape_id: null, tracking_check: null }], competitors: [] });
     const tables = watched(db);
     deps.fetchSiteHtml = async () => ({ html: OLO_SITE, via: "direct" as const });
-    deps.openaiKey = async () => "sk";
+    deps.openaiReady = async () => true;
     deps.researchBrand = (async () => ({ brand_identity: BRAND, headquarters: { city: "New York", region: "NY", country: "US" }, site_language: "en", logo: { url: "https://www.olo.com/logo.svg" }, html: "", url: "", fetched_via: "direct", debug: {} })) as never;
 
     expect(await STEPS.brand_read.inputs(db, c, new Map())).toBe("olo.com");
@@ -1105,7 +1105,7 @@ describe("brief, pillars and keywords from the LinkedIn page", () => {
     const c = kit();
     const db = dbWith({ clients: [c] });
     deps.now = () => new Date(NOW);
-    deps.anthropicKey = async () => "key";
+    deps.anthropicReady = async () => true;
     deps.scrapeMarkdown = async () => null;
     deps.fetchSiteText = async () => "";
     let given: { evidence?: { brief_text?: string }; opts?: Record<string, unknown> } = {};
@@ -1123,7 +1123,7 @@ describe("brief, pillars and keywords from the LinkedIn page", () => {
   });
   it("replaces a brief it drafted from the posts earlier with the page's", async () => {
     const c = kit({ brief_text: "Drafted from the client's posts on 2026-11-01:\n\nKitcaster books guests.", field_sources: { brief_text: { by: "lifecycle", from: "posts" } } });
-    Object.assign(deps, { now: () => new Date(NOW), anthropicKey: async () => "key", scrapeMarkdown: async () => null, fetchSiteText: async () => "", derivePillars: async () => derived() });
+    Object.assign(deps, { now: () => new Date(NOW), anthropicReady: async () => true, scrapeMarkdown: async () => null, fetchSiteText: async () => "", derivePillars: async () => derived() });
     await STEPS.brief_pillars.run(dbWith({ clients: [c] }), c, ctx({ rows: rowsOf(row("brand_read"), social(PAGE)) }));
     expect([c.brief_text, c.field_sources.brief_text.from]).toEqual([`Drafted from the LinkedIn page on 2026-11-08:\n\n${ABOUT}`, "linkedin_page"]);
   });
@@ -1135,7 +1135,7 @@ describe("brief, pillars and keywords from the LinkedIn page", () => {
     expect(await STEPS.brief_pillars.run(dbWith({ clients: [uproar()] }), uproar(), ctx({ rows: rowsOf(few(null)) }))).toMatchObject({ status: "waiting", reason: "posts" });
     expect(await STEPS.brief_pillars.run(dbWith({ clients: [uproar()] }), uproar(), ctx({ rows: rowsOf(few({ ...PAGE, about: "", tagline: null })) }))).toMatchObject({ status: "waiting", reason: "posts" });
     const c = uproar();
-    Object.assign(deps, { now: () => new Date(NOW), anthropicKey: async () => "key", scrapeMarkdown: fail("the scrape") });
+    Object.assign(deps, { now: () => new Date(NOW), anthropicReady: async () => true, scrapeMarkdown: fail("the scrape") });
     let opts: Record<string, unknown> = {};
     deps.derivePillars = (async (_db: unknown, _c: unknown, _k: string, o: Record<string, unknown>) => { opts = o; return derived(); }) as never;
     expect(await STEPS.brief_pillars.run(dbWith({ clients: [c] }), c, ctx({ rows: rowsOf(few(PAGE)) }))).toMatchObject({ status: "done", result: { brief: "from_page", pillars: "derived", posts: 2 } });
@@ -1154,7 +1154,7 @@ describe("brief, pillars and keywords from the LinkedIn page", () => {
   });
   it("keeps today's order: the website's text first, the page after it, the posts last", async () => {
     deps.now = () => new Date(NOW);
-    deps.anthropicKey = async () => "key";
+    deps.anthropicReady = async () => true;
     // The site has text: the brief is the site's, and the page is still read for the pillars.
     const site = kit();
     deps.scrapeMarkdown = async () => ({ markdown: "# Kitcaster books founders, executives and experts on the podcasts their buyers already listen to every week.", title: "Kitcaster" });
@@ -1182,7 +1182,7 @@ describe("brief, pillars and keywords from the LinkedIn page", () => {
     const c = kit();
     const db = dbWith({ clients: [c] });
     deps.now = () => new Date(NOW);
-    deps.anthropicKey = async () => "key";
+    deps.anthropicReady = async () => true;
     deps.scrapeMarkdown = async () => ({ markdown: "# Kitcaster books founders, executives and experts on the podcasts their buyers already listen to every week.", title: "Kitcaster" });
     deps.derivePillars = (async () => derived({ pillars: [], keywords: ["podcast guesting", "b2b podcasts"], sources: ["social_posts", "brief"] })) as never;
     const out = await STEPS.brief_pillars.run(db, c, ctx({ rows: rowsOf(row("brand_read"), social(null)) }));
@@ -1263,14 +1263,14 @@ describe("design_settings", () => {
     const seen = { key: 0, spot: 0, pages: [] as string[], sizes: [] as string[], logoPng: [] as string[], hash: [] as string[], calls: [] as Array<{ route: string; body: Record<string, unknown>; carried?: { search?: unknown; asks: number } | null }> };
     deps.now = () => new Date(T);
     deps.projectUrl = () => "https://project.test";
-    deps.fetchSiteHtml = (async (url: string, o: { firecrawlKey?: string | null } = {}) => {
+    deps.fetchSiteHtml = (async (url: string, o: { cost?: unknown } = {}) => {
       seen.pages.push(url);
       // The step reads the page directly: it never hands a scraping key over.
-      if (o.firecrawlKey) throw new Error("the step must read the homepage without a scraping service");
+      if (o.cost) throw new Error("the step must read the homepage without a scraping service");
       if (opts.page === null) throw new ResearchError("site_unreachable", "The website could not be read.");
       return { html: opts.page ?? "<html><body><main></main></body></html>", via: "direct" as const };
     }) as never;
-    deps.anthropicKey = async () => { seen.key++; return "key"; };
+    deps.anthropicReady = async () => { seen.key++; return true; };
     deps.imaging = (async () => ({
       logoPng: async (_db: unknown, _client: string, url: string) => {
         seen.logoPng.push(url);
@@ -1612,7 +1612,7 @@ describe("design_settings", () => {
 
   it("fails without a set when a read is needed and the AI connection is not configured", async () => {
     const { db, seen } = world({ row: null });
-    deps.anthropicKey = async () => null;
+    deps.anthropicReady = async () => false;
     expect(await STEPS.design_settings.run(db, c(), ctx({ rows: refs }))).toEqual({ status: "failed", error: "The AI connection is not configured." });
     expect(seen.calls).toEqual([]);
     expect(db.rpcCalls).toEqual([]);
@@ -2475,7 +2475,7 @@ describe("content_strategy", () => {
       let gathered = 0;
       deps.trendIO = trendIO;
       deps.strategyIO = () => ({ ...io(), gather: async () => { gathered++; return io().gather(); } });
-      deps.anthropicKey = async () => "key";
+      deps.anthropicReady = async () => true;
       deps.now = () => new Date("2026-11-02T10:00:00.000Z");
       return { gathered: () => gathered, writes: watched(db) };
     };
@@ -2598,11 +2598,11 @@ describe("content_strategy", () => {
     it("tries again quietly without an AI connection, and waits for a profile", async () => {
       deps.trendIO = trendIO;
       deps.strategyIO = io;
-      deps.anthropicKey = async () => null;
+      deps.anthropicReady = async () => false;
       const db = dbWith(tables());
       const rows = await current(db);
       expect(await STEPS.content_strategy.run(db, c(), ctx({ rows }))).toMatchObject({ status: "failed" });
-      deps.anthropicKey = async () => "key";
+      deps.anthropicReady = async () => true;
       const none = dbWith({ ...tables(), trend_profiles: [] });
       expect(await STEPS.content_strategy.run(none, c(), ctx({ rows }))).toMatchObject({ status: "waiting" });
     });
@@ -2650,7 +2650,7 @@ describe("design_refs (references that refresh themselves)", () => {
   function fakeIO(posts: () => Record<string, unknown>[], over: Record<string, unknown> = {}): Calls {
     const calls: Calls = { read: 0, windows: [], image: 0, review: 0, asked: [], learn: 0, learned: [] };
     deps.refsIO = (() => ({
-      now: () => new Date(NOW), apiKey: async () => "key",
+      now: () => new Date(NOW), aiReady: async () => {},
       readPosts: async (a: { since: Date; until: Date }) => {
         calls.read++;
         calls.windows.push(Math.round((a.until.getTime() - a.since.getTime()) / 86_400_000));
@@ -3178,7 +3178,7 @@ describe("a client with profiles and no website (onboarding from social profiles
     const d = olo();
     const db2 = dbWith({ clients: [d], sprout_profiles: PROFILES() });
     const searches: string[] = [];
-    deps.searchWeb = async (q: string) => { searches.push(q); return ["https://olo-dining.example", "https://www.instagram.com/olo"]; };
+    deps.searchWeb = async (_cost: unknown, q: string) => { searches.push(q); return ["https://olo-dining.example", "https://www.instagram.com/olo"]; };
     const first = await STEPS.website.run(db2, d, ctx());
     expect(first).toMatchObject({ status: "waiting", reason: "website", recheckDays: 7, result: { posts: 1, months: 12, searched_at: NOW, queries: ["Olo", "olo.hq"] } });
     expect(searches).toEqual(["Olo", "olo.hq"]);
@@ -3197,7 +3197,7 @@ describe("a client with profiles and no website (onboarding from social profiles
     const rows = rowsOf(social());
     expect(await STEPS.brief_pillars.inputs(db, c, rows)).toMatch(/\|social:1$/);
     deps.now = () => new Date(NOW);
-    deps.anthropicKey = async () => "key";
+    deps.anthropicReady = async () => true;
     deps.scrapeMarkdown = fail("the scrape");
     let opts: Record<string, unknown> = {};
     deps.derivePillars = (async (_db: unknown, _c: unknown, _k: string, o: Record<string, unknown>) => {
@@ -3226,7 +3226,7 @@ describe("a client with profiles and no website (onboarding from social profiles
     const rows = rowsOf(row("brief_pillars"), social());
     expect(await STEPS.competitors.inputs(db, olo(), rows)).toBeNull();
     expect(await STEPS.competitors.inputs(db, olo({ content_pillars: pillars }), rows)).toMatch(/^site:\|notes:/);
-    deps.anthropicKey = async () => "key";
+    deps.anthropicReady = async () => true;
     let asked: { geo?: unknown; postsText?: unknown } = {};
     deps.identifyCompetitors = (async (d: typeof db, cl: { geo: string }, _k: string, o: { postsText?: string }) => {
       asked = { geo: cl.geo, postsText: o.postsText };
@@ -3262,7 +3262,7 @@ describe("a client with profiles and no website (onboarding from social profiles
     const swapped = comps.map((c) => (c.name === "Square" ? { ...c, name: "Lunchbox" } : c));
     expect(await STEPS.competitors.inputs(dbWith({ competitor_sets: [{ ...set }], competitors: swapped }), withSite, rowsOf(chosen))).toBe("existing:s1");
     // The identification keeps saying it replaces the set chosen from posts, so the pick a minute later still runs.
-    deps.anthropicKey = async () => "key";
+    deps.anthropicReady = async () => true;
     deps.identifyCompetitors = (async () => ({ set_id: "draft2", competitors: [1, 2, 3], rejected: [] })) as never;
     const first = await STEPS.competitors.run(db, withSite, ctx({ rows: rowsOf(chosen) }));
     expect(first).toMatchObject({ status: "waiting", result: { draft_set_id: "draft2", chosen_from: "posts", set_id: "s1" } });
@@ -3357,7 +3357,7 @@ describe("a client with profiles and no website (onboarding from social profiles
     });
     const db = dbWith({ clients: [c] });
     deps.fetchSiteHtml = async () => ({ html: FOOTER_SITE.replace("<body>", '<body><header><img class="logo" src="/logo.png"></header>'), via: "direct" as const });
-    deps.openaiKey = async () => "sk";
+    deps.openaiReady = async () => true;
     deps.researchBrand = fail("the brand read");
     await STEPS.brand_read.run(db, c, ctx({ rows: rowsOf(social()) }));
     // The site's footer address (rank 2) beats an address in posts (rank 3); its logo replaces the profile picture.

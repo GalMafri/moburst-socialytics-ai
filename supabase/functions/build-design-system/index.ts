@@ -16,6 +16,8 @@ import type { DesignSystem, FormatKey } from '../_shared/design-system/types.ts'
 import { renderRemote } from '../_shared/design-system/renderClient.ts';
 import { Image } from 'https://deno.land/x/imagescript@1.3.0/mod.ts';
 import { anthropicFetch } from "../_shared/anthropic.ts";
+import type { CostContext } from "../_shared/cost/context.ts";
+import { costCtx, hasKey } from "../_shared/paid/index.ts";
 
 const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-socialytics-secret', 'Content-Type': 'application/json' };
 const BUCKET = 'brand-assets';
@@ -28,11 +30,11 @@ async function upload(db: any, path: string, bytes: Uint8Array, type: string) {
   if (error) throw new Error(`A brand asset could not be stored: ${error.message}`);
 }
 
-async function readSystem(apiKey: string, images: any[], clientName: string) {
+async function readSystem(cost: CostContext, images: any[], clientName: string) {
   const tool = { name: 'record_design_system', description: 'Record the design system read from the posts.', input_schema: designSystemSchema() };
   const content = [...images.flatMap((img, i) => [{ type: 'text', text: `Reference ${i}` }, img]), { type: 'text', text: `${BUILD_INSTRUCTIONS}\nThe client is ${clientName}.` }];
-  const response = await anthropicFetch("/v1/messages", {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' }, signal: AbortSignal.timeout(110_000),
+  const response = await anthropicFetch(cost, "/v1/messages", {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(110_000),
     body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 4000, tools: [tool], tool_choice: { type: 'tool', name: tool.name }, messages: [{ role: 'user', content }] }),
   });
   if (!response.ok) throw new Error(`The design system could not be read (${response.status}).`);
@@ -116,13 +118,14 @@ Deno.serve(async (req) => {
     if (clientError || !client) throw new Error('Client references could not be loaded.');
     const paths = referencesFor(client.design_references, client.harvested_design_references, 8, null);
     if (paths.length < 3) throw new Error('Connect this client’s social profiles in Client Setup to discover at least three real brand references first.');
-    const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
-    if (!apiKey) throw new Error('The design service is unavailable.');
+    if (!(await hasKey('anthropic'))) throw new Error('The design service is unavailable.');
 
     const { data: latest } = await db.from('client_design_systems').select('version').eq('client_id', client_id).order('version', { ascending: false }).limit(1).maybeSingle();
     const version = (latest?.version || 0) + 1;
     const images = await Promise.all(paths.map((p) => sourceImage(db, p)));
-    const draft = await readSystem(apiKey, images, client.name);
+    // A person in the app, or a schedule or operation calling with the shared secret.
+    const cost = costCtx({ clientId: client_id, feature: 'design.system_build', actor: trusted ? 'system' : 'user', userId: caller.userId });
+    const draft = await readSystem(cost, images, client.name);
     const logo = await logoAsset(db, client_id, version, paths, draft, client.logo_url || null);
     const system = normaliseDesignSystem(draft, paths, logo.path);
     const face = await resolvedFamily(system.tokens.font.family);

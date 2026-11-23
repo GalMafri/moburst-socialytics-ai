@@ -30,6 +30,7 @@
 // calls a run), and what is refused twice is listed on the plan.
 
 import { anthropicMessages } from "../anthropic.ts";
+import { anthropicCost } from "../anthropicCost.ts";
 import { collectOwnedCompetitive } from "../competitive/ownedSource.ts";
 import { competitiveBrief } from "../competitive/brief.ts";
 import {
@@ -81,12 +82,6 @@ const RETRY_MINUTES = 10;
 const DAY = 86400_000;
 
 export const CLIENT_COLUMNS = "id, name, brand_identity, content_pillars, geo, language, timezone, primary_platforms, posting_rhythm, sprout_customer_id, website_url";
-
-function apiKey(): string {
-  const key = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!key) throw new Error("ANTHROPIC_API_KEY is not configured.");
-  return key;
-}
 
 function todayIn(timeZone: string, now: Date): string {
   try {
@@ -705,7 +700,7 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
     const tokens = { input: 0, output: 0 };
     /** One model call and what its reply came to: the posts that passed, the seasonal posts dropped and the posts the checks refused. */
     const ask = async (context: typeof ctx, noTest = false) => {
-      const result = await anthropicMessages({ apiKey: apiKey(), body: { model: COPY_MODEL, max_tokens: 16000, messages: [{ role: "user", content: weekPrompt(context) }] } });
+      const result = await anthropicMessages({ cost: await anthropicCost({ clientId: client.id, feature: "calendar.week_copy", actor: "schedule", executionId: job.id }), body: { model: COPY_MODEL, max_tokens: 16000, messages: [{ role: "user", content: weekPrompt(context) }] } });
       const u = usage(result.raw);
       tokens.input += u.input; tokens.output += u.output;
       const seasonal: DroppedPost[] = [];
@@ -902,7 +897,7 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
         brand: String(client.name), voiceBlock, note: pending.note, scope: pending.scope, posts: posts.map(asRevisePost),
         pillars, languages: list(client.language), evidence, others, strategy,
       });
-      const result = await anthropicMessages({ apiKey: apiKey(), body: { model: COPY_MODEL, max_tokens: 12000, messages: [{ role: "user", content: prompt }] } });
+      const result = await anthropicMessages({ cost: await anthropicCost({ clientId: client.id, feature: "calendar.week_revise", actor: "schedule", executionId: job.id }), body: { model: COPY_MODEL, max_tokens: 12000, messages: [{ role: "user", content: prompt }] } });
       const u = usage(result.raw);
       tokens.input += u.input; tokens.output += u.output;
       const refused: RefusedPost[] = [];
@@ -970,7 +965,7 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
 
     // A person's note teaches the memory; the daily run's own note does not.
     if (pending.by && pending.scope === "untouched") {
-      await learnFromSignal(admin, client.id, { kind: "revise_note", note: pending.note }).catch((e) => console.warn("[calendar] memory:", e instanceof Error ? e.message : e));
+      await learnFromSignal(admin, client.id, { kind: "revise_note", note: pending.note }, { actor: "schedule", executionId: job.id }).catch((e) => console.warn("[calendar] memory:", e instanceof Error ? e.message : e));
     }
     return { status: "done", result: { plan_id: plan.id, rewritten: replaced.length } };
   } catch (e) {
@@ -995,10 +990,10 @@ export const MEMORY_LIMIT = 8;
  * Merge the client's preferences when the list has grown past MEMORY_LIMIT.
  * A failed merge is logged and changes nothing; it never fails the voice job.
  */
-async function keepMemoryShort(admin: Db, clientId: string): Promise<{ before: number; after: number } | null> {
+async function keepMemoryShort(admin: Db, clientId: string, jobId: string | null = null): Promise<{ before: number; after: number } | null> {
   try {
     if ((await activePreferences(admin, clientId)).length <= MEMORY_LIMIT) return null;
-    return await consolidateMemory(admin, clientId);
+    return await consolidateMemory(admin, clientId, { actor: "schedule", executionId: jobId });
   } catch (e) {
     console.warn("[calendar] memory merge:", e instanceof Error ? e.message : String(e));
     return null;
@@ -1014,8 +1009,8 @@ export async function runVoiceProfile(admin: Db, job: WeekJob, now = new Date())
     const { data: client, error } = await admin.from("clients").select(CLIENT_COLUMNS).eq("id", job.client_id).maybeSingle();
     if (error || !client) throw new Error("Could not read the client.");
     const { posts, sprout, names } = await ownPosts(admin, client, await feedSnapshots(admin, client.id), now);
-    const voice = await buildVoiceProfile(admin, client.id, posts, now, { names });
-    const memory = await keepMemoryShort(admin, client.id);
+    const voice = await buildVoiceProfile(admin, client.id, posts, now, { names, by: { actor: "schedule", executionId: job.id } });
+    const memory = await keepMemoryShort(admin, client.id, job.id);
     // A new voice: the client's lifecycle looks at the upcoming calendar (lifecycle step calendar_recheck). The look is a
     // minute away, so this job is recorded as finished when it runs. Asked of the database directly: lifecycle/run.ts imports this file.
     try {

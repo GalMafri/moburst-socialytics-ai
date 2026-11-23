@@ -15,6 +15,8 @@
 // fetch, so the helpers can be tested.
 
 import { fetchPublic, isPubliclyFetchable } from "../net/safeUrl.ts";
+import type { CostContext } from "../cost/context.ts";
+import { hasKey, paid } from "../paid/index.ts";
 
 export const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -82,8 +84,13 @@ export function normalizeWebsite(website: string): string {
   return /^https?:\/\//i.test(t) ? t : `https://${t}`;
 }
 
-/** The page's HTML: a direct fetch, then Firecrawl when the site refuses automated visitors. */
-export async function fetchSiteHtml(url: string, opts: { firecrawlKey?: string | null; fetchImpl?: Fetch; log?: string[] } = {}): Promise<{ html: string; via: "direct" | "firecrawl" }> {
+/**
+ * The page's HTML: a direct fetch, then Firecrawl when the site refuses
+ * automated visitors. Firecrawl is tried only with a `cost` (who the read is
+ * for, through the paying desk) and only while its key is set; without
+ * either, the direct fetch is all.
+ */
+export async function fetchSiteHtml(url: string, opts: { cost?: CostContext | null; fetchImpl?: Fetch; log?: string[] } = {}): Promise<{ html: string; via: "direct" | "firecrawl" }> {
   const f = opts.fetchImpl ?? fetch;
   const log = opts.log ?? [];
   // The address comes from a person's input. A private, loopback or link-local
@@ -99,11 +106,11 @@ export async function fetchSiteHtml(url: string, opts: { firecrawlKey?: string |
   } catch (e) {
     log.push(`Direct fetch failed: ${e instanceof Error ? e.message : String(e)}`);
   }
-  if (!opts.firecrawlKey) throw new ResearchError("site_unreachable", "The website could not be read.");
+  if (!opts.cost || !(await hasKey("firecrawl"))) throw new ResearchError("site_unreachable", "The website could not be read.");
   try {
-    const fc = await f("https://api.firecrawl.dev/v1/scrape", {
+    const fc = await paid.fetch(opts.cost, "firecrawl", "/v1/scrape", {
       method: "POST",
-      headers: { Authorization: `Bearer ${opts.firecrawlKey}`, "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url, formats: ["html"], waitFor: 5000 }),
       signal: AbortSignal.timeout(45000),
     });
@@ -119,22 +126,11 @@ export async function fetchSiteHtml(url: string, opts: { firecrawlKey?: string |
   }
 }
 
-/** The OpenAI key: the function environment first, then the workspace setting. */
-// deno-lint-ignore no-explicit-any
-export async function openaiKeyFor(db: any): Promise<string | null> {
-  const env = (globalThis as { Deno?: { env: { get(k: string): string | undefined } } }).Deno?.env;
-  const fromEnv = env?.get("OPENAI_API_KEY");
-  if (fromEnv) return fromEnv;
-  const { data } = await db.from("app_settings").select("value").eq("key", "openai_api_key").maybeSingle();
-  return data?.value ? String(data.value) : null;
-}
-
 export async function researchBrand(input: {
   websiteUrl: string;
   clientName?: string | null;
-  /** Needed when withModel is true. */
-  openaiKey?: string | null;
-  firecrawlKey?: string | null;
+  /** Who the read is for: the paying desk records its Firecrawl and OpenAI calls against it. */
+  cost: CostContext;
   /** False reads the site only: no model call, no brand identity. */
   withModel?: boolean;
   /** The page already fetched (a site-only read before this one), so it is not fetched twice. */
@@ -144,19 +140,19 @@ export async function researchBrand(input: {
   const rawFetch = input.fetchImpl ?? fetch;
   // Every request to an address the site names (its stylesheets, logos and
   // images) goes through fetchPublic, so none of them can reach a private
-  // address, directly or by redirect. Only the fixed vendor calls use rawFetch.
+  // address, directly or by redirect. The vendor calls go through the paying desk.
   const f: Fetch = (u, init) => fetchPublic(u, init, rawFetch as typeof fetch);
   const url = normalizeWebsite(input.websiteUrl);
   const baseUrl = new URL(url).origin;
   const log: string[] = [];
-  const { html, via } = input.page ?? await fetchSiteHtml(url, { firecrawlKey: input.firecrawlKey, fetchImpl: rawFetch, log });
+  const { html, via } = input.page ?? await fetchSiteHtml(url, { cost: input.cost, fetchImpl: rawFetch, log });
   const logo = logoOnPage(html, baseUrl);
   const withModel = input.withModel !== false;
   if (!withModel) {
     return { brand_identity: null, headquarters: null, site_language: null, logo, html, url, fetched_via: via,
       debug: { structured_colors_found: 0, structured_colors: [], images_found: 0, raster_images_sent: 0, log } };
   }
-  if (!input.openaiKey) throw new ResearchError("not_configured", "The AI connection for brand research is not configured.");
+  if (!(await hasKey("openai"))) throw new ResearchError("not_configured", "The AI connection for brand research is not configured.");
 
   // Structured colors: SVG fills, then inline SVG, CSS variables, meta tags, CSS rules.
   const structuredColors = extractStructuredColors(html, log);
@@ -175,7 +171,7 @@ export async function researchBrand(input: {
   log.push(`Found ${imageUrls.length} image URL(s): ${imageUrls.map((i) => i.label).join(", ") || "none"}`);
   const visionImages = await fetchRasterImagesAsBase64(imageUrls, log, f);
   const textSignals = extractTextSignals(html, cssText);
-  const read = await readWithModel({ clientName: input.clientName ?? null, url, structured: finalStructured, visionImages, textSignals, siteText: siteTextExcerpt(html), openaiKey: input.openaiKey, log, fetchImpl: rawFetch });
+  const read = await readWithModel({ clientName: input.clientName ?? null, url, structured: finalStructured, visionImages, textSignals, siteText: siteTextExcerpt(html), cost: input.cost, log });
   return {
     brand_identity: read.identity, headquarters: read.headquarters, site_language: read.language, logo, html, url, fetched_via: via,
     debug: { structured_colors_found: finalStructured.length, structured_colors: finalStructured.slice(0, 10), images_found: imageUrls.length, raster_images_sent: visionImages.length, log },
@@ -200,9 +196,8 @@ async function readWithModel(a: {
   visionImages: Array<{ dataUrl: string; label: string }>;
   textSignals: ReturnType<typeof extractTextSignals>;
   siteText: string;
-  openaiKey: string;
+  cost: CostContext;
   log: string[];
-  fetchImpl: Fetch;
 }): Promise<{ identity: BrandIdentity; headquarters: Headquarters | null; language: string | null }> {
   const hasStructured = a.structured.length > 0;
   const hasHighConfidence = a.structured.some((c) => c.confidence === "high");
@@ -304,9 +299,9 @@ Return the JSON brand identity object now.`,
     messages[1].content.push({ type: "text", text: `[Image: ${img.label}]` });
   }
 
-  const resp = await a.fetchImpl("https://api.openai.com/v1/chat/completions", {
+  const resp = await paid.fetch(a.cost, "openai", "/v1/chat/completions", {
     method: "POST",
-    headers: { Authorization: `Bearer ${a.openaiKey}`, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model: "gpt-4.1", messages, temperature: 0.1, max_tokens: 900 }),
     signal: AbortSignal.timeout(90000),
   });
@@ -948,13 +943,13 @@ export function isGenericColor(hex: string): boolean {
  */
 export interface SocialBrandInput {
   clientName: string;
-  openaiKey: string;
+  /** Who the read is for (the paying desk records the OpenAI call against it). */
+  cost: CostContext;
   /** The profile picture first, then designed posts, each with its label. */
   images: Array<{ bytes: Uint8Array; label: string }>;
   /** The top posts, one per line. */
   postsText: string;
   bio?: string | null;
-  fetchImpl?: Fetch;
 }
 
 export interface SocialBrandRead {
@@ -1007,7 +1002,6 @@ export function parseSocialBrandReply(content: string): SocialBrandRead {
 
 /** One OpenAI call (gpt-4.1, as the website's brand read): the brand read from the client's social profile. */
 export async function readSocialBrand(i: SocialBrandInput): Promise<SocialBrandRead> {
-  const f = i.fetchImpl ?? fetch;
   // deno-lint-ignore no-explicit-any
   const content: any[] = [{
     type: "text",
@@ -1031,9 +1025,9 @@ Return the JSON brand identity object now.`,
     content.push({ type: "text", text: `[Image: ${img.label}]` });
     sent++;
   }
-  const resp = await f("https://api.openai.com/v1/chat/completions", {
+  const resp = await paid.fetch(i.cost, "openai", "/v1/chat/completions", {
     method: "POST",
-    headers: { Authorization: `Bearer ${i.openaiKey}`, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model: "gpt-4.1", messages: [{ role: "system", content: SOCIAL_SYSTEM }, { role: "user", content }], temperature: 0.1, max_tokens: 900 }),
     signal: AbortSignal.timeout(90000),
   });

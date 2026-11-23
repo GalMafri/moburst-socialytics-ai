@@ -2,9 +2,9 @@
 // _shared/brand/research.ts, which the client lifecycle's brand_read step
 // runs on the server; this function answers the page with the same result
 // and writes nothing.
-import { createClient } from "../_shared/supabase.ts";
 import { staffGate } from "../_shared/auth/requireStaff.ts";
-import { openaiKeyFor, ResearchError, researchBrand } from "../_shared/brand/research.ts";
+import { ResearchError, researchBrand } from "../_shared/brand/research.ts";
+import { costCtx, hasKey } from "../_shared/paid/index.ts";
 import { htmlLanguage, resolveLocation } from "../_shared/lifecycle/location.ts";
 
 const corsHeaders = {
@@ -24,18 +24,16 @@ Deno.serve(async (req) => {
   if (denied) return denied;
 
   try {
-    const { website_url, client_name } = await req.json();
+    const { website_url, client_name, client_id } = await req.json();
     if (!website_url) return jsonResponse({ error: "website_url is required" }, 400);
+    if (!(await hasKey("openai"))) return jsonResponse({ error: "OpenAI API key not configured." }, 400);
 
-    const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    const openaiKey = await openaiKeyFor(db);
-    if (!openaiKey) return jsonResponse({ error: "OpenAI API key not configured." }, 400);
-
+    // The client the page is setting up, when it says (a new client has none yet): its crawl and model call are charged to it.
+    const clientId: string | null = typeof client_id === "string" && client_id ? client_id : null;
     const read = await researchBrand({
       websiteUrl: website_url,
       clientName: client_name,
-      openaiKey,
-      firecrawlKey: Deno.env.get("FIRECRAWL_API_KEY") ?? null,
+      cost: costCtx({ clientId, feature: "brand.research", actor: "user" }),
     });
     const location = resolveLocation(read.html, { headquarters: read.headquarters, website: read.url });
     return jsonResponse({

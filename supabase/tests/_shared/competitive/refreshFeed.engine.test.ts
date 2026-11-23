@@ -70,7 +70,7 @@ const snapshot = (db: ReturnType<typeof admin>) => {
   return { ...row, payload: rest };
 };
 
-const ENV = { rivaliqKey: "rq", anthropicKey: undefined, secret: "fixture-secret" };
+const ENV = { rivaliqKey: "rq", by: { actor: "system" as const }, secret: "fixture-secret" };
 /** The in-app LinkedIn run with no pause between its looks at Apify. */
 const NO_PAUSE = { ...ENV, linkedinInline: { sleep: async () => {} } };
 const APP = [...DEFAULTS, { kind: "linkedin_source", client_id: MOBURST, engine: "app" }];
@@ -355,7 +355,9 @@ describe("refreshCompetitorFeed and the LinkedIn source switch", () => {
 });
 
 describe("the topic pass of a feed refresh", () => {
-  const KEY_ENV = { ...ENV, anthropicKey: "model-key" };
+  // The paying desk has the model's key (a stubbed function secret).
+  beforeEach(() => vi.stubGlobal("Deno", { env: { get: (n: string) => (n === "ANTHROPIC_API_KEY" ? "model-key" : undefined) } }));
+  const KEY_ENV = ENV;
   const topicReply = JSON.stringify({ topics: [{ key: "", topic: "Fall promo", summary: "Two companies ran a fall promotion.", companies: ["Peer", "Moburst"], platforms: ["instagram"], post_urls: ["https://instagram.com/p/1"], confidence: 0.8 }] });
   /** The model: answers with the given status and text; nothing else is fetched. */
   const model = (status: number, text = "") => vi.stubGlobal("fetch", vi.fn(async () => new Response(status === 200 ? JSON.stringify({ content: [{ type: "text", text }] }) : "model down", { status })));

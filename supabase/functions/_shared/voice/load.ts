@@ -6,7 +6,9 @@
 // the team's preferences or the client's real voice
 // (src/test/copyWritersUseVoice.test.ts checks this).
 
+import type { Actor } from "../cost/context.ts";
 import { anthropicMessages } from "../anthropic.ts";
+import { anthropicCost } from "../anthropicCost.ts";
 import { answerText, roomFor } from "../anthropicReply.ts";
 import { consolidatePrompt, mergePrompt, parseConsolidation, parseMergeOps, parseOverallVoice, parseVoiceProfile, voicePlatforms, voiceProfilePrompt, voiceSample, VOICE_RULE, type ClientVoice, type LearnedChange, type MemorySignal, type Preference, type SocialVoice } from "./voice.ts";
 import { bestExamples, rhythmFromPosts, scoreOwnPosts, type OwnPost } from "../calendar/evidence.ts";
@@ -52,11 +54,8 @@ export async function loadClientVoice(admin: Db, clientId: string, now = new Dat
   };
 }
 
-function apiKey(): string {
-  const key = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!key) throw new Error("ANTHROPIC_API_KEY is not configured.");
-  return key;
-}
+/** Who a voice call is for beside the client: the person or job that led to it. */
+export interface VoiceBy { actor: Actor; executionId?: string | null; userId?: string | null }
 
 const excerpt = (s: string, n = 300) => String(s || "").replace(/\s+/g, " ").trim().slice(0, n);
 
@@ -71,13 +70,13 @@ async function mustWrite(p: PromiseLike<{ error: { message: string } | null }>, 
  * stays short and current. Answers what changed, so a rewrite note can show
  * what was learned and take it back (undoLearning).
  */
-export async function learnFromSignal(admin: Db, clientId: string, signal: MemorySignal): Promise<{ ops: number; changes: LearnedChange[] }> {
+export async function learnFromSignal(admin: Db, clientId: string, signal: MemorySignal, by: VoiceBy = { actor: "user" }): Promise<{ ops: number; changes: LearnedChange[] }> {
   if (signal.kind === "copy_edit" && signal.before.trim() === signal.after.trim()) return { ops: 0, changes: [] };
   const [{ data: client }, current] = await Promise.all([
     admin.from("clients").select("name").eq("id", clientId).maybeSingle(),
     activePreferences(admin, clientId),
   ]);
-  const result = await anthropicMessages({ apiKey: apiKey(), body: { model: MEMORY_MODEL, max_tokens: roomFor(1200), messages: [{ role: "user", content: mergePrompt(String(client?.name ?? "the client"), current, signal) }] } });
+  const result = await anthropicMessages({ cost: await anthropicCost({ clientId, feature: "voice.learn", ...by }), body: { model: MEMORY_MODEL, max_tokens: roomFor(1200), messages: [{ role: "user", content: mergePrompt(String(client?.name ?? "the client"), current, signal) }] } });
   // A reply that was cut off or declined teaches nothing, as a reply that cannot be read does.
   const ops = parseMergeOps(answerText(result), current.map((p) => p.id));
   const source = signal.kind === "copy_edit" ? "copy_edit" : signal.kind;
@@ -169,11 +168,11 @@ export async function undoLearning(admin: Db, clientId: string, changes: Learned
  * voice job runs it for every client whose list has grown past eight
  * (calendar/runWeek.ts keepMemoryShort).
  */
-export async function consolidateMemory(admin: Db, clientId: string): Promise<{ before: number; after: number }> {
+export async function consolidateMemory(admin: Db, clientId: string, by: VoiceBy = { actor: "schedule" }): Promise<{ before: number; after: number }> {
   const current = (await activePreferences(admin, clientId)).sort((a, b) => a.last_confirmed_at.localeCompare(b.last_confirmed_at));
   if (current.length < 2) return { before: current.length, after: current.length };
   const { data: client } = await admin.from("clients").select("name").eq("id", clientId).maybeSingle();
-  const result = await anthropicMessages({ apiKey: apiKey(), body: { model: MEMORY_MODEL, max_tokens: roomFor(3000), messages: [{ role: "user", content: consolidatePrompt(String(client?.name ?? "the client"), current) }] } });
+  const result = await anthropicMessages({ cost: await anthropicCost({ clientId, feature: "voice.consolidate", ...by }), body: { model: MEMORY_MODEL, max_tokens: roomFor(3000), messages: [{ role: "user", content: consolidatePrompt(String(client?.name ?? "the client"), current) }] } });
   const merged = parseConsolidation(answerText(result), current.map((p) => p.id));
   if (!merged.length) throw new Error("The memory merge returned nothing usable; nothing was changed.");
   const byId = new Map(current.map((p) => [p.id, p]));
@@ -215,7 +214,7 @@ export async function consolidateMemory(admin: Db, clientId: string): Promise<{ 
  * plainly (the posts arrive that way already, runWeek.ts ownPosts), and the
  * profile carries the rule it was built under.
  */
-export async function buildVoiceProfile(admin: Db, clientId: string, posts: OwnPost[], now = new Date(), opts: { names?: ListedName[] } = {}): Promise<SocialVoice> {
+export async function buildVoiceProfile(admin: Db, clientId: string, posts: OwnPost[], now = new Date(), opts: { names?: ListedName[]; by?: VoiceBy } = {}): Promise<SocialVoice> {
   const names = opts.names ?? [];
   const { data: client } = await admin.from("clients").select("name, timezone, social_voice").eq("id", clientId).maybeSingle();
   const sample = voiceSample(posts);
@@ -230,7 +229,7 @@ export async function buildVoiceProfile(admin: Db, clientId: string, posts: OwnP
   let overall: SocialVoice["overall"] | null = null;
   if (Object.keys(sample).length) {
     const byPlatform = Object.fromEntries(Object.entries(sample).map(([p, xs]) => [p, xs.map(({ text, date, format }) => ({ text, date, format }))]));
-    const result = await anthropicMessages({ apiKey: apiKey(), body: { model: COPY_MODEL, max_tokens: roomFor(6000), messages: [{ role: "user", content: voiceProfilePrompt(String(client?.name ?? "the client"), byPlatform, own) }] } });
+    const result = await anthropicMessages({ cost: await anthropicCost({ clientId, feature: "brand.voice", ...(opts.by ?? { actor: "schedule" }) }), body: { model: COPY_MODEL, max_tokens: roomFor(6000), messages: [{ role: "user", content: voiceProfilePrompt(String(client?.name ?? "the client"), byPlatform, own) }] } });
     const reply = answerText(result);
     profile = parseVoiceProfile(reply, own, names);
     overall = parseOverallVoice(reply, names);

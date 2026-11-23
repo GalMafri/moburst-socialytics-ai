@@ -194,3 +194,6 @@ verify_jwt = false
 # itself and acts only on that person.
 [functions.role-preview]
 verify_jwt = false
+
+[functions.cost-reconcile]
+verify_jwt = false

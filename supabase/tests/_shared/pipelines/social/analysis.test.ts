@@ -1,8 +1,9 @@
 // @vitest-environment node
 // The social analyses' requests and checks, and the two provider clients.
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MOBURST, TRENDS } from "../../../../fixtures/pipelines/social";
 import { analysisExemptions, analysisNames, BRIEF_SCHEMA, briefAnswer, briefRequest, repairRequest, SYNTHESIS_SCHEMA, synthesisProblems, synthesisRequest } from "../../../../functions/_shared/pipelines/social/analysis";
+import { TEST_COST, useTestMeter } from "../../../paid/testMeter";
 import { gammaClient, GAMMA_TEMPLATE_ID, sproutReader } from "../../../../functions/_shared/pipelines/social/providers";
 import { COMPARED_RATE, SPROUT_RATE, synthesisText } from "../../../../functions/_shared/pipelines/social/prompt";
 import { COMPARED_RATE_LABEL, SPROUT_RATE_LABEL } from "../../../../../src/lib/rateLabels";
@@ -164,22 +165,27 @@ describe("Sprout", () => {
 });
 
 describe("Gamma", () => {
+  afterEach(() => { vi.unstubAllGlobals(); useTestMeter(); });
   it("makes the deck from the template, once, and reads it, with the key never in what it says", async () => {
     const sent: Any[] = [];
     let reads = 0;
     const fetchImpl = async (url: string, init?: RequestInit) => {
-      sent.push({ url, method: init?.method ?? "GET", body: init?.body ? JSON.parse(String(init.body)) : null, key: (init?.headers as Record<string, string>)["X-API-KEY"] });
+      sent.push({ url, method: init?.method ?? "GET", body: init?.body ? JSON.parse(String(init.body)) : null, key: new Headers(init?.headers).get("X-API-KEY") });
       if (init?.method === "POST") return new Response(JSON.stringify({ generationId: "g1" }));
-      return ++reads < 3 ? new Response("gk-secret down", { status: 502 }) : new Response(JSON.stringify({ status: "completed", gammaUrl: "https://gamma.app/docs/x" }));
+      return ++reads < 3 ? new Response("sk-gamma-secret down", { status: 502 }) : new Response(JSON.stringify({ status: "completed", gammaUrl: "https://gamma.app/docs/x" }));
     };
-    const g = gammaClient({ apiKey: "gk-secret", fetchImpl, sleep: async () => {} });
+    vi.stubGlobal("Deno", { env: { get: (k: string) => (k === "GAMMA_API_KEY" ? "sk-gamma-secret" : undefined) } });
+    // The paying desk adds the key, as in production.
+    useTestMeter(fetchImpl, { auth: true });
+    const g = gammaClient({ cost: TEST_COST, sleep: async () => {} });
     expect(await g.create("the prompt")).toEqual({ generationId: "g1" });
-    expect(sent[0]).toEqual({ url: "https://public-api.gamma.app/v1.0/generations/from-template", method: "POST", body: { gammaId: GAMMA_TEMPLATE_ID, prompt: "the prompt", sharingOptions: { workspaceAccess: "view" } }, key: "gk-secret" });
+    expect(sent[0]).toEqual({ url: "https://public-api.gamma.app/v1.0/generations/from-template", method: "POST", body: { gammaId: GAMMA_TEMPLATE_ID, prompt: "the prompt", sharingOptions: { workspaceAccess: "view" } }, key: "sk-gamma-secret" });
     expect(GAMMA_TEMPLATE_ID).toBe("g_ix9srva6gx7iiso");
     expect(await g.read("g1")).toEqual({ status: "completed", gammaUrl: "https://gamma.app/docs/x" });
     reads = -10;
     expect(await g.read("g1")).toEqual({ error: { message: "Gamma answered 502: [redacted] down" } });
-    const refused = gammaClient({ apiKey: "gk-secret", fetchImpl: async () => new Response("bad key gk-secret", { status: 401 }) });
+    useTestMeter(async () => new Response("bad key sk-gamma-secret", { status: 401 }), { auth: true });
+    const refused = gammaClient({ cost: TEST_COST });
     await expect(refused.create("p")).rejects.toThrow("Gamma answered 401: bad key [redacted]");
   });
 });

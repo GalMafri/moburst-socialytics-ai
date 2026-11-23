@@ -63,7 +63,6 @@ import { withCompetitiveEvidenceLimits } from "../../competitive/reportEvidence.
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
-type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
 export const COMPETITIVE_PIPELINE = "competitive_v1";
 /** The wait between two weekly post windows (Landscape Social Posts' batch interval, 125 000 ms). */
@@ -87,8 +86,6 @@ export interface CompetitiveDeps {
   apify?: ApifyFactory;
   /** collectOwnedCompetitive (the competitive-owned-source logic). */
   owned?: (db: Any, client: Any, period: { start: string; end: string }) => Promise<Any>;
-  /** For the Message Batches API calls. */
-  claudeFetch?: Fetch;
 }
 
 const input = (ctx: StepContext) => (ctx.run.input ?? {}) as { request?: Any; replay?: ReplayInput; range?: { start: string; end: string } };
@@ -235,7 +232,7 @@ export function competitivePipeline(deps: CompetitiveDeps = {}): PipelineDefinit
         let rows: unknown[] = [];
         let runId: string | null = null;
         if (plan.has_sources) {
-          const actor = await runActorStep(ctx, { actor: LINKEDIN_ACTOR, input: plan.input, datasetKey: "apify.dataset", apify: deps.apify });
+          const actor = await runActorStep(ctx, { actor: LINKEDIN_ACTOR, input: plan.input, datasetKey: "apify.dataset", apify: deps.apify, feature: "report.competitive.linkedin" });
           if (actor.type === "wait") return actor.result;
           rows = actor.rows;
           runId = actor.runId;
@@ -314,11 +311,11 @@ export function competitivePipeline(deps: CompetitiveDeps = {}): PipelineDefinit
 
       analysis: claudeBatchStep({
         async build(ctx) {
-          return { apiKey: String(ctx.env(ANTHROPIC_API_KEY) ?? ""), body: analysisRequest(await need(ctx, "aggregates"), requestOf(ctx).team_preferences) };
+          return { body: analysisRequest(await need(ctx, "aggregates"), requestOf(ctx).team_preferences) };
         },
+        feature: "report.competitive.analysis",
         saveAs: "analysis.answer",
         next: "parse",
-        fetchImpl: deps.claudeFetch,
       }),
 
       async parse(ctx) {
@@ -340,11 +337,11 @@ export function competitivePipeline(deps: CompetitiveDeps = {}): PipelineDefinit
       repair: claudeBatchStep({
         async build(ctx) {
           const answer = await need<{ text: string }>(ctx, "analysis.answer");
-          return { apiKey: String(ctx.env(ANTHROPIC_API_KEY) ?? ""), body: repairRequest(answer.text, String(ctx.state.repair_error ?? "")) };
+          return { body: repairRequest(answer.text, String(ctx.state.repair_error ?? "")) };
         },
+        feature: "report.competitive.repair",
         saveAs: "analysis.repaired",
         next: "parse_repair",
-        fetchImpl: deps.claudeFetch,
       }),
 
       async parse_repair(ctx) {

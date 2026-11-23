@@ -49,7 +49,8 @@ describe.skipIf(!live)("the review question, asked of the live model", () => {
   it("answers occasion for every occasion post, and everyday for all but at most one everyday post", async () => {
     const answers: Array<{ post: Post; usable: boolean; kind: string | null; occasion: string | null; evidence: string }> = [];
     for (const post of posts) {
-      const response = await anthropicFetch("/v1/messages", {
+      // The test meter (supabase/tests/paid) adds no key, so the request carries this check's own.
+      const response = await anthropicFetch({ tool: "socialytics", clientId: null, feature: "qa.review_live", actor: "system", qa: true }, "/v1/messages", {
         method: "POST", headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
         body: JSON.stringify(reviewRequest(
           { brand, platform: post.platform, postedAt: `${post.date}T15:00:00Z`, caption: post.caption },

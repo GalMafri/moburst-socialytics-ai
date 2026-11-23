@@ -17,7 +17,7 @@ describe("P30 detectCompetitorHandles with a malformed website", () => {
     await detectCompetitorHandles(db, [
       { id: "c1", client_id: "cl", name: "Acme", website_url: "acme .com" },
       { id: "c2", client_id: "cl", name: "Beta", website_url: "beta.com" },
-    ]).catch(() => undefined);
+    ], { by: { actor: "user" } }).catch(() => undefined);
     const statuses = db.tables.competitors.map((c) => c.profile_detection?.status ?? null);
     expect(statuses).not.toContain("running");
     expect(statuses[1]).not.toBeNull();

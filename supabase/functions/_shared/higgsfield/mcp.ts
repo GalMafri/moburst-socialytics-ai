@@ -8,8 +8,19 @@
 // id, calls tools, and reads results. No SSE resumption, no server-initiated
 // requests, no sampling — none of which a generation call needs.
 //
+// Every request goes through the paying desk (_shared/paid): the server's
+// answers say nothing about cost, so nothing is recorded per call; a
+// generation's credits are recorded once it completes (paid.record, where
+// the caller sees it finish).
+//
 // Kept free of Deno globals at module scope so vitest can exercise the
-// framing logic with a stub fetch.
+// framing logic with a stub fetch (the test meter, supabase/tests/paid).
+
+import type { CostContext } from "../cost/context.ts";
+import { paid } from "../paid/index.ts";
+
+/** The MCP endpoint, under Higgsfield's MCP host (cost/registry.ts). */
+export const MCP_PATH = "/mcp";
 
 export interface McpToolResult {
   /** Whatever the tool returned as structured content, when it did. */
@@ -61,9 +72,12 @@ export function parseRpcBody(contentType: string, body: string): any {
 }
 
 export interface McpClientOptions {
-  url: string;
+  /** Who the session's calls are for. */
+  cost: CostContext;
+  /** The endpoint under the provider's MCP host; MCP_PATH unless a test says otherwise. */
+  path?: string;
+  /** The team's OAuth access token (oauth.ts); the desk leaves an Authorization the caller set as it is. */
   accessToken: string;
-  fetchImpl?: typeof fetch;
   /** Per-request budget. Edge functions die at 150s, so never near that. */
   timeoutMs?: number;
   /** A fresh access token in place of one the server rejected (higgsfield/oauth.ts, higgsfieldMcp): a 401 is answered with one renewal and the request sent again. */
@@ -71,20 +85,20 @@ export interface McpClientOptions {
 }
 
 export class McpClient {
-  private readonly url: string;
+  private readonly cost: CostContext;
+  private readonly path: string;
   private token: string;
   private readonly renewToken?: (rejected: string) => Promise<string>;
-  private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
   private sessionId: string | null = null;
   private nextId = 1;
   private initialized = false;
 
   constructor(opts: McpClientOptions) {
-    this.url = opts.url;
+    this.cost = opts.cost;
+    this.path = opts.path ?? MCP_PATH;
     this.token = opts.accessToken;
     this.renewToken = opts.renewToken;
-    this.fetchImpl = opts.fetchImpl ?? fetch;
     this.timeoutMs = opts.timeoutMs ?? 60_000;
   }
 
@@ -105,7 +119,7 @@ export class McpClient {
     if (params !== undefined) payload.params = params;
     if (!isNotification) payload.id = this.nextId++;
 
-    const post = () => this.fetchImpl(this.url, {
+    const post = () => paid.fetch(this.cost, "higgsfield", this.path, {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify(payload),

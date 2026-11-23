@@ -15,6 +15,7 @@ import { drivePipeline, pipelineDb, testClock } from "../../../functions/_shared
 import { TREND_SOURCES } from "../../../functions/_shared/trends/sources";
 import { TREND_PLATFORMS, type TrendPlatform } from "../../../functions/_shared/trends/types";
 import { trendsPipeline } from "../../../functions/_shared/pipelines/definitions/trends";
+import { viaTestMeter } from "../../paid/testMeter";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -71,7 +72,7 @@ async function drive(linkedin: "RUNNING" | "FAILED") {
     trend_weeks: [{ id: "w1", client_id: "c1", week_start: "2026-10-26", status: "running", platforms: {}, cost: {}, created_at: "2026-10-26T09:00:00.000Z" }],
   }, () => clock.now());
   const requests: Any[] = [];
-  const pipeline = trendsPipeline({ apify: apify(linkedin), claudeFetch: claude(requests) });
+  const pipeline = trendsPipeline({ apify: apify(linkedin), ...viaTestMeter(claude(requests)) });
   const registry = makeRegistry([pipeline], () => true);
   const { run_id } = await startPipelineRun(db, { mode: "app", pipeline, clientId: "c1", realTable: "trend_weeks", realId: "w1", input: { week_start: "2026-10-26" }, dedupe: "trends:c1:2026-10-26" });
   const driven = await drivePipeline(db, registry, run_id, { clock, env: ENV, maxCalls: 6000 });

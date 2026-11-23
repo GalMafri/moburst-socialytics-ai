@@ -13,6 +13,7 @@ import { drivePipeline, pipelineDb, testClock } from "../../../../functions/_sha
 import { TREND_SOURCES } from "../../../../functions/_shared/trends/sources";
 import { TREND_PLATFORMS, type TrendPlatform } from "../../../../functions/_shared/trends/types";
 import { TRENDS_PIPELINE, trendsPipeline, trendWeekEnd, type TrendsDeps } from "../../../../functions/_shared/pipelines/definitions/trends";
+import { viaTestMeter } from "../../../paid/testMeter";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -124,7 +125,7 @@ async function run(o: SetupOptions & ClaudeOptions & { deps?: Partial<TrendsDeps
   const inputs: Array<{ platform: TrendPlatform; input: Any }> = [];
   // The monthly hashtag refresh lands while Claude is rewriting, after the run read the profile.
   const onRewrite = o.refreshMidRun ? () => { db.tables.trend_profiles[0].hashtags_at = "2026-11-01T09:30:00.000Z"; } : o.onRewrite;
-  const pipeline = trendsPipeline({ apify: apify(calls, { fail: o.fail, refuse: o.refuse, answers: o.answers, inputs }), claudeFetch: claude(requests, { ...o, onRewrite }), ...o.deps });
+  const pipeline = trendsPipeline({ apify: apify(calls, { fail: o.fail, refuse: o.refuse, answers: o.answers, inputs }), ...viaTestMeter(claude(requests, { ...o, onRewrite })), ...o.deps });
   const registry = makeRegistry([pipeline], () => true);
   const { run_id } = await startPipelineRun(db, { mode: "app", pipeline, clientId: "c1", realTable: "trend_weeks", realId: "w1", input: { week_start: "2026-10-26" }, dedupe: "trends:c1:2026-10-26" });
   const driven = await drivePipeline(db, registry, run_id, { clock, env: ENV });
@@ -189,7 +190,7 @@ describe("trends_v1", () => {
     const { clock, db } = setup();
     const calls: TrendPlatform[] = [];
     const gate = { refuse: null as number | null, afterFirstStart: true };
-    const pipeline = trendsPipeline({ apify: apify(calls, { gate }), claudeFetch: claude([]) });
+    const pipeline = trendsPipeline({ apify: apify(calls, { gate }), ...viaTestMeter(claude([])) });
     const registry = makeRegistry([pipeline], () => true);
     // Monday morning of the run's week, so 15 hours of waiting stay inside the week.
     clock.set(new Date("2026-10-26T06:00:00.000Z"));
@@ -221,7 +222,7 @@ describe("trends_v1", () => {
     const { clock, db } = setup();
     const calls: TrendPlatform[] = [];
     const gate = { refuse: null as number | null, afterFirstStart: true };
-    const pipeline = trendsPipeline({ apify: apify(calls, { gate }), claudeFetch: claude([]) });
+    const pipeline = trendsPipeline({ apify: apify(calls, { gate }), ...viaTestMeter(claude([])) });
     const registry = makeRegistry([pipeline], () => true);
     // Sunday morning of the week of 26 Oct (Israel time): the week ends at midnight.
     const { run_id } = await startPipelineRun(db, { mode: "app", pipeline, clientId: "c1", realTable: "trend_weeks", realId: "w1", input: { week_start: "2026-10-26" }, dedupe: "trends:c1:2026-10-26" });

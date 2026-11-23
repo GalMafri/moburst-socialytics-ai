@@ -20,7 +20,7 @@ describe("P30 identifyCompetitors", () => {
       '{"name":"Other Law","website_url":"https://otherlaw.com","rationale":"r","similarity_score":0.7},' +
       '{"name":"Third Law","website_url":"https://thirdlaw.com","rationale":"r","similarity_score":0.6}]}';
     const db = fakeDb({ competitor_sets: [], competitors: [] });
-    const out = await identifyCompetitors(db, { id: "cl-1", name: "Bader Law", website_url: null }, "k", { postsText: "[Instagram] Injured? Call Bader Law" });
+    const out = await identifyCompetitors(db, { id: "cl-1", name: "Bader Law", website_url: null }, { tool: "socialytics", clientId: "cl-1", feature: "competitors.identify", actor: "user" }, { postsText: "[Instagram] Injured? Call Bader Law" });
     expect(out.competitors.map((c: { name: string }) => c.name)).not.toContain("Bader Law");
   });
 
@@ -31,7 +31,7 @@ describe("P30 identifyCompetitors", () => {
       '{"name":"Other Law","website_url":"https://otherlaw.com","rationale":"r","similarity_score":0.7},' +
       '{"name":"Third Law","website_url":"https://thirdlaw.com","rationale":"r","similarity_score":0.6}]}';
     const db = fakeDb({ competitor_sets: [], competitors: [] });
-    const out = await identifyCompetitors(db, { id: "cl-1", name: "Bader Law", website_url: null }, "k", { postsText: "[Instagram] Injured? Call Bader Law" });
+    const out = await identifyCompetitors(db, { id: "cl-1", name: "Bader Law", website_url: null }, { tool: "socialytics", clientId: "cl-1", feature: "competitors.identify", actor: "user" }, { postsText: "[Instagram] Injured? Call Bader Law" });
     expect(out.competitors.map((c: { name: string }) => c.name)).toEqual(["Peer Law", "Other Law", "Third Law"]);
   });
 });

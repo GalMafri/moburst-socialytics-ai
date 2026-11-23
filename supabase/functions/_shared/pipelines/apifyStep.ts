@@ -4,6 +4,9 @@
 // run has succeeded, its whole dataset is read, kept in the payload store,
 // and handed to the step.
 //
+// The run's cost goes to the run's client and the run (pipelines/cost.ts),
+// through the paying desk, which also holds the token.
+//
 // While APIFY_API_TOKEN is not set the step waits quietly and looks again
 // every TOKEN_WAIT_SECONDS, and its step log says what it is waiting for.
 // A token Apify refuses (401, or 402 and 403 for an account-level reason) waits
@@ -21,6 +24,7 @@
 
 import { apifyClient, ApifyTokenMissing, ApifyTokenRefused, APIFY_TOKEN_ENV, isFinalRunStatus, type ApifyClient, type ApifyClientOptions } from "../apify/client.ts";
 import { StepRestart, type StepContext, type StepResult } from "./types.ts";
+import { runCost } from "./cost.ts";
 
 /** How long a step waits before it looks for the token again. */
 export const TOKEN_WAIT_SECONDS = 600;
@@ -39,6 +43,8 @@ export interface ActorRequest {
   /** A timeout or memory left out is the actor's own default (as n8n's Apify node runs the social scrapers). */
   actor: { id: string; name: string; timeoutSecs?: number; memoryMbytes?: number };
   input: unknown;
+  /** What the run is, for its cost (e.g. "trends.tiktok"). */
+  feature: string;
   /** Where the raw dataset is kept in the run's payload store. */
   datasetKey: string;
   /** How long to keep the dataset (the payload store's default when left out). */
@@ -63,9 +69,7 @@ export async function runActorStep(ctx: StepContext, r: ActorRequest): Promise<A
       detail: { waiting_for: APIFY_TOKEN_ENV, note: `${APIFY_TOKEN_ENV} ${refused ? "was refused by Apify" : "is not set yet"}; the step looks again in ${TOKEN_WAIT_SECONDS / 60} minutes.` },
     },
   });
-  const token = ctx.env(APIFY_TOKEN_ENV);
-  if (!String(token ?? "").trim()) return waitForToken();
-  const client = (r.apify ?? apifyClient)({ token, signal: ctx.signal });
+  const client = (r.apify ?? apifyClient)({ cost: runCost(ctx, r.feature), signal: ctx.signal });
 
   const start = async (): Promise<ActorStep> => {
     const run = await client.startRun(r.actor.id, r.input, { timeoutSecs: r.actor.timeoutSecs, memoryMbytes: r.actor.memoryMbytes });
@@ -87,8 +91,8 @@ export async function runActorStep(ctx: StepContext, r: ActorRequest): Promise<A
     await ctx.payloads.put(r.datasetKey, rows, r.keepDays ? { keepDays: r.keepDays } : undefined);
     return { type: "rows", rows, runId, usageUsd: run.usageTotalUsd ?? null };
   } catch (e) {
-    // The token went away between the check above, or Apify refused it: the
-    // step waits for the account to answer again and spends no try.
+    // The token is not set, or Apify refused it: the step waits for the
+    // account to answer again and spends no try.
     if (e instanceof ApifyTokenMissing) return waitForToken();
     if (e instanceof ApifyTokenRefused) return waitForToken(true);
     throw e;

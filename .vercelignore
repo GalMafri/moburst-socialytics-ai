@@ -5,3 +5,5 @@
 # be listed here (server/test/deploy.test.ts fails until it is).
 /api/client
 /api/mcp
+/api/openapi.json
+/api/openapi.released.json

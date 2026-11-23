@@ -16,6 +16,8 @@
 import { createClient } from "../_shared/supabase.ts";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
+import type { CostContext } from "../_shared/cost/context.ts";
+import { costCtx, hasKey } from "../_shared/paid/index.ts";
 import { answerText, PERSON_WAIT_MS, roomFor } from "../_shared/anthropicReply.ts";
 import { clipText } from "../_shared/text/clip.ts";
 import { readShownInsights } from "../_shared/reports/shownFields.ts";
@@ -53,13 +55,14 @@ Deno.serve(async (req) => {
     if (!report || report.status !== "complete") return json({ error: "That report is not available." }, 404);
     // Then write access to this report's client (company-scoped staff stop here for other companies).
     const caller = await requireStaff(req, { writeClientId: report.client_id });
-    const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-    if (!apiKey) return json({ error: "Rewriting is not set up yet." }, 503);
+    if (!(await hasKey("anthropic"))) return json({ error: "Rewriting is not set up yet." }, 503);
+    // The report is the unit of work the rewrite is for.
+    const cost = (feature: string) => costCtx({ clientId: report.client_id, feature, actor: "user", executionId: report.id, userId: caller.userId ?? null });
     const { data: known } = await admin.from("competitive_learnings").select("kind, text").eq("client_id", report.client_id).order("created_at", { ascending: false }).limit(20);
     const learnings = (known || []) as CompetitiveLearning[];
 
     if (body?.action === "learn") {
-      return json({ learned: await learn(admin, apiKey, report.client_id, body, feedback, learnings, caller.userId) });
+      return json({ learned: await learn(admin, cost("suggestion.learn"), report.client_id, body, feedback, learnings, caller.userId) });
     }
 
     const { data: client } = await admin.from("clients").select("name, brand_identity").eq("id", report.client_id).maybeSingle();
@@ -119,7 +122,7 @@ Deno.serve(async (req) => {
     const until = Date.now() + PERSON_WAIT_MS;
     for (let attempt = 0; attempt < 2 && !revision; attempt++) {
       const waitMs = attempt === 0 ? PERSON_WAIT_MS / 2 : until - Date.now();
-      const result = await anthropicMessages({ apiKey, body: { model: MODEL, max_tokens: roomFor(1500), messages: [{ role: "user", content: prompt }] }, waitMs });
+      const result = await anthropicMessages({ cost: cost("suggestion.revise"), body: { model: MODEL, max_tokens: roomFor(1500), messages: [{ role: "user", content: prompt }] }, waitMs });
       // A rewrite that was cut off, declined or too long in coming is a try that came back unusable.
       revision = parseRevision(answerText(result));
     }
@@ -139,7 +142,7 @@ Deno.serve(async (req) => {
  * again (unique on the lower-cased text).
  */
 // deno-lint-ignore no-explicit-any
-async function learn(admin: any, apiKey: string, clientId: string, body: any, feedback: string, known: CompetitiveLearning[], userId: string | null): Promise<CompetitiveLearning[]> {
+async function learn(admin: any, cost: CostContext, clientId: string, body: any, feedback: string, known: CompetitiveLearning[], userId: string | null): Promise<CompetitiveLearning[]> {
   const side = (x: unknown) => ({
     gap: text((x as Record<string, unknown>)?.gap, 400),
     why_it_matters: text((x as Record<string, unknown>)?.why_it_matters, 1200),
@@ -159,7 +162,7 @@ async function learn(admin: any, apiKey: string, clientId: string, body: any, fe
     "If the edit only fixed wording and teaches nothing lasting, return no rules.",
     'Reply with JSON only: {"rules":[{"kind":"prefer"|"avoid","text":"..."}]}',
   ].filter(Boolean).join("\n\n");
-  const result = await anthropicMessages({ apiKey, body: { model: MODEL, max_tokens: roomFor(600), messages: [{ role: "user", content: prompt }] }, waitMs: PERSON_WAIT_MS });
+  const result = await anthropicMessages({ cost, body: { model: MODEL, max_tokens: roomFor(600), messages: [{ role: "user", content: prompt }] }, waitMs: PERSON_WAIT_MS });
   const rules = parseLearnings(answerText(result)).filter((r) => !known.some((k) => k.text.toLowerCase() === r.text.toLowerCase()));
   const saved: CompetitiveLearning[] = [];
   for (const r of rules) {

@@ -41,7 +41,7 @@ export function linkedInSourcePipeline(deps: { apify?: ApifyFactory } = {}): Pip
       async collect(ctx) {
         const input = (ctx.run.input ?? {}) as { sources?: unknown; period?: { start?: string; end?: string } };
         const plan = prepareSourceRequest({ sources: input.sources, period: input.period });
-        const actor = await runActorStep(ctx, { actor: LINKEDIN_ACTOR, input: plan.input, datasetKey: "apify.dataset", apify: deps.apify });
+        const actor = await runActorStep(ctx, { actor: LINKEDIN_ACTOR, input: plan.input, datasetKey: "apify.dataset", apify: deps.apify, feature: "competitors.linkedin_source" });
         if (actor.type === "wait") return actor.result;
         const verified = verifyLinkedInRows(actor.rows, plan, { today: ctx.now().toISOString().slice(0, 10) });
         const answer = linkedInSourceAnswer(plan, verified);

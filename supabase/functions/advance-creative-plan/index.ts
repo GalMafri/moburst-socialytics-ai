@@ -35,6 +35,15 @@ import { FORMAT_DIMENSIONS } from '../_shared/design-system/types.ts';
 import { bytesToDataUrl, urlToDataUrl } from '../_shared/render/hero.ts';
 import { counterText, wholePostCorrection, wholePostExpectedText, wholePostPrompt, wholePostQuestion } from '../_shared/design-prompts/wholePost.ts';
 import { STALE_PENDING_MS, submittedGivenUp } from './stale.ts';
+import { costCtx } from '../_shared/paid/index.ts';
+
+/**
+ * A frame's paid calls: the plan's client, the frame's media job as the
+ * execution. The run is re-entrant (the browser polls it, a schedule calls it
+ * without one), so its work is counted as the job's, whoever looked.
+ */
+// deno-lint-ignore no-explicit-any
+const frameCost = (creative: any, jobId: string, feature: string) => costCtx({ clientId: creative.client_id, feature, actor: 'schedule', executionId: jobId });
 
 const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-socialytics-secret' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -146,8 +155,8 @@ async function submitFrame(db: any, creative: any, index: number, attempt: numbe
       : wholePostPrompt(creative.plan, index, spec, creative.mode, Boolean(logoUrl), correction);
     // The design edit works on ONE source post (the frame's layout reference comes first); the legacy path keeps its reference set.
     const started = designed
-      ? await startImageWithHiggsfield(db, prompt, imageAspectRatio(creative.platform, creative.format), referenceUrls)
-      : await startDesignEdit(db, prompt, imageAspectRatio(creative.platform, creative.format), referenceUrls[0]);
+      ? await startImageWithHiggsfield(db, frameCost(creative, row.id, 'post.image'), prompt, imageAspectRatio(creative.platform, creative.format), referenceUrls)
+      : await startDesignEdit(db, frameCost(creative, row.id, 'post.image'), prompt, imageAspectRatio(creative.platform, creative.format), referenceUrls[0]);
     const { error: recordError } = await db.from('media_jobs').update({ request_id: started.jobId, model_path: started.model, status: 'submitted', updated_at: new Date().toISOString() }).eq('id', row.id);
     if (recordError) throw new Error(`Image submitted as ${started.jobId} but recording failed.`);
     return { ...row, status: 'submitted', request_id: started.jobId };
@@ -175,7 +184,7 @@ async function reviewJob(db: any, creative: any, index: number, job: Job, design
   const candidate = designed ? await urlToDataUrl((await preparedHero(db, creative, job)).hero_url) : await reviewCandidate(db, creative, job);
   // A whole post is judged with its approved words: exact text, one authentic logo, legible, on brand.
   const expectedText = designed ? '' : wholePostExpectedText(creative.plan, index, creative.mode);
-  const verdict = await validateDesignImage(candidate, { referenceImages: references, logoImage, creative: true, video: false, creativeDirection: direction, expectedText, question: v2 ? artworkQuestionV2(v2, frame.subject) : template ? artworkReviewQuestion(designed!.system, template, frame.subject) : wholePostQuestion(expectedText, Boolean(logoImage), JSON.stringify({ hero: frame.subject, composition: frame.composition, hierarchy: frame.layout ? { headline: frame.layout.headline_position, hero: frame.layout.subject_position, logo: frame.layout.logo_position } : undefined }), counterText(creative.mode, index, creative.plan.frames.length)) });
+  const verdict = await validateDesignImage(candidate, { cost: frameCost(creative, job.id, 'design.review'), referenceImages: references, logoImage, creative: true, video: false, creativeDirection: direction, expectedText, question: v2 ? artworkQuestionV2(v2, frame.subject) : template ? artworkReviewQuestion(designed!.system, template, frame.subject) : wholePostQuestion(expectedText, Boolean(logoImage), JSON.stringify({ hero: frame.subject, composition: frame.composition, hierarchy: frame.layout ? { headline: frame.layout.headline_position, hero: frame.layout.subject_position, logo: frame.layout.logo_position } : undefined }), counterText(creative.mode, index, creative.plan.frames.length)) });
   const dirty = verdictIsDirty(verdict, { expectNoText: Boolean(designed) });
   if (verdict.skipped && !designed) {
     // A whole post is never approved unreviewed: leave the job awaiting review so the next tick tries again,
@@ -243,7 +252,7 @@ async function advancePlan(db: any, creative: any, budget: { reviews: number }):
     }
     if (job.status === 'submitted' && job.request_id) {
       try {
-        const snapshot = await checkVideoJob(db, job.request_id);
+        const snapshot = await checkVideoJob(db, job.request_id, frameCost(creative, job.id, 'post.image'), { quantities: { images: 1 } });
         if (snapshot.status === 'completed' && snapshot.url) {
           const stored = await storeRemoteImage(db, creative.client_id, snapshot.url, `creative-${creative.id}-${index}-${attempt}`);
           await db.from('media_jobs').update({ status: 'completed', output_url: stored, updated_at: new Date().toISOString() }).eq('id', job.id);

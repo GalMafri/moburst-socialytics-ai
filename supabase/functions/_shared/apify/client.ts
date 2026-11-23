@@ -16,14 +16,21 @@
 // twice. Anything still failing is thrown for the step runner, which tries
 // the step again later.
 //
-// The token is APIFY_API_TOKEN (the same account as n8n's "Apify account 2").
-// While it is not set, every call throws ApifyTokenMissing, which a step
+// Every request goes through the paying desk (_shared/paid), which adds the
+// token, APIFY_API_TOKEN (the same account as n8n's "Apify account 2"), and
+// records each run's cost once, the first time the run is seen finished,
+// with the dollars Apify reports (usageTotalUsd, keyed by the run's id).
+// While the token is not set, every call throws ApifyTokenMissing, which a step
 // turns into a quiet wait and a line in its step log, never a failure. A
 // token Apify refuses (401, or an account-level 402 or 403) is the same:
 // ApifyTokenRefused. A 403 for one actor stays an ordinary ApifyError, so only
 // that platform fails.
 
-export const APIFY_API = "https://api.apify.com/v2";
+import type { CostContext } from "../cost/context.ts";
+import { paid, ProviderKeyMissing } from "../paid/index.ts";
+
+/** The API version every path is under, below the provider's base (cost/registry.ts). */
+export const APIFY_API_PATH = "/v2";
 export const APIFY_TOKEN_ENV = "APIFY_API_TOKEN";
 
 /** The run states Apify reports. The last four are final. */
@@ -78,13 +85,11 @@ const errorTypeOf = (body: string): string => {
 };
 const tokenRefused = (status: number, body: string) => status === 401 || ((status === 402 || status === 403) && ACCOUNT_ERROR_TYPES.has(errorTypeOf(body)));
 
-type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
-
 export interface ApifyClientOptions {
-  token: string | null | undefined;
+  /** Who the runs are for: the paying desk records each finished run's cost against it. */
+  cost: CostContext;
   /** Ends every request when it fires (a pipeline step's time running out). */
   signal?: AbortSignal;
-  fetchImpl?: Fetch;
   sleep?: (ms: number) => Promise<void>;
   /** Tries of one request after the first (default 3). */
   retries?: number;
@@ -96,9 +101,6 @@ export function apifyRetryWaitMs(attempt: number, retryAfter: string | null): nu
   const asked = retryAfter != null && retryAfter.trim() !== "" && Number.isFinite(Number(retryAfter)) ? Number(retryAfter) * 1000 : 0;
   return Math.min(10_000, Math.max(base, asked));
 }
-
-/** The token never appears in an error message or a log. */
-const redact = (text: string, token: string) => (token ? text.split(token).join("[redacted]") : text);
 
 export interface ApifyClient {
   /** POST /acts/{actor}/runs: starts a run and returns it at once (READY or RUNNING). A timeout or memory left out is the actor's own default. */
@@ -112,27 +114,27 @@ export interface ApifyClient {
 }
 
 export function apifyClient(o: ApifyClientOptions): ApifyClient {
-  const token = String(o.token ?? "").trim();
-  const f: Fetch = o.fetchImpl ?? ((url, init) => fetch(url, init));
   const sleep = o.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const retries = o.retries ?? 3;
 
   const request = async (method: "GET" | "POST", path: string, query: Record<string, string | number>, body?: unknown): Promise<unknown> => {
-    if (!token) throw new ApifyTokenMissing();
-    const url = new URL(`${APIFY_API}${path}`);
-    for (const [k, v] of Object.entries(query)) url.searchParams.set(k, String(v));
+    const params = new URLSearchParams();
+    for (const [k, v] of Object.entries(query)) params.set(k, String(v));
+    const qs = params.toString();
+    const target = `${APIFY_API_PATH}${path}${qs ? `?${qs}` : ""}`;
     const starting = method === "POST";
     for (let attempt = 0; ; attempt++) {
       if (o.signal?.aborted) throw o.signal.reason ?? new Error("The Apify request was stopped.");
       let response: Response;
       try {
-        response = await f(url.href, {
+        response = await paid.fetch(o.cost, "apify", target, {
           method,
-          headers: { Authorization: `Bearer ${token}`, Accept: "application/json", ...(body !== undefined ? { "Content-Type": "application/json" } : {}) },
+          headers: { Accept: "application/json", ...(body !== undefined ? { "Content-Type": "application/json" } : {}) },
           ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
           ...(o.signal ? { signal: o.signal } : {}),
         });
       } catch (e) {
+        if (e instanceof ProviderKeyMissing) throw new ApifyTokenMissing();
         // A dropped read is tried again; a start whose answer was lost is not (it may be running).
         if (starting || o.signal?.aborted || attempt >= retries) throw e;
         await sleep(apifyRetryWaitMs(attempt, null));
@@ -141,7 +143,8 @@ export function apifyClient(o: ApifyClientOptions): ApifyClient {
       if (response.ok) return await response.json();
       const retryable = starting ? response.status === 429 || response.status === 503 : response.status === 429 || response.status >= 500;
       const answerText = await response.text().catch(() => "");
-      const detail = redact(answerText, token).slice(0, 300);
+      // The client never holds the token, so one an answer echoes is recognized by its shape (apify_api_...).
+      const detail = answerText.replace(/apify_api_[A-Za-z0-9]+/g, "[redacted]").slice(0, 300);
       if (tokenRefused(response.status, answerText)) throw new ApifyTokenRefused(`Apify ${method} ${path} answered ${response.status}: ${detail}`, response.status);
       if (!retryable || attempt >= retries) throw new ApifyError(`Apify ${method} ${path} answered ${response.status}: ${detail}`, response.status);
       await sleep(apifyRetryWaitMs(attempt, response.headers.get("retry-after")));

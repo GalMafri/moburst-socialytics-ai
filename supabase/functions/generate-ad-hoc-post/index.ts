@@ -8,6 +8,7 @@ import { createClient } from "../_shared/supabase.ts";
 import { competitiveBrief } from "../_shared/competitive/brief.ts";
 import { staffGate } from "../_shared/auth/requireStaff.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
+import { costCtx, hasKey } from "../_shared/paid/index.ts";
 import { answerText, PERSON_WAIT_MS, roomFor } from "../_shared/anthropicReply.ts";
 import { COPY_MODEL, loadClientVoice } from "../_shared/voice/load.ts";
 import { voicePromptBlock } from "../_shared/voice/voice.ts";
@@ -37,8 +38,7 @@ Deno.serve(async (req) => {
     const format = adHocFormat(creative_type, platform);
     if ("refused" in format) return jsonResp({ error: format.refused }, 400);
 
-    const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
-    if (!anthropicKey) {
+    if (!(await hasKey("anthropic"))) {
       return jsonResp({ error: "ANTHROPIC_API_KEY not configured" }, 400);
     }
 
@@ -101,7 +101,7 @@ Generate a complete post recommendation. Return ONLY this JSON:
 }`;
 
     const result = await anthropicMessages({
-      apiKey: anthropicKey,
+      cost: costCtx({ clientId: String(client_id), feature: "post.ad_hoc", actor: "user" }),
       body: { model: COPY_MODEL, max_tokens: roomFor(2500), messages: [{ role: "user", content: prompt }] },
       waitMs: PERSON_WAIT_MS,
     });
