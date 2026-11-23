@@ -1,16 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { socialyticsOpenApi, socialyticsRoutes } from "../../functions/api/openapi";
+import { socialyticsOpenApi } from "../../functions/api/openapi";
 import { SCHEMAS } from "../../functions/api/schemas";
-import { emptyData, makeFakeStore } from "../../functions/_shared/socialytics-api/store.fake";
+import { stubRoutes } from "./stub";
 
-const routes = socialyticsRoutes({
-  store: makeFakeStore(emptyData()), analytics: async () => ({ ok: true, status: 200, data: {} }), health: async () => ({}),
-  jobs: { create: async (j) => ({ ...j, id: "x" }), byIdempotency: async () => null, get: async () => null, list: async () => [], update: async (_i, p) => p as never, runningCount: async () => 0 },
-  kickWorker: async () => {}, discard: async () => ({ removed: { client: false, competitor_sets: 0, reports: 0, competitive_reports: 0, posts: 0, media_jobs: 0 } }), capacity: 3, stepNames: [],
-  keys: { insert: async (k) => ({ ...k, id: "k", created_at: "", last_used_at: null, revoked_at: null, owner_email: null }), list: async () => [], listByOwner: async () => [], countLive: async () => 0, revoke: async () => false, revokeOwned: async () => null },
-  verifyStaffSession: async () => null, sessionToken: () => null, now: () => new Date(),
-  serverUrl: "https://x.supabase.co/functions/v1/api",
-});
+const routes = stubRoutes();
 const doc = socialyticsOpenApi(routes, "https://x.supabase.co/functions/v1/api") as { openapi: string; paths: Record<string, Record<string, { responses: Record<string, unknown>; requestBody?: unknown; security?: unknown }>>; components: { schemas: Record<string, unknown>; securitySchemes: Record<string, { type: string; scheme: string; description?: string }> } };
 
 function refs(node: unknown, out: string[]) {

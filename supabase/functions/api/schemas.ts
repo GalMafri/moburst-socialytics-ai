@@ -76,7 +76,7 @@ const Analytics = obj({
 });
 const Finding = obj({ kind: { type: "string" }, severity: { type: "string" }, client_id: str, client: str, detail: { type: "string" }, link: str, report_id: str, job_id: str });
 const Status = obj({ tool: { type: "string" }, time: { type: "string" }, findings: arr(Finding), demo_jobs: obj({ running: { type: "integer" }, stuck: { type: "integer" }, failed_24h: { type: "integer" } }), counts: { type: "object" } });
-const Health = obj({ ok: bool, tool: { type: "string" }, version: { type: "string" }, time: { type: "string" } });
+const Health = obj({ ok: bool, tool: { type: "string" }, version: { type: "string" }, build: { type: "string", description: "Hash of the deployed API function source; equals BUILD_STAMP in supabase/functions/api/build-stamp.ts on the commit it was built from." }, time: { type: "string" } });
 
 const DemoInput = obj({
   client_name: { type: "string", description: "The brand's name." }, website: { type: "string", description: "The brand's website (domain or URL)." }, industry: { type: "string", description: "Accepted for parity with AdVisor; not used by Socialytics." },
