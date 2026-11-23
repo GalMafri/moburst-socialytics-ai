@@ -1,30 +1,1091 @@
 {
+  "api_only_actions": {
+    "rewrite_post_copy": "Claude writes copy itself and saves it with socialytics_post_copy_save; the API keeps the app's own rewrite for scripts."
+  },
+  "auth": {
+    "bearer": "Machine clients send a Socialytics API key as Authorization: Bearer <key>; the key's scopes and client reach apply.",
+    "oauth": "Claude connectors sign in as the person through the project's Supabase Auth (OAuth 2.1): everyone reaches the clients they see in Socialytics; Moburst staff also save and start work; admins also read costs.",
+    "scopes": {
+      "costs": "socialytics_cost_summary",
+      "read": "the reads and socialytics_api",
+      "run": "the work tools (two-step: an estimate and a confirm_token first)"
+    }
+  },
+  "description": "Socialytics, Moburst's organic social tool, as a remote MCP server (Streamable HTTP). Generated from supabase/functions/mcp/catalog.ts by `npm run api:gen`; do not edit by hand.",
   "name": "socialytics",
-  "description": "Socialytics, Moburst's organic social intelligence tool. Every tool calls the Socialytics API (base URL https://rwouwxqggjjacbpbhqsn.supabase.co/functions/v1/api) with an API key in the Authorization header as a bearer token. Lists return { data, next_cursor }; pass next_cursor back as cursor for the next page.",
-  "auth": { "type": "bearer", "header": "Authorization", "scopes": { "read": "every read tool", "demo": "the socialytics_demo_* tools" } },
+  "rest_api": "https://rwouwxqggjjacbpbhqsn.supabase.co/functions/v1/api",
+  "server": "https://rwouwxqggjjacbpbhqsn.supabase.co/functions/v1/mcp",
   "tools": [
-    { "name": "socialytics_clients_list", "method": "GET", "path": "/v1/clients", "description": "List the clients this key may see, with their brand, pillars, keywords, design, Sprout and competitor summaries, readiness and last report.", "inputSchema": { "type": "object", "properties": { "q": { "type": "string", "description": "Part of the client name." }, "company_slug": { "type": "string" }, "include_archived": { "type": "boolean" }, "limit": { "type": "integer", "maximum": 200 }, "cursor": { "type": "string" } } } },
-    { "name": "socialytics_client_get", "method": "GET", "path": "/v1/clients/{id}", "description": "One client with its Sprout profiles (names and networks), competitor sets with handles, and report schedules.", "inputSchema": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] } },
-    { "name": "socialytics_client_setup", "method": "GET", "path": "/v1/clients/{id}/setup", "description": "Whether the client is ready (brand identity, pillars, keywords, Sprout profile, confirmed competitors, confirmed design settings, schedule) and, for each gap, what it waits for.", "inputSchema": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] } },
-    { "name": "socialytics_client_analytics", "method": "GET", "path": "/v1/clients/{id}/analytics", "description": "Sprout performance for a client over a window (default: the last 30 days): totals, the previous window, changes, per profile, top posts. Answers 422 unprocessable when the client has no Sprout profile.", "inputSchema": { "type": "object", "properties": { "id": { "type": "string" }, "start": { "type": "string", "description": "yyyy-mm-dd" }, "end": { "type": "string", "description": "yyyy-mm-dd" } }, "required": ["id"] } },
-    { "name": "socialytics_reports_list", "method": "GET", "path": "/v1/reports", "description": "Social analysis reports: period, status, deck link, counts, metric changes, warnings.", "inputSchema": { "type": "object", "properties": { "client_id": { "type": "string" }, "status": { "type": "string", "enum": ["running", "completed", "failed"] }, "from": { "type": "string" }, "to": { "type": "string" }, "limit": { "type": "integer" }, "cursor": { "type": "string" } } } },
-    { "name": "socialytics_report_get", "method": "GET", "path": "/v1/reports/{id}", "description": "One social report with its analysis, content calendar, performance and trend summaries, plus industry_trends: the themes the weekly trend collection stored for the weeks of its period (what is happening, why it matters, the angle for the brand, and example posts), or null when there are none.", "inputSchema": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] } },
-    { "name": "socialytics_competitive_reports_list", "method": "GET", "path": "/v1/competitive-reports", "description": "Competitive reports: period, status, deck link, totals, quality check.", "inputSchema": { "type": "object", "properties": { "client_id": { "type": "string" }, "status": { "type": "string", "enum": ["running", "complete", "failed"] }, "limit": { "type": "integer" }, "cursor": { "type": "string" } } } },
-    { "name": "socialytics_competitive_report_get", "method": "GET", "path": "/v1/competitive-reports/{id}", "description": "One competitive report with its executive summary, scorecard, gaps, teardown, breakdowns and per-company aggregates.", "inputSchema": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] } },
-    { "name": "socialytics_competitor_sets_list", "method": "GET", "path": "/v1/competitor-sets", "description": "Competitor sets with their competitors and social handles.", "inputSchema": { "type": "object", "properties": { "client_id": { "type": "string" }, "status": { "type": "string" }, "limit": { "type": "integer" }, "cursor": { "type": "string" } } } },
-    { "name": "socialytics_competitor_set_get", "method": "GET", "path": "/v1/competitor-sets/{id}", "description": "One competitor set.", "inputSchema": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] } },
-    { "name": "socialytics_posts_list", "method": "GET", "path": "/v1/posts", "description": "Generated posts: copy, hashtags, format, media, approval state.", "inputSchema": { "type": "object", "properties": { "client_id": { "type": "string" }, "report_id": { "type": "string" }, "source": { "type": "string" }, "approved": { "type": "boolean" }, "include_archived": { "type": "boolean" }, "limit": { "type": "integer" }, "cursor": { "type": "string" } } } },
-    { "name": "socialytics_post_get", "method": "GET", "path": "/v1/posts/{id}", "description": "One generated post.", "inputSchema": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] } },
-    { "name": "socialytics_media_jobs_list", "method": "GET", "path": "/v1/media-jobs", "description": "Media generation jobs with their status, output and review.", "inputSchema": { "type": "object", "properties": { "client_id": { "type": "string" }, "status": { "type": "string" }, "limit": { "type": "integer" }, "cursor": { "type": "string" } } } },
-    { "name": "socialytics_schedules_list", "method": "GET", "path": "/v1/schedules", "description": "Report schedules.", "inputSchema": { "type": "object", "properties": { "client_id": { "type": "string" }, "limit": { "type": "integer" }, "cursor": { "type": "string" } } } },
-    { "name": "socialytics_scheduled_posts_list", "method": "GET", "path": "/v1/scheduled-posts", "description": "Posts scheduled to Sprout Social.", "inputSchema": { "type": "object", "properties": { "client_id": { "type": "string" }, "status": { "type": "string" }, "limit": { "type": "integer" }, "cursor": { "type": "string" } } } },
-    { "name": "socialytics_alerts_list", "method": "GET", "path": "/v1/alerts", "description": "Competitive alerts: topics competitors are posting about.", "inputSchema": { "type": "object", "properties": { "client_id": { "type": "string" }, "status": { "type": "string" }, "limit": { "type": "integer" }, "cursor": { "type": "string" } } } },
-    { "name": "socialytics_design_systems_list", "method": "GET", "path": "/v1/design-systems", "description": "Design systems with templates, tokens and previews.", "inputSchema": { "type": "object", "properties": { "client_id": { "type": "string" }, "limit": { "type": "integer" }, "cursor": { "type": "string" } } } },
-    { "name": "socialytics_status", "method": "GET", "path": "/v1/status", "description": "Pipeline health findings and demo job counts.", "inputSchema": { "type": "object", "properties": {} } },
-    { "name": "socialytics_demo_create", "method": "POST", "path": "/v1/demo-jobs", "description": "Onboard any brand from its name and website and run the prospect half of a Socialytics demo on a demo copy of the brand (company slug demo-<brand>; production clients are never touched): brand identity, brief, pillars, design system when references exist, a confirmed competitor set, the social report with trends, recommendations, calendar and deck, and a generated post. RivalIQ tracking, the competitive report and Sprout analytics are recorded as connected_only gaps and shown on the connected showcase workspace. Answers 202 with a job; poll socialytics_demo_get or give a callback_url. Takes 15 to 30 minutes.", "inputSchema": { "type": "object", "properties": { "client_name": { "type": "string" }, "website": { "type": "string" }, "competitors": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "website": { "type": "string" } }, "required": ["name"] } }, "requester": { "type": "object", "properties": { "id": { "type": "string" }, "email": { "type": "string" }, "name": { "type": "string" } } }, "idempotency_key": { "type": "string" }, "callback_url": { "type": "string", "format": "uri" }, "force_run": { "type": "boolean" } }, "required": ["client_name", "website"] } },
-    { "name": "socialytics_demo_get", "method": "GET", "path": "/v1/demo-jobs/{id}", "description": "Live progress of a demo job by step, and its outputs when complete.", "inputSchema": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] } },
-    { "name": "socialytics_demo_list", "method": "GET", "path": "/v1/demo-jobs", "description": "Demo jobs.", "inputSchema": { "type": "object", "properties": { "client_id": { "type": "string" }, "status": { "type": "string" }, "limit": { "type": "integer" }, "cursor": { "type": "string" } } } },
-    { "name": "socialytics_demo_cancel", "method": "POST", "path": "/v1/demo-jobs/{id}/cancel", "description": "Stop a queued or running demo job.", "inputSchema": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] } },
-    { "name": "socialytics_demo_discard", "method": "POST", "path": "/v1/demo-jobs/{id}/discard", "description": "Remove what a finished demo job created (the client when the job created it, otherwise only its competitor sets, reports, posts and media jobs).", "inputSchema": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] } }
-  ]
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "List the Socialytics clients you can see, newest first, with their brand, readiness (setup) and last report. Call this first to turn a client's name into its id: pass part of the name as q, for example q \"Bader\". Returns { data, next_cursor }; pass next_cursor back as cursor for more.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "The next_cursor of the previous page, for the next page.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "How many to return, 1 to 50 (default 20).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "q": {
+            "description": "Part of the client name.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "socialytics_clients_list",
+      "offered_to": {
+        "key_scope": "read",
+        "people": "everyone"
+      },
+      "title": "List Socialytics clients",
+      "uses": [
+        "GET /v1/clients"
+      ]
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "One client with its Sprout Social profile names, competitor sets with their social handles, and report schedules. Call socialytics_clients_list first to find the client id.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "description": "The client id.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id"
+        ],
+        "type": "object"
+      },
+      "name": "socialytics_client_get",
+      "offered_to": {
+        "key_scope": "read",
+        "people": "everyone"
+      },
+      "title": "Get a Socialytics client",
+      "uses": [
+        "GET /v1/clients/:id"
+      ]
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Social reports, newest first: period, status, deck link, counts and metric changes. To find a client's report for a month, list with its client_id and pick the one whose period covers that month, then call socialytics_report_get. Call socialytics_clients_list first to find the client id.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "description": "Only this client's reports.",
+            "type": "string"
+          },
+          "cursor": {
+            "description": "The next_cursor of the previous page, for the next page.",
+            "type": "string"
+          },
+          "from": {
+            "description": "Created on or after this date (yyyy-mm-dd).",
+            "type": "string"
+          },
+          "limit": {
+            "description": "How many to return, 1 to 50 (default 20).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "running",
+              "completed",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "to": {
+            "description": "Created on or before this date (yyyy-mm-dd).",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "socialytics_reports_list",
+      "offered_to": {
+        "key_scope": "read",
+        "people": "everyone"
+      },
+      "title": "List social reports",
+      "uses": [
+        "GET /v1/reports"
+      ]
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "One social report: its header (period, status, deck link, counts, metric changes) and the sections analysis, calendar (the content calendar), performance (Sprout Social) and trends. Every section comes by default; a report too large for one answer lists the rest in omitted_sections, to ask for with sections. Call socialytics_clients_list and socialytics_reports_list first to find the report id.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "report_id": {
+            "description": "The report id.",
+            "type": "string"
+          },
+          "sections": {
+            "description": "Only these sections (default all).",
+            "items": {
+              "enum": [
+                "analysis",
+                "calendar",
+                "performance",
+                "trends"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "report_id"
+        ],
+        "type": "object"
+      },
+      "name": "socialytics_report_get",
+      "offered_to": {
+        "key_scope": "read",
+        "people": "everyone"
+      },
+      "title": "Get a social report",
+      "uses": [
+        "GET /v1/reports/:id"
+      ]
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Competitive reports, newest first: period, status, deck link, totals and quality check. Then call socialytics_competitive_report_get. Call socialytics_clients_list first to find the client id.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "description": "Only this client's reports.",
+            "type": "string"
+          },
+          "cursor": {
+            "description": "The next_cursor of the previous page, for the next page.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "How many to return, 1 to 50 (default 20).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "running",
+              "complete",
+              "failed"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "socialytics_competitive_reports_list",
+      "offered_to": {
+        "key_scope": "read",
+        "people": "everyone"
+      },
+      "title": "List competitive reports",
+      "uses": [
+        "GET /v1/competitive-reports"
+      ]
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "One competitive report: its header and the sections analysis (executive summary, scorecard, gaps, winner teardown, competitor breakdowns) and aggregates (per company). Every section comes by default; a report too large for one answer lists the rest in omitted_sections, to ask for with sections. Call socialytics_competitive_reports_list first to find the report id.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "report_id": {
+            "description": "The competitive report id.",
+            "type": "string"
+          },
+          "sections": {
+            "description": "Only these sections (default all).",
+            "items": {
+              "enum": [
+                "analysis",
+                "aggregates"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "report_id"
+        ],
+        "type": "object"
+      },
+      "name": "socialytics_competitive_report_get",
+      "offered_to": {
+        "key_scope": "read",
+        "people": "everyone"
+      },
+      "title": "Get a competitive report",
+      "uses": [
+        "GET /v1/competitive-reports/:id"
+      ]
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Sprout Social performance for a client over a window (default the last 30 days): totals, the previous window, changes, per profile and top posts. Call socialytics_clients_list first to find the client id.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "description": "The client id.",
+            "type": "string"
+          },
+          "end": {
+            "description": "Last day (yyyy-mm-dd).",
+            "type": "string"
+          },
+          "start": {
+            "description": "First day (yyyy-mm-dd).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id"
+        ],
+        "type": "object"
+      },
+      "name": "socialytics_client_analytics",
+      "offered_to": {
+        "key_scope": "read",
+        "people": "everyone"
+      },
+      "title": "Get a client's Sprout Social performance",
+      "uses": [
+        "GET /v1/clients/:id/analytics"
+      ]
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "The client's weekly trend themes for the weeks with any day between from and to (default the last 30 days), newest week first, each with what is happening, why it matters, the angle for the client and the posts it is built on. If omitted_themes is present, ask again with an earlier to date for the older themes. Call socialytics_clients_list first to find the client id.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "description": "The client id.",
+            "type": "string"
+          },
+          "from": {
+            "description": "First day (yyyy-mm-dd).",
+            "type": "string"
+          },
+          "to": {
+            "description": "Last day (yyyy-mm-dd).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id"
+        ],
+        "type": "object"
+      },
+      "name": "socialytics_trend_themes",
+      "offered_to": {
+        "key_scope": "read",
+        "people": "everyone"
+      },
+      "title": "Get a client's weekly trend themes",
+      "uses": [
+        "trend_themes_in_range"
+      ]
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "The posts on a client's content calendar from one day to another (by default the client's today to 28 days ahead, at most 92 days), by date: each post's key, date, time, platform, format, pillar, copy, hashtags, call to action, why it is planned, whether someone has worked on it, and updated_at. Call socialytics_clients_list first to find the client id.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "description": "The client id.",
+            "type": "string"
+          },
+          "from": {
+            "description": "First day (yyyy-mm-dd).",
+            "type": "string"
+          },
+          "to": {
+            "description": "Last day (yyyy-mm-dd).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id"
+        ],
+        "type": "object"
+      },
+      "name": "socialytics_calendar_posts",
+      "offered_to": {
+        "key_scope": null,
+        "people": "everyone"
+      },
+      "title": "Get a client's calendar posts",
+      "uses": [
+        "person"
+      ]
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "A client's content strategy as the Strategy page shows it: when it was written, each section (goals, audience, positioning, each pillar, each platform, not now, what to avoid, measures) with its key, title and text, who edited it and when where a person did, whether that edit came from Claude, and its version; and each platform's state. For Moburst staff. Call socialytics_clients_list first to find the client id.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "description": "The client id.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id"
+        ],
+        "type": "object"
+      },
+      "name": "socialytics_strategy_get",
+      "offered_to": {
+        "key_scope": null,
+        "people": "staff"
+      },
+      "title": "Get a client's content strategy",
+      "uses": [
+        "person"
+      ]
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "What a client told the team, as Socialytics keeps it: the team's standing notes; the points every post for the client follows now (things to avoid, things to do, what is coming up and facts, each with its date and platform); and the notes, newest first, each with its id, title, date, who added it, whether it came from Claude or Socialytics, and where its reading stands. With note_id, that note's text. For Moburst staff. Call socialytics_clients_list first to find the client id.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "description": "The client id.",
+            "type": "string"
+          },
+          "note_id": {
+            "description": "One note's id, for its text.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id"
+        ],
+        "type": "object"
+      },
+      "name": "socialytics_client_notes",
+      "offered_to": {
+        "key_scope": null,
+        "people": "staff"
+      },
+      "title": "Get a client's notes",
+      "uses": [
+        "person"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Adds one note to a client's notes in Socialytics: client feedback, a meeting note or an instruction from the client, with the date it was said. Socialytics reads it into the points every post written for the client follows, as it does notes added in the app. The same text saved again adds nothing and answers who saved it and when. Text up to 20,000 characters. client_id and client_name must name the same client. For Moburst staff, on clients they can change in Socialytics.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "description": "The client id, from the project instruction or socialytics_clients_list.",
+            "type": "string"
+          },
+          "client_name": {
+            "description": "The client's name as Socialytics has it, to confirm the id. Case does not matter.",
+            "type": "string"
+          },
+          "date": {
+            "description": "The day it was said or written (yyyy-mm-dd), no later than tomorrow. Defaults to today.",
+            "type": "string"
+          },
+          "text": {
+            "description": "The note's full text, up to 20,000 characters.",
+            "type": "string"
+          },
+          "title": {
+            "description": "A title, such as the file's name. Defaults to the text's first line.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id",
+          "client_name",
+          "text"
+        ],
+        "type": "object"
+      },
+      "name": "socialytics_note_save",
+      "offered_to": {
+        "key_scope": null,
+        "people": "staff"
+      },
+      "title": "Save a client note to Socialytics",
+      "uses": [
+        "person"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Saves new copy for one post on a client's content calendar, as the calendar's Save does: the copy, and its hashtags and call to action when given. The weekly revisions then keep the post as it is. based_on is the post's updated_at from socialytics_calendar_posts; if the post changed after that, nothing is saved and the current copy comes back. Copy equal to what is saved changes nothing. client_id and client_name must name the same client. For Moburst staff, on clients they can change in Socialytics.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "based_on": {
+            "description": "The post's updated_at, as socialytics_calendar_posts gave it.",
+            "type": "string"
+          },
+          "client_id": {
+            "description": "The client id, from the project instruction or socialytics_clients_list.",
+            "type": "string"
+          },
+          "client_name": {
+            "description": "The client's name as Socialytics has it, to confirm the id. Case does not matter.",
+            "type": "string"
+          },
+          "copy": {
+            "description": "The copy, up to 10,000 characters.",
+            "type": "string"
+          },
+          "cta": {
+            "description": "The call to action. Leave out to keep the post's own.",
+            "type": "string"
+          },
+          "hashtags": {
+            "description": "The post's hashtags, up to 30. Leave out to keep the post's own.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "post_key": {
+            "description": "The post's key, from socialytics_calendar_posts.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id",
+          "client_name",
+          "post_key",
+          "copy",
+          "based_on"
+        ],
+        "type": "object"
+      },
+      "name": "socialytics_post_copy_save",
+      "offered_to": {
+        "key_scope": null,
+        "people": "staff"
+      },
+      "title": "Save a calendar post's copy to Socialytics",
+      "uses": [
+        "person"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Saves a person's version of one section of a client's content strategy, as editing it on the Strategy page does; the strategy's rewrites keep it. section_key and based_on (the section's version) come from socialytics_strategy_get; if the section changed after that, nothing is saved and the current text comes back. Text equal to the section's changes nothing, and empty text is refused. client_id and client_name must name the same client. For Moburst staff, on clients they can change in Socialytics.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "based_on": {
+            "description": "The section's version, as socialytics_strategy_get gave it.",
+            "type": "string"
+          },
+          "client_id": {
+            "description": "The client id, from the project instruction or socialytics_clients_list.",
+            "type": "string"
+          },
+          "client_name": {
+            "description": "The client's name as Socialytics has it, to confirm the id. Case does not matter.",
+            "type": "string"
+          },
+          "section_key": {
+            "description": "The section's key, from socialytics_strategy_get.",
+            "type": "string"
+          },
+          "text": {
+            "description": "The section's new text, up to 20,000 characters.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id",
+          "client_name",
+          "section_key",
+          "text",
+          "based_on"
+        ],
+        "type": "object"
+      },
+      "name": "socialytics_strategy_section_save",
+      "offered_to": {
+        "key_scope": null,
+        "people": "staff"
+      },
+      "title": "Save a strategy section to Socialytics",
+      "uses": [
+        "person"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Starts attaching a finished deck file (.pptx or .pdf, up to 50 MB) to a client's social or competitive report: returns a deck id and a one-time upload command for the file, valid for two hours. The deck shows on the report once socialytics_report_deck_save is called with that deck id. client_id and client_name must name the same client. For Moburst staff, on clients they can change in Socialytics.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "description": "The client id, from the project instruction or socialytics_clients_list.",
+            "type": "string"
+          },
+          "client_name": {
+            "description": "The client's name as Socialytics has it, to confirm the id. Case does not matter.",
+            "type": "string"
+          },
+          "file_name": {
+            "description": "The deck file's name or path, ending in .pptx or .pdf.",
+            "type": "string"
+          },
+          "report_id": {
+            "description": "The id of the client's social report (socialytics_reports_list) or competitive report (socialytics_competitive_reports_list).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id",
+          "client_name",
+          "report_id",
+          "file_name"
+        ],
+        "type": "object"
+      },
+      "name": "socialytics_report_deck_upload",
+      "offered_to": {
+        "key_scope": null,
+        "people": "staff"
+      },
+      "title": "Start attaching a deck to a report",
+      "uses": [
+        "person"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Lists a finished deck on a client's social or competitive report, where anyone who can see the report, the client included, can open it. Give deck_id once its file was uploaded with the command from socialytics_report_deck_upload, or link for a Google Slides or Drive link (https). Saving the same deck again adds nothing. client_id and client_name must name the same client. For Moburst staff, on clients they can change in Socialytics.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "description": "The client id, from the project instruction or socialytics_clients_list.",
+            "type": "string"
+          },
+          "client_name": {
+            "description": "The client's name as Socialytics has it, to confirm the id. Case does not matter.",
+            "type": "string"
+          },
+          "deck_id": {
+            "description": "The deck id from socialytics_report_deck_upload.",
+            "type": "string"
+          },
+          "link": {
+            "description": "A Google Slides or Drive link (https), instead of a deck id.",
+            "type": "string"
+          },
+          "report_id": {
+            "description": "The id of the client's social report (socialytics_reports_list) or competitive report (socialytics_competitive_reports_list).",
+            "type": "string"
+          },
+          "title": {
+            "description": "The deck's title, as people should see it on the report.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id",
+          "client_name",
+          "report_id",
+          "title"
+        ],
+        "type": "object"
+      },
+      "name": "socialytics_report_deck_save",
+      "offered_to": {
+        "key_scope": null,
+        "people": "staff"
+      },
+      "title": "Attach a deck to a report",
+      "uses": [
+        "person"
+      ]
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Every read endpoint of the Socialytics API this connection may call, from the live route table: path, what it returns, its path parameters and its query parameters. Use it to find data the other tools do not cover, then call socialytics_api with the path.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "name": "socialytics_api_schema",
+      "offered_to": {
+        "key_scope": "read",
+        "people": "everyone"
+      },
+      "title": "List the Socialytics API's read endpoints",
+      "uses": [
+        "GET /v1/*"
+      ]
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Call any read endpoint socialytics_api_schema lists, with this connection's own reach: path like /v1/clients/<id>/setup, and query as an object of parameters. Answers what the REST API answers. Lists return { data, next_cursor }; pass next_cursor back as cursor for more.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "description": "The endpoint path, starting /v1/.",
+            "type": "string"
+          },
+          "query": {
+            "additionalProperties": {
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            },
+            "description": "Query parameters, for example { \"client_id\": \"...\", \"limit\": 20 }.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "name": "socialytics_api",
+      "offered_to": {
+        "key_scope": "read",
+        "people": "everyone"
+      },
+      "title": "Call a Socialytics API read endpoint",
+      "uses": [
+        "GET /v1/*"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Start a client's monthly social report (kind social) or competitive report on its confirmed competitors (kind competitive) for a period, by default the last 30 days. A run already open or running for the client is answered instead of starting a second. Follow it with socialytics_reports_list or socialytics_competitive_reports_list; a report takes about an hour. It costs money, charged to the client: call it first without confirm_token to get what it will do, an estimate and a confirm_token, show those to the person, and call it again with the same arguments and the confirm_token only once they agree. Call socialytics_clients_list first to find the client id.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "description": "The client id.",
+            "type": "string"
+          },
+          "confirm_token": {
+            "description": "The confirm_token from the first call. Leave it out to get the estimate first; nothing starts without it.",
+            "type": "string"
+          },
+          "end": {
+            "description": "Last day (yyyy-mm-dd).",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "description": "Optional. The same value on a retry never starts the work twice.",
+            "maxLength": 200,
+            "type": "string"
+          },
+          "kind": {
+            "description": "social (default) or competitive.",
+            "enum": [
+              "social",
+              "competitive"
+            ],
+            "type": "string"
+          },
+          "start": {
+            "description": "First day (yyyy-mm-dd); send with end, or neither.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "name": "socialytics_report_start",
+      "offered_to": {
+        "key_scope": "run",
+        "people": "staff"
+      },
+      "title": "Start a social or competitive report",
+      "uses": [
+        "action:start_social_report",
+        "action:start_competitive_report"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Draft one social post for a client from a topic, in the client's voice, pillars and competitive picture: platform, format, hook, concept, visual direction, copy, CTA and hashtags. Nothing is saved; add it to the calendar in Socialytics. It costs money, charged to the client: call it first without confirm_token to get what it will do, an estimate and a confirm_token, show those to the person, and call it again with the same arguments and the confirm_token only once they agree. Call socialytics_clients_list first to find the client id.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "description": "The client id.",
+            "type": "string"
+          },
+          "confirm_token": {
+            "description": "The confirm_token from the first call. Leave it out to get the estimate first; nothing starts without it.",
+            "type": "string"
+          },
+          "format": {
+            "description": "Image, Carousel, Video, Reel, or Story (Instagram and Facebook only). Default: chosen for the topic.",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "description": "Optional. The same value on a retry never starts the work twice.",
+            "maxLength": 200,
+            "type": "string"
+          },
+          "platform": {
+            "description": "Instagram, Facebook, TikTok, LinkedIn, X and so on.",
+            "type": "string"
+          },
+          "topic": {
+            "description": "What the post is about.",
+            "maxLength": 2000,
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id",
+          "platform",
+          "topic"
+        ],
+        "type": "object"
+      },
+      "name": "socialytics_post_draft",
+      "offered_to": {
+        "key_scope": "run",
+        "people": "staff"
+      },
+      "title": "Draft a post",
+      "uses": [
+        "action:draft_post"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Start the design options for one of a client's calendar posts, as its Create design button does, optionally following a note. The options appear on the post in Socialytics when they are ready. The post_key comes from socialytics_calendar_posts. It costs money, charged to the client: call it first without confirm_token to get what it will do, an estimate and a confirm_token, show those to the person, and call it again with the same arguments and the confirm_token only once they agree.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "description": "The client id.",
+            "type": "string"
+          },
+          "confirm_token": {
+            "description": "The confirm_token from the first call. Leave it out to get the estimate first; nothing starts without it.",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "description": "Optional. The same value on a retry never starts the work twice.",
+            "maxLength": 200,
+            "type": "string"
+          },
+          "note": {
+            "description": "What every option should follow.",
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "post_key": {
+            "description": "The calendar post's post_key.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id",
+          "post_key"
+        ],
+        "type": "object"
+      },
+      "name": "socialytics_post_design_start",
+      "offered_to": {
+        "key_scope": "run",
+        "people": "staff"
+      },
+      "title": "Start a calendar post's designs",
+      "uses": [
+        "action:design_post"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Propose a new draft set of 8 to 12 competitors for a client, each with a rationale and a similarity score, for the team to review and confirm on the Competitors screen. Earlier sets are kept. It costs money, charged to the client: call it first without confirm_token to get what it will do, an estimate and a confirm_token, show those to the person, and call it again with the same arguments and the confirm_token only once they agree. Call socialytics_clients_list first to find the client id.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "description": "The client id.",
+            "type": "string"
+          },
+          "confirm_token": {
+            "description": "The confirm_token from the first call. Leave it out to get the estimate first; nothing starts without it.",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "description": "Optional. The same value on a retry never starts the work twice.",
+            "maxLength": 200,
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id"
+        ],
+        "type": "object"
+      },
+      "name": "socialytics_competitors_identify",
+      "offered_to": {
+        "key_scope": "run",
+        "people": "staff"
+      },
+      "title": "Propose competitors",
+      "uses": [
+        "action:identify_competitors"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Collect the client's competitors' recent posts again (the last 7 days, or days 1 to 30) and detect the topics several of them share, which become competitive alerts. It costs money, charged to the client: call it first without confirm_token to get what it will do, an estimate and a confirm_token, show those to the person, and call it again with the same arguments and the confirm_token only once they agree. Call socialytics_clients_list first to find the client id.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "description": "The client id.",
+            "type": "string"
+          },
+          "confirm_token": {
+            "description": "The confirm_token from the first call. Leave it out to get the estimate first; nothing starts without it.",
+            "type": "string"
+          },
+          "days": {
+            "description": "The window in days (default 7).",
+            "maximum": 30,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "description": "Optional. The same value on a retry never starts the work twice.",
+            "maxLength": 200,
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id"
+        ],
+        "type": "object"
+      },
+      "name": "socialytics_competitor_feed_refresh",
+      "offered_to": {
+        "key_scope": "run",
+        "people": "staff"
+      },
+      "title": "Refresh the competitor feed",
+      "uses": [
+        "action:refresh_competitor_feed"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Plan a week of a client's content calendar, as its Plan next week button does: the week named by its Monday, or the earliest week without a plan, up to four weeks ahead. The posts appear in the calendar when the plan is written. It costs money, charged to the client: call it first without confirm_token to get what it will do, an estimate and a confirm_token, show those to the person, and call it again with the same arguments and the confirm_token only once they agree. Call socialytics_clients_list first to find the client id.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "description": "The client id.",
+            "type": "string"
+          },
+          "confirm_token": {
+            "description": "The confirm_token from the first call. Leave it out to get the estimate first; nothing starts without it.",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "description": "Optional. The same value on a retry never starts the work twice.",
+            "maxLength": 200,
+            "type": "string"
+          },
+          "week": {
+            "description": "The Monday of the week (yyyy-mm-dd).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id"
+        ],
+        "type": "object"
+      },
+      "name": "socialytics_calendar_week_plan",
+      "offered_to": {
+        "key_scope": "run",
+        "people": "staff"
+      },
+      "title": "Plan a calendar week",
+      "uses": [
+        "action:plan_calendar_week"
+      ]
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "What Socialytics' paid AI and data services cost over a period, in USD: the total and rows grouped by provider and client by default (or by day, feature, resource and so on). Default: the last 30 days.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "description": "Only this client's costs.",
+            "type": "string"
+          },
+          "from": {
+            "description": "Start, inclusive (yyyy-mm-dd). Default: 30 days before to.",
+            "type": "string"
+          },
+          "group_by": {
+            "description": "Comma list of day, week, month, client, provider, resource, feature, bucket, env. Default provider,client.",
+            "type": "string"
+          },
+          "to": {
+            "description": "End, exclusive (yyyy-mm-dd). Default: now.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "socialytics_cost_summary",
+      "offered_to": {
+        "key_scope": "costs",
+        "people": "admin"
+      },
+      "title": "Get Socialytics' costs",
+      "uses": [
+        "GET /v1/costs"
+      ]
+    }
+  ],
+  "transport": "streamable-http"
 }

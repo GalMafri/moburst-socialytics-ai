@@ -2,7 +2,7 @@
 // API without a database. The contract test and the docs generator
 // (scripts/api-gen.ts) both build the OpenAPI document from it.
 import { socialyticsOpenApi, socialyticsRoutes } from "../../functions/api/openapi";
-import { emptyData, makeFakeStore } from "../../functions/_shared/socialytics-api/store.fake";
+import { emptyData, makeFakeStore } from "../_shared/socialytics-api/store.fake";
 
 export const PUBLIC_SERVER_URL = "https://rwouwxqggjjacbpbhqsn.supabase.co/functions/v1/api";
 

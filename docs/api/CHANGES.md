@@ -4,4 +4,25 @@
 
 ## 2026-11-23
 
+- GET /v1/admin/keys: response field data[].created_by_email added
+- GET /v1/me/keys: response field data[].company_slugs added
+- POST /v1/admin/keys: response field data.created_by_email added
+- POST /v1/me/keys: response field data.company_slugs added
+- POST /v1/me/keys: request field company_slugs added
+- POST /v1/me/keys: request field expires_at added
+- POST /v1/me/keys: request field scopes added
+
+## 2026-11-23
+
+- Added `POST /v1/clients/{id}/calendar-weeks`
+- Added `POST /v1/clients/{id}/competitive-reports`
+- Added `POST /v1/clients/{id}/competitor-feed`
+- Added `POST /v1/clients/{id}/competitor-proposals`
+- Added `POST /v1/clients/{id}/copy-drafts`
+- Added `POST /v1/clients/{id}/post-designs`
+- Added `POST /v1/clients/{id}/post-drafts`
+- Added `POST /v1/clients/{id}/reports`
+
+## 2026-11-23
+
 - Baseline: the API as documented in REFERENCE.md.

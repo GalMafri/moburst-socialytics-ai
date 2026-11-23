@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { handleRequest, type AuditRow, type CoreDeps } from "./core";
+import { authenticateKey, handleRequest, type AuditRow, type CoreDeps } from "./core";
 import { ApiError } from "./errors";
 import { hashKey } from "./keys";
 import type { Route } from "./router";
@@ -156,5 +156,23 @@ describe("handleRequest", () => {
     expect((await handleRequest(req("POST", "/internal/w", { Authorization: "Bearer svc-k" }, {}), d.deps)).status).toBe(200);
     const none = await deps({ cronSecret: null, serviceKey: null });
     expect((await handleRequest(req("POST", "/internal/w", { "X-Cron-Secret": "" }, {}), none.deps)).status).toBe(401);
+  });
+});
+
+describe("authenticateKey (a key presented outside the API function)", () => {
+  const live = hashKey("adv_live");
+  const row = (minute_count: number, extra: Record<string, unknown> = {}) => ({ id: "k1", name: "k", key_prefix: "adv_live", scopes: ["read", "run", "bogus"], company_slugs: ["acme"], client_ids: null, rate_limit_per_minute: 2, expires_at: null, revoked_at: null, minute_count, ...extra });
+  const deps = (r: unknown) => ({ touchKey: async (h: string) => (h === (await live) ? (r as never) : null), clientsForScope: async () => [{ id: "c-acme", company_slug: "acme" }, { id: "c-other", company_slug: "other" }] });
+
+  it("resolves scopes and client reach the way the API does", async () => {
+    const auth = await authenticateKey("adv_live", deps(row(1)));
+    expect(auth).toMatchObject({ kind: "key", keyId: "k1", scopes: ["read", "run"] });
+    expect(auth.clients.allows("c-acme")).toBe(true);
+    expect(auth.clients.allows("c-other")).toBe(false);
+  });
+  it("refuses an unknown, revoked or over-limit key", async () => {
+    await expect(authenticateKey("adv_nope", deps(row(1)))).rejects.toMatchObject({ status: 401 });
+    await expect(authenticateKey("adv_live", deps(row(1, { revoked_at: "2026-01-01T00:00:00Z" })))).rejects.toMatchObject({ status: 401 });
+    await expect(authenticateKey("adv_live", deps(row(3)))).rejects.toMatchObject({ status: 429 });
   });
 });

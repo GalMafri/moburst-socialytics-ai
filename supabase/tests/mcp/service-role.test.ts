@@ -1,8 +1,11 @@
 // @vitest-environment node
 // Where the connector's service-role client can reach, read from the code
-// itself: index.ts makes it, and hands it to three places only, the minute
-// counter (mcp_rate_touch), the audit row (api_requests) and the saves'
-// writer (writes.ts makeServiceWriter). No other connector module makes a
+// itself: index.ts makes it, and hands it to these places only: the minute
+// counter (mcp_rate_touch), the audit row (api_requests), the saves' writer
+// (writes.ts makeServiceWriter), an API key's lookup and reads (the API's
+// own store and key lookup, trend_themes_in_range, the key's owner for
+// Sprout), and the work tools (the API's public actions, their idempotency
+// keys and the cost ledger, tasks.ts). No other connector module makes a
 // client, reads the service key or writes anything; the writer's one
 // instance goes to the saves and nowhere else. A change that lets any other
 // module reach the service role fails here.
@@ -43,10 +46,15 @@ describe("the connector's service role", () => {
     expect(code("index.ts").match(/SUPABASE_SERVICE_ROLE_KEY/g)).toHaveLength(1);
   });
 
-  it("reaches the minute counter, the audit row and the saves' writer, and nothing else", () => {
+  it("reaches the minute counter, the audit row, the saves' writer, an API key's lookup and reads, and the work tools, and nothing else", () => {
     const index = source("index.ts");
     expect(uses(index, "service")).toEqual([
       "makeServiceWriter(service)",
+      "makeStore(service)",
+      "keyLookupsOver(service)",
+      "workOver(service)",
+      "actingUserOf(service, auth)",
+      'service.rpc("trend_themes_in_range", { p_client: clientId, p_from: from, p_to: to })',
       'service.rpc("mcp_rate_touch", { p_user: userId })',
       'service.from("api_requests").insert(row)',
     ]);

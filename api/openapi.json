@@ -320,6 +320,13 @@
           "created_at": {
             "type": "string"
           },
+          "created_by_email": {
+            "description": "Who made the key (the admin list).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "expires_at": {
             "type": [
               "string",
@@ -434,6 +441,13 @@
           },
           "created_at": {
             "type": "string"
+          },
+          "created_by_email": {
+            "description": "Who made the key (the admin list).",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "expires_at": {
             "type": [
@@ -1291,6 +1305,90 @@
         },
         "type": "object"
       },
+      "CompetitorProposal": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CompetitorProposalObject"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "CompetitorProposalObject": {
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "competitors": {
+            "items": {
+              "properties": {
+                "id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "rationale": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "similarity_score": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "website": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "links": {
+            "properties": {
+              "set": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "rejected": {
+            "description": "Proposals left out because their website could not be checked.",
+            "type": "integer"
+          },
+          "set_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "draft"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "CompetitorSet": {
         "properties": {
           "data": {
@@ -2077,6 +2175,87 @@
         },
         "type": "object"
       },
+      "DesignPostInput": {
+        "properties": {
+          "idempotency_key": {
+            "description": "Optional. A retry with the same key, from the same caller, returns the first answer instead of starting the work again. Kept for 24 hours.",
+            "maxLength": 200,
+            "type": "string"
+          },
+          "note": {
+            "description": "Optional: what every design option should follow.",
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "post_key": {
+            "description": "The calendar post's key.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "post_key"
+        ],
+        "type": "object"
+      },
+      "DesignStarted": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DesignStartedObject"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "DesignStartedObject": {
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "design": {
+            "oneOf": [
+              {
+                "properties": {
+                  "created_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "filmed_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "post_key": {
+            "type": "string"
+          },
+          "status": {
+            "description": "preparing while the options are made; needs_filming when the idea is a real person on camera, which is filmed, never generated.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "DesignSystemList": {
         "properties": {
           "data": {
@@ -2242,6 +2421,112 @@
         },
         "type": "object"
       },
+      "DraftPostInput": {
+        "properties": {
+          "format": {
+            "description": "Optional: Image, Carousel, Video, Reel, or Story (Instagram and Facebook only). Default: the model chooses.",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "description": "Optional. A retry with the same key, from the same caller, returns the first answer instead of starting the work again. Kept for 24 hours.",
+            "maxLength": 200,
+            "type": "string"
+          },
+          "platform": {
+            "description": "Instagram, Facebook, TikTok, LinkedIn, X and so on.",
+            "type": "string"
+          },
+          "topic": {
+            "description": "What the post is about, in a person's words.",
+            "maxLength": 2000,
+            "type": "string"
+          }
+        },
+        "required": [
+          "platform",
+          "topic"
+        ],
+        "type": "object"
+      },
+      "DraftedPost": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DraftedPostObject"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "DraftedPostObject": {
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "post": {
+            "properties": {
+              "concept": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "copy": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "cta": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "format": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hashtags": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "hook": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "pillar": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "platform": {
+                "type": "string"
+              },
+              "visual_direction": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "saved": {
+            "description": "Always false: the draft is returned, not added to the calendar.",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
       "Empty": {
         "properties": {},
         "type": "object"
@@ -2270,6 +2555,71 @@
         ],
         "type": "object"
       },
+      "FeedRefreshed": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FeedRefreshedObject"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "FeedRefreshedObject": {
+        "properties": {
+          "alerts": {
+            "type": "integer"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "linkedin_pending": {
+            "description": "LinkedIn posts are still being collected; they are added by themselves.",
+            "type": "boolean"
+          },
+          "links": {
+            "properties": {
+              "alerts": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "posts": {
+            "type": "integer"
+          },
+          "topics_pending": {
+            "description": "Shared topics are still being detected.",
+            "type": "boolean"
+          },
+          "window": {
+            "oneOf": [
+              {
+                "properties": {
+                  "end": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "start": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
       "Health": {
         "properties": {
           "build": {
@@ -2286,6 +2636,16 @@
             "type": "string"
           },
           "version": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "IdentifyCompetitorsInput": {
+        "properties": {
+          "idempotency_key": {
+            "description": "Optional. A retry with the same key, from the same caller, returns the first answer instead of starting the work again. Kept for 24 hours.",
+            "maxLength": 200,
             "type": "string"
           }
         },
@@ -2417,11 +2777,41 @@
       },
       "PersonalKeyCreate": {
         "properties": {
+          "company_slugs": {
+            "description": "Only these companies' clients. Default: every company the person can see.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "expires_at": {
+            "description": "When the key stops working, at most 90 days ahead. Default: 90 days.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "name": {
             "description": "1 to 80 characters after trimming, with at least one visible character and no line breaks, tabs or other control characters.",
             "maxLength": 80,
             "minLength": 1,
             "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "description": "[\"read\"] (default, read only) or [\"read\", \"run\"] (read and write: start work through the actions).",
+              "enum": [
+                "read",
+                "run"
+              ],
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "required": [
@@ -2442,6 +2832,16 @@
       },
       "PersonalKeyCreatedObject": {
         "properties": {
+          "company_slugs": {
+            "description": "The companies the key is for; null for every company its owner can see.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "created_at": {
             "type": "string"
           },
@@ -2479,7 +2879,8 @@
           "scopes": {
             "items": {
               "enum": [
-                "read"
+                "read",
+                "run"
               ],
               "type": "string"
             },
@@ -2511,6 +2912,16 @@
       },
       "PersonalKeyObject": {
         "properties": {
+          "company_slugs": {
+            "description": "The companies the key is for; null for every company its owner can see.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "created_at": {
             "type": "string"
           },
@@ -2544,7 +2955,8 @@
           "scopes": {
             "items": {
               "enum": [
-                "read"
+                "read",
+                "run"
               ],
               "type": "string"
             },
@@ -2577,6 +2989,21 @@
           "id",
           "revoked_at"
         ],
+        "type": "object"
+      },
+      "PlanWeekInput": {
+        "properties": {
+          "idempotency_key": {
+            "description": "Optional. A retry with the same key, from the same caller, returns the first answer instead of starting the work again. Kept for 24 hours.",
+            "maxLength": 200,
+            "type": "string"
+          },
+          "week": {
+            "description": "Optional: the Monday of the week to plan, up to four weeks ahead. Default: the earliest week without a plan.",
+            "format": "date",
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "Post": {
@@ -2746,6 +3173,22 @@
               "string",
               "null"
             ]
+          }
+        },
+        "type": "object"
+      },
+      "RefreshFeedInput": {
+        "properties": {
+          "days": {
+            "description": "The window in days (default 7).",
+            "maximum": 30,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "description": "Optional. A retry with the same key, from the same caller, returns the first answer instead of starting the work again. Kept for 24 hours.",
+            "maxLength": 200,
+            "type": "string"
           }
         },
         "type": "object"
@@ -3077,6 +3520,190 @@
         },
         "type": "object"
       },
+      "ReportStarted": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ReportStartedObject"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "ReportStartedObject": {
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "social",
+              "competitive"
+            ],
+            "type": "string"
+          },
+          "links": {
+            "properties": {
+              "report": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reports": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "range": {
+            "oneOf": [
+              {
+                "properties": {
+                  "end": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "start": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "report_id": {
+            "description": "The report, once it exists; until then, find it in the links.reports list.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requested_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resumed": {
+            "description": "True when the answer is a run that was already open or running, not a new one.",
+            "type": "boolean"
+          },
+          "status": {
+            "description": "queued: the run is waiting for the worker (it starts within a minute); running: a report for the client was already running.",
+            "enum": [
+              "queued",
+              "running"
+            ],
+            "type": "string"
+          },
+          "waiting_for": {
+            "description": "tracking: a competitive run waits until the confirmed competitors are tracked, then starts by itself.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "RewriteCopyInput": {
+        "properties": {
+          "concept": {
+            "type": "string"
+          },
+          "copy": {
+            "type": "string"
+          },
+          "cta": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "idempotency_key": {
+            "description": "Optional. A retry with the same key, from the same caller, returns the first answer instead of starting the work again. Kept for 24 hours.",
+            "maxLength": 200,
+            "type": "string"
+          },
+          "note": {
+            "description": "Optional: what to change, as a person would say it.",
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "pillar": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "post_key": {
+            "description": "A calendar post's key: its copy, platform, format, pillar and CTA are read from the calendar. Or send the fields below instead.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RewrittenCopy": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/RewrittenCopyObject"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "RewrittenCopyObject": {
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "copy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cta": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hashtags": {
+            "description": "Null when the model gave none (the post keeps its own).",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "post_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "saved": {
+            "description": "Always false: save the copy in the app.",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
       "ScheduleList": {
         "properties": {
           "data": {
@@ -3293,6 +3920,26 @@
         ],
         "type": "object"
       },
+      "StartReportInput": {
+        "properties": {
+          "end": {
+            "description": "Last day of the period (yyyy-mm-dd).",
+            "format": "date",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "description": "Optional. A retry with the same key, from the same caller, returns the first answer instead of starting the work again. Kept for 24 hours.",
+            "maxLength": 200,
+            "type": "string"
+          },
+          "start": {
+            "description": "First day of the period (yyyy-mm-dd). Send with end, or neither for the last 30 days.",
+            "format": "date",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "Status": {
         "properties": {
           "data": {
@@ -3378,6 +4025,58 @@
           }
         },
         "type": "object"
+      },
+      "WeekPlanned": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/WeekPlannedObject"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "WeekPlannedObject": {
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "plan": {
+            "oneOf": [
+              {
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "week_start": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "week": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -3393,7 +4092,7 @@
     }
   },
   "info": {
-    "description": "Everything Socialytics holds for the clients a key may see (clients with their brand, pillars and design, social and competitive reports with their decks, competitor sets, generated posts and media, schedules, scheduled posts, competitive alerts, design systems, Sprout performance, health), plus the ad-hoc demo job that onboards any brand from a name and a website and runs every feature for it, and what Socialytics' paid providers cost per client, service and period (the costs scope). Authenticate with `Authorization: Bearer <key>`. The personal key routes under /v1/me take a Socialytics sign-in session instead, for Moburst staff only. Lists are paginated with `limit` and `cursor`.",
+    "description": "Everything Socialytics holds for the clients a key may see (clients with their brand, pillars and design, social and competitive reports with their decks, competitor sets, generated posts and media, schedules, scheduled posts, competitive alerts, design systems, Sprout performance, health), the actions people start in the app (start a social or competitive report, draft a post, write a post's copy again, start a post's designs, propose competitors, refresh the competitor feed, plan a calendar week; the run scope, with an optional idempotency_key), plus the ad-hoc demo job that onboards any brand from a name and a website and runs every feature for it, and what Socialytics' paid providers cost per client, service and period (the costs scope). Authenticate with `Authorization: Bearer <key>`. The personal key routes under /v1/me take a Socialytics sign-in session instead, for Moburst staff only. Lists are paginated with `limit` and `cursor`.",
     "title": "Socialytics API",
     "version": "1"
   },
@@ -3792,6 +4491,454 @@
           "Clients"
         ],
         "x-scope": "read"
+      }
+    },
+    "/v1/clients/{id}/calendar-weeks": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanWeekInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeekPlanned"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "Plan a week of a client's content calendar (the calendar's Plan next week): the week named, or the earliest unplanned one",
+        "tags": [
+          "Actions"
+        ],
+        "x-scope": "run"
+      }
+    },
+    "/v1/clients/{id}/competitive-reports": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartReportInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportStarted"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "Start a client's competitive report on its confirmed competitors (default the last 30 complete days)",
+        "tags": [
+          "Actions"
+        ],
+        "x-scope": "run"
+      }
+    },
+    "/v1/clients/{id}/competitor-feed": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshFeedInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedRefreshed"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "Collect the client's competitors' recent posts again and detect the topics they share",
+        "tags": [
+          "Actions"
+        ],
+        "x-scope": "run"
+      }
+    },
+    "/v1/clients/{id}/competitor-proposals": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentifyCompetitorsInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompetitorProposal"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "Propose a new draft set of competitors for a client, for the team to review and confirm in the app",
+        "tags": [
+          "Actions"
+        ],
+        "x-scope": "run"
+      }
+    },
+    "/v1/clients/{id}/copy-drafts": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RewriteCopyInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RewrittenCopy"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "Write a calendar post's copy again, optionally following a note; nothing is saved",
+        "tags": [
+          "Actions"
+        ],
+        "x-scope": "run"
+      }
+    },
+    "/v1/clients/{id}/post-designs": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DesignPostInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesignStarted"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "Start the design options for one of a client's calendar posts (the post's Create design)",
+        "tags": [
+          "Actions"
+        ],
+        "x-scope": "run"
+      }
+    },
+    "/v1/clients/{id}/post-drafts": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftPostInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftedPost"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "Draft one post for a client from a topic, in its voice and pillars; nothing is saved",
+        "tags": [
+          "Actions"
+        ],
+        "x-scope": "run"
+      }
+    },
+    "/v1/clients/{id}/reports": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartReportInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportStarted"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "Start a client's social report for a period (default the last 30 days); answers the run already open instead of starting a second",
+        "tags": [
+          "Actions"
+        ],
+        "x-scope": "run"
       }
     },
     "/v1/clients/{id}/setup": {
@@ -4871,7 +6018,7 @@
             "Session": []
           }
         ],
-        "summary": "Make a personal API key, read only for 90 days (the key is returned once; needs your signed-in Socialytics session)",
+        "summary": "Make a personal API key, read only or read and write, for all your companies or some, for up to 90 days (the key is returned once; needs your signed-in Socialytics session)",
         "tags": [
           "Personal keys"
         ]

@@ -28,10 +28,14 @@ describe("admit", () => {
   });
 
   it("takes the highest role a person holds, as the app does", async () => {
-    for (const [roles, role] of [[["client", "admin"], "admin"], [["client", "moburst_user"], "moburst_user"], [["client"], "client"]] as const) {
+    for (const [roles, role] of [[["client", "admin"], "admin"], [["client", "moburst_user"], "moburst_user"]] as const) {
       const out = await admit(OAUTH, reads([...roles], []));
       expect(out.ok && out.person.role).toBe(role);
     }
+  });
+
+  it("refuses a client user: the API and the connector are for Moburst staff only", async () => {
+    expect(await admit(OAUTH, reads(["client"], ["c-bader"]))).toEqual({ ok: false, status: 403, message: "The Socialytics connector is for Moburst staff only." });
   });
 
   it("refuses an app session token: only a sign-in made through Claude carries client_id", async () => {

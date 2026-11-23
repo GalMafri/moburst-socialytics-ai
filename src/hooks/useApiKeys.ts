@@ -23,6 +23,8 @@ export interface ApiKey {
   owner_user_id: string | null;
   /** That person's email, or null for a tool key (or an owner whose account is gone). */
   owner_email: string | null;
+  /** Who made the key. */
+  created_by_email?: string | null;
 }
 
 export interface CreateKeyInput {

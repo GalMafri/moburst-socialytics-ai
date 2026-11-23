@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { CLIENT } from "../../functions/_shared/socialytics-api/fixtures";
+import { CLIENT } from "../_shared/socialytics-api/fixtures";
 import { readRoutes } from "../../functions/_shared/socialytics-api/routes-read";
-import { makeFakeStore, emptyData } from "../../functions/_shared/socialytics-api/store.fake";
+import { makeFakeStore, emptyData } from "../_shared/socialytics-api/store.fake";
 import { handleRequest, type CoreDeps } from "../../functions/_shared/api/core";
 import { hashKey } from "../../functions/_shared/api/keys";
 

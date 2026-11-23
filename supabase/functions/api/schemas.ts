@@ -91,14 +91,68 @@ const DemoJob = obj({
   links: obj({ self: { type: "string" }, client: str }),
 });
 const Discarded = obj({ job_id: { type: "string" }, removed: obj({ client: bool, competitor_sets: { type: "integer" }, reports: { type: "integer" }, competitive_reports: { type: "integer" }, posts: { type: "integer" }, media_jobs: { type: "integer" } }) });
-const ApiKey = obj({ id: { type: "string" }, name: { type: "string" }, key_prefix: { type: "string" }, scopes: arr({ type: "string", enum: [...SCOPES] }), company_slugs: { type: ["array", "null"], items: { type: "string" } }, client_ids: { type: ["array", "null"], items: { type: "string" } }, rate_limit_per_minute: { type: "integer" }, created_at: { type: "string" }, expires_at: str, last_used_at: str, revoked_at: str, note: str, owner_user_id: str, owner_email: str });
+const ApiKey = obj({ id: { type: "string" }, name: { type: "string" }, key_prefix: { type: "string" }, scopes: arr({ type: "string", enum: [...SCOPES] }), company_slugs: { type: ["array", "null"], items: { type: "string" } }, client_ids: { type: ["array", "null"], items: { type: "string" } }, rate_limit_per_minute: { type: "integer" }, created_at: { type: "string" }, expires_at: str, last_used_at: str, revoked_at: str, note: str, owner_user_id: str, owner_email: str, created_by_email: { ...str, description: "Who made the key (the admin list)." } });
 const ApiKeyCreate = obj({ name: { type: "string" }, scopes: arr({ type: "string", enum: [...SCOPES] }), company_slugs: arr({ type: "string" }), client_ids: arr({ type: "string" }), rate_limit_per_minute: { type: "integer" }, expires_at: str, note: str }, ["name", "scopes"]);
 const ApiKeyCreated = obj({ ...(ApiKey.properties as Record<string, unknown>), key: { type: "string", description: "Shown once; store it now." }, warning: { type: "string" } });
-// A person's own key (/v1/me/keys): read only, 90 days, reaching what its owner can see in Socialytics at the time of each call.
-const PersonalKey = obj({ id: { type: "string" }, name: { type: "string" }, key_prefix: { type: "string" }, scopes: arr({ type: "string", enum: ["read"] }), created_at: { type: "string" }, expires_at: str, last_used_at: str, revoked_at: str });
-const PersonalKeyCreate = obj({ name: { type: "string", minLength: 1, maxLength: 80, description: "1 to 80 characters after trimming, with at least one visible character and no line breaks, tabs or other control characters." } }, ["name"]);
+// A person's own key (/v1/me/keys): read only or read and write, for all the companies its owner can see or some, at most 90 days,
+// reaching what its owner can see in Socialytics at the time of each call (narrowed to its companies).
+const PersonalKey = obj({
+  id: { type: "string" }, name: { type: "string" }, key_prefix: { type: "string" }, scopes: arr({ type: "string", enum: ["read", "run"] }),
+  company_slugs: { type: ["array", "null"], items: { type: "string" }, description: "The companies the key is for; null for every company its owner can see." },
+  created_at: { type: "string" }, expires_at: str, last_used_at: str, revoked_at: str,
+});
+const PersonalKeyCreate = obj({
+  name: { type: "string", minLength: 1, maxLength: 80, description: "1 to 80 characters after trimming, with at least one visible character and no line breaks, tabs or other control characters." },
+  scopes: arr({ type: "string", enum: ["read", "run"], description: "[\"read\"] (default, read only) or [\"read\", \"run\"] (read and write: start work through the actions)." }),
+  company_slugs: { type: ["array", "null"], items: { type: "string" }, maxItems: 50, description: "Only these companies' clients. Default: every company the person can see." },
+  expires_at: { type: ["string", "null"], format: "date-time", description: "When the key stops working, at most 90 days ahead. Default: 90 days." },
+}, ["name"]);
 const PersonalKeyCreated = obj({ ...(PersonalKey.properties as Record<string, unknown>), key: { type: "string", description: "Shown once; store it now." } });
 const PersonalKeyRevoked = obj({ id: { type: "string" }, revoked_at: { type: "string" } }, ["id", "revoked_at"]);
+
+// ── Actions (actions.ts): fixed public inputs, whatever the internal functions take today ──
+const idem = { type: "string", maxLength: 200, description: "Optional. A retry with the same key, from the same caller, returns the first answer instead of starting the work again. Kept for 24 hours." };
+const day = (description: string) => ({ type: "string", format: "date", description });
+const StartReportInput = obj({ start: day("First day of the period (yyyy-mm-dd). Send with end, or neither for the last 30 days."), end: day("Last day of the period (yyyy-mm-dd)."), idempotency_key: idem });
+const ReportStarted = obj({
+  client_id: { type: "string" }, kind: { type: "string", enum: ["social", "competitive"] },
+  status: { type: "string", enum: ["queued", "running"], description: "queued: the run is waiting for the worker (it starts within a minute); running: a report for the client was already running." },
+  resumed: { type: "boolean", description: "True when the answer is a run that was already open or running, not a new one." },
+  report_id: { ...str, description: "The report, once it exists; until then, find it in the links.reports list." }, range: { oneOf: [obj({ start: str, end: str }), { type: "null" }] }, requested_at: str,
+  waiting_for: { type: ["string", "null"], description: "tracking: a competitive run waits until the confirmed competitors are tracked, then starts by itself." },
+  links: obj({ reports: { type: "string" }, report: str }),
+});
+const DraftPostInput = obj({
+  platform: { type: "string", description: "Instagram, Facebook, TikTok, LinkedIn, X and so on." }, topic: { type: "string", maxLength: 2000, description: "What the post is about, in a person's words." },
+  format: { type: "string", description: "Optional: Image, Carousel, Video, Reel, or Story (Instagram and Facebook only). Default: the model chooses." }, idempotency_key: idem,
+}, ["platform", "topic"]);
+const DraftedPost = obj({
+  client_id: { type: "string" }, saved: { type: "boolean", description: "Always false: the draft is returned, not added to the calendar." },
+  post: obj({ platform: { type: "string" }, format: str, pillar: str, hook: str, concept: str, visual_direction: str, copy: str, cta: str, hashtags: arr({ type: "string" }) }),
+});
+const RewriteCopyInput = obj({
+  post_key: { type: "string", description: "A calendar post's key: its copy, platform, format, pillar and CTA are read from the calendar. Or send the fields below instead." },
+  copy: { type: "string" }, concept: { type: "string" }, platform: { type: "string" }, format: { type: "string" }, pillar: { type: "string" }, cta: { type: "string" },
+  note: { type: "string", maxLength: 2000, description: "Optional: what to change, as a person would say it." }, idempotency_key: idem,
+});
+const RewrittenCopy = obj({ client_id: { type: "string" }, post_key: str, saved: { type: "boolean", description: "Always false: save the copy in the app." }, copy: str, cta: str, hashtags: { type: ["array", "null"], items: { type: "string" }, description: "Null when the model gave none (the post keeps its own)." } });
+const DesignPostInput = obj({ post_key: { type: "string", description: "The calendar post's key." }, note: { type: "string", maxLength: 2000, description: "Optional: what every design option should follow." }, idempotency_key: idem }, ["post_key"]);
+const DesignStarted = obj({
+  client_id: { type: "string" }, post_key: { type: "string" }, status: { type: "string", description: "preparing while the options are made; needs_filming when the idea is a real person on camera, which is filmed, never generated." },
+  filmed_by: str, design: { oneOf: [obj({ id: { type: "string" }, status: str, created_at: str }), { type: "null" }] },
+});
+const IdentifyCompetitorsInput = obj({ idempotency_key: idem });
+const CompetitorProposal = obj({
+  client_id: { type: "string" }, set_id: str, status: { type: "string", enum: ["draft"] },
+  competitors: arr(obj({ id: str, name: str, website: str, rationale: str, similarity_score: num })), rejected: { type: "integer", description: "Proposals left out because their website could not be checked." }, links: obj({ set: str }),
+});
+const RefreshFeedInput = obj({ days: { type: "integer", minimum: 1, maximum: 30, description: "The window in days (default 7)." }, idempotency_key: idem });
+const FeedRefreshed = obj({
+  client_id: { type: "string" }, window: { oneOf: [obj({ start: str, end: str }), { type: "null" }] }, posts: { type: "integer" }, alerts: { type: "integer" },
+  linkedin_pending: { type: "boolean", description: "LinkedIn posts are still being collected; they are added by themselves." }, topics_pending: { type: "boolean", description: "Shared topics are still being detected." }, links: obj({ alerts: { type: "string" } }),
+});
+const PlanWeekInput = obj({ week: { type: "string", format: "date", description: "Optional: the Monday of the week to plan, up to four weeks ahead. Default: the earliest week without a plan." }, idempotency_key: idem });
+const WeekPlanned = obj({ client_id: { type: "string" }, week: str, plan: { oneOf: [obj({ id: { type: "string" }, week_start: str, status: str }), { type: "null" }] } });
 
 export const SCHEMAS: Record<string, S> = {
   // The cost routes' schemas, shared with every Moburst tool.
@@ -122,4 +176,11 @@ export const SCHEMAS: Record<string, S> = {
   ApiKeyCreate, ApiKeyObject: ApiKey, ApiKeyCreatedObject: ApiKeyCreated, ApiKeyCreated: one("ApiKeyCreatedObject"), ApiKeyList: list("ApiKeyObject"),
   PersonalKeyCreate, PersonalKeyObject: PersonalKey, PersonalKeyList: list("PersonalKeyObject"), PersonalKeyCreatedObject: PersonalKeyCreated, PersonalKeyCreated: one("PersonalKeyCreatedObject"),
   PersonalKeyRevokedObject: PersonalKeyRevoked, PersonalKeyRevoked: one("PersonalKeyRevokedObject"),
+  StartReportInput, ReportStartedObject: ReportStarted, ReportStarted: one("ReportStartedObject"),
+  DraftPostInput, DraftedPostObject: DraftedPost, DraftedPost: one("DraftedPostObject"),
+  RewriteCopyInput, RewrittenCopyObject: RewrittenCopy, RewrittenCopy: one("RewrittenCopyObject"),
+  DesignPostInput, DesignStartedObject: DesignStarted, DesignStarted: one("DesignStartedObject"),
+  IdentifyCompetitorsInput, CompetitorProposalObject: CompetitorProposal, CompetitorProposal: one("CompetitorProposalObject"),
+  RefreshFeedInput, FeedRefreshedObject: FeedRefreshed, FeedRefreshed: one("FeedRefreshedObject"),
+  PlanWeekInput, WeekPlannedObject: WeekPlanned, WeekPlanned: one("WeekPlannedObject"),
 };

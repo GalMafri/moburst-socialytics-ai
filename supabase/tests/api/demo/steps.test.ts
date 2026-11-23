@@ -3,7 +3,7 @@ import { advanceJob, initialSteps, type JobRecord } from "../../../functions/_sh
 import type { CallResult } from "../../../functions/_shared/invoke";
 import type { StepView } from "../../../functions/_shared/lifecycle/run";
 import { cleanSiteText } from "../../../functions/api/demo/site-text";
-import { CLIENT, COMPETITIVE_REPORT, DESIGN_SYSTEM, REPORT, SPROUT_PROFILE } from "../../../functions/_shared/socialytics-api/fixtures";
+import { CLIENT, COMPETITIVE_REPORT, DESIGN_SYSTEM, REPORT, SPROUT_PROFILE } from "../../_shared/socialytics-api/fixtures";
 import { emptyTables, makeFakeDemoDb, type FakeTables } from "../../../functions/api/demo/fake-db";
 import { DEMO_STEPS, refreshOutputs, slugify, type DemoCtx } from "../../../functions/api/demo/steps";
 

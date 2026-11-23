@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import { ThemeProvider } from "next-themes";
 import { StaffOnlyRoute } from "@/components/StaffOnlyRoute";
@@ -35,7 +35,8 @@ import CalendarIndex from "./pages/CalendarIndex";
 import ClientCalendar from "./pages/ClientCalendar";
 import Settings from "./pages/Settings";
 import Usage from "./pages/Usage";
-import ApiKeys from "./pages/ApiKeys";
+import ApiPage from "./pages/ApiPage";
+import ApiReferencePage from "./pages/ApiReferencePage";
 import NotFound from "./pages/NotFound";
 import StrategyIndex from "./pages/StrategyIndex";
 import ClientStrategy from "./pages/ClientStrategy";
@@ -73,7 +74,11 @@ const App = () => (
               {/* Content strategy: staff only, the team's working draft */}
               <Route path="/strategy" element={<StaffOnlyRoute><StrategyIndex /></StaffOnlyRoute>} />
               <Route path="/settings" element={<StaffOnlyRoute><Settings /></StaffOnlyRoute>} />
-              <Route path="/api-keys" element={<StaffOnlyRoute><ApiKeys /></StaffOnlyRoute>} />
+              <Route path="/api-access" element={<StaffOnlyRoute><ApiPage /></StaffOnlyRoute>} />
+              <Route path="/api-access/reference" element={<StaffOnlyRoute><ApiReferencePage /></StaffOnlyRoute>} />
+              {/* The keys page moved to the API page's Tokens tab; /api-docs is the moburst.ai name for the page. */}
+              <Route path="/api-keys" element={<Navigate to="/api-access?tab=tokens" replace />} />
+              <Route path="/api-docs" element={<Navigate to="/api-access" replace />} />
               <Route path="/usage" element={<AdminOnlyRoute><Usage /></AdminOnlyRoute>} />
               {/* Every page of one client. ClientAccessGate shows one calm sentence, with the way back to the
                   dashboard, when this person cannot read the client (another client's address, an id that does

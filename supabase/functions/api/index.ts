@@ -25,6 +25,8 @@ import { buildFindings, loadHealthRows } from "./health.ts";
 import { DEMO_STEPS, makeDemoCtx, refreshOutputs } from "./demo/steps.ts";
 import { discardJob, workerRoute } from "./worker.ts";
 import { costStore } from "../_shared/cost/store.ts";
+import { makeActionRunStore } from "../_shared/socialytics-api/action-runs-store.ts";
+import { makeActionDeps } from "../_shared/socialytics-api/action-deps.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
@@ -66,8 +68,15 @@ const routeDeps: Omit<AllDeps, "sessionToken"> = {
   },
   jobs, kickWorker: async () => { await callFunction("api/internal/worker", { kick: true }, env); }, discard: (job) => discardJob(job, { db, call: (name, body, actAs) => callFunction(name, body, { ...env, actAs }) }),
   capacity: 3, stepNames: DEMO_STEPS.map((s) => s.name), keys, serverUrl, costs: costStore(db), refresh: (job) => refreshOutputs(job, ctx),
+  actions: makeActionDeps(db, env),
+  actionRuns: makeActionRunStore(db),
   extraRoutes: [workerRoute({ jobs, ctx, steps: DEMO_STEPS })],
   verifyStaffSession: sessions.staff,
+  companySlugs: async () => {
+    const { data, error } = await db.from("clients").select("company_slug").not("company_slug", "is", null);
+    if (error) throw new Error(error.message);
+    return [...new Set(((data ?? []) as Array<{ company_slug: string }>).map((r) => r.company_slug))];
+  },
   now: () => new Date(),
 };
 
