@@ -5,7 +5,7 @@
  */
 import { invalid, notFound } from "../_shared/api/errors.ts";
 import { generateKey, hashKey } from "../_shared/api/keys.ts";
-import type { Route } from "../_shared/api/router.ts";
+import { SCOPES, type Route } from "../_shared/api/router.ts";
 
 export interface StoredKey {
   id: string; name: string; key_prefix: string; key_hash: string; scopes: string[]; company_slugs: string[] | null; client_ids: string[] | null;
@@ -29,7 +29,6 @@ export interface KeyStore {
   revokeOwned(id: string, userId: string): Promise<{ id: string; revoked_at: string } | null>;
 }
 
-const SCOPES = ["read", "demo", "admin"];
 const publicKey = (k: StoredKey) => {
   const { key_hash: _h, ...rest } = k;
   return rest;
@@ -44,7 +43,7 @@ export function adminRoutes(deps: { keys: KeyStore; tool: "adv" | "soc" }): Rout
         const name = typeof b.name === "string" ? b.name.trim() : "";
         if (!name) throw invalid("name is required", { field: "name" });
         const scopes = Array.isArray(b.scopes) ? b.scopes.map(String) : [];
-        if (!scopes.length || scopes.some((x) => !SCOPES.includes(x))) throw invalid("scopes must be a non-empty list of read, demo or admin", { field: "scopes" });
+        if (!scopes.length || scopes.some((x) => !(SCOPES as readonly string[]).includes(x))) throw invalid(`scopes must be a non-empty list of ${SCOPES.join(", ")}`, { field: "scopes" });
         const slugs = Array.isArray(b.company_slugs) ? b.company_slugs.map(String).map((x) => x.trim()).filter(Boolean) : [];
         const clientIds = Array.isArray(b.client_ids) ? b.client_ids.map(String).filter(Boolean) : [];
         const rate = b.rate_limit_per_minute == null ? 120 : Number(b.rate_limit_per_minute);

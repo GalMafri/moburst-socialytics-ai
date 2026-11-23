@@ -15,6 +15,7 @@
 // good size.
 
 import { anthropicMessages, type AnthropicResult } from "../anthropic.ts";
+import { costCtx, hasKey } from "../paid/index.ts";
 import type { JobOutcome, ScheduledJob } from "../scheduled-jobs/types.ts";
 import {
   EXTRACT_TOOL, GUIDE_URL, MIN_GUIDE_CHARS,
@@ -251,16 +252,17 @@ export async function platformSizesDryRun(db: Db, deps: SizeDeps): Promise<SizeR
 }
 
 /** The live services: a plain GET of the guide, and the planning model through anthropicMessages. */
-export function liveSizeDeps(env: (name: string) => string | undefined): SizeDeps {
+export function liveSizeDeps(_env: (name: string) => string | undefined): SizeDeps {
   return {
     fetchGuide: async (url) => {
       const res = await fetch(url, { headers: { Accept: "text/html", "User-Agent": "Mozilla/5.0 (compatible; image-size-reader/1.0)" }, redirect: "follow", signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
       return { status: res.status, html: await res.text() };
     },
     extract: async (prompt) => {
-      const apiKey = env("ANTHROPIC_API_KEY");
-      if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
-      return extractAnswer(await anthropicMessages({ apiKey, body: extractRequest(prompt), signal: AbortSignal.timeout(MODEL_TIMEOUT_MS) }));
+      if (!(await hasKey("anthropic"))) throw new Error("ANTHROPIC_API_KEY is not set.");
+      // The size table is the same for every client: a shared cost.
+      const cost = costCtx({ clientId: null, feature: "platform_sizes.refresh", actor: "schedule" });
+      return extractAnswer(await anthropicMessages({ cost, body: extractRequest(prompt), signal: AbortSignal.timeout(MODEL_TIMEOUT_MS) }));
     },
   };
 }

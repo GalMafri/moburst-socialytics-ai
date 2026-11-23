@@ -1,6 +1,7 @@
 import { createClient } from "../_shared/supabase.ts";
 import { staffGate } from "../_shared/auth/requireStaff.ts";
 import { BRAND_BOOK_MAX_BYTES, BRAND_BOOK_TYPES } from "../_shared/brand/brandBookLimits.ts";
+import { costCtx, hasKey, paid } from "../_shared/paid/index.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -25,7 +26,9 @@ Deno.serve(async (req) => {
   if (denied) return denied;
 
   try {
-    const { file_path, bucket, client_name } = await req.json();
+    const { file_path, bucket, client_name, client_id } = await req.json();
+    // The client the brand book belongs to, when the page says (a new client has none yet): the model call is charged to it.
+    const clientId: string | null = typeof client_id === "string" && client_id ? client_id : null;
 
     if (!file_path || !bucket) {
       return new Response(JSON.stringify({ error: "file_path and bucket are required" }), {
@@ -60,17 +63,7 @@ Deno.serve(async (req) => {
       ? { type: "file", file: { filename: String(file_path).split("/").pop() || "brand-book.pdf", file_data: dataUrl } }
       : { type: "image_url", image_url: { url: dataUrl, detail: "high" } };
 
-    let openaiKey = Deno.env.get("OPENAI_API_KEY");
-    if (!openaiKey) {
-      const { data: settings } = await supabase
-        .from("app_settings")
-        .select("value")
-        .eq("key", "openai_api_key")
-        .single();
-      openaiKey = settings?.value;
-    }
-
-    if (!openaiKey) {
+    if (!(await hasKey("openai"))) {
       throw new Error("OpenAI API key not configured");
     }
 
@@ -106,10 +99,9 @@ MANDATORY RULES:
       },
     ];
 
-    const openaiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+    const openaiResponse = await paid.fetch(costCtx({ clientId, feature: "brand.extract_file", actor: "user" }), "openai", "/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${openaiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({

@@ -8,18 +8,15 @@
 import { listOwnedPostRows, MAX_POST_PAGES } from "../sprout/posts.ts";
 import { listFollowerLocations } from "../sprout/audience.ts";
 import { listCustomerProfiles } from "../sprout/profiles.ts";
-import { apifyClient, APIFY_TOKEN_ENV } from "../apify/client.ts";
+import { apifyClient } from "../apify/client.ts";
 import { readInstagramBio } from "../apify/instagramProfile.ts";
 import { readLinkedInPage } from "../apify/linkedinPage.ts";
-import { openaiKeyFor, readSocialBrand } from "../brand/research.ts";
+import { readSocialBrand } from "../brand/research.ts";
+import { hasKey } from "../paid/index.ts";
 import { isPubliclyFetchable } from "../net/safeUrl.ts";
 import type { SocialIO } from "./socialRead.ts";
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-
-function env(k: string): string | undefined {
-  return (globalThis as { Deno?: { env: { get(k: string): string | undefined } } }).Deno?.env.get(k);
-}
 
 /** A picture's bytes, read directly with a time limit and a size limit, from a public address only. */
 async function image(url: string): Promise<Uint8Array | null> {
@@ -41,9 +38,9 @@ export function liveSocialIO(): SocialIO {
     followers: (ids, since, until, customer) => listFollowerLocations(ids, { since, until, customerId: customer }),
     customerProfiles: (customer) => listCustomerProfiles(customer),
     image,
-    instagram: (handle, runId) => readInstagramBio(apifyClient({ token: env(APIFY_TOKEN_ENV) }), handle, { runId, waitSecs: 60 }),
-    linkedinPage: (url, runId) => readLinkedInPage(apifyClient({ token: env(APIFY_TOKEN_ENV) }), url, { runId, waitSecs: 60 }),
-    openaiKey: (db) => openaiKeyFor(db),
+    instagram: (cost, handle, runId) => readInstagramBio(apifyClient({ cost }), handle, { runId, waitSecs: 60 }),
+    linkedinPage: (cost, url, runId) => readLinkedInPage(apifyClient({ cost }), url, { runId, waitSecs: 60 }),
+    openaiReady: () => hasKey("openai"),
     brandRead: (input) => readSocialBrand(input),
   };
 }

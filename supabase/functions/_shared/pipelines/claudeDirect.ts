@@ -24,6 +24,7 @@
 
 import type { PayloadStore } from "./types.ts";
 import { anthropicFetch } from "../anthropic.ts";
+import type { CostContext } from "../cost/context.ts";
 
 /** The edge function that makes a direct call. */
 export const CLAUDE_DIRECT_FUNCTION = "claude-direct";
@@ -39,21 +40,20 @@ export interface ClaudeUsage { input_tokens: number; output_tokens: number }
 export interface DirectAnswer { text: string; stop_reason: string; seconds: number; start: number; usage?: ClaudeUsage }
 export interface DirectFailure { message: string; seconds: number; start: number }
 
-type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
-
 /**
  * One Messages API call, streamed so the connection carries data the whole
  * time it runs. Returns every text block joined, as answerText does for a
  * whole message (thinking is left out), and the stop reason. A stream that
  * ends without one, or that carries an error, throws.
  */
-export async function claudeStream(a: { apiKey: string; body: Record<string, unknown>; signal: AbortSignal; fetchImpl?: Fetch }): Promise<{ text: string; stopReason: string; usage: ClaudeUsage }> {
-  const r = await anthropicFetch("/v1/messages", {
+export async function claudeStream(a: { cost: CostContext; body: Record<string, unknown>; signal: AbortSignal }): Promise<{ text: string; stopReason: string; usage: ClaudeUsage }> {
+  // The desk reads the stream's usage from its own copy as the stream ends.
+  const r = await anthropicFetch(a.cost, "/v1/messages", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": a.apiKey, "anthropic-version": "2023-06-01" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...a.body, stream: true }),
     signal: a.signal,
-  }, a.fetchImpl);
+  });
   if (!r.ok || !r.body) throw new Error(`Claude did not take the request [${r.status}]: ${(await r.text().catch(() => "")).slice(0, 200)}`);
   const texts = new Map<number, string>();
   let stopReason = "";
@@ -99,15 +99,15 @@ export async function claudeStream(a: { apiKey: string; body: Record<string, unk
  * it can run as a background task with nobody waiting for it.
  */
 export async function runClaudeDirect(store: PayloadStore, a: {
-  apiKey: string; body: Record<string, unknown>; saveAs: string; start: number; keepDays?: number;
-  fetchImpl?: Fetch; now?: () => number; deadlineMs?: number;
+  cost: CostContext; body: Record<string, unknown>; saveAs: string; start: number; keepDays?: number;
+  now?: () => number; deadlineMs?: number;
 }): Promise<void> {
   const now = a.now ?? Date.now;
   const t0 = now();
   const seconds = () => Math.round((now() - t0) / 1000);
   const keep = a.keepDays ? { keepDays: a.keepDays } : undefined;
   try {
-    const r = await claudeStream({ apiKey: a.apiKey, body: a.body, signal: AbortSignal.timeout(a.deadlineMs ?? CLAUDE_DIRECT_DEADLINE_MS), fetchImpl: a.fetchImpl });
+    const r = await claudeStream({ cost: a.cost, body: a.body, signal: AbortSignal.timeout(a.deadlineMs ?? CLAUDE_DIRECT_DEADLINE_MS) });
     const answer: DirectAnswer = { text: r.text, stop_reason: r.stopReason, seconds: seconds(), start: a.start, usage: r.usage };
     await store.put(directKey(a.saveAs), answer, keep);
   } catch (e) {

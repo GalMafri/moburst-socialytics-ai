@@ -3,7 +3,8 @@
 // quietly like a missing token does, so no try is spent and no run is marked
 // failed; the step looks again once the account answers.
 import { describe, expect, it } from "vitest";
-import { apifyClient, ApifyError, ApifyTokenRefused, type ApifyClient } from "../../../functions/_shared/apify/client";
+import { apifyClient, ApifyError, ApifyTokenMissing, ApifyTokenRefused, type ApifyClient } from "../../../functions/_shared/apify/client";
+import { TEST_COST, useTestMeter } from "../../paid/testMeter";
 import { runActorStep, TOKEN_WAIT_SECONDS } from "../../../functions/_shared/pipelines/apifyStep";
 import type { StepContext } from "../../../functions/_shared/pipelines/types";
 
@@ -15,7 +16,7 @@ function ctx(over: Partial<StepContext> = {}): StepContext {
     ...over,
   } as unknown as StepContext;
 }
-const request = (apify: () => ApifyClient) => ({ actor: { id: "a", name: "A" }, input: {}, datasetKey: "k", apify });
+const request = (apify: () => ApifyClient) => ({ actor: { id: "a", name: "A" }, input: {}, datasetKey: "k", apify, feature: "trends.scrape_test" });
 const refusing = (status: number): ApifyClient => ({
   async startRun() { throw new ApifyTokenRefused(`Apify POST /acts/a/runs answered ${status}`, status); },
   async getRun() { throw new ApifyTokenRefused(`Apify GET /actor-runs/r answered ${status}`, status); },
@@ -53,8 +54,8 @@ describe("runActorStep with a refused token", () => {
 
   it("keeps a started run when the token itself has gone missing", async () => {
     const step = await runActorStep(
-      ctx({ poll: { handle: { apify_run_id: "r1" }, polls: 1, since: "x" } as never, env: () => undefined }),
-      request(() => refusing(401)),
+      ctx({ poll: { handle: { apify_run_id: "r1" }, polls: 1, since: "x" } as never }),
+      request(() => ({ ...refusing(401), async getRun() { throw new ApifyTokenMissing(); } })),
     );
     if (step.type !== "wait" || step.result.type !== "poll") throw new Error("expected a poll");
     expect(step.result.handle).toMatchObject({ apify_run_id: "r1" });
@@ -68,7 +69,7 @@ describe("runActorStep with a refused token", () => {
 
 describe("apifyClient answers", () => {
   const answer = (status: number, type?: string) =>
-    apifyClient({ token: "tok", retries: 0, fetchImpl: async () => new Response(type ? JSON.stringify({ error: { type, message: "no" } }) : "no", { status }) });
+    (useTestMeter(async () => new Response(type ? JSON.stringify({ error: { type, message: "no" } }) : "no", { status })), apifyClient({ cost: TEST_COST, retries: 0 }));
   it("names a refused token apart from other errors, and never retries it", async () => {
     await expect(answer(401).startRun("a", {}, {})).rejects.toBeInstanceOf(ApifyTokenRefused);
     await expect(answer(402, "not-enough-usage-to-run-paid-actor").startRun("a", {}, {})).rejects.toBeInstanceOf(ApifyTokenRefused);

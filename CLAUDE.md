@@ -1,0 +1,60 @@
+# Socialytics: rules for working in this repo
+
+Read `.agents/qa-project-context.md` for the stack, test commands, data model and release rules. This file adds the rules that keep cost tracking and the public API correct as the product changes. Tests enforce every rule below; when one fails, its message names the file, the line and what to do.
+
+## How Socialytics is built and deployed (do not ask the owner to explain this)
+
+- Socialytics is a Lovable project ("Socialytics AI", id `9444db2d-9d44-473f-b34f-26767e1c6c0c`). The backend is Lovable Cloud: Supabase project `rwouwxqggjjacbpbhqsn`, managed by Lovable, not reachable with a personal Supabase connector.
+- Code lives in GitHub `GalMafri/moburst-socialytics-ai`. Merging or pushing to `main` syncs into Lovable within a minute and deploys the website through GitHub Actions.
+- Edge functions and database migrations go live through Lovable: ask the project's Lovable agent (the Lovable connector's `send_message`) to apply the new migrations and deploy the named functions. Read production data with the connector's `query_database`.
+- GitHub access: the owner's token is in the macOS Keychain and `gh` is signed in. Open, merge and follow pull requests yourself.
+
+## Paid calls and cost tracking
+
+Every call to a paid provider (Claude, OpenAI, Gemini, Apify, Gamma, Firecrawl, Higgsfield, Jina) goes through the paying desk:
+
+```ts
+import { costCtx, hasKey, paid } from "../_shared/paid/index.ts";
+
+const ctx = costCtx({ clientId, feature: "calendar.week_copy", actor: "schedule", executionId: job.id });
+const res = await paid.fetch(ctx, "anthropic", "/v1/messages", { method: "POST", body: JSON.stringify(body) });
+```
+
+- Claude calls go through `_shared/anthropic.ts` (`anthropicMessages`, `anthropicFetch`, the batch and stream helpers in `_shared/pipelines/`), which take the same cost context and use the paying desk underneath.
+- `paid.fetch` adds the provider's credentials, records what the call cost in `cost_events`, and returns the provider's answer untouched. Never `fetch` a provider URL yourself and never read a provider key (`Deno.env.get("ANTHROPIC_API_KEY")`, the `app_settings` key rows, and the like). Use `await hasKey(provider)` to check whether a key is set. Keys come from the function secrets first, then `app_settings`, as before.
+- `clientId` is the client the work is for, whoever started it and whether or not the client pays. Take it from the request body, the job or run row, or the record being processed. Pass `null` only for a feature listed in `SHARED_FEATURES` (`_shared/paid/config.ts`), which is work that serves every client at once. Work with no client that is not shared is recorded under development & QA and flagged unattributed.
+- `feature` is a stable lowercase label for the work (`post.image`, `report.social.brief`). Keep it when you refactor; the costs page groups by it.
+- `executionId` is the id the gOS usage events use for the same unit of work (see `supabase/migrations/20260820180000_gos_usage_contract.sql`; in pipelines, the run id).
+- QA and smoke scripts pass `qa: true`, so their spend is dev/QA.
+- A test client is marked with `clients.exclude_from_reporting = true` (the same flag the gOS usage contract uses); its spend, past and future, then reports under development & QA.
+
+### Adding a paid provider
+1. Add it to `PROVIDERS` in `supabase/functions/_shared/cost/registry.ts` (base URL, hosts, key names) and a usage reader in `usage.ts`. These files are the shared core: make the change in the AdVisor repo and sync it here with its `scripts/sync-api-core.sh`. Never edit them in this repo.
+2. Add its credentials to `authHeaders` in `_shared/paid/index.ts`.
+3. Add a price row to `_shared/cost/pricing.ts`, with the source URL.
+
+### Changing or adding a price
+Add a new row to `_shared/cost/pricing.ts` with a new `effectiveFrom` date. Never edit or delete a row that was used: recorded events keep the price they were charged at. Mark `verified: false` when the figure is an estimate or depends on Moburst's plan.
+
+### What the cost guardrails check (`supabase/tests/paid/cost-guard.test.ts`)
+- No provider address appears outside `_shared/cost` and `_shared/paid`. A line that only names a provider (a URL check) can say so with `// cost-guard: not a call`.
+- Every secret the code reads is either a paid provider's key in the registry or listed in `NOT_PAID_SECRETS` with a reason. A new secret fails until you decide which it is.
+- Paid keys are read only inside `_shared/paid`.
+- Every AI model id in the code has a price row. Switching models fails until the new one is priced.
+- `clientId: null` appears only for shared features.
+
+## The public API (`supabase/functions/api`)
+
+- The route table is the only description of the API. `docs/api/REFERENCE.md`, `api/openapi.json` and `docs/api/CHANGES.md` are generated from it. Never edit them by hand.
+- After changing a route, a schema (`supabase/functions/api/schemas.ts`) or anything in the API function, run `npm run api:gen` and commit what it writes. The api-docs test fails until you do.
+- Changes are additive by default: add routes, optional parameters and response fields freely. Removing or renaming a route, a query parameter or a response field, making a request field required, or dropping an accepted value breaks the portal, demo screens and agents that use the API. `npm run api:gen` refuses such a change until each line is listed in `api/BREAKING.md` with the date and what replaces it. Prefer keeping the old shape working alongside the new one.
+- Key scopes: `read`, `demo`, `run`, `costs`, `admin` (`SCOPES` in `_shared/api/router.ts`).
+- The cost routes (`GET /v1/costs`, `/v1/cost-events`, `/v1/cost-pricing`) come from the shared core and must stay identical in AdVisor and Socialytics.
+
+## Shared cores
+
+`supabase/functions/_shared/api` and `supabase/functions/_shared/cost` are written in the AdVisor repo and copied here verbatim by AdVisor's `scripts/sync-api-core.sh`. Never edit them in this repo: change them in AdVisor, run their tests there, then sync. The script refuses to overwrite a copy that was edited in place. The `core-peer` check in CI fails when the two repos' copies differ.
+
+## Before you push
+
+`npx vitest run` covers the guardrails above. If you changed the API, `npm run api:gen` first.

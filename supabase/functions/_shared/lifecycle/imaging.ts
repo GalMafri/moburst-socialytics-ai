@@ -10,6 +10,7 @@ import { Image } from "https://deno.land/x/imagescript@1.3.0/mod.ts";
 import { svgToPng } from "../render/resvg.ts";
 import { cutLogo } from "../design-system/logoAsset.ts";
 import { anthropicMessages } from "../anthropic.ts";
+import type { CostContext } from "../cost/context.ts";
 import { answerText, replySample, roomFor } from "../anthropicReply.ts";
 import { imageSize } from "../design/logoPick.ts";
 import { generatedMediaPath, inkColor, logoNormalization, logoSpotPrompt, parseLogoSpot, pngSize, type LogoSpot } from "./designSettings.ts";
@@ -219,7 +220,7 @@ function base64(bytes: Uint8Array): string {
  * 18 Nov 2026 such a reply was stored as "no place found", and the client's
  * logo stayed at the default place for good).
  */
-export async function readLogoSpot(db: Db, brand: string, referencePaths: string[], apiKey: string): Promise<LogoSpot | null> {
+export async function readLogoSpot(db: Db, brand: string, referencePaths: string[], cost: CostContext): Promise<LogoSpot | null> {
   // deno-lint-ignore no-explicit-any
   const content: any[] = [];
   for (const path of referencePaths.slice(0, SPOT_POSTS)) {
@@ -236,7 +237,7 @@ export async function readLogoSpot(db: Db, brand: string, referencePaths: string
   }
   if (!content.length) return null;
   content.push({ type: "text", text: logoSpotPrompt(brand, content.length) });
-  const result = await anthropicMessages({ apiKey, body: { model: SPOT_MODEL, max_tokens: roomFor(SPOT_ANSWER_TOKENS), messages: [{ role: "user", content }] }, waitMs: SPOT_WAIT_MS });
+  const result = await anthropicMessages({ cost, body: { model: SPOT_MODEL, max_tokens: roomFor(SPOT_ANSWER_TOKENS), messages: [{ role: "user", content }] }, waitMs: SPOT_WAIT_MS });
   const spot = parseLogoSpot(answerText(result));
   if (!spot) throw new Error(`The logo's place on the client's posts could not be read: ${replySample(result)}`);
   return spot;

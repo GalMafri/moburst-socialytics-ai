@@ -8,7 +8,7 @@ const client = { id: "c1", name: "Acme", website_url: null, field_sources: {}, t
 const io: SocialIO = {
   now: () => new Date("2026-11-15T10:00:00.000Z"), posts: async () => [], followers: async () => [], customerProfiles: async () => [], image: async () => null,
   instagram: async () => { throw new Error("Apify token refused"); },
-  linkedinPage: async () => { throw new Error("no page"); }, openaiKey: async () => null, brandRead: async () => { throw new Error("not asked"); },
+  linkedinPage: async () => { throw new Error("no page"); }, openaiReady: async () => false, brandRead: async () => { throw new Error("not asked"); },
 };
 
 describe("social_read's Instagram bio for a changed account", () => {

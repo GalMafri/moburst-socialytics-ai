@@ -90,7 +90,6 @@ import { TREND_PLATFORMS, UNCOUNTED_PLATFORMS, type DropReason, type KeptPost, t
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
-type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
 export const TRENDS_PIPELINE = "trends_v1";
 /** A source run that fails this many times is marked failed, and the week goes on. */
@@ -102,8 +101,6 @@ const KEEP = { keepDays: SOURCE_KEEP_DAYS };
 
 export interface TrendsDeps {
   apify?: ApifyFactory;
-  /** For the Message Batches API calls. */
-  claudeFetch?: Fetch;
 }
 
 type PlatformStatus = "ok" | "empty" | "failed" | "not_watched" | "no_searches";
@@ -445,7 +442,7 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
           prog.stalled = true;
           throw new Error(`The ${platform} source did not finish in ${SCRAPE_TRIES} tries.`);
         }
-        const actor = await runActorStep(ctx, { actor: TREND_SOURCES[platform].actor, input: run.input, datasetKey: key, keepDays: SOURCE_KEEP_DAYS, apify: deps.apify });
+        const actor = await runActorStep(ctx, { actor: TREND_SOURCES[platform].actor, input: run.input, datasetKey: key, keepDays: SOURCE_KEEP_DAYS, apify: deps.apify, feature: `trends.scrape_${platform}` });
         if (actor.type === "wait") return actor.result;
         // A run that took every search and brought back nothing at all may have
         // been turned away (20 Oct 2026, TikTok); it gets one more run before
@@ -518,7 +515,6 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
       ...(answered.length ? { status: await statusWithout(ctx, answered), finished_at: ctx.now().toISOString() } : {}),
     });
   };
-  const apiKey = (ctx: StepContext) => String(ctx.env(ANTHROPIC_API_KEY) ?? "");
 
   /** The second ask carries the first answer and its problems, so Claude fixes what was wrong. */
   const repaired = async (ctx: StepContext, body: Record<string, unknown>, first: string): Promise<Record<string, unknown>> => {
@@ -555,18 +551,18 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
     async build(ctx) {
       const [plan, candidates] = await Promise.all([need<Plan>(ctx, "plan"), candidatesOf(ctx)]);
       const body = filterRequest(plan.profile, plan.exclusions, candidates);
-      return { apiKey: apiKey(ctx), body: again ? await repaired(ctx, body, "answer.filter") : body };
+      return { body: again ? await repaired(ctx, body, "answer.filter") : body };
     },
-    saveAs, keepDays: KEEP.keepDays, next: "read_filter", fetchImpl: deps.claudeFetch,
+    feature: "trends.filter", saveAs, keepDays: KEEP.keepDays, next: "read_filter",
   }), filterGiveUp);
 
   const themesStep = (saveAs: string, again: boolean) => orGiveUp(claudeBatchStep({
     async build(ctx) {
       const [plan, kept, dismissed] = await Promise.all([need<Plan>(ctx, "plan"), need<KeptPost[]>(ctx, "kept"), dismissedTitles(ctx)]);
       const body = themesRequest(plan.profile, kept, dismissed);
-      return { apiKey: apiKey(ctx), body: again ? await repaired(ctx, body, "answer.themes") : body };
+      return { body: again ? await repaired(ctx, body, "answer.themes") : body };
     },
-    saveAs, keepDays: KEEP.keepDays, next: "read_themes", fetchImpl: deps.claudeFetch,
+    feature: "trends.themes", saveAs, keepDays: KEEP.keepDays, next: "read_themes",
   }), themesGiveUp);
 
   const order = TREND_PLATFORMS.map((p) => `scrape_${p}`);
@@ -591,9 +587,9 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
         const short = plan.short?.[platform];
         if (!short) throw new Error(`The plan has no shortfall for ${platform}.`);
         const body = rewriteRequest(rewriteProfile(plan), platform, short.last, short.kept, { keep: short.person, avoid: short.removed });
-        return { apiKey: apiKey(ctx), body: again ? await repaired(ctx, body, rewriteKey(platform, false)) : body };
+        return { body: again ? await repaired(ctx, body, rewriteKey(platform, false)) : body };
       },
-      saveAs: rewriteKey(platform, again), keepDays: KEEP.keepDays, next: "read_rewrite", fetchImpl: deps.claudeFetch,
+      feature: "trends.rewrite_searches", saveAs: rewriteKey(platform, again), keepDays: KEEP.keepDays, next: "read_rewrite",
     }), rewriteGiveUp)(ctx);
   };
   const scrapeSteps = Object.fromEntries(TREND_PLATFORMS.map((p) => [scrapeStepOf(p), scrapeStep(p)]));

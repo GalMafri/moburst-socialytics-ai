@@ -26,6 +26,7 @@ import {
 } from "../../functions/run-scheduled-jobs/trends";
 import type { ScheduledJob } from "../../functions/_shared/scheduled-jobs/types";
 import { trendWeekOf } from "../../../src/lib/display";
+import { viaTestMeter } from "../paid/testMeter";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -131,7 +132,7 @@ function world(o: { failFilter?: boolean } = {}) {
   const requests: Any[] = [];
   const filter = { failFilter: !!o.failFilter };
   const claudeFetch = (url: string, init?: RequestInit) => claude(requests, filter)(url, init);
-  const registry = makeRegistry([trendsPipeline({ apify: apify(sources), claudeFetch })], () => true);
+  const registry = makeRegistry([trendsPipeline({ apify: apify(sources), ...viaTestMeter(claudeFetch) })], () => true);
   const drive = (runId: string) => drivePipeline(db, registry, runId, { clock, env: ENV });
   const week = () => db.tables.trend_weeks[0];
   const posts = () => (db.tables.trend_posts ?? []).filter((p) => p.week_id === week().id);

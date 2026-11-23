@@ -1,9 +1,13 @@
+import type {CostContext} from '../cost/context.ts';
 import {higgsfieldMcp} from './oauth.ts';
 import {HiggsfieldError,IMAGE_MODEL,creditBalance,importReferences,submitImage} from './generate.ts';
 
-/** Submission only: the image queue must not consume the edge request window. */
-export async function startImageWithHiggsfield(db:any,prompt:string,aspect:string,referenceUrls:string[],opts:{minReferences?:number;model?:string;extra?:Record<string,unknown>}={}) {
-  const mcp=await higgsfieldMcp(db);
+/**
+ * Submission only: the image queue must not consume the edge request window. `cost` is who the image is for;
+ * the generation is recorded when it is seen completed (renderVideo.ts, checkVideoJob).
+ */
+export async function startImageWithHiggsfield(db:any,cost:CostContext,prompt:string,aspect:string,referenceUrls:string[],opts:{minReferences?:number;model?:string;extra?:Record<string,unknown>}={}) {
+  const mcp=await higgsfieldMcp(db,cost);
   const balance=await creditBalance(mcp);
   if(balance&&balance.credits<20) throw new HiggsfieldError('The Higgsfield account needs more credits before starting another design.');
   const referenceIds=await importReferences(mcp,referenceUrls,'image');
@@ -16,6 +20,6 @@ export async function startImageWithHiggsfield(db:any,prompt:string,aspect:strin
 
 /** The design edit: one of the client's own posts is the source of structure and components; GPT Image 2.5 edits it. */
 export const DESIGN_EDIT_MODEL='gpt_image_2_5';
-export function startDesignEdit(db:any,prompt:string,aspect:string,sourceUrl:string) {
-  return startImageWithHiggsfield(db,prompt,aspect,[sourceUrl],{minReferences:1,model:DESIGN_EDIT_MODEL,extra:{quality:'high'}});
+export function startDesignEdit(db:any,cost:CostContext,prompt:string,aspect:string,sourceUrl:string) {
+  return startImageWithHiggsfield(db,cost,prompt,aspect,[sourceUrl],{minReferences:1,model:DESIGN_EDIT_MODEL,extra:{quality:'high'}});
 }

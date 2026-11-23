@@ -41,8 +41,8 @@ import { listCustomerGroups, listCustomerProfiles } from "../sprout/profiles.ts"
 import { networkKey } from "../sprout/publishRules.ts";
 import { listBrandPosts, MAX_POST_PAGES, POSTS_YEAR_DAYS } from "../sprout/posts.ts";
 import { searchWebsite, searchWebsiteByName, statedWebsite, webReader } from "../sprout/website.ts";
-import { fetchSiteHtml, LOGO_MARKS_RULE, logoFilesOnPage, logoOnPage, normalizeWebsite, openaiKeyFor, ownMarksOnPage, ResearchError, researchBrand, standaloneSvg, type PageMark } from "../brand/research.ts";
-import { anthropicKey, briefFromStrategyDoc, derivePillars, isGenericPillars, pageEvidence, PillarsError, type PillarClient, type PillarPost } from "../brand/pillars.ts";
+import { fetchSiteHtml, LOGO_MARKS_RULE, logoFilesOnPage, logoOnPage, normalizeWebsite, ownMarksOnPage, ResearchError, researchBrand, standaloneSvg, type PageMark } from "../brand/research.ts";
+import { briefFromStrategyDoc, derivePillars, isGenericPillars, pageEvidence, PillarsError, type PillarClient, type PillarPost } from "../brand/pillars.ts";
 import { fetchSiteText, identifyCompetitors, IdentifyError } from "../competitive/identify.ts";
 import { detectCompetitorHandles } from "../competitive/detectHandles.ts";
 import { confirmDraftSet } from "../competitive/confirmSet.ts";
@@ -74,7 +74,7 @@ import { HASHTAG_PLATFORMS } from "../trends/types.ts";
 import { liveStrategyIO, readPending, savePending, saveStrategy, startStrategy, strategyEvidence, strategyPhase, type StrategyIO } from "../strategy/write.ts";
 import { advancePublicRead, POLL_MINUTES } from "../strategy/publicRead.ts";
 import { desiredProfiles, profileInputs, profilesKey, syncProfiles } from "../strategy/profiles.ts";
-import { apifyClient, APIFY_TOKEN_ENV } from "../apify/client.ts";
+import { apifyClient } from "../apify/client.ts";
 import { LONG_RETRY_MINUTES, type StepOutcome, type StepPolicy, type StepRow } from "./policy.ts";
 import { NotInStorage, PictureError } from "../picture/client.ts";
 import type { LogoSetResult, PostLogo } from "../picture/contract.ts";
@@ -83,6 +83,8 @@ import { askLogoSet, liveIo, readingOf, readNextPosts, type PictureIo, type Read
 import { chooseLogo, eitherRead, LOGO_PICK_RULE, measuredPlacement, postsCarrying, type FoundAt } from "../design/logoPick.ts";
 import type { LogoFile } from "./imaging.ts";
 import { clipText } from "../text/clip.ts";
+import type { Actor, CostContext } from "../cost/context.ts";
+import { costCtx, hasKey } from "../paid/index.ts";
 import { listedNames, NAME_TAGLINE, plainDisplayName, plainNames, storedNames, type ListedName } from "../text/displayName.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -103,7 +105,16 @@ export const CLIENT_COLUMNS = [
 /** The most other logo files kept from a client's website (brand_read), and so the most the picture service is sent for one logo set. */
 export const MAX_SITE_LOGOS = 6;
 
+/** Who ran a step, for the cost of its paid calls: the schedule under its lifecycle_step job, or the API demo. */
+export interface StepBy { actor: Actor; executionId?: string | null }
+
+/** A step's paid calls: the client's, under the job that ran the step. Left out (a test), the schedule's. */
+export const stepCost = (client: ClientRow, feature: string, ctx?: { by?: StepBy }): CostContext =>
+  costCtx({ clientId: String(client.id), feature, actor: ctx?.by?.actor ?? "schedule", executionId: ctx?.by?.executionId ?? null });
+
 export interface StepContext {
+  /** Who ran the step (run.ts); left out in tests. */
+  by?: StepBy;
   force: boolean;
   /** The step's row before this run, when it ran on the same inputs; null otherwise. */
   previous: StepRow | null;
@@ -127,9 +138,9 @@ export const deps = {
   now: () => new Date(),
   researchBrand,
   fetchSiteHtml,
-  openaiKey: (db: Db) => openaiKeyFor(db),
-  anthropicKey: (db: Db) => anthropicKey(db),
-  firecrawlKey: () => env("FIRECRAWL_API_KEY") ?? null,
+  /** Whether the AI connections are set (the paying desk holds the keys). */
+  openaiReady: () => hasKey("openai"),
+  anthropicReady: () => hasKey("anthropic"),
   rivaliqKey: () => env("RIVALIQ_API_KEY") ?? null,
   projectUrl: () => env("SUPABASE_URL") ?? "",
   derivePillars,
@@ -143,7 +154,7 @@ export const deps = {
   searchWebsite,
   siteReader: () => webReader(),
   searchWebsiteByName,
-  searchWeb: (query: string) => searchWeb(query),
+  searchWeb: (cost: CostContext, query: string) => searchWeb(cost, query),
   socialIO: () => liveSocialIO(),
   identifyCompetitors,
   detectCompetitorHandles,
@@ -157,21 +168,21 @@ export const deps = {
   /** The picture service, for a client's logo set (design_settings). */
   picture: (db: Db): PictureIo => liveIo(db),
   claudeMessages: anthropicMessages,
-  trendIO: (): ProfileIO => ({
+  trendIO: (cost?: CostContext): ProfileIO => ({
     ownPosts: (db, client, snapshots, now) => ownPosts(db, client, snapshots, now),
     feedSnapshots,
     competitorSet,
     async siteText(url) {
-      const scraped = await deps.scrapeMarkdown(url);
+      const scraped = cost ? await deps.scrapeMarkdown(cost, url) : null;
       const text = cleanSiteText(scraped?.markdown ?? "");
       return text.length >= 80 ? text : await deps.fetchSiteText(url);
     },
   }),
-  strategyIO: (): StrategyIO => liveStrategyIO((url) => deps.trendIO().siteText(url)),
+  strategyIO: (cost?: CostContext): StrategyIO => liveStrategyIO((url) => deps.trendIO(cost).siteText(url)),
   /** The strategy's 90-day public read (strategy/publicRead.ts): the stored feed, and the app's Apify actors for what it does not cover. */
-  strategyPublicRead: (db: Db, client: ClientRow, rows: Map<string, StepRow>) => advancePublicRead(db, { id: client.id, name: client.name },
+  strategyPublicRead: (db: Db, client: ClientRow, rows: Map<string, StepRow>, cost: CostContext) => advancePublicRead(db, { id: client.id, name: client.name },
     { tracking: rows.get("tracking")?.result ?? null, brand_read: rows.get("brand_read")?.result ?? null, accounts: rows.get("accounts")?.result ?? null }, deps.now(), {
-      apify: () => (env(APIFY_TOKEN_ENV) ? apifyClient({ token: env(APIFY_TOKEN_ENV) }) : null),
+      apify: async () => ((await hasKey("apify")) ? apifyClient({ cost }) : null),
       feedSnapshots: (d, id) => feedSnapshots(d, id),
     }),
 };
@@ -457,10 +468,9 @@ async function writeDesignSettings(db: Db, client: ClientRow, ctx: StepContext, 
   let unread: string | null = null;
   if (kept) spot = kept.read;
   else if (posts.length) {
-    const key = await deps.anthropicKey(db);
-    if (!key) return { outcome: { status: "failed", error: "The AI connection is not configured." } };
+    if (!(await deps.anthropicReady())) return { outcome: { status: "failed", error: "The AI connection is not configured." } };
     try {
-      spot = await imaging.readLogoSpot(db, client.name, posts, key);
+      spot = await imaging.readLogoSpot(db, client.name, posts, stepCost(client, "lifecycle.design_settings", ctx));
     } catch (e) {
       unread = e instanceof Error ? e.message : String(e);
       if (existing) return { outcome: failedRead(unread, ctx) };
@@ -1077,7 +1087,7 @@ export const STEPS: Record<string, StepDef> = {
       const stated = siteKey(statedWebsite(pageOf(socialResult(rows))));
       return ids.length ? `profiles:${ids.join(",")}|name:${normName(client.name)}${links ? `|bio:${textHash(links)}` : ""}${stated ? `|page:${stated}` : ""}` : null;
     },
-    async run(db, client, { previous, rows }) {
+    async run(db, client, { previous, rows, by }) {
       if (siteKey(client.website_url) || !lifecycleMayWrite(client.field_sources, "website_url")) return { status: "done", result: { kept: true } };
       // The website the client's LinkedIn page states is the first evidence: it is kept as stated, with no search.
       // Another active client's own site is that client's: recorded, and searched past as if none were stated.
@@ -1118,7 +1128,8 @@ export const STEPS: Record<string, StepDef> = {
       const searchedAt = typeof before?.searched_at === "string" ? before.searched_at : null;
       let searched: { searched_at: string; queries: string[]; tried: unknown } | null = null;
       if (!website && (!searchedAt || now.getTime() - Date.parse(searchedAt) >= 30 * DAY)) {
-        const byName = await deps.searchWebsiteByName(brand, { search: (q: string) => deps.searchWeb(q) }, reader, { skip: tried.map((t) => t.domain) });
+        const searchCost = stepCost(client, "lifecycle.website", { by });
+        const byName = await deps.searchWebsiteByName(brand, { search: (q: string) => deps.searchWeb(searchCost, q) }, reader, { skip: tried.map((t) => t.domain) });
         searched = { searched_at: now.toISOString(), queries: byName.queries, tried: byName.tried };
         if (byName.website) {
           website = byName.website;
@@ -1157,7 +1168,7 @@ export const STEPS: Record<string, StepDef> = {
       const key = str(client.look_since) ? `${site}|look:${str(client.look_since)}` : site;
       return (await parentPageFor(db, client)) ? `${key}|text_only` : key;
     },
-    async run(db, client, { rows }) {
+    async run(db, client, { rows, by }) {
       const fs = client.field_sources;
       const may = (f: string) => lifecycleMayWrite(fs, f);
       const website = normalizeWebsite(String(client.website_url));
@@ -1167,7 +1178,7 @@ export const STEPS: Record<string, StepDef> = {
       const own = (f: string) => !textOnly && may(f);
       let page: { html: string; via: "direct" | "firecrawl" };
       try {
-        page = await deps.fetchSiteHtml(website, { firecrawlKey: deps.firecrawlKey() });
+        page = await deps.fetchSiteHtml(website, { cost: stepCost(client, "brand.research", { by }) });
       } catch (e) {
         if (e instanceof ResearchError) return { status: "failed", error: e.message };
         throw e;
@@ -1180,10 +1191,9 @@ export const STEPS: Record<string, StepDef> = {
       const needModel = own("brand_identity") || (own("timezone") && !exactZone) || (own("geo") && !freeCountry) || (may("language") && !lang.language);
       let read = null;
       if (needModel) {
-        const openaiKey = await deps.openaiKey(db);
-        if (!openaiKey) return { status: "failed", error: "The AI connection for brand research is not configured." };
+        if (!(await deps.openaiReady())) return { status: "failed", error: "The AI connection for brand research is not configured." };
         try {
-          read = await deps.researchBrand({ websiteUrl: website, clientName: client.name, openaiKey, page });
+          read = await deps.researchBrand({ websiteUrl: website, clientName: client.name, cost: stepCost(client, "brand.research", { by }), page });
         } catch (e) {
           if (e instanceof ResearchError) return { status: "failed", error: e.message };
           throw e;
@@ -1285,7 +1295,7 @@ export const STEPS: Record<string, StepDef> = {
       const own = ["brief_text", "content_pillars", "social_keywords"].map((f) => (lifecycleMayWrite(fs, f) ? "p" : "x")).join("");
       return `brief:${brief}|doc:${str(client.strategy_doc_file_path)}|site:${site ?? ""}|own:${own}${socialVersionKey(rows, fromPosts)}${briefPageKey(client, rows)}`;
     },
-    async run(db, client, { rows }) {
+    async run(db, client, { rows, by }) {
       const fs = client.field_sources;
       const may = (f: string) => lifecycleMayWrite(fs, f);
       const personBrief = str(client.brief_text) && setBy(fs, "brief_text") !== "lifecycle" ? String(client.brief_text) : "";
@@ -1317,7 +1327,7 @@ export const STEPS: Record<string, StepDef> = {
           briefDoc = docPath;
         } else {
           try {
-            const fromDoc = await deps.briefFromStrategyDoc(db, docPath, await deps.anthropicKey(db));
+            const fromDoc = await deps.briefFromStrategyDoc(db, docPath, stepCost(client, "brand.pillars", { by }));
             if (fromDoc) {
               fields.brief_text = `From the strategy document, read on ${day(deps.now())}:\n\n${fromDoc.text}`;
               from.brief_text = "strategy_doc";
@@ -1334,7 +1344,7 @@ export const STEPS: Record<string, StepDef> = {
       const needSite = !personBrief && brief !== "from_doc" && !!client.website_url;
       let siteText = "";
       if (needSite) {
-        const scraped = await deps.scrapeMarkdown(String(client.website_url));
+        const scraped = await deps.scrapeMarkdown(stepCost(client, "brand.pillars", { by }), String(client.website_url));
         siteText = cleanSiteText(scraped?.markdown ?? "");
         if (siteText.length < 80) siteText = await deps.fetchSiteText(String(client.website_url));
       }
@@ -1364,12 +1374,11 @@ export const STEPS: Record<string, StepDef> = {
       let derivedKeywords = 0;
       let source: string | null = null;
       if (wantPillars || wantKeywords || briefFromPosts) {
-        const key = await deps.anthropicKey(db);
-        if (!key) return { status: "failed", error: "The AI connection is not configured." };
+        if (!(await deps.anthropicReady())) return { status: "failed", error: "The AI connection is not configured." };
         // The derivation reads the strategy document and the LinkedIn page itself, so a brief taken from either is not given twice.
         const evidence = { ...client, brief_text: brief === "drafted" ? (fields.brief_text as string | undefined) ?? str(client.brief_text) : personBrief };
         try {
-          const d = await deps.derivePillars(db, evidence as PillarClient, key, {
+          const d = await deps.derivePillars(db, evidence as PillarClient, stepCost(client, "brand.pillars", { by }), {
             siteText: brief === "drafted" ? null : siteText || null, language: str(client.language) || null,
             ...(posts.length ? { posts, briefFromPosts, bio: (social?.instagram?.bio?.biography as string | undefined) ?? null } : {}),
             ...(page ? { page } : {}),
@@ -1594,7 +1603,7 @@ export const STEPS: Record<string, StepDef> = {
       const ids = (await activeProfiles(db, client.id)).map((p) => p.id);
       return ids.length ? `profiles:${ids.join(",")}|look:${str(client.look_since)}` : null;
     },
-    run: (db, client, { rows }) => runSocialRead(db, client, { rows }, deps.socialIO()),
+    run: (db, client, { rows, by }) => runSocialRead(db, client, { rows, by }, deps.socialIO()),
   },
 
   // The client's voice profile checked against what a voice is built from, and built again only
@@ -1726,14 +1735,14 @@ export const STEPS: Record<string, StepDef> = {
       const notNow = await notNowPlatforms(db, client.id);
       return `${referenceFingerprint(ids, String(client.sprout_customer_id || defaultSproutCustomerId()))}|chosen:${choicesKey(choices, uploads)}${notNow.length ? `|not_now:${notNow.join(",")}` : ""}|rule:${LIBRARY_RULE}`;
     },
-    async run(db, client, { rows, previous }) {
+    async run(db, client, { rows, previous, by }) {
       try {
         // The social read's scores order each platform's slots; a platform the strategy marks "not now" gets no section.
         const multiples = (socialResult(rows)?.multiples ?? undefined) as Record<string, number> | undefined;
         // A check that did not finish in one run goes on from where it stopped (the result's progress), so a run reads
         // only what is left; a check that failed before says how many times in a row.
         const out = await refreshReferences(db, String(client.id), deps.refsIO(), {
-          multiples, notNow: await notNowPlatforms(db, client.id), resume: previous?.result?.progress, failedBefore: previous?.status === "failed" ? previous.attempts : 0,
+          by: by ?? { actor: "schedule" }, multiples, notNow: await notNowPlatforms(db, client.id), resume: previous?.result?.progress, failedBefore: previous?.status === "failed" ? previous.attempts : 0,
         });
         if (out.kind === "no_accounts") return { status: "waiting", reason: "social_accounts" };
         if (out.kind === "in_progress") return { status: "waiting", reason: "in_progress", recheckMinutes: 1, result: { reviewed: out.reviewed, left: out.left, progress: out.progress } };
@@ -1769,7 +1778,7 @@ export const STEPS: Record<string, StepDef> = {
       if (!site && isGenericPillars(client.content_pillars)) return null;
       return `site:${site ?? ""}|notes:${textHash(client.competitor_seed_notes)}`;
     },
-    async run(db, client, { previous, rows }) {
+    async run(db, client, { previous, rows, by }) {
       const set = await currentSet(db, client.id);
       const again = !!set && (await chosenFromPostsAgain(db, client, rows, set));
       if (set && !again) return { status: "done", result: { set_id: set.id, status: set.status, source: "existing" } };
@@ -1784,12 +1793,11 @@ export const STEPS: Record<string, StepDef> = {
         if (!draft || draft.status !== "draft") draftId = null;
       }
       if (!draftId) {
-        const key = await deps.anthropicKey(db);
-        if (!key) return { status: "failed", error: "The AI connection is not configured." };
+        if (!(await deps.anthropicReady())) return { status: "failed", error: "The AI connection is not configured." };
         try {
           // With no website: the top posts' text where the homepage's would be, the followers' countries as markets.
           const markets = site ? [] : followerMarkets(social);
-          const made = await deps.identifyCompetitors(db, markets.length ? { ...client, geo: markets.join(",") } : client, key, { generatedBy: null, ...(site ? {} : { postsText: topPostsText(social) }) });
+          const made = await deps.identifyCompetitors(db, markets.length ? { ...client, geo: markets.join(",") } : client, stepCost(client, "competitors.identify", { by }), { generatedBy: null, ...(site ? {} : { postsText: topPostsText(social) }) });
           return { status: "waiting", reason: "in_progress", recheckMinutes: 1, result: { ...carry, draft_set_id: made.set_id, proposed: made.competitors.length } };
         } catch (e) {
           if (e instanceof IdentifyError && e.code === "too_few") return { status: "waiting", reason: "competitors", recheckDays: 30, result: { ...carry, draft_set_id: null } };
@@ -1811,7 +1819,7 @@ export const STEPS: Record<string, StepDef> = {
       }
       // Their profiles, for the screens; tracking does not need them.
       await Promise.all(chosen.map((c: { id: string; client_id: string; name: string; website_url: string | null }) =>
-        deps.detectCompetitorHandles(db, [c]).catch((e: unknown) => console.warn("[lifecycle] profile lookup skipped", c.name, e instanceof Error ? e.message : e))));
+        deps.detectCompetitorHandles(db, [c], { by: by ?? { actor: "schedule" } }).catch((e: unknown) => console.warn("[lifecycle] profile lookup skipped", c.name, e instanceof Error ? e.message : e))));
       await deps.confirmDraftSet(db, draftId, { confirmedBy: null, notes: site ? "Chosen automatically: the three closest competitors with a website." : "Chosen automatically from the client's posts: the three closest competitors with a website." });
       return { status: "done", result: { set_id: draftId, selected: chosen.map((c: { name: string }) => c.name), proposed: (comps ?? []).length, created: true, chosen_from: site ? "website" : "posts", ...(again ? { replaced: set!.id } : {}) } };
     },
@@ -1845,12 +1853,12 @@ export const STEPS: Record<string, StepDef> = {
         JSON.stringify(client.primary_platforms ?? []), names.join(","),
       ].join("|"))}`;
     },
-    async run(db, client) {
-      const key = await deps.anthropicKey(db);
-      if (!key) return { status: "failed", error: "The AI connection is not configured." };
-      const e = await profileEvidence(db, client, deps.now(), deps.trendIO());
+    async run(db, client, { by }) {
+      if (!(await deps.anthropicReady())) return { status: "failed", error: "The AI connection is not configured." };
+      const cost = stepCost(client, "lifecycle.trend_profile", { by });
+      const e = await profileEvidence(db, client, deps.now(), deps.trendIO(cost));
       if (!e) return { status: "waiting", reason: "nothing_to_read", recheckDays: 1 };
-      const got = await askTwice(deps.claudeMessages, key, profileRequest(e), (text) => parseProfile(text, e));
+      const got = await askTwice(deps.claudeMessages, cost, profileRequest(e), (text) => parseProfile(text, e));
       if ("error" in got) return { status: "failed", error: `The trend profile could not be written: ${got.error}` };
       await writeTrendProfile(db, client.id, got.value, evidenceKey(e), deps.now());
       return { status: "done", result: { topics: got.value.topics.length, platforms: got.value.platforms.map((p) => p.platform) } };
@@ -1870,18 +1878,18 @@ export const STEPS: Record<string, StepDef> = {
       if (await isStrategyOnly(db, client.id)) return null;
       return `${monthIn(deps.now())}:${p.written_at}`;
     },
-    async run(db, client) {
+    async run(db, client, { by }) {
       const { data: p } = await db.from("trend_profiles").select("audience, fit_rubric, hashtags_at").eq("client_id", client.id).maybeSingle();
       if (!p) return { status: "waiting", reason: "no_profile", recheckDays: 1 };
       const now = deps.now();
       if (p.hashtags_at && monthIn(new Date(p.hashtags_at)) === monthIn(now)) return { status: "done", result: { skipped: "this_month" } };
-      const key = await deps.anthropicKey(db);
-      if (!key) return { status: "failed", error: "The AI connection is not configured." };
-      const e = await profileEvidence(db, client, now, deps.trendIO());
+      if (!(await deps.anthropicReady())) return { status: "failed", error: "The AI connection is not configured." };
+      const cost = stepCost(client, "lifecycle.trend_hashtags", { by });
+      const e = await profileEvidence(db, client, now, deps.trendIO(cost));
       if (!e) return { status: "waiting", reason: "nothing_to_read", recheckDays: 1 };
       const terms = await activeTerms(db, client.id);
       const body = hashtagsRequest({ audience: String(p.audience), fit_rubric: String(p.fit_rubric), topics: terms.topics, hashtags: terms.hashtags }, e);
-      const got = await askTwice(deps.claudeMessages, key, body, (text) => parseHashtags(text, e));
+      const got = await askTwice(deps.claudeMessages, cost, body, (text) => parseHashtags(text, e));
       if ("error" in got) return { status: "failed", error: `The trend hashtags could not be refreshed: ${got.error}` };
       for (const platform of HASHTAG_PLATFORMS) await syncLifecycleTerms(db, client.id, "hashtag", platform, got.value[platform]);
       // Instagram searches by these hashtags, so a coverage rewrite of Instagram made from the old ones goes; other platforms' stay.
@@ -1919,22 +1927,22 @@ export const STEPS: Record<string, StepDef> = {
       const profiles = desiredProfiles(await profileInputs(db, { id: client.id, name: client.name }, { tracking: rows.get("tracking")?.result ?? null, brand_read: rows.get("brand_read")?.result ?? null, accounts: rows.get("accounts")?.result ?? null }));
       return `v2|profile:${p.written_at}|networks:${networks}|rhythm:${textHash(JSON.stringify(client.posting_rhythm ?? null))}|public:${profilesKey(profiles)}|set:${await competitorsKey(db, client.id)}${socialVersionKey(rows, postsOnly(client))}`;
     },
-    async run(db, client, { rows }) {
-      const key = await deps.anthropicKey(db);
-      if (!key) return { status: "failed", error: "The AI connection is not configured." };
+    async run(db, client, { rows, by }) {
+      if (!(await deps.anthropicReady())) return { status: "failed", error: "The AI connection is not configured." };
+      const cost = stepCost(client, "lifecycle.content_strategy", { by });
       const inputsKey = await STEPS.content_strategy.inputs(db, client, rows);
       if (!inputsKey) return { status: "waiting", reason: "trend_profile", recheckDays: 1 };
       // A draft for other inputs is dropped: the write starts over.
       let pending = await readPending(db, client.id);
       if (pending?.inputs_key !== inputsKey) {
         // The 90-day public read first, across runs while the app's Apify actors read what the feed does not cover.
-        const read = await deps.strategyPublicRead(db, client, rows);
+        const read = await deps.strategyPublicRead(db, client, rows, cost);
         if (read.status === "reading") return { status: "waiting", reason: "public_read", recheckMinutes: POLL_MINUTES, result: { reading: read.runs.length } };
-        const e = await strategyEvidence(db, client, deps.now(), deps.strategyIO(), read);
+        const e = await strategyEvidence(db, client, deps.now(), deps.strategyIO(cost), read);
         if (!e) return { status: "waiting", reason: "trend_profile", recheckDays: 1 };
         pending = startStrategy(e, inputsKey, deps.now());
       }
-      const out = await strategyPhase(deps.claudeMessages, key, pending);
+      const out = await strategyPhase(deps.claudeMessages, cost, pending);
       if (out.kind === "next") {
         await savePending(db, client.id, out.pending, deps.now());
         return { status: "waiting", reason: "in_progress", recheckMinutes: 1, result: { phase: out.pending.phase } };

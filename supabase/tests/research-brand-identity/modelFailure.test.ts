@@ -13,7 +13,7 @@ vi.mock("../../functions/_shared/brand/research.ts", () => {
   class ResearchError extends Error {
     constructor(public code: string, message: string) { super(message); }
   }
-  return { ResearchError, openaiKeyFor: async () => "key", researchBrand: research };
+  return { ResearchError, researchBrand: research };
 });
 
 let handler: (req: Request) => Promise<Response>;

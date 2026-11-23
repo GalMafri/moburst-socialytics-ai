@@ -8,7 +8,7 @@ import { join } from "node:path";
  * source). CORE.sha256 is written by scripts/sync-api-core.sh in every copy;
  * this test fails when a copy was edited in place instead of being synced.
  */
-describe("api core", () => {
+describe("shared core", () => {
   it("matches the synced checksum", () => {
     const dir = __dirname;
     const files = readdirSync(dir).filter((f) => f.endsWith(".ts") && f !== "core-checksum.test.ts").sort();

@@ -22,6 +22,8 @@ import { shadowLinkedInSource } from "../pipelines/shadow.ts";
 import { feedLinkedInAnswer } from "../pipelines/feedLinkedIn.ts";
 import type { InlineDeps } from "../pipelines/inline.ts";
 import { anthropicFetch } from "../anthropic.ts";
+import type { Actor } from "../cost/context.ts";
+import { costCtx, hasKey } from "../paid/index.ts";
 import { queueFeedRetry } from "./feedRetry.ts";
 
 /** A refresh that stopped with an answer for the caller: an HTTP status and, for a known case, a code. */
@@ -46,7 +48,8 @@ export class TopicsNotDetectedError extends Error {
 
 export interface FeedRefreshEnv {
   rivaliqKey: string | undefined;
-  anthropicKey: string | undefined;
+  /** Who asked for the refresh, for the topic pass's cost (a person on the feed page, or the feed job). */
+  by: { actor: Actor; executionId?: string | null; userId?: string | null };
   /** SOCIALYTICS_N8N_SECRET, sent to the LinkedIn source workflow. */
   secret: string | null | undefined;
   /** Window length in days (1 to 30, default 7). */
@@ -142,8 +145,8 @@ export function topicRows<T extends { topic: string; key?: string }>(topics: T[]
 }
 
 /** Topics that two or more companies posted about in the window, with confidence. */
-async function detectTopics(clientName: string, posts: any[], start: string, end: string, key: string | undefined, known: KnownTopic[]): Promise<Topic[]> {
-  if (!key || posts.length < 2) return [];
+async function detectTopics(clientId: string, clientName: string, posts: any[], start: string, end: string, by: FeedRefreshEnv["by"], known: KnownTopic[]): Promise<Topic[]> {
+  if (posts.length < 2 || !(await hasKey("anthropic"))) return [];
   const compact: CompactPost[] = posts
     .slice()
     .sort((a, b) => (Number(b.engagementTotal) || 0) - (Number(a.engagementTotal) || 0))
@@ -160,9 +163,9 @@ async function detectTopics(clientName: string, posts: any[], start: string, end
   const prompt = topicPrompt(clientName, compact, start, end, known);
   let r: Response;
   try {
-    r = await anthropicFetch("/v1/messages", {
+    r = await anthropicFetch(costCtx({ clientId, feature: "competitors.feed_refresh", ...by }), "/v1/messages", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 2000, messages: [{ role: "user", content: prompt }] }),
     });
   } catch (e) {
@@ -328,7 +331,7 @@ export async function harvestOwnCreative(
  */
 async function saveFeedTopics(
   admin: any, clientId: string, clientName: string, socialPosts: any[], window: { start: string; end: string },
-  anthropicKey: string | undefined, snapshotId: string | null,
+  by: FeedRefreshEnv["by"], snapshotId: string | null,
 ): Promise<{ alerts: number; notDetected: boolean; snapshotId: string | null }> {
   // The earlier windows' topics, dismissed ones included: the model is asked
   // to reuse a key when the theme is the same, so a theme is counted once
@@ -348,7 +351,7 @@ async function saveFeedTopics(
 
   let detected: Topic[];
   try {
-    detected = await detectTopics(clientName, socialPosts, window.start, window.end, anthropicKey, known);
+    detected = await detectTopics(clientId, clientName, socialPosts, window.start, window.end, by, known);
   } catch (e) {
     if (e instanceof TopicsNotDetectedError) return { alerts: 0, notDetected: true, snapshotId };
     throw e;
@@ -403,7 +406,7 @@ export async function refreshCompetitorFeed(admin: any, clientId: string, env: F
       .eq("id", env.topicsSnapshotId).eq("client_id", clientId).eq("endpoint", "feed").maybeSingle();
     const stored = snap?.payload as { window?: { start: string; end: string }; socialPosts?: unknown[] } | undefined;
     if (stored?.window && Array.isArray(stored.socialPosts)) {
-      const found = await saveFeedTopics(admin, clientId, client.name, stored.socialPosts, stored.window, env.anthropicKey, snap.id);
+      const found = await saveFeedTopics(admin, clientId, client.name, stored.socialPosts, stored.window, env.by, snap.id);
       return {
         client_id: clientId, landscape_id: snap.landscape_id, window: stored.window, posts: stored.socialPosts.length, truncated: false, alerts: found.alerts,
         ...(found.notDetected ? { topics_not_detected: true as const, snapshot_id: found.snapshotId } : {}),
@@ -522,7 +525,7 @@ export async function refreshCompetitorFeed(admin: any, clientId: string, env: F
   // RivalIQ call, so the newest of them become references too.
   const harvest = await harvestOwnCreative(admin, clientId, match.client_company_id, socialPosts, client.name);
 
-  const found = await saveFeedTopics(admin, clientId, client.name, socialPosts, window, env.anthropicKey, savedSnapshot?.id ?? null);
+  const found = await saveFeedTopics(admin, clientId, client.name, socialPosts, window, env.by, savedSnapshot?.id ?? null);
 
   return {
     // QA 22 Nov 2026 (P30-06): never capped. RivalIQ at its limit throws above, and the merged

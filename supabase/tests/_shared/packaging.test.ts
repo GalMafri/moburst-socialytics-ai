@@ -82,9 +82,13 @@ describe("deploy packaging", () => {
     if (d.isDirectory()) return sources(path);
     return d.isFile() && d.name.endsWith(".ts") && !/\.test\.ts$|fake/.test(d.name) ? [path] : [];
   });
+  // The address itself is written once, in the paying desk's provider
+  // registry (_shared/cost); anthropic.ts is the one module that sends to it.
   it("reaches the Anthropic API only through _shared/anthropic.ts", () => {
-    const direct = sources(functionsDir).filter((f) => readFileSync(f, "utf8").includes("api.anthropic.com")).map(rel);
-    expect(direct).toEqual(["_shared/anthropic.ts"]);
+    const named = sources(functionsDir).filter((f) => readFileSync(f, "utf8").includes("api.anthropic.com")).map(rel);
+    expect(named).toEqual(["_shared/cost/registry.ts"]);
+    const sends = sources(functionsDir).filter((f) => !/^_shared\/(cost|paid)\//.test(rel(f))).filter((f) => /\.(?:fetch|record)\(\s*[^,]+,\s*["']anthropic["']/.test(readFileSync(f, "utf8"))).map(rel);
+    expect(sends).toEqual(["_shared/anthropic.ts"]);
   });
   it("makes every Supabase client through _shared/supabase.ts", () => {
     const own = sources(functionsDir).filter((f) => /import\s*\{[^}]*\bcreateClient\b[^}]*\}\s*from\s*["'](?:https:\/\/esm\.sh\/|npm:|jsr:)@supabase\/supabase-js/.test(readFileSync(f, "utf8"))).map(rel);
@@ -95,16 +99,16 @@ describe("deploy packaging", () => {
     expect(fixtureFolders(functionsDir)).toEqual([]);
   });
 
-  // The one exception is _shared/api: the API core is copied verbatim from
-  // AdVisor with its tests, and CORE.sha256 covers both, so its 32 KB of tests
-  // stay where the sync puts them.
+  // The exceptions are _shared/api and _shared/cost: those cores are copied
+  // verbatim from AdVisor with their tests, and CORE.sha256 covers both, so
+  // their tests stay where the sync puts them.
   it("keeps tests out of the deployed folders", () => {
     const tests = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((d) => {
       const path = join(dir, d.name);
       if (d.isDirectory()) return tests(path);
       return /\.(test|spec)\.tsx?$|\.snap$/.test(d.name) ? [rel(path)] : [];
     });
-    expect(tests(functionsDir).filter((f) => !f.startsWith("_shared/api/"))).toEqual([]);
+    expect(tests(functionsDir).filter((f) => !f.startsWith("_shared/api/") && !f.startsWith("_shared/cost/"))).toEqual([]);
   });
 
   it("keeps every function's upload under the deploy limit", () => {

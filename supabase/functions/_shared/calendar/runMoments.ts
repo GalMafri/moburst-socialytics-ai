@@ -16,6 +16,7 @@
 // be planned with no moments.
 
 import { anthropicMessages } from "../anthropic.ts";
+import { anthropicCost } from "../anthropicCost.ts";
 import { clipText } from "../text/clip.ts";
 import { collectOwnedCompetitive } from "../competitive/ownedSource.ts";
 import { activeTerms } from "../trends/profile.ts";
@@ -47,12 +48,6 @@ const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00
 const isDay = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const str = (v: unknown, n = 4000) => (typeof v === "string" ? clipText(v.replace(/\s+/g, " ").trim(), n) : "");
-
-function apiKey(): string {
-  const key = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!key) throw new Error("ANTHROPIC_API_KEY is not configured.");
-  return key;
-}
 
 function todayIn(timeZone: string, now: Date): string {
   try {
@@ -104,7 +99,7 @@ export async function runMomentsList(admin: Db, job: WeekJob, now = new Date()):
     const used = { input: 0, output: 0, searches: 0 };
     let text = "";
     for (let turn = 0; ; turn++) {
-      const result = await anthropicMessages({ apiKey: apiKey(), body: { model: MOMENTS_MODEL, max_tokens: 16000, output_config: { effort: "medium" }, tools: [tool], messages } });
+      const result = await anthropicMessages({ cost: await anthropicCost({ clientId: null, feature: "moments.list", actor: "schedule", executionId: job.id }), body: { model: MOMENTS_MODEL, max_tokens: 16000, output_config: { effort: "medium" }, tools: [tool], messages } });
       const u = usageOf(result.raw);
       used.input += u.input; used.output += u.output; used.searches += u.searches;
       if (result.stopReason === "refusal") throw new Error("The moments list was declined.");
@@ -367,7 +362,7 @@ export async function runWeekMoments(admin: Db, job: WeekJob, now = new Date()):
     let checked: ReturnType<typeof checkJudgement> | null = null;
     const best = new Map<string, HistoryPost | null>(candidates.map((m) => [m.key, histories.get(m.key)?.best ?? null]));
     for (let attempt = 0; attempt < 2 && !checked; attempt++) {
-      const result = await anthropicMessages({ apiKey: apiKey(), body: {
+      const result = await anthropicMessages({ cost: await anthropicCost({ clientId: client.id, feature: "calendar.moments", actor: "schedule", executionId: job.id }), body: {
         model: MOMENTS_MODEL, max_tokens: 8000, output_config: { effort: "medium", format: { type: "json_schema", schema: JUDGE_SCHEMA } },
         messages: [{ role: "user", content: judgePrompt(input) }],
       } });
@@ -395,7 +390,7 @@ export async function runMomentFeedback(admin: Db, job: WeekJob, now = new Date(
     if (error) throw new Error(`Could not read the removal: ${error.message}`);
     if (!removal) return { status: "skipped", reason: "The removal no longer exists." };
     if (!str(removal.moment_name)) return { status: "done", result: { ops: 0 } };
-    const learned = await learnFromSignal(admin, removal.client_id, { kind: "moment_removed", moment: str(removal.moment_name, 200), category: removal.category ?? null, date: removal.post_date ? String(removal.post_date).slice(0, 10) : null });
+    const learned = await learnFromSignal(admin, removal.client_id, { kind: "moment_removed", moment: str(removal.moment_name, 200), category: removal.category ?? null, date: removal.post_date ? String(removal.post_date).slice(0, 10) : null }, { actor: "schedule", executionId: job.id });
     return { status: "done", result: learned };
   } catch (e) {
     return retry(job, message(e), now);

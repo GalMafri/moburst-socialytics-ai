@@ -5,7 +5,9 @@
  */
 export type Method = "GET" | "POST" | "DELETE";
 export type AuthKind = "none" | "key" | "admin" | "internal";
-export type Scope = "read" | "demo" | "admin";
+/** Every key permission. read: data; demo: demo jobs; run: actions that spend; costs: the cost report; admin: keys. */
+export const SCOPES = ["read", "demo", "run", "costs", "admin"] as const;
+export type Scope = (typeof SCOPES)[number];
 
 export interface QueryDoc {
   type: string;

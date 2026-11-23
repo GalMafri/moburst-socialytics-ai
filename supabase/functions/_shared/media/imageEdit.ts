@@ -3,16 +3,21 @@
 // One edit by the OpenAI image model: the given images and prompt, an
 // optional mask, answered as a PNG at exactly the size asked for. Used by the
 // design worker (designs and their cleanups) and the video worker (the kit).
+// It goes through the paying desk, which adds the OpenAI key (no key is a
+// FINAL error, ProviderKeyMissing, as it always was) and records the cost
+// against `cost`.
 
 import { decode as base64Decode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { pngSize } from "../canva/jobs.ts";
+import type { CostContext } from "../cost/context.ts";
+import { paid } from "../paid/index.ts";
 import { ModelBusy, ModelRefused } from "./modelBusy.ts";
 
 export { ModelBusy, ModelRefused };
 
 export const OPENAI_IMAGE_MODEL = "gpt-image-2.5-flare";
 
-export async function imageEdit(apiKey: string, images: { bytes: Uint8Array; name: string }[], prompt: string, size: [number, number], mask?: Uint8Array): Promise<Uint8Array> {
+export async function imageEdit(cost: CostContext, images: { bytes: Uint8Array; name: string }[], prompt: string, size: [number, number], mask?: Uint8Array): Promise<Uint8Array> {
   const form = new FormData();
   form.append("model", OPENAI_IMAGE_MODEL);
   form.append("size", `${size[0]}x${size[1]}`);
@@ -24,9 +29,8 @@ export async function imageEdit(apiKey: string, images: { bytes: Uint8Array; nam
   }
   if (mask) form.append("mask", new Blob([mask as unknown as BlobPart], { type: "image/png" }), "mask.png");
   form.append("prompt", prompt);
-  const resp = await fetch("https://api.openai.com/v1/images/edits", {
+  const resp = await paid.fetch(cost, "openai", "/v1/images/edits", {
     method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}` },
     body: form,
     signal: AbortSignal.timeout(360_000),
   });

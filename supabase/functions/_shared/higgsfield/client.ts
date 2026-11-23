@@ -11,9 +11,18 @@
 // account and issues no service credential, so an edge function cannot hold
 // that session. The REST API exposes the same model catalog with a key.
 //
-// Deliberately dependency-free and Deno-global-free at module scope: the unit
-// tests import this file through vitest (Node), so `Deno` is only touched
-// inside resolveCredentials(), and fetch/sleep are injectable.
+// Every Higgsfield request goes through the paying desk (_shared/paid), which
+// adds the `Key id:secret` header from HIGGSFIELD_API_KEY_ID and
+// HIGGSFIELD_API_KEY_SECRET (env only: app_settings is readable by every
+// staff session, so no fallback there). The caller names the REST address
+// (baseUrl) as it names the model path. Higgsfield's answers carry no price;
+// a caller that sees a generation complete records it (paid.record).
+//
+// Deno-global-free at module scope: the unit tests import this file through
+// vitest (Node) with a test meter (supabase/tests/paid); sleep is injectable.
+
+import type { CostContext } from "../cost/context.ts";
+import { paid, ProviderKeyMissing } from "../paid/index.ts";
 
 export type HiggsfieldStatus =
   | "queued"
@@ -118,39 +127,6 @@ export class HiggsfieldError extends Error {
   }
 }
 
-export const HIGGSFIELD_BASE_URL = "https://api.higgsfield.ai";
-
-export interface HiggsfieldCredentials {
-  keyId: string;
-  keySecret: string;
-}
-
-/**
- * Read credentials from the environment.
- *
- * Env ONLY, on purpose. The obvious symmetry would be to fall back to
- * app_settings the way generate-post-image does for gemini_api_key, but
- * app_settings is SELECT-able by every is_moburst_staff() session and
- * Settings.tsx pulls the whole table into the browser, so a key stored there is
- * readable client-side by all staff. Do not add that fallback.
- */
-export function resolveCredentials(): HiggsfieldCredentials {
-  const env = (globalThis as { Deno?: { env: { get(k: string): string | undefined } } }).Deno?.env;
-  const keyId = env?.get("HIGGSFIELD_API_KEY_ID");
-  const keySecret = env?.get("HIGGSFIELD_API_KEY_SECRET");
-  if (!keyId || !keySecret) {
-    throw new HiggsfieldError(
-      "not_configured",
-      "HIGGSFIELD_API_KEY_ID and HIGGSFIELD_API_KEY_SECRET must be set as Supabase edge secrets.",
-    );
-  }
-  return { keyId, keySecret };
-}
-
-export function authHeader(creds: HiggsfieldCredentials): string {
-  return `Key ${creds.keyId}:${creds.keySecret}`;
-}
-
 // ── Polling policy ───────────────────────────────────────────────────────────
 //
 // Higgsfield's documented recommendation: start at 2s, widen gradually to 10s,
@@ -186,16 +162,34 @@ export function classifyPollResponse(httpStatus: number): PollAction {
 // ── HTTP surface ─────────────────────────────────────────────────────────────
 
 export interface HiggsfieldClientOptions {
-  credentials?: HiggsfieldCredentials;
-  /** Injectable for tests. Defaults to the global fetch. */
-  fetchImpl?: typeof fetch;
+  /** Who the call is for: the paying desk adds the key and records the call against it. */
+  cost: CostContext;
   /** Injectable for tests. Defaults to a real setTimeout sleep. */
   sleepImpl?: (ms: number) => Promise<void>;
   /** Injectable for tests, so jitter is deterministic. */
   randomImpl?: () => number;
 }
 
+/** The REST API's address, named by the caller (the desk accepts it only on Higgsfield's own hosts). */
+export interface HiggsfieldRestOptions extends HiggsfieldClientOptions {
+  baseUrl: string;
+}
+
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** One request through the paying desk; keys that are not set read as not_configured, as they always did. */
+async function send(o: HiggsfieldClientOptions, url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await paid.fetch(o.cost, "higgsfield", url, init);
+  } catch (e) {
+    if (e instanceof ProviderKeyMissing) {
+      throw new HiggsfieldError("not_configured", "HIGGSFIELD_API_KEY_ID and HIGGSFIELD_API_KEY_SECRET must be set as Supabase edge secrets.");
+    }
+    throw e;
+  }
+}
+
+const restUrl = (o: HiggsfieldRestOptions, path: string) => `${o.baseUrl.replace(/\/+$/, "")}${path}`;
 
 /**
  * Turn a non-OK submission response into a typed error. The concurrency limit
@@ -235,22 +229,16 @@ async function submissionError(resp: Response): Promise<HiggsfieldError> {
 export async function submit(
   modelPath: string,
   body: Record<string, unknown>,
-  opts: HiggsfieldClientOptions & { webhookUrl?: string } = {},
+  opts: HiggsfieldRestOptions & { webhookUrl?: string },
 ): Promise<HiggsfieldSubmission> {
-  const creds = opts.credentials ?? resolveCredentials();
-  const doFetch = opts.fetchImpl ?? fetch;
-
-  let url = `${HIGGSFIELD_BASE_URL}${modelPath}`;
+  let url = restUrl(opts, modelPath);
   if (opts.webhookUrl) {
     url += `?hf_webhook=${encodeURIComponent(opts.webhookUrl)}`;
   }
 
-  const resp = await doFetch(url, {
+  const resp = await send(opts, url, {
     method: "POST",
-    headers: {
-      Authorization: authHeader(creds),
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
 
@@ -277,8 +265,6 @@ export async function pollUntilTerminal(
   statusUrl: string,
   opts: HiggsfieldClientOptions & { timeoutMs: number },
 ): Promise<HiggsfieldResult> {
-  const creds = opts.credentials ?? resolveCredentials();
-  const doFetch = opts.fetchImpl ?? fetch;
   const sleep = opts.sleepImpl ?? defaultSleep;
   const random = opts.randomImpl ?? Math.random;
 
@@ -292,8 +278,10 @@ export async function pollUntilTerminal(
 
     let resp: Response;
     try {
-      resp = await doFetch(statusUrl, { headers: { Authorization: authHeader(creds) } });
-    } catch {
+      resp = await send(opts, statusUrl, {});
+    } catch (e) {
+      // Keys that are not set will not appear by waiting.
+      if (e instanceof HiggsfieldError) throw e;
       // Transport failure is transient; widen and retry.
       delay = nextPollDelay(delay);
       continue;
@@ -353,14 +341,11 @@ export async function pollUntilTerminal(
 export async function uploadInput(
   bytes: Uint8Array | ArrayBuffer | Blob,
   contentType: string,
-  opts: HiggsfieldClientOptions = {},
+  opts: HiggsfieldRestOptions & { /** The presigned PUT's fetch (the storage host, never through the desk). Defaults to fetch. */ storageFetch?: typeof fetch },
 ): Promise<string> {
-  const creds = opts.credentials ?? resolveCredentials();
-  const doFetch = opts.fetchImpl ?? fetch;
-
-  const ticketResp = await doFetch(`${HIGGSFIELD_BASE_URL}/files/generate-upload-url`, {
+  const ticketResp = await send(opts, restUrl(opts, "/files/generate-upload-url"), {
     method: "POST",
-    headers: { Authorization: authHeader(creds), "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content_type: contentType }),
   });
   if (!ticketResp.ok) throw await submissionError(ticketResp);
@@ -374,7 +359,7 @@ export async function uploadInput(
   // Every header the ticket returned has to be replayed, including
   // x-amz-tagging. Sending the Higgsfield credential here would leak it to the
   // storage host, so the auth header is deliberately absent.
-  const putResp = await doFetch(ticket.upload_url, {
+  const putResp = await (opts.storageFetch ?? fetch)(ticket.upload_url, {
     method: "PUT",
     headers: ticket.upload_headers ?? { "Content-Type": contentType },
     body: bytes as BodyInit,
@@ -395,13 +380,11 @@ export async function uploadInput(
 export async function estimate(
   modelPath: string,
   body: Record<string, unknown>,
-  opts: HiggsfieldClientOptions = {},
+  opts: HiggsfieldRestOptions,
 ): Promise<unknown> {
-  const creds = opts.credentials ?? resolveCredentials();
-  const doFetch = opts.fetchImpl ?? fetch;
-  const resp = await doFetch(`${HIGGSFIELD_BASE_URL}/estimate${modelPath}`, {
+  const resp = await send(opts, restUrl(opts, `/estimate${modelPath}`), {
     method: "POST",
-    headers: { Authorization: authHeader(creds), "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   if (!resp.ok) throw await submissionError(resp);
@@ -415,13 +398,8 @@ export async function estimate(
  */
 export async function cancel(
   cancelUrl: string,
-  opts: HiggsfieldClientOptions = {},
+  opts: HiggsfieldClientOptions,
 ): Promise<boolean> {
-  const creds = opts.credentials ?? resolveCredentials();
-  const doFetch = opts.fetchImpl ?? fetch;
-  const resp = await doFetch(cancelUrl, {
-    method: "POST",
-    headers: { Authorization: authHeader(creds) },
-  });
+  const resp = await send(opts, cancelUrl, { method: "POST" });
   return resp.status === 202;
 }

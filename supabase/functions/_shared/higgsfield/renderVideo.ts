@@ -9,6 +9,8 @@
 // the credits are spent either way. So submission and collection are two
 // separate calls with a media_jobs row between them.
 
+import type { CostContext } from "../cost/context.ts";
+import { paid } from "../paid/index.ts";
 import { higgsfieldMcp } from "./oauth.ts";
 import {
   HiggsfieldError,
@@ -42,6 +44,8 @@ export const HOLD_THE_FRAME =
 
 export interface StartVideoArgs {
   supabase: any;
+  /** Who the clip is for: the MCP calls go through the paying desk. */
+  cost: CostContext;
   prompt: string;
   aspectRatio: string;
   /** A Higgsfield job id or media id for the still the clip animates. */
@@ -62,7 +66,7 @@ export interface StartedVideo {
 /** Submit a clip and return at once. Nothing here waits for pixels. */
 export async function startVideoWithHiggsfield(args: StartVideoArgs): Promise<StartedVideo> {
   // The token is renewed once if it runs out mid-render (oauth.ts, higgsfieldMcp; QA 22 Nov 2026).
-  const mcp = await higgsfieldMcp(args.supabase);
+  const mcp = await higgsfieldMcp(args.supabase, args.cost);
 
   const balance = await creditBalance(mcp);
   if (balance && balance.credits < VIDEO_CREDIT_FLOOR) {
@@ -114,8 +118,14 @@ export function videoJobSnapshot(waited:Awaited<ReturnType<typeof awaitJobs>>):J
  * because the caller here is a browser asking every few seconds, not an
  * agent willing to hold a socket open.
  */
-export async function checkVideoJob(supabase: any, jobId: string): Promise<JobSnapshot> {
-  const mcp = await higgsfieldMcp(supabase);
+export async function checkVideoJob(supabase: any, jobId: string, cost: CostContext, spent: { model?: string | null; quantities: Record<string, number> }): Promise<JobSnapshot> {
+  const mcp = await higgsfieldMcp(supabase, cost);
   const waited = await awaitJobs(mcp, [{ index: 0, job_id: jobId }], { budgetMs: 0, pollSeconds: 0 });
-  return videoJobSnapshot(waited);
+  const snapshot = videoJobSnapshot(waited);
+  // The generation is done, so it is paid for: recorded once (a later look at the same job is the same key),
+  // in what the caller knows it spent (`spent`), since Higgsfield's answers carry no price.
+  if (snapshot.status === "completed") {
+    await paid.record(cost, "higgsfield", { resource: waited.outcomes[0]?.model ?? spent.model ?? "unknown", quantities: spent.quantities, providerRef: jobId, idempotencyKey: `higgsfield:${jobId}` });
+  }
+  return snapshot;
 }

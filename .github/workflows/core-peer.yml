@@ -1,0 +1,20 @@
+name: core-peer
+
+# The shared cores (supabase/functions/_shared/api and _shared/cost) are written
+# in AdVisor and copied here by AdVisor's scripts/sync-api-core.sh. This fails
+# when the copy here and AdVisor's main differ. See CLAUDE.md.
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+jobs:
+  core-peer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shared cores match AdVisor
+        env:
+          PEER_REPO: GalMafri/moburst-advisor-ai
+          PEER_TOKEN: ${{ secrets.PEER_REPO_TOKEN }}
+        run: scripts/check-core-peer.sh

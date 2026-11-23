@@ -120,6 +120,8 @@ describe("fileHash", () => {
 // The read of where the client's posts put the logo. A reply that was cut off
 // at its limit used to be stored as "no place found", and the client's logo
 // then sat at the default place in every design (18 Nov 2026).
+const COST = { tool: "socialytics" as const, clientId: "c1", feature: "lifecycle.logo_spot", actor: "system" as const };
+
 describe("readLogoSpot", () => {
   const model = vi.mocked(anthropicMessages);
   const withPosts = (n = 2) => {
@@ -132,7 +134,7 @@ describe("readLogoSpot", () => {
   it("asks with room for the model to think before its short answer", async () => {
     const { db, paths } = withPosts(2);
     answers('{"logo":"shown","logo_at":"bottom-right","logo_width":0.18,"posts_with_logo":2}');
-    expect(await readLogoSpot(db, "the brand", paths, "key")).toEqual({ shown: true, at: "bottom-right", width: 0.18 });
+    expect(await readLogoSpot(db, "the brand", paths, COST)).toEqual({ shown: true, at: "bottom-right", width: 0.18 });
     expect(model).toHaveBeenCalledTimes(1);
     const body = model.mock.calls[0][0].body as { model: string; max_tokens: number; messages: Array<{ content: Array<{ type: string }> }> };
     expect(body.model).toBe("claude-opus-5-5");
@@ -149,31 +151,31 @@ describe("readLogoSpot", () => {
   it("gives the answer that the posts do not show the logo as an answer", async () => {
     const { db, paths } = withPosts();
     answers('{"logo":"none","logo_at":"","logo_width":0,"posts_with_logo":0}');
-    expect(await readLogoSpot(db, "the brand", paths, "key")).toEqual({ shown: false, at: null, width: null });
+    expect(await readLogoSpot(db, "the brand", paths, COST)).toEqual({ shown: false, at: null, width: null });
   });
 
   it("throws for a reply that was cut off, with or without the start of an answer, so nothing is kept as the read", async () => {
     const { db, paths } = withPosts();
     answers("", "max_tokens");
-    await expect(readLogoSpot(db, "the brand", paths, "key")).rejects.toThrow("The logo's place on the client's posts could not be read: the reply was cut off at its limit");
+    await expect(readLogoSpot(db, "the brand", paths, COST)).rejects.toThrow("The logo's place on the client's posts could not be read: the reply was cut off at its limit");
     // Half an answer that happens to hold a whole object is still half an answer.
     answers('{"logo":"none"}', "max_tokens");
-    await expect(readLogoSpot(db, "the brand", paths, "key")).rejects.toThrow("the reply was cut off at its limit");
+    await expect(readLogoSpot(db, "the brand", paths, COST)).rejects.toThrow("the reply was cut off at its limit");
   });
 
   it("throws for a reply that was declined or too long in coming, and for one that is not the JSON asked for", async () => {
     const { db, paths } = withPosts();
     answers("", "refusal");
-    await expect(readLogoSpot(db, "the brand", paths, "key")).rejects.toThrow("the reply was declined");
+    await expect(readLogoSpot(db, "the brand", paths, COST)).rejects.toThrow("the reply was declined");
     answers("", "timed_out");
-    await expect(readLogoSpot(db, "the brand", paths, "key")).rejects.toThrow("The logo's place on the client's posts could not be read: the reply did not arrive in time");
+    await expect(readLogoSpot(db, "the brand", paths, COST)).rejects.toThrow("The logo's place on the client's posts could not be read: the reply did not arrive in time");
     answers("The logo sits in the top left corner of most posts.");
-    await expect(readLogoSpot(db, "the brand", paths, "key")).rejects.toThrow("could not be read: The logo sits in the top left");
+    await expect(readLogoSpot(db, "the brand", paths, COST)).rejects.toThrow("could not be read: The logo sits in the top left");
   });
 
   it("answers null, and asks nothing, when none of the posts can be loaded", async () => {
     model.mockReset();
-    expect(await readLogoSpot(fakeDb(), "the brand", ["c1/missing.jpg"], "key")).toBeNull();
+    expect(await readLogoSpot(fakeDb(), "the brand", ["c1/missing.jpg"], COST)).toBeNull();
     expect(model).not.toHaveBeenCalled();
   });
 });

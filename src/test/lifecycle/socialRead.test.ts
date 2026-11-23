@@ -59,7 +59,7 @@ const PAGE = (url: string): LinkedInPage => ({ url, name: "Olo", website: "https
 const PAGE_LOGO = "https://media.licdn.example/olo-logo-400.png";
 const HQ_NY = { line1: "99 Hudson St", city: "New York", region: "NY", postalCode: "10013", country: "US" };
 /** A page read that gives the page with these fields. */
-const pageRead = (over: Partial<LinkedInPage>) => async (url: string) => ({ state: "read" as const, run_id: "p1", usd: null, page: { ...PAGE(url), ...over } });
+const pageRead = (over: Partial<LinkedInPage>) => async (_cost: unknown, url: string) => ({ state: "read" as const, run_id: "p1", usd: null, page: { ...PAGE(url), ...over } });
 /** Other clients of the agency, each with a zone that came from a real source. */
 const agencyClients = (zone: string, n: number) => Array.from({ length: n }, (_, i) => ({
   id: `k${i}`, archived_at: null, demo_job_id: null, timezone: zone, field_sources: { timezone: { by: "lifecycle", at: "now", from: "schema.org" } },
@@ -75,9 +75,9 @@ function io(over: Partial<SocialIO> = {}, rows: () => Record<string, unknown>[] 
     } }],
     customerProfiles: async () => [],
     image: async (url) => { calls.images.push(url); return url === pic(7) ? png(400) : png(320); },
-    instagram: async (handle) => { calls.instagram++; return { state: "read", run_id: "r1", usd: 0.003, bio: { handle, biography: "Restaurant ordering. Austin, Texas", links: ["https://olo.com"], full_name: "Olo", category: null } }; },
-    linkedinPage: async (url, runId) => { calls.linkedinPage.push(runId); calls.urls.push(url); return { state: "read", run_id: "p1", usd: 0.004, page: PAGE(url) }; },
-    openaiKey: async () => "sk",
+    instagram: async (_cost, handle) => { calls.instagram++; return { state: "read", run_id: "r1", usd: 0.003, bio: { handle, biography: "Restaurant ordering. Austin, Texas", links: ["https://olo.com"], full_name: "Olo", category: null } }; },
+    linkedinPage: async (_cost, url, runId) => { calls.linkedinPage.push(runId); calls.urls.push(url); return { state: "read", run_id: "p1", usd: 0.004, page: PAGE(url) }; },
+    openaiReady: async () => true,
     brandRead: async () => { calls.brandRead++; return { identity: { primary_color: "#1a1a1a", secondary_color: "#2b2b2b", accent_color: "#ff5a00", font_family: "Inter", visual_style: "v", logo_description: "l", tone_of_voice: "t", design_elements: "d", background_style: "b" }, stated: { city: "Austin", region: "TX", country: "US" }, languages: ["en"] }; },
     ...over,
   };
@@ -330,7 +330,7 @@ describe("runSocialRead", () => {
     expect((out as { result: Record<string, unknown> }).result.instagram).toMatchObject({ run_id: "r9", bio: null });
     const rows = new Map([["social_read", stepRow((out as { result: Record<string, unknown> }).result)]]);
     let asked: string | null = "";
-    const collect = io({ instagram: async (handle, runId) => { asked = runId; return { state: "read", run_id: "r9", usd: null, bio: { handle, biography: "Austin", links: [], full_name: null, category: null } }; } });
+    const collect = io({ instagram: async (_cost, handle, runId) => { asked = runId; return { state: "read", run_id: "r9", usd: null, bio: { handle, biography: "Austin", links: [], full_name: null, category: null } }; } });
     const next = await runSocialRead(db, c, { rows }, collect.fake);
     expect(asked).toBe("r9");
     expect((next as { result: Record<string, unknown> }).result.instagram).toMatchObject({ bio: { biography: "Austin" } });
@@ -394,7 +394,7 @@ describe("snapshotOf", () => {
     expect(first.linkedin_page).toMatchObject({ run_id: "p9", page: null, read_at: null });
     expect(first.instagram).toMatchObject({ handle: "olo.hq" });
     let asked: string | null = "";
-    const collect = io({ linkedinPage: async (url, runId) => { asked = runId; return { state: "read", run_id: "p9", usd: null, page: PAGE(url) }; } });
+    const collect = io({ linkedinPage: async (_cost, url, runId) => { asked = runId; return { state: "read", run_id: "p9", usd: null, page: PAGE(url) }; } });
     const next = await runSocialRead(db, c, { rows: new Map([["social_read", stepRow(first)]]) }, collect.fake);
     expect(asked).toBe("p9");
     expect(pageOf((next as { result: Record<string, unknown> }).result)).toMatchObject({ name: "Olo" });
@@ -475,8 +475,8 @@ describe("snapshotOf", () => {
     // Past Apify's keep time a run answers 404: collecting it throws.
     const asked: Array<string | null> = [];
     const gone = io({
-      linkedinPage: async (_url, runId) => { asked.push(runId); throw new Error("Apify answered 404"); },
-      instagram: async (_handle, runId) => { asked.push(runId); throw new Error("Apify answered 404"); },
+      linkedinPage: async (_cost, _url, runId) => { asked.push(runId); throw new Error("Apify answered 404"); },
+      instagram: async (_cost, _handle, runId) => { asked.push(runId); throw new Error("Apify answered 404"); },
     });
     const second = ((await runSocialRead(db, c, { rows: new Map([["social_read", stepRow(first)]]) }, gone.fake)) as { result: Record<string, unknown> }).result;
     expect(asked.sort()).toEqual(["p9", "r9"]);
@@ -484,7 +484,7 @@ describe("snapshotOf", () => {
     expect(second.instagram).not.toHaveProperty("run_id");
     // The next look starts a new read of each, with no run id, and both land.
     const runIds: Array<string | null> = [];
-    const fresh = io({ instagram: async (handle, runId) => { runIds.push(runId); return { state: "read", run_id: "r10", usd: null, bio: { handle, biography: "Austin", links: [], full_name: null, category: null } }; } });
+    const fresh = io({ instagram: async (_cost, handle, runId) => { runIds.push(runId); return { state: "read", run_id: "r10", usd: null, bio: { handle, biography: "Austin", links: [], full_name: null, category: null } }; } });
     const third = ((await runSocialRead(db, c, { rows: new Map([["social_read", stepRow(second)]]) }, fresh.fake)) as { result: Record<string, unknown> }).result;
     expect(fresh.calls.linkedinPage).toEqual([null]);
     expect(runIds).toEqual([null]);
@@ -507,7 +507,7 @@ describe("snapshotOf", () => {
     expect(lost.instagram).not.toHaveProperty("run_id");
     expect(lost.instagram).toMatchObject({ handle: "olo.eats", bio: { biography: "Restaurant ordering. Austin, Texas" } });
     const runIds: Array<string | null> = [];
-    const fresh = io({ instagram: async (handle, runId) => { runIds.push(runId); return { state: "read", run_id: "r12", usd: null, bio: { handle, biography: "Eats", links: [], full_name: null, category: null } }; } });
+    const fresh = io({ instagram: async (_cost, handle, runId) => { runIds.push(runId); return { state: "read", run_id: "r12", usd: null, bio: { handle, biography: "Eats", links: [], full_name: null, category: null } }; } });
     const next = ((await runSocialRead(db, c, { rows: new Map([["social_read", stepRow(lost)]]) }, fresh.fake)) as { result: Record<string, unknown> }).result;
     expect(runIds).toEqual([null]);
     expect(next.instagram).toMatchObject({ handle: "olo.eats", bio: { biography: "Eats" } });
@@ -526,8 +526,8 @@ describe("snapshotOf", () => {
     const bio = new Promise<void>((r) => { bioStarted = r; });
     const alongside = (other: Promise<void>) => Promise.race([other, new Promise<void>((_, no) => setTimeout(() => no(new Error("the other read did not start alongside")), 500))]);
     const together = io({
-      instagram: async (handle) => { bioStarted(); await alongside(page); return { state: "read", run_id: "r1", usd: null, bio: { handle, biography: "Austin", links: [], full_name: null, category: null } }; },
-      linkedinPage: async (url) => { pageStarted(); await alongside(bio); return { state: "read", run_id: "p1", usd: null, page: PAGE(url) }; },
+      instagram: async (_cost, handle) => { bioStarted(); await alongside(page); return { state: "read", run_id: "r1", usd: null, bio: { handle, biography: "Austin", links: [], full_name: null, category: null } }; },
+      linkedinPage: async (_cost, url) => { pageStarted(); await alongside(bio); return { state: "read", run_id: "p1", usd: null, page: PAGE(url) }; },
     });
     const c = oloClient();
     const both = ((await runSocialRead(world(c), c, { rows: new Map() }, together.fake)) as { result: Record<string, unknown> }).result;

@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { claudeBatchStep } from "../../../functions/_shared/pipelines/claude";
 import type { PipelineRun, StepContext } from "../../../functions/_shared/pipelines/types";
+import { viaTestMeter } from "../../paid/testMeter";
 
 const saved = new Map<string, unknown>();
 function ctx(at: string): StepContext {
@@ -23,7 +24,7 @@ describe("claudeBatchStep when the batch submit fails", () => {
     const asked: number[] = [];
     // The Batches API is overloaded; the direct function takes the request.
     const fetchImpl = async () => new Response("overloaded", { status: 529 });
-    const step = claudeBatchStep({ build: async () => ({ apiKey: "***", body: { max_tokens: 32000, messages: [] } }), saveAs: "analysis.answer", next: "parse", fetchImpl, direct: async (a) => { asked.push(a.start); } });
+    const step = claudeBatchStep({ feature: "report.test", build: async () => ({ body: { max_tokens: 32000, messages: [] } }), saveAs: "analysis.answer", next: "parse", ...viaTestMeter(fetchImpl), direct: async (a) => { asked.push(a.start); } });
     await expect(step(ctx("2026-11-20T08:00:00Z"))).rejects.toThrow();
     // The runner's retry 2 minutes later (failedTry keeps the payload, poll still null).
     await expect(step(ctx("2026-11-20T08:02:00Z"))).rejects.toThrow();
@@ -37,7 +38,7 @@ describe("claudeBatchStep across rounds", () => {
     saved.clear();
     const asked: number[] = [];
     const fetchImpl = async (url: string) => new Response(JSON.stringify(url.endsWith("/batches") ? { id: "msgbatch_1" } : { processing_status: "in_progress" }), { status: 200 });
-    const step = claudeBatchStep({ build: async () => ({ apiKey: "***", body: { max_tokens: 32000, messages: [] } }), saveAs: "analysis.answer", next: "parse", fetchImpl, direct: async (a) => { asked.push(a.start); } });
+    const step = claudeBatchStep({ feature: "report.test", build: async () => ({ body: { max_tokens: 32000, messages: [] } }), saveAs: "analysis.answer", next: "parse", ...viaTestMeter(fetchImpl), direct: async (a) => { asked.push(a.start); } });
     const polling = (at: string) => ({ ...ctx(at), poll: { handle: { claude_batch_id: "msgbatch_1", direct_starts: 1 }, polls: 1, since: "x" } }) as unknown as StepContext;
     // Round 1: asked, answered directly, taken.
     expect(await step(ctx("2026-11-20T08:00:00Z"))).toMatchObject({ type: "poll" });

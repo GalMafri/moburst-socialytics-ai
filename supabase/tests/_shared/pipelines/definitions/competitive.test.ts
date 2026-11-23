@@ -17,6 +17,7 @@ import { startPipelineRun } from "../../../../functions/_shared/pipelines/store"
 import { drivePipeline, pipelineDb, testClock } from "../../../../functions/_shared/pipelines/testDriver";
 import { competitivePipeline, POST_WINDOW_SPACING_SECONDS, type CompetitiveDeps } from "../../../../functions/_shared/pipelines/definitions/competitive";
 import { FX, linkedInRows, owned, POSTS, snap } from "../../../../fixtures/pipelines/moburst";
+import { apifyWhenToken, viaTestMeter } from "../../../paid/testMeter";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -98,9 +99,9 @@ async function run(o: { mode: "shadow" | "app"; env?: (n: string) => string | un
   const requests: Any[] = [];
   const pipeline = competitivePipeline({
     rivaliq: rivaliq({ calls: calls.rivaliq, failSummary: o.failSummary, busyOnce: o.busyOnce }),
-    apify: apify({ calls: calls.apify }),
+    apify: apifyWhenToken((n) => (o.env ?? ENV_ALL)(n), apify({ calls: calls.apify })),
     owned: async () => { calls.sprout += 1; return owned(); },
-    claudeFetch: claude(JSON.stringify(CLEAN_ANALYSIS), requests),
+    ...viaTestMeter(claude(JSON.stringify(CLEAN_ANALYSIS), requests)),
     ...o.deps,
   });
   const { run_id } = await startPipelineRun(db, { mode: o.mode, pipeline, clientId: FX.report.client_id, realTable: "competitive_reports", realId: reportId, input: { range: { start: "2026-09-01", end: "2026-09-30" }, set_id: FX.set.id, request }, dedupe: `${o.mode}:competitive:${reportId}` });

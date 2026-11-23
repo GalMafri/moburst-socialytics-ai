@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import { competitivePipeline } from "../../../functions/_shared/pipelines/definitions/competitive";
 import { socialPipeline } from "../../../functions/_shared/pipelines/definitions/social";
 import type { PipelineRun, StepContext } from "../../../functions/_shared/pipelines/types";
+import { viaTestMeter } from "../../paid/testMeter";
 
 function ctx(saved: Map<string, unknown>, state: Record<string, unknown>, kind: string): StepContext {
   const run = { id: "run-1", kind, mode: "shadow", input: { request: {} }, started_at: "2026-11-20T07:00:00Z" } as unknown as PipelineRun;
@@ -37,7 +38,7 @@ describe("fresh analysis round after a failed repair", () => {
       // Round 1's direct answer, which did not match the format.
       ["analysis.answer.direct", { text: "not the JSON", stop_reason: "end_turn", seconds: 90, start: 1 }],
     ]);
-    const def = competitivePipeline({ claudeFetch: fakeFetch(calls) });
+    const def = competitivePipeline({ ...viaTestMeter(fakeFetch(calls)) });
     // parse_repair sends the run back to analysis with analysis_rounds 1 (definitions/competitive.ts:346).
     const r = await def.steps.analysis(ctx(saved, { analysis_rounds: 1, repair_error: null }, "competitive"));
     expect(r.type).toBe("poll"); // a fresh request is under way
@@ -47,7 +48,7 @@ describe("fresh analysis round after a failed repair", () => {
   it("control (passes): with no kept direct answer the same step does make a new request", async () => {
     const calls: string[] = [];
     const saved = new Map<string, unknown>([["aggregates", { companies: [] }]]);
-    const r = await competitivePipeline({ claudeFetch: fakeFetch(calls) }).steps.analysis(ctx(saved, { analysis_rounds: 1 }, "competitive"));
+    const r = await competitivePipeline({ ...viaTestMeter(fakeFetch(calls)) }).steps.analysis(ctx(saved, { analysis_rounds: 1 }, "competitive"));
     expect(r.type).toBe("poll");
   });
 
@@ -57,7 +58,7 @@ describe("fresh analysis round after a failed repair", () => {
       ["normalized", {}],
       ["synthesis.answer.direct", { text: "not the JSON", stop_reason: "end_turn", seconds: 90, start: 1 }],
     ]);
-    const def = socialPipeline({ claudeFetch: fakeFetch(calls) });
+    const def = socialPipeline({ ...viaTestMeter(fakeFetch(calls)) });
     const r = await def.steps.synthesis(ctx(saved, { analysis_rounds: 1, repair_error: null }, "social"));
     expect(r.type).toBe("poll");
     expect(calls.length).toBeGreaterThan(0);

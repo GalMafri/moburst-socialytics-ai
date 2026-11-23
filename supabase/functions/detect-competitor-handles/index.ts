@@ -52,7 +52,7 @@ Deno.serve(async (req) => {
     if (writeErr) throw new Error(`Access check failed: ${writeErr.message}`);
     if (!canWrite) return jsonResp({ error: "You do not have access to this client." }, 403);
 
-    const { results, writeErrors } = await detectCompetitorHandles(supabase, competitors, { refresh: refresh === true });
+    const { results, writeErrors } = await detectCompetitorHandles(supabase, competitors, { refresh: refresh === true, by: { actor: "user", userId: caller.userId } });
     return jsonResp(writeErrors.length ? { results, write_errors: writeErrors } : { results });
   } catch (err: unknown) {
     if (err instanceof AuthzError) {

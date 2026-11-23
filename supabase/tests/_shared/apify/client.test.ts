@@ -2,7 +2,8 @@
 // The Apify client against a stand-in API: the requests it makes, its quiet
 // retries, the start it never repeats blindly, the dataset read a page at a
 // time, and a missing token that is a wait, not a failure.
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { TEST_COST, useTestMeter } from "../../paid/testMeter";
 import { apifyClient, ApifyError, apifyRetryWaitMs, ApifyTokenMissing, isFinalRunStatus } from "../../../functions/_shared/apify/client";
 
 type Call = { method: string; url: string; auth: string | null; body: unknown };
@@ -17,23 +18,29 @@ function api(answers: Array<Response | Error>) {
     return next;
   };
   const waits: number[] = [];
+  // The paying desk sends the client's requests here, and adds the token as it does in production.
+  useTestMeter(fetchImpl, { auth: true });
   return { calls, waits, fetchImpl, sleep: async (ms: number) => { waits.push(ms); } };
 }
 const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
 const status = (code: number, text = "") => new Response(text, { status: code });
 const RUN = { id: "run-1", status: "RUNNING", defaultDatasetId: "ds-1" };
 
+let token: string | undefined = "tok";
+beforeEach(() => { token = "tok"; vi.stubGlobal("Deno", { env: { get: (k: string) => (k === "APIFY_API_TOKEN" ? token : undefined) } }); });
+afterEach(() => { vi.unstubAllGlobals(); useTestMeter(); });
+
 describe("apifyClient", () => {
   it("starts an actor run with its input, timeout and memory, authenticated by the token", async () => {
     const a = api([ok({ data: RUN })]);
-    const run = await apifyClient({ token: "tok", fetchImpl: a.fetchImpl, sleep: a.sleep }).startRun("WI0tj4Ieb5Kq458gB", { targetUrls: ["u"] }, { timeoutSecs: 240, memoryMbytes: 512 });
+    const run = await apifyClient({ cost: TEST_COST, sleep: a.sleep }).startRun("WI0tj4Ieb5Kq458gB", { targetUrls: ["u"] }, { timeoutSecs: 240, memoryMbytes: 512 });
     expect(run).toEqual(RUN);
     expect(a.calls).toEqual([{ method: "POST", url: "https://api.apify.com/v2/acts/WI0tj4Ieb5Kq458gB/runs?timeout=240&memory=512", auth: "Bearer tok", body: { targetUrls: ["u"] } }]);
   });
 
   it("looks at a run with Apify holding the answer up to a minute, never longer", async () => {
     const a = api([ok({ data: { ...RUN, status: "SUCCEEDED" } }), ok({ data: RUN })]);
-    const c = apifyClient({ token: "tok", fetchImpl: a.fetchImpl, sleep: a.sleep });
+    const c = apifyClient({ cost: TEST_COST, sleep: a.sleep });
     expect((await c.getRun("run-1", { waitSecs: 600 })).status).toBe("SUCCEEDED");
     await c.getRun("run-1");
     expect(a.calls.map((x) => x.url)).toEqual(["https://api.apify.com/v2/actor-runs/run-1?waitForFinish=60", "https://api.apify.com/v2/actor-runs/run-1"]);
@@ -44,33 +51,44 @@ describe("apifyClient", () => {
   it("reads a dataset a page at a time until a short page", async () => {
     const page = (n: number, from: number) => ok(Array.from({ length: n }, (_, i) => ({ i: from + i })));
     const a = api([page(2, 0), page(2, 2), page(1, 4)]);
-    const items = await apifyClient({ token: "tok", fetchImpl: a.fetchImpl, sleep: a.sleep }).datasetItems("ds-1", { pageSize: 2 });
+    const items = await apifyClient({ cost: TEST_COST, sleep: a.sleep }).datasetItems("ds-1", { pageSize: 2 });
     expect(items).toHaveLength(5);
     expect(a.calls.map((x) => new URL(x.url).searchParams.get("offset"))).toEqual(["0", "2", "4"]);
     const b = api([page(2, 0), page(2, 2)]);
-    await expect(apifyClient({ token: "tok", fetchImpl: b.fetchImpl, sleep: b.sleep }).datasetItems("ds-1", { pageSize: 2, maxItems: 3 })).rejects.toThrow("more than 3 items");
+    await expect(apifyClient({ cost: TEST_COST, sleep: b.sleep }).datasetItems("ds-1", { pageSize: 2, maxItems: 3 })).rejects.toThrow("more than 3 items");
   });
 
   it("tries a read again quietly after a rate limit, a server error or a dropped connection", async () => {
     const a = api([status(429), status(502), new TypeError("connection reset"), ok({ data: RUN })]);
-    expect((await apifyClient({ token: "tok", fetchImpl: a.fetchImpl, sleep: a.sleep }).getRun("run-1")).id).toBe("run-1");
+    expect((await apifyClient({ cost: TEST_COST, sleep: a.sleep }).getRun("run-1")).id).toBe("run-1");
     expect(a.waits).toEqual([1000, 2000, 4000]);
     const b = api([status(500), status(500), status(500), status(500)]);
-    await expect(apifyClient({ token: "tok", fetchImpl: b.fetchImpl, sleep: b.sleep }).getRun("run-1")).rejects.toBeInstanceOf(ApifyError);
+    await expect(apifyClient({ cost: TEST_COST, sleep: b.sleep }).getRun("run-1")).rejects.toBeInstanceOf(ApifyError);
     const c = api([status(404, "not found")]);
-    await expect(apifyClient({ token: "tok", fetchImpl: c.fetchImpl, sleep: c.sleep }).getRun("run-1")).rejects.toThrow("answered 404");
+    await expect(apifyClient({ cost: TEST_COST, sleep: c.sleep }).getRun("run-1")).rejects.toThrow("answered 404");
     expect(c.calls).toHaveLength(1);
   });
 
   it("starts a run again only when Apify refused it, never after a lost answer", async () => {
     const a = api([status(429), ok({ data: RUN })]);
-    expect((await apifyClient({ token: "tok", fetchImpl: a.fetchImpl, sleep: a.sleep }).startRun("actor", {}, { timeoutSecs: 240, memoryMbytes: 512 })).id).toBe("run-1");
+    expect((await apifyClient({ cost: TEST_COST, sleep: a.sleep }).startRun("actor", {}, { timeoutSecs: 240, memoryMbytes: 512 })).id).toBe("run-1");
     const b = api([new TypeError("socket hang up"), ok({ data: RUN })]);
-    await expect(apifyClient({ token: "tok", fetchImpl: b.fetchImpl, sleep: b.sleep }).startRun("actor", {}, { timeoutSecs: 240, memoryMbytes: 512 })).rejects.toThrow("socket hang up");
+    await expect(apifyClient({ cost: TEST_COST, sleep: b.sleep }).startRun("actor", {}, { timeoutSecs: 240, memoryMbytes: 512 })).rejects.toThrow("socket hang up");
     expect(b.calls).toHaveLength(1);
     const c = api([status(500)]);
-    await expect(apifyClient({ token: "tok", fetchImpl: c.fetchImpl, sleep: c.sleep }).startRun("actor", {}, { timeoutSecs: 240, memoryMbytes: 512 })).rejects.toThrow("answered 500");
+    await expect(apifyClient({ cost: TEST_COST, sleep: c.sleep }).startRun("actor", {}, { timeoutSecs: 240, memoryMbytes: 512 })).rejects.toThrow("answered 500");
     expect(c.calls).toHaveLength(1);
+  });
+
+  it("records a run's cost once, with Apify's own dollars, when it is seen finished", async () => {
+    const calls: string[] = [];
+    const answers = [ok({ data: RUN }), ok({ data: { ...RUN, status: "SUCCEEDED", actId: "actor-1", usageTotalUsd: 0.42 } })];
+    const rows = useTestMeter(async (url) => { calls.push(url); return answers.shift()!; }, { auth: true });
+    const c = apifyClient({ cost: TEST_COST });
+    await c.getRun("run-1");
+    await c.getRun("run-1");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ provider: "apify", client_id: "test-client", feature: "test.call", cost_usd: 0.42, provider_ref: "run-1", idempotency_key: "apify:run-1" });
   });
 
   it("honors a Retry-After of up to 10 s", () => {
@@ -80,10 +98,12 @@ describe("apifyClient", () => {
   });
 
   it("is a quiet wait without a token, and never shows the token in an error", async () => {
+    token = undefined;
     const a = api([]);
-    await expect(apifyClient({ token: "  ", fetchImpl: a.fetchImpl }).getRun("run-1")).rejects.toBeInstanceOf(ApifyTokenMissing);
+    await expect(apifyClient({ cost: TEST_COST }).getRun("run-1")).rejects.toBeInstanceOf(ApifyTokenMissing);
     expect(a.calls).toEqual([]);
-    const b = api([status(401, "token secret-token is not valid")]);
-    await expect(apifyClient({ token: "secret-token", fetchImpl: b.fetchImpl, sleep: b.sleep }).getRun("run-1")).rejects.toThrow("token [redacted] is not valid");
+    token = "apify_api_SECRET123";
+    const b = api([status(401, "token apify_api_SECRET123 is not valid")]);
+    await expect(apifyClient({ cost: TEST_COST, sleep: b.sleep }).getRun("run-1")).rejects.toThrow("token [redacted] is not valid");
   });
 });

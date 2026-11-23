@@ -30,11 +30,13 @@ beforeEach(async () => {
     return new Response(JSON.stringify({ choices: [{ message: { content: '{"primary_color":"#112233"}' } }] }));
   });
   vi.resetModules();
+  // The modules were reset, so the paying desk the function loads is a fresh one: its test meter is installed again.
+  (await import("../paid/testMeter")).useTestMeter();
   await import("../../functions/extract-brand-from-file/index.ts");
 });
 afterEach(() => vi.unstubAllGlobals());
 
-const call = (file_path: string) => handler(new Request("https://f/x", { method: "POST", body: JSON.stringify({ file_path, bucket: "brand-books", client_name: "Bader Law" }) }));
+const call = (file_path: string, extra: Record<string, unknown> = {}) => handler(new Request("https://f/x", { method: "POST", body: JSON.stringify({ file_path, bucket: "brand-books", client_name: "Bader Law", ...extra }) }));
 const parts = () => st.openai[0].messages[1].content as Array<Record<string, unknown>>;
 
 describe("extract-brand-from-file", () => {
@@ -63,6 +65,15 @@ describe("extract-brand-from-file", () => {
     const r = await call("Bader/big.pdf");
     expect(await r.json()).toEqual({ brand_identity: null, not_read: "too_large" });
     expect(st.openai).toEqual([]);
+  });
+
+  it("charges the model call to the client the page names", async () => {
+    const vendor = await import("../../functions/_shared/paid/index.ts");
+    const record = vi.spyOn(vendor.paid, "fetch");
+    st.files["Bader/logo.png"] = new Uint8Array([1, 2, 3]);
+    await call("Bader/logo.png", { client_id: "client-9" });
+    expect(record.mock.calls[0][0]).toMatchObject({ clientId: "client-9", feature: "brand.extract_file", actor: "user" });
+    expect(record.mock.calls[0].slice(1, 3)).toEqual(["openai", "/v1/chat/completions"]);
   });
 
   it("says which file type it does not read", async () => {

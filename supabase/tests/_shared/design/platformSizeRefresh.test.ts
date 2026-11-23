@@ -331,6 +331,8 @@ describe("a look before the first run", () => {
 
 describe("the live services", () => {
   afterEach(() => { vi.unstubAllGlobals(); });
+  // The paying desk reads the key (the function's own secret here); the model call goes to the stubbed fetch.
+  beforeEach(() => { vi.stubGlobal("Deno", { env: { get: env } }); });
 
   const env = (name: string) => (name === "ANTHROPIC_API_KEY" ? "test-key" : undefined);
   const FORCED_REFUSED = { type: "error", error: { type: "invalid_request_error", message: 'tool_choice: type "tool" and "any" are not supported for this model.' } };
@@ -406,6 +408,7 @@ describe("the live services", () => {
     const out = await runPlatformSizes(db, job, liveSizeDeps(env));
     expect(out.status).toBe("done");
     expect((await reads())[0].rows.map((r) => r.outcome)).toEqual(Array(7).fill("same"));
+    vi.stubGlobal("Deno", { env: { get: () => undefined } });
     await expect(liveSizeDeps(() => undefined).extract("x")).rejects.toThrow("ANTHROPIC_API_KEY is not set.");
   });
 

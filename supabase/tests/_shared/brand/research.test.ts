@@ -1,8 +1,11 @@
 // @vitest-environment node
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { useTestMeter } from "../../paid/testMeter";
 import { fetchSiteHtml, researchBrand, extractImageUrls, logoFilesOnPage, logoOnPage, ownMarksOnPage, ownPaint, standaloneSvg, parseBrandReply, parseSocialBrandReply, readSocialBrand, siteTextExcerpt, visionImageType } from "../../../functions/_shared/brand/research";
 
 const BASE = "https://www.example.com";
+const cost = { tool: "socialytics" as const, clientId: "c1", feature: "brand.research", actor: "user" as const };
+afterEach(() => { vi.unstubAllGlobals(); useTestMeter(); });
 
 describe("logoOnPage", () => {
   it("takes the logo the site's schema.org data names first", () => {
@@ -247,12 +250,15 @@ describe("the brand read from social profiles", () => {
   });
   it("sends the profile picture and designed posts as images, the posts and bio as text, to gpt-4.1", async () => {
     let body: { model: string; messages: Array<{ role: string; content: unknown }> } | null = null;
-    const fetchImpl = (async (_url: string, init: RequestInit) => {
-      body = JSON.parse(String(init.body));
+    let url = "";
+    useTestMeter(async (u: string, init?: RequestInit) => {
+      url = u;
+      body = JSON.parse(String(init?.body));
       return new Response(JSON.stringify({ choices: [{ message: { content: REPLY } }] }), { status: 200 });
-    }) as unknown as typeof fetch;
+    });
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0]);
-    const out = await readSocialBrand({ clientName: "Olo", openaiKey: "sk", images: [{ bytes: png, label: "LinkedIn profile picture" }, { bytes: new Uint8Array([1, 2, 3]), label: "unreadable" }], postsText: "P1 Order ahead", bio: "Austin, TX", fetchImpl });
+    const out = await readSocialBrand({ clientName: "Olo", cost, images: [{ bytes: png, label: "LinkedIn profile picture" }, { bytes: new Uint8Array([1, 2, 3]), label: "unreadable" }], postsText: "P1 Order ahead", bio: "Austin, TX" });
+    expect(url).toBe("https://api.openai.com/v1/chat/completions");
     expect(out.stated).toEqual({ city: "Austin", region: "TX", country: "US" });
     expect(body!.model).toBe("gpt-4.1");
     const parts = body!.messages[1].content as Array<{ type: string; text?: string }>;
@@ -304,7 +310,11 @@ describe("researchBrand never reaches a private address through the page it read
       if (u.startsWith("https://api.openai.com/")) return new Response(JSON.stringify({ choices: [{ message: { content: "{}" } }] }), { status: 200 });
       return new Response("secret", { status: 200 });
     });
-    await researchBrand({ websiteUrl: "https://example.com/", openaiKey: "sk", fetchImpl }).catch(() => null);
+    // The model call goes through the paying desk (its test meter sends it to the same fake), with the key set.
+    vi.stubGlobal("Deno", { env: { get: (k: string) => (k === "OPENAI_API_KEY" ? "sk" : undefined) } });
+    useTestMeter((u, init) => fetchImpl(u, init));
+    await researchBrand({ websiteUrl: "https://example.com/", cost, fetchImpl }).catch(() => null);
+    expect(requested).toContain("https://api.openai.com/v1/chat/completions");
     expect(requested.filter((u) => u.includes(PRIVATE))).toEqual([]);
     expect(requested).toContain("https://example.com/redirect.css");
   });

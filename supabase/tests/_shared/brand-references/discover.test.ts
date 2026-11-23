@@ -32,12 +32,13 @@ const EVERYDAY = { usable: true, confidence: 0.95, reason: "Branded type over a 
 const HOLIDAY = { usable: true, confidence: 0.95, reason: "Branded type over a pumpkin pattern", kind: "occasion", occasion: "holiday", evidence: "Happy Halloween" };
 
 type Asked = Parameters<CheckIO["review"]>[0];
+const COST = { tool: "socialytics" as const, clientId: "c1", feature: "brand.references", actor: "schedule" as const };
 function world(answer: (a: Asked) => unknown, rows: Review[] = []) {
   const db = fakeDb({ design_reference_reviews: rows.map((r) => ({ client_id: "c1", ...r })) });
   const asked: Asked[] = [];
   const images: string[] = [];
   const io: CheckIO = {
-    now: () => new Date(NOW), apiKey: async () => "key", readPosts: async () => [],
+    now: () => new Date(NOW), aiReady: async () => {}, readPosts: async () => [],
     image: async (url) => { images.push(url); return { bytes: new TextEncoder().encode(url), mime: "image/jpeg" }; },
     review: async (a) => { asked.push(a); return answer(a); },
   };
@@ -48,9 +49,9 @@ function world(answer: (a: Asked) => unknown, rows: Review[] = []) {
 describe("what the reviewer is shown", () => {
   it("is the image with the brand, the platform, the date and the caption", async () => {
     const w = world(() => EVERYDAY);
-    await reviewPosts(w.db, BRAND, [candidate("li:1", "2026-11-10")], [], w.io, "key");
+    await reviewPosts(w.db, BRAND, [candidate("li:1", "2026-11-10")], [], w.io, COST);
     expect(w.asked).toEqual([{
-      apiKey: "key", brand: "Harbor Coffee", imageUrl: `https://project.test/storage/v1/object/public/design-references/c1/candidates/${hashOf(media("li:1"))}.jpg`,
+      cost: COST, brand: "Harbor Coffee", imageUrl: `https://project.test/storage/v1/object/public/design-references/c1/candidates/${hashOf(media("li:1"))}.jpg`,
       platform: "LinkedIn", postedAt: "2026-11-10T15:00:00Z", caption: CAPTION,
     }]);
   });
@@ -81,7 +82,7 @@ describe("what the reviewer is shown", () => {
 describe("a new post", () => {
   it("is stored with its answer, its caption's key and the question's version", async () => {
     const w = world(() => EVERYDAY);
-    const run = await reviewPosts(w.db, BRAND, [candidate("ig:1", "2026-11-10")], [], w.io, "key");
+    const run = await reviewPosts(w.db, BRAND, [candidate("ig:1", "2026-11-10")], [], w.io, COST);
     expect(run.modelCalls).toBe(1);
     expect(w.stored("ig:1")).toMatchObject({
       client_id: "c1", verdict: "designed", path: `c1/social-${hashOf(media("ig:1"))}.jpg`, kind: "everyday", occasion: null, evidence: null,
@@ -94,19 +95,19 @@ describe("a new post", () => {
 
   it("made for an occasion is stored as designed, with the type and the evidence", async () => {
     const w = world(() => HOLIDAY);
-    await reviewPosts(w.db, BRAND, [candidate("ig:1", "2026-10-31", { text: "Happy Halloween from Harbor Coffee!" })], [], w.io, "key");
+    await reviewPosts(w.db, BRAND, [candidate("ig:1", "2026-10-31", { text: "Happy Halloween from Harbor Coffee!" })], [], w.io, COST);
     expect(w.stored("ig:1")).toMatchObject({ verdict: "designed", kind: "occasion", occasion: "holiday", evidence: "Happy Halloween", caption_hash: captionHash("Happy Halloween from Harbor Coffee!"), rule: 2 });
   });
 
   it("with a designed answer and no full answer to the occasion question is stored designed and unanswered", async () => {
     const w = world(() => ({ usable: true, confidence: 0.95, reason: "Branded type", kind: "occasion", occasion: "holiday", evidence: "" }));
-    await reviewPosts(w.db, BRAND, [candidate("ig:1", "2026-11-10")], [], w.io, "key");
+    await reviewPosts(w.db, BRAND, [candidate("ig:1", "2026-11-10")], [], w.io, COST);
     expect(w.stored("ig:1")).toMatchObject({ verdict: "designed", kind: null, occasion: null, evidence: null, rule: 2 });
   });
 
   it("that is not designed carries no answer to the occasion question", async () => {
     const w = world(() => ({ ...HOLIDAY, usable: false }));
-    await reviewPosts(w.db, BRAND, [candidate("ig:1", "2026-11-10")], [], w.io, "key");
+    await reviewPosts(w.db, BRAND, [candidate("ig:1", "2026-11-10")], [], w.io, COST);
     expect(w.stored("ig:1")).toMatchObject({ verdict: "not_designed", path: null, kind: null, occasion: null, evidence: null, rule: 2 });
   });
 });
@@ -115,7 +116,7 @@ describe("a designed post answered under the old question", () => {
   it("is asked once more from its stored image, and stays designed with its file and reason", async () => {
     const before = storedBefore("ig:1", "2026-10-20");
     const w = world(() => ({ ...HOLIDAY, usable: false, confidence: 0.2, reason: "Changed its mind" }), [before]);
-    const run = await reviewPosts(w.db, BRAND, [candidate("ig:1", "2026-10-20")], [before], w.io, "key");
+    const run = await reviewPosts(w.db, BRAND, [candidate("ig:1", "2026-10-20")], [before], w.io, COST);
     expect(w.images).toEqual([]);
     expect(w.db.uploads.size).toBe(0);
     expect(w.asked[0]).toMatchObject({ imageUrl: `https://project.test/storage/v1/object/public/design-references/${before.path}`, platform: "Instagram", postedAt: "2026-10-20T15:00:00Z", caption: CAPTION });
@@ -130,7 +131,7 @@ describe("a designed post answered under the old question", () => {
   it("stays designed and unanswered when the answer is not a full one, never unreadable", async () => {
     const before = storedBefore("ig:1", "2026-10-20");
     const w = world(() => ({ note: "no verdict" }), [before]);
-    await reviewPosts(w.db, BRAND, [candidate("ig:1", "2026-10-20")], [before], w.io, "key");
+    await reviewPosts(w.db, BRAND, [candidate("ig:1", "2026-10-20")], [before], w.io, COST);
     expect(w.stored("ig:1")).toMatchObject({ verdict: "designed", path: before.path, kind: null, occasion: null, rule: 2, reviewed_at: NOW });
   });
 
@@ -139,7 +140,7 @@ describe("a designed post answered under the old question", () => {
     const w = world((a) => { if (a.imageUrl.endsWith(first.path!)) throw new Error("rate limited"); return EVERYDAY; }, [first, second]);
     w.db.uploads.set(`design-references/${first.path}`, "image");
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    const run = await reviewPosts(w.db, BRAND, [candidate("ig:1", "2026-10-20"), candidate("ig:2", "2026-10-21")], [first, second], w.io, "key");
+    const run = await reviewPosts(w.db, BRAND, [candidate("ig:1", "2026-10-20"), candidate("ig:2", "2026-10-21")], [first, second], w.io, COST);
     // Not a column of it changed: still under the old question, so the next run asks it again.
     expect(w.stored("ig:1")).toEqual({ client_id: "c1", ...first });
     expect(run.missed).toEqual(["ig:1"]);
@@ -152,7 +153,7 @@ describe("a designed post answered under the old question", () => {
     const w = world((a) => { if (a.imageUrl.endsWith(waiting.path!)) throw new Error("overloaded"); return EVERYDAY; }, [waiting, other]);
     w.db.uploads.set(`design-references/${waiting.path}`, "image");
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    await reviewPosts(w.db, BRAND, [candidate("ig:1", "2026-10-20"), candidate("ig:2", "2026-10-21")], [waiting, other], w.io, "key");
+    await reviewPosts(w.db, BRAND, [candidate("ig:1", "2026-10-20"), candidate("ig:2", "2026-10-21")], [waiting, other], w.io, COST);
     expect(w.stored("ig:1")).toMatchObject({ kind: null, rule: 2, reviewed_at: "2026-11-09T00:00:00.000Z" });
   });
 
@@ -160,7 +161,7 @@ describe("a designed post answered under the old question", () => {
     const before = storedBefore("ig:1", "2026-10-20");
     const w = world(() => { throw new Error("image could not be fetched"); }, [before]);
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    const run = await reviewPosts(w.db, BRAND, [candidate("ig:1", "2026-10-20")], [before], w.io, "key");
+    const run = await reviewPosts(w.db, BRAND, [candidate("ig:1", "2026-10-20")], [before], w.io, COST);
     expect(run.rows).toHaveLength(1);
     expect(run.missed).toEqual([]);
     expect(w.stored("ig:1")).toMatchObject({ verdict: "designed", kind: null, rule: 2 });
@@ -173,7 +174,7 @@ describe("an identical image", () => {
   it("takes the answer given under the current question, with its kind, and no model is asked", async () => {
     const known = storedBefore("ig:1", "2026-10-31", { rule: 2, kind: "occasion", occasion: "holiday", evidence: "Happy Halloween" });
     const w = world(() => EVERYDAY, [known]);
-    const run = await reviewPosts(w.db, BRAND, [twin("li:9")], [known], w.io, "key");
+    const run = await reviewPosts(w.db, BRAND, [twin("li:9")], [known], w.io, COST);
     expect(run.modelCalls).toBe(0);
     expect(w.asked).toEqual([]);
     expect(w.stored("li:9")).toMatchObject({ verdict: "designed", path: known.path, kind: "occasion", occasion: "holiday", evidence: "Happy Halloween", rule: 2 });
@@ -182,7 +183,7 @@ describe("an identical image", () => {
   it("does not take an answer given under the old question: it is asked", async () => {
     const known = storedBefore("ig:1", "2026-10-31");
     const w = world(() => HOLIDAY, [known]);
-    const run = await reviewPosts(w.db, BRAND, [twin("li:9")], [known], w.io, "key");
+    const run = await reviewPosts(w.db, BRAND, [twin("li:9")], [known], w.io, COST);
     expect(run.modelCalls).toBe(1);
     expect(w.stored("li:9")).toMatchObject({ verdict: "designed", kind: "occasion", occasion: "holiday", rule: 2 });
     // The old row is untouched until its own turn in the queue.
@@ -195,7 +196,7 @@ describe("the time one run gives to reviews", () => {
     const w = world(() => EVERYDAY);
     const queue = [1, 2, 3, 4, 5, 6].map((n) => candidate(`ig:${n}`, `2026-11-0${n}`));
     // The run began two minutes ago: its time for reviews is already spent.
-    const run = await reviewPosts(w.db, BRAND, queue, [], w.io, "key", Date.now() - 120_000);
+    const run = await reviewPosts(w.db, BRAND, queue, [], w.io, COST, Date.now() - 120_000);
     expect(run.rows.map((r) => r.source_post_id)).toEqual(["ig:1", "ig:2", "ig:3", "ig:4"]);
     expect(run.modelCalls).toBe(4);
   });
@@ -207,17 +208,17 @@ describe("when the model answers none of a batch", () => {
     const w = world(() => { throw new Error("overloaded"); }, [before]);
     w.db.uploads.set(`design-references/${before.path}`, "image");
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    await expect(reviewPosts(w.db, BRAND, [candidate("ig:1", "2026-10-20"), candidate("ig:2", "2026-10-21")], [before], w.io, "key")).rejects.toThrow("The reference quality check did not answer. It will be tried again.");
+    await expect(reviewPosts(w.db, BRAND, [candidate("ig:1", "2026-10-20"), candidate("ig:2", "2026-10-21")], [before], w.io, COST)).rejects.toThrow("The reference quality check did not answer. It will be tried again.");
     expect(w.db.tables.design_reference_reviews).toEqual([{ client_id: "c1", ...before }]);
     expect(warn.mock.calls.length).toBe(2);
 
     // Asked-again posts alone count as well.
     const only = world(() => { throw new Error("overloaded"); }, [before]);
     only.db.uploads.set(`design-references/${before.path}`, "image");
-    await expect(reviewPosts(only.db, BRAND, [candidate("ig:1", "2026-10-20")], [before], only.io, "key")).rejects.toThrow("The reference quality check did not answer.");
+    await expect(reviewPosts(only.db, BRAND, [candidate("ig:1", "2026-10-20")], [before], only.io, COST)).rejects.toThrow("The reference quality check did not answer.");
     expect(only.stored("ig:1")).toEqual({ client_id: "c1", ...before });
     // So does a check that failed once before: one failure is still a passing one.
-    await expect(reviewPosts(only.db, BRAND, [candidate("ig:1", "2026-10-20")], [before], only.io, "key", Date.now(), 1)).rejects.toThrow("The reference quality check did not answer.");
+    await expect(reviewPosts(only.db, BRAND, [candidate("ig:1", "2026-10-20")], [before], only.io, COST, Date.now(), 1)).rejects.toThrow("The reference quality check did not answer.");
     expect(only.stored("ig:1")).toEqual({ client_id: "c1", ...before });
   });
 
@@ -226,7 +227,7 @@ describe("when the model answers none of a batch", () => {
     const w = world(() => { throw new Error("the image could not be processed"); }, [stuck]);
     w.db.uploads.set(`design-references/${stuck.path}`, "image");
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    const run = await reviewPosts(w.db, BRAND, [candidate("ig:1", "2026-10-20")], [stuck], w.io, "key", Date.now(), 2);
+    const run = await reviewPosts(w.db, BRAND, [candidate("ig:1", "2026-10-20")], [stuck], w.io, COST, Date.now(), 2);
     // It stays designed with its file, and is asked again a week later.
     expect(w.stored("ig:1")).toMatchObject({ verdict: "designed", path: stuck.path, reason: "Branded type over a color block", kind: null, rule: 2, reviewed_at: NOW });
     expect(run).toMatchObject({ missed: [], modelCalls: 1 });
@@ -235,7 +236,7 @@ describe("when the model answers none of a batch", () => {
     const many = [1, 2, 3, 4, 5].map((n) => storedBefore(`ig:${n}`, `2026-10-2${n}`));
     const later = world(() => { throw new Error("overloaded"); }, many);
     for (const r of many) later.db.uploads.set(`design-references/${r.path}`, "image");
-    await expect(reviewPosts(later.db, BRAND, many.map((r, n) => candidate(r.source_post_id, `2026-10-2${n + 1}`)), many, later.io, "key", Date.now(), 2)).rejects.toThrow("The reference quality check did not answer.");
+    await expect(reviewPosts(later.db, BRAND, many.map((r, n) => candidate(r.source_post_id, `2026-10-2${n + 1}`)), many, later.io, COST, Date.now(), 2)).rejects.toThrow("The reference quality check did not answer.");
     expect(later.db.tables.design_reference_reviews.filter((r) => r.rule === 2)).toHaveLength(4);
     expect(later.stored("ig:5").rule ?? 1).toBe(1);
   });
@@ -245,7 +246,7 @@ describe("a post known only from its stored review", () => {
   it("is never asked: it has no caption and no image in this run", async () => {
     const known = storedBefore("ig:1", "2026-10-20");
     const w = world(() => EVERYDAY, [known]);
-    const run = await reviewPosts(w.db, BRAND, [{ ...candidate("ig:1", "2026-10-20"), text: "", image_url: "", carried: true }], [known], w.io, "key");
+    const run = await reviewPosts(w.db, BRAND, [{ ...candidate("ig:1", "2026-10-20"), text: "", image_url: "", carried: true }], [known], w.io, COST);
     expect(run).toEqual({ rows: [], modelCalls: 0, missed: [] });
     expect(w.stored("ig:1")).toEqual({ client_id: "c1", ...known });
   });

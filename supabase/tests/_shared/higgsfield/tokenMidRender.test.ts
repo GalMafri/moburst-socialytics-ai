@@ -8,6 +8,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
 import { renderImageWithHiggsfield } from "../../../functions/_shared/higgsfield/renderImage";
+import { useTestMeter } from "../../paid/testMeter";
 
 const T0 = Date.parse("2026-11-20T10:00:00.000Z");
 const MISSING = "Could not find the function public.higgsfield_tokens_read without parameters in the schema cache";
@@ -49,10 +50,13 @@ describe("an access token that expires during a render", () => {
       }
       return rpc(msg.id, {});
     }));
+    const rows = useTestMeter();
     const download = vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-type": "image/png" } })) as unknown as typeof fetch;
 
-    const rendered = renderImageWithHiggsfield({ supabase: db, prompt: "p", aspectRatio: "1:1", referenceUrls: [], budgetMs: 115_000, fetchImpl: download });
+    const rendered = renderImageWithHiggsfield({ supabase: db, cost: { tool: "socialytics", clientId: "c1", feature: "post.image", actor: "user" }, prompt: "p", aspectRatio: "1:1", referenceUrls: [], budgetMs: 115_000, fetchImpl: download });
     await expect(rendered).resolves.toMatchObject({ imageMime: "image/png" });
     expect(tokenCalls).toBe(1);
+    // The finished image is recorded once, for the client it was made for (Higgsfield's answers carry no price).
+    expect(rows).toEqual([expect.objectContaining({ provider: "higgsfield", client_id: "c1", feature: "post.image", resource: "nano_banana_pro", quantities: { images: 1 }, provider_ref: "job-1", idempotency_key: "higgsfield:job-1" })]);
   });
 });

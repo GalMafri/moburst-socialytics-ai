@@ -31,6 +31,7 @@
 // written here.
 
 import { answerText, roomFor } from "../anthropicReply.ts";
+import type { CostContext } from "../cost/context.ts";
 import { parseAnswer } from "../pipelines/competitive/analysis.ts";
 import { applyRhythmSetting, numberEvidence, scoreOwnPosts, type EvidenceItem, type OwnPost, type RhythmLine } from "../calendar/evidence.ts";
 import { fmtMultiple } from "../calendar/reasonText.ts";
@@ -784,7 +785,7 @@ export interface WriteUsage {
   tokens: Record<string, { input: number; output: number }>;
 }
 
-export type StrategyCall = (args: { apiKey: string; body: Record<string, unknown> }) => Promise<{ text: string; stopReason?: string; raw?: unknown }>;
+export type StrategyCall = (args: { cost: CostContext; body: Record<string, unknown> }) => Promise<{ text: string; stopReason?: string; raw?: unknown }>;
 
 export type StrategyPhase = "write" | "reask" | "check" | "fix" | "recheck";
 
@@ -888,7 +889,7 @@ function fixAsk(flagged: Array<{ section: string; statement: string }>): string 
  * the check flagged statements; check again. A reply that fails where no
  * further ask is allowed ends the write.
  */
-export async function strategyPhase(call: StrategyCall, apiKey: string, pending: PendingStrategy): Promise<PhaseOutcome> {
+export async function strategyPhase(call: StrategyCall, cost: CostContext, pending: PendingStrategy): Promise<PhaseOutcome> {
   const e = pending.evidence;
   const usage: WriteUsage = structuredClone(pending.usage);
   const count = (model: string, raw: unknown) => {
@@ -904,7 +905,7 @@ export async function strategyPhase(call: StrategyCall, apiKey: string, pending:
     const base = strategyRequest(e);
     const messages = pending.phase === "write" ? (base.messages as PendingStrategy["messages"]) : [...pending.messages, { role: "user", content: pending.ask ?? "" }];
     usage.calls.writer++;
-    const r = await call({ apiKey, body: { ...base, messages } });
+    const r = await call({ cost, body: { ...base, messages } });
     count(STRATEGY_MODEL, r.raw);
     const got = cutOff(r) ? { error: "The answer was cut off before it ended." } : parseStrategy(r.text, e);
     if (pending.phase === "write") {
@@ -921,7 +922,7 @@ export async function strategyPhase(call: StrategyCall, apiKey: string, pending:
   if (!pending.draft) return over("The draft to check was missing.");
   const written = assemble(pending.draft, e);
   usage.calls.checker++;
-  const r = await call({ apiKey, body: checkRequest(e, written.sections) });
+  const r = await call({ cost, body: checkRequest(e, written.sections) });
   count(CHECK_MODEL, r.raw);
   if (cutOff(r)) return over("The check's reply was cut off before it ended.");
   // A check that was declined is read as empty, which is no check: nothing passes on it.

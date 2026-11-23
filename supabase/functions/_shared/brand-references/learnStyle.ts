@@ -28,7 +28,7 @@
 import { libraryEntries, postLabel, referencesFor, shortDay } from "../design-prompts/designRefs.ts";
 import { type Candidate, referenceFingerprint, sproutCandidates } from "./candidates.ts";
 import { defaultSproutCustomerId } from "../sprout/customer.ts";
-import { anthropicKeyFor, type CheckIO, liveCheckIO, READ_CAP, READ_STOP_MS, reviewPosts, SLICE_START_BUDGET_MS } from "./discover.ts";
+import { aiReady, type CheckIO, liveCheckIO, READ_CAP, READ_STOP_MS, reviewPosts, SLICE_START_BUDGET_MS } from "./discover.ts";
 import {
   carriedCandidates, type Choice, choicesKey, type CorpusInput, occasionPosts, PIPELINE_VERSION, qualifiedPlatforms, relearnReason, type Review, reviewCounts, reviewQueue,
   readVerdict, type Selection, selectLibrary, siblings, SLICE_DAYS, type StoredEntry, THIN_WINDOW_DAYS,
@@ -36,11 +36,13 @@ import {
 import { base64Bytes, brandBookFitsRequest } from "../brand/brandBookLimits.ts";
 import { StyleError } from "./errors.ts";
 import { anthropicFetch } from "../anthropic.ts";
+import type { Actor, CostContext } from "../cost/context.ts";
+import { costCtx } from "../paid/index.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
 
-export { anthropicKeyFor };
+export { aiReady };
 
 export const STYLE_SYSTEM_PROMPT = `You are a senior brand designer doing a forensic style analysis. You are writing a BINDING STYLE RULEBOOK — not a description, not a vibes check. A generative image model will follow these rules verbatim to produce new work for this brand. If the rules are soft, the output will be generic. If the rules are sharp and opinionated, the output will look like the brand.
 
@@ -218,13 +220,13 @@ const mediaType = (path: string) => (/\.png$/i.test(path) ? "image/png" : /\.web
 
 export interface RefsIO extends CheckIO {
   /** The model writes the rulebook: its reply text. */
-  learn(args: { apiKey: string; system: string; content: unknown[] }): Promise<string>;
+  learn(args: { cost: CostContext; system: string; content: unknown[] }): Promise<string>;
 }
 
-async function learn(args: { apiKey: string; system: string; content: unknown[] }): Promise<string> {
-  const resp = await anthropicFetch("/v1/messages", {
+async function learn(args: { cost: CostContext; system: string; content: unknown[] }): Promise<string> {
+  const resp = await anthropicFetch(args.cost, "/v1/messages", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": args.apiKey, "anthropic-version": "2023-06-01" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model: LEARN_MODEL, max_tokens: 3000, system: args.system, messages: [{ role: "user", content: args.content }] }),
   });
   if (!resp.ok) {
@@ -351,7 +353,15 @@ export interface RefreshOptions {
   resume?: unknown;
   /** How many runs of this check failed in a row before this one. */
   failedBefore?: number;
+  /** Who asked for the check, for the cost of its model calls (the client is always the one charged). Left out: the schedule. */
+  by?: RefsBy;
 }
+
+/** Who asked for a check of the references, and the unit of work it is part of (a lifecycle_step job). */
+export interface RefsBy { actor: Actor; executionId?: string | null; userId?: string | null }
+
+const refsCost = (clientId: string, feature: string, by: RefsBy = { actor: "schedule" }): CostContext =>
+  costCtx({ clientId, feature, actor: by.actor, executionId: by.executionId ?? null, userId: by.userId ?? null });
 
 /**
  * The weekly check of one client's design references. A Sprout read of 90
@@ -437,7 +447,8 @@ export async function refreshReferences(db: Db, clientId: string, io: RefsIO, pe
     input = inputNow();
     const queue = reviewQueue(input);
     if (!queue.length) return 0;
-    const run = await reviewPosts(db, client, queue, reviews, io, await io.apiKey(db), started, perf.failedBefore ?? 0);
+    await io.aiReady();
+    const run = await reviewPosts(db, client, queue, reviews, io, refsCost(clientId, "brand.references", perf.by), started, perf.failedBefore ?? 0);
     const fresh = new Map(run.rows.map((r) => [r.source_post_id, r]));
     reviews = [...reviews.filter((r) => !fresh.has(r.source_post_id)), ...run.rows];
     input = inputNow();
@@ -551,9 +562,9 @@ export async function refreshReferences(db: Db, clientId: string, io: RefsIO, pe
   if (reason && images && !lookWaits) {
     const qualified = qualifiedPlatforms(sel);
     if (images.count < 3) throw new StyleError("provider", "The references could not be loaded. It will be tried again.");
-    const apiKey = await io.apiKey(db);
+    await io.aiReady();
     const text = await io.learn({
-      apiKey, system: LIBRARY_STYLE_PROMPT,
+      cost: refsCost(clientId, "brand.references", perf.by), system: LIBRARY_STYLE_PROMPT,
       content: [{ type: "text", text: `Analyze these posts by "${client.name}" and write the JSON rulebook.` }, ...images.content, { type: "text", text: rulebookRequestText(client.name, sel, previous) }],
     });
     modelCalls++;
@@ -624,10 +635,10 @@ export interface LearnedStyle {
   cached: boolean;
 }
 
-export async function learnBrandStyle(db: Db, clientId: string, opts: { discover: boolean; force?: boolean }, io: RefsIO = liveRefsIO()): Promise<LearnedStyle> {
+export async function learnBrandStyle(db: Db, clientId: string, opts: { discover: boolean; force?: boolean; by?: RefsBy }, io: RefsIO = liveRefsIO()): Promise<LearnedStyle> {
   if (opts.discover) {
     // The client's own posts: the same weekly check the lifecycle runs, so both learn the same way.
-    const out = await refreshReferences(db, clientId, io);
+    const out = await refreshReferences(db, clientId, io, { by: opts.by });
     if (out.kind === "no_accounts") throw new StyleError("no_accounts", "The client has no social accounts assigned yet.");
     if (out.kind === "in_progress") throw new StyleError("provider", "The client's posts are still being reviewed. It will be tried again.");
     if (out.kind === "too_few") throw new StyleError("too_few", `${out.designed} of the client's recent posts are designed posts; 3 are needed to learn its style.`);
@@ -638,7 +649,7 @@ export async function learnBrandStyle(db: Db, clientId: string, opts: { discover
     .select("id, name, design_references, harvested_design_references, brand_book_file_path, design_style_synthesis")
     .eq("id", clientId).maybeSingle();
   if (clientErr || !client) throw new StyleError("provider", "The client could not be read.");
-  const apiKey = await anthropicKeyFor(db);
+  await aiReady();
   const designRefs: string[] = referencesFor(client.design_references, client.harvested_design_references, 8, null);
   const brandBookPath: string | null = client.brand_book_file_path || null;
   if (designRefs.length === 0 && !brandBookPath) throw new StyleError("no_sources", "There are no design references or brand book to learn from.");
@@ -683,9 +694,9 @@ export async function learnBrandStyle(db: Db, clientId: string, opts: { discover
   }
   if (sourceCount === 0) throw new StyleError("provider", "The references could not be loaded. It will be tried again.");
 
-  const resp = await anthropicFetch("/v1/messages", {
+  const resp = await anthropicFetch(refsCost(clientId, "brand.style", opts.by), "/v1/messages", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-beta": "pdfs-2024-09-25" },
+    headers: { "Content-Type": "application/json", "anthropic-beta": "pdfs-2024-09-25" },
     body: JSON.stringify({ model: LEARN_MODEL, max_tokens: 2000, system: STYLE_SYSTEM_PROMPT, messages: [{ role: "user", content }] }),
   });
   if (!resp.ok) {

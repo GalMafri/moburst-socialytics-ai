@@ -17,9 +17,10 @@ import { useApiKeys, useCreateApiKey, useRevokeApiKey, type ApiKey, type Created
 import { cn } from "@/lib/utils";
 import { invokeResendable, sendQuietly } from "@/lib/quietSend";
 
-const SCOPES: Array<{ id: "read" | "demo" | "admin"; label: string; hint: string }> = [
+const SCOPES: Array<{ id: "read" | "demo" | "costs" | "admin"; label: string; hint: string }> = [
   { id: "read", label: "read", hint: "Every client, report, competitor set, post, schedule and alert the key may see." },
   { id: "demo", label: "demo", hint: "Start demo jobs that onboard a brand and run each feature for it." },
+  { id: "costs", label: "costs", hint: "Read what each client costs in paid AI and data services (for the moburst.ai costs page)." },
   { id: "admin", label: "admin", hint: "Manage keys through the API." },
 ];
 

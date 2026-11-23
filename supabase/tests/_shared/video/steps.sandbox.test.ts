@@ -22,12 +22,12 @@ vi.mock("../../../functions/_shared/video/sandbox.ts", async () => {
       return `sess-${++sandbox.started}`;
     }),
     // A deleted session is not found (the hosted API answers 404 for it).
-    checkScript: vi.fn(async (id: string) => {
+    checkScript: vi.fn(async (_cost: unknown, id: string) => {
       sandbox.checked.push(id);
       if (sandbox.ended.has(id)) throw new Error(`Hosted sandbox GET /v1/sessions/${id} 404: not found`);
       return sandbox.answer;
     }),
-    endScript: vi.fn(async (id: string) => { sandbox.ended.add(id); }),
+    endScript: vi.fn(async (_cost: unknown, id: string) => { sandbox.ended.add(id); }),
   };
 });
 const vision = vi.hoisted(() => ({ fail: 0 }));

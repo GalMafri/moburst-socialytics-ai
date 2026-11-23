@@ -11,6 +11,7 @@
 // specs/2026-11-03-onboarding-complete-design.md, section 1).
 
 import { anthropicMessages } from "../anthropic.ts";
+import type { CostContext } from "../cost/context.ts";
 import { validateCompetitorWebsites } from "./validateCompetitorWebsites.ts";
 
 const BROWSER_UA =
@@ -46,7 +47,7 @@ export async function fetchSiteText(websiteUrl: string): Promise<string> {
   }
 }
 
-export async function proposeCompetitors(args: { anthropicKey: string; client: Record<string, unknown>; siteText: string; postsText?: string }): Promise<ProposedCompetitor[]> {
+export async function proposeCompetitors(args: { cost: CostContext; client: Record<string, unknown>; siteText: string; postsText?: string }): Promise<ProposedCompetitor[]> {
   const c = args.client as {
     name: string; website_url?: string; geo?: string; language?: string; social_keywords?: string[];
     content_pillars?: Array<{ name?: string; description?: string }> | null; brief_text?: string; brand_notes?: string; competitor_seed_notes?: string;
@@ -70,7 +71,7 @@ export async function proposeCompetitors(args: { anthropicKey: string; client: R
   // non-text block).
   const PREFILL = '{"competitors":[';
   const callModel = (maxTokens: number) => anthropicMessages({
-    apiKey: args.anthropicKey,
+    cost: args.cost,
     onDropped: (param) => console.log(`identify-competitors: model refused "${param}", retried without it`),
     body: {
       model: "claude-sonnet-5",
@@ -136,9 +137,9 @@ const nameKey = (name: unknown) => String(name ?? "").toLowerCase().replace(/\./
  * website that answers leaves no draft (IdentifyError too_few).
  */
 // deno-lint-ignore no-explicit-any
-export async function identifyCompetitors(db: Db, client: Record<string, any>, anthropicKey: string, opts: { generatedBy?: string | null; postsText?: string | null } = {}) {
+export async function identifyCompetitors(db: Db, client: Record<string, any>, cost: CostContext, opts: { generatedBy?: string | null; postsText?: string | null } = {}) {
   const siteText = client.website_url ? await fetchSiteText(client.website_url) : "";
-  const suggestions = await proposeCompetitors({ anthropicKey, client, siteText, postsText: siteText ? "" : (opts.postsText ?? "").slice(0, 6000) });
+  const suggestions = await proposeCompetitors({ cost, client, siteText, postsText: siteText ? "" : (opts.postsText ?? "").slice(0, 6000) });
   // QA 22 Nov 2026 (P30-05): the client is never its own competitor. The
   // website check alone let it through for a client with no website on file,
   // or a proposal on another of the client's domains.

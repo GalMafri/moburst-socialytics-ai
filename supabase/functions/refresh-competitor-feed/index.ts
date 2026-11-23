@@ -26,12 +26,12 @@ Deno.serve(async (req) => {
     // Scoped to the client, not merely to staff. This was the only competitive
     // function that checked the role and not the client, so a company-scoped
     // staff member could pull any client's competitor feed.
-    if (!viaSecret) await requireStaff(req, { writeClientId: clientId });
+    const staff = viaSecret ? null : await requireStaff(req, { writeClientId: clientId });
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const result = await refreshCompetitorFeedOnDemand(admin, clientId, {
       rivaliqKey: Deno.env.get("RIVALIQ_API_KEY"),
-      anthropicKey: Deno.env.get("ANTHROPIC_API_KEY"),
+      by: staff ? { actor: "user", userId: staff.userId ?? null } : { actor: "system" },
       secret,
       days: body.days,
     });

@@ -1,0 +1,5503 @@
+{
+  "components": {
+    "schemas": {
+      "AlertList": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/AlertObject"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "AlertObject": {
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "companies": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "confidence": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "platforms": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "post_count": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "post_urls": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "type": "string"
+          },
+          "summary": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "topic": {
+            "type": "string"
+          },
+          "window": {
+            "properties": {
+              "end": {
+                "type": "string"
+              },
+              "start": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "Analytics": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AnalyticsObject"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "AnalyticsObject": {
+        "properties": {
+          "by_profile": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "changes": {
+            "type": "object"
+          },
+          "client": {
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "daily": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "fetched_at": {
+            "type": "string"
+          },
+          "previous_range": {
+            "properties": {
+              "days": {
+                "type": "integer"
+              },
+              "end": {
+                "type": "string"
+              },
+              "start": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "previous_totals": {
+            "properties": {
+              "comments": {
+                "type": "number"
+              },
+              "impressions": {
+                "type": "number"
+              },
+              "post_link_clicks": {
+                "type": "number"
+              },
+              "reactions": {
+                "type": "number"
+              },
+              "shares": {
+                "type": "number"
+              },
+              "video_views": {
+                "type": "number"
+              }
+            },
+            "type": "object"
+          },
+          "profiles": {
+            "items": {
+              "properties": {
+                "name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "network": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "range": {
+            "properties": {
+              "days": {
+                "type": "integer"
+              },
+              "end": {
+                "type": "string"
+              },
+              "start": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "top_posts": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "totals": {
+            "properties": {
+              "comments": {
+                "type": "number"
+              },
+              "impressions": {
+                "type": "number"
+              },
+              "post_link_clicks": {
+                "type": "number"
+              },
+              "reactions": {
+                "type": "number"
+              },
+              "shares": {
+                "type": "number"
+              },
+              "video_views": {
+                "type": "number"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "ApiKeyCreate": {
+        "properties": {
+          "client_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "company_slugs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rate_limit_per_minute": {
+            "type": "integer"
+          },
+          "scopes": {
+            "items": {
+              "enum": [
+                "read",
+                "demo",
+                "run",
+                "costs",
+                "admin"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "scopes"
+        ],
+        "type": "object"
+      },
+      "ApiKeyCreated": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ApiKeyCreatedObject"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "ApiKeyCreatedObject": {
+        "properties": {
+          "client_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "company_slugs": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "key": {
+            "description": "Shown once; store it now.",
+            "type": "string"
+          },
+          "key_prefix": {
+            "type": "string"
+          },
+          "last_used_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "owner_email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "owner_user_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rate_limit_per_minute": {
+            "type": "integer"
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scopes": {
+            "items": {
+              "enum": [
+                "read",
+                "demo",
+                "run",
+                "costs",
+                "admin"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "warning": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ApiKeyList": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ApiKeyObject"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "ApiKeyObject": {
+        "properties": {
+          "client_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "company_slugs": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "key_prefix": {
+            "type": "string"
+          },
+          "last_used_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "owner_email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "owner_user_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rate_limit_per_minute": {
+            "type": "integer"
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scopes": {
+            "items": {
+              "enum": [
+                "read",
+                "demo",
+                "run",
+                "costs",
+                "admin"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "Client": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ClientObject"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "ClientList": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ClientObject"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "ClientObject": {
+        "properties": {
+          "archived": {
+            "type": "boolean"
+          },
+          "brand_identity": {
+            "oneOf": [
+              {
+                "properties": {
+                  "accent_color": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "background_style": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "design_elements": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "font_family": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "logo_description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "primary_color": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "secondary_color": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "tone_of_voice": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "visual_style": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "brief": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "company_slug": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "competitor_sets": {
+            "items": {
+              "properties": {
+                "client_id": {
+                  "type": "string"
+                },
+                "competitors": {
+                  "items": {
+                    "properties": {
+                      "detection": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "handles": {
+                        "items": {
+                          "properties": {
+                            "active": {
+                              "type": "boolean"
+                            },
+                            "confidence": {
+                              "type": [
+                                "number",
+                                "null"
+                              ]
+                            },
+                            "followers": {
+                              "type": [
+                                "integer",
+                                "null"
+                              ]
+                            },
+                            "handle": {
+                              "type": "string"
+                            },
+                            "platform": {
+                              "type": "string"
+                            },
+                            "source": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "url": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "rank": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "rationale": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "selected": {
+                        "type": "boolean"
+                      },
+                      "similarity_score": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "website": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "confirmed_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "created_at": {
+                  "type": "string"
+                },
+                "demo_job_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "links": {
+                  "properties": {
+                    "api": {
+                      "type": "string"
+                    },
+                    "app": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "notes": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "source": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "type": "string"
+                },
+                "tracked": {
+                  "type": "boolean"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "competitors": {
+            "properties": {
+              "selected": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "set_status": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tracked": {
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          },
+          "counts": {
+            "properties": {
+              "competitive_reports": {
+                "type": "integer"
+              },
+              "posts": {
+                "type": "integer"
+              },
+              "reports": {
+                "type": "integer"
+              },
+              "schedules": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "demo_job_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "design": {
+            "properties": {
+              "ready": {
+                "type": "boolean"
+              },
+              "references": {
+                "type": "integer"
+              },
+              "synthesis_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "system": {
+                "oneOf": [
+                  {
+                    "properties": {
+                      "approved_at": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "status": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "waiting_for": {
+                "enum": [
+                  "look",
+                  "designed_posts",
+                  "social_accounts",
+                  "logo_file",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "geo": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "keywords": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "language": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_report": {
+            "oneOf": [
+              {
+                "properties": {
+                  "completed_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "period": {
+                    "properties": {
+                      "end": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "start": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "status": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "links": {
+            "properties": {
+              "api": {
+                "type": "string"
+              },
+              "app": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "logo_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "pillars": {
+            "items": {
+              "properties": {
+                "description": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "platforms": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "schedules": {
+            "items": {
+              "properties": {
+                "active": {
+                  "type": "boolean"
+                },
+                "client_id": {
+                  "type": "string"
+                },
+                "created_at": {
+                  "type": "string"
+                },
+                "frequency": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "last_result": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "last_run_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "next_run_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "range_mode": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "run_day_of_month": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "setup": {
+            "properties": {
+              "issues": {
+                "items": {
+                  "properties": {
+                    "fix": {
+                      "enum": [
+                        "setup",
+                        "competitive"
+                      ],
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "brand_identity_missing",
+                        "pillars_missing",
+                        "keywords_missing",
+                        "sprout_missing",
+                        "competitors_missing",
+                        "design_style_missing",
+                        "schedule_missing"
+                      ],
+                      "type": "string"
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "ready": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "ready",
+              "issues"
+            ],
+            "type": "object"
+          },
+          "sprout": {
+            "properties": {
+              "networks": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "profiles": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "sprout_profiles": {
+            "items": {
+              "properties": {
+                "handle": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "network": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "url": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "website": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "CompetitiveReport": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CompetitiveReportObject"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "CompetitiveReportList": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/CompetitiveReportObject"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "CompetitiveReportObject": {
+        "properties": {
+          "aggregates": {
+            "oneOf": [
+              {
+                "properties": {
+                  "client_name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "companies": {
+                    "items": {
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "metrics_available": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "analysis": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "deck": {
+            "properties": {
+              "url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "demo_job_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "duration_minutes": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "links": {
+            "properties": {
+              "api": {
+                "type": "string"
+              },
+              "app": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "period": {
+            "properties": {
+              "days": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "end": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "start": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "provider_status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "quality_check": {},
+          "set_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "totals": {
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "CompetitorSet": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CompetitorSetObject"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "CompetitorSetList": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/CompetitorSetObject"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "CompetitorSetObject": {
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "competitors": {
+            "items": {
+              "properties": {
+                "detection": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "handles": {
+                  "items": {
+                    "properties": {
+                      "active": {
+                        "type": "boolean"
+                      },
+                      "confidence": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "followers": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "handle": {
+                        "type": "string"
+                      },
+                      "platform": {
+                        "type": "string"
+                      },
+                      "source": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "url": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "rank": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "rationale": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "selected": {
+                  "type": "boolean"
+                },
+                "similarity_score": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "website": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "confirmed_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "demo_job_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "links": {
+            "properties": {
+              "api": {
+                "type": "string"
+              },
+              "app": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "tracked": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "CostEventList": {
+        "properties": {
+          "data": {
+            "items": {
+              "properties": {
+                "actor_kind": {
+                  "type": "string"
+                },
+                "bucket": {
+                  "type": "string"
+                },
+                "client_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "client_name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "company_slug": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "cost_source": {
+                  "type": "string"
+                },
+                "cost_usd": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "env": {
+                  "type": "string"
+                },
+                "execution_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "feature": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "occurred_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "price_ref": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "provider": {
+                  "type": "string"
+                },
+                "provider_ref": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "quantities": {
+                  "additionalProperties": {
+                    "type": "number"
+                  },
+                  "type": "object"
+                },
+                "resource": {
+                  "type": "string"
+                },
+                "unattributed": {
+                  "type": "boolean"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "CostPricing": {
+        "properties": {
+          "data": {
+            "properties": {
+              "at": {
+                "type": "string"
+              },
+              "prices": {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "providers": {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "CostSummary": {
+        "properties": {
+          "data": {
+            "properties": {
+              "currency": {
+                "enum": [
+                  "USD"
+                ],
+                "type": "string"
+              },
+              "filters": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "from": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "group_by": {
+                "items": {
+                  "enum": [
+                    "day",
+                    "week",
+                    "month",
+                    "client",
+                    "provider",
+                    "resource",
+                    "feature",
+                    "bucket",
+                    "env"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "notes": {
+                "type": "string"
+              },
+              "reconciliation": {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "rows": {
+                "items": {
+                  "description": "One row per group. Holds the group_by keys (client is an object with id, name, company_slug, bucket; resource also carries provider), then the totals.",
+                  "properties": {
+                    "bucket": {
+                      "type": "string"
+                    },
+                    "client": {
+                      "properties": {
+                        "bucket": {
+                          "type": "string"
+                        },
+                        "company_slug": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "id": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "name": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "cost_usd": {
+                      "description": "US dollars",
+                      "type": "number"
+                    },
+                    "day": {
+                      "type": "string"
+                    },
+                    "env": {
+                      "type": "string"
+                    },
+                    "estimated_usd": {
+                      "description": "US dollars",
+                      "type": "number"
+                    },
+                    "events": {
+                      "type": "integer"
+                    },
+                    "feature": {
+                      "type": "string"
+                    },
+                    "month": {
+                      "type": "string"
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "quantities": {
+                      "additionalProperties": {
+                        "type": "number"
+                      },
+                      "type": "object"
+                    },
+                    "resource": {
+                      "type": "string"
+                    },
+                    "unattributed_events": {
+                      "type": "integer"
+                    },
+                    "unattributed_usd": {
+                      "description": "US dollars",
+                      "type": "number"
+                    },
+                    "unpriced_events": {
+                      "type": "integer"
+                    },
+                    "week": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "to": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "tool": {
+                "enum": [
+                  "advisor",
+                  "socialytics"
+                ],
+                "type": "string"
+              },
+              "totals": {
+                "properties": {
+                  "cost_usd": {
+                    "description": "US dollars",
+                    "type": "number"
+                  },
+                  "estimated_usd": {
+                    "description": "US dollars",
+                    "type": "number"
+                  },
+                  "events": {
+                    "type": "integer"
+                  },
+                  "unattributed_events": {
+                    "type": "integer"
+                  },
+                  "unattributed_usd": {
+                    "description": "US dollars",
+                    "type": "number"
+                  },
+                  "unpriced_events": {
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "tool",
+              "currency",
+              "from",
+              "to",
+              "totals",
+              "rows"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "DemoInput": {
+        "properties": {
+          "callback_url": {
+            "description": "An https URL that receives the finished job (signed with X-Demo-Signature).",
+            "type": "string"
+          },
+          "client_name": {
+            "description": "The brand's name.",
+            "type": "string"
+          },
+          "competitors": {
+            "items": {
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "website": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "force_run": {
+            "description": "Run the reports even when one completed in the last 7 days.",
+            "type": "boolean"
+          },
+          "idempotency_key": {
+            "type": "string"
+          },
+          "industry": {
+            "description": "Accepted for parity with AdVisor; not used by Socialytics.",
+            "type": "string"
+          },
+          "regions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "requester": {
+            "properties": {
+              "email": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "website": {
+            "description": "The brand's website (domain or URL).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_name",
+          "website"
+        ],
+        "type": "object"
+      },
+      "DemoJob": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DemoJobObject"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "DemoJobList": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/DemoJobObject"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "DemoJobObject": {
+        "properties": {
+          "callback_status": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "callback_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "client_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "gaps": {
+            "items": {
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "step": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "idempotency_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "input": {
+            "type": "object"
+          },
+          "links": {
+            "properties": {
+              "client": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "self": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "next_check_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outputs": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "requester": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "run_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "partial",
+              "failed",
+              "cancelled"
+            ],
+            "type": "string"
+          },
+          "steps": {
+            "items": {
+              "properties": {
+                "data": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "finished_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "message": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "outcome": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "started_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "enum": [
+                    "pending",
+                    "running",
+                    "done",
+                    "skipped",
+                    "failed"
+                  ],
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "DesignSystemList": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/DesignSystemObject"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "DesignSystemObject": {
+        "properties": {
+          "approved_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "previews": {
+            "items": {
+              "properties": {
+                "format": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "template_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "url": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "status": {
+            "type": "string"
+          },
+          "templates": {
+            "items": {
+              "properties": {
+                "formats": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "tokens": {
+            "oneOf": [
+              {
+                "properties": {
+                  "colors": {
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "font_family": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "Discarded": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DiscardedObject"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "DiscardedObject": {
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "removed": {
+            "properties": {
+              "client": {
+                "type": "boolean"
+              },
+              "competitive_reports": {
+                "type": "integer"
+              },
+              "competitor_sets": {
+                "type": "integer"
+              },
+              "media_jobs": {
+                "type": "integer"
+              },
+              "posts": {
+                "type": "integer"
+              },
+              "reports": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "Empty": {
+        "properties": {},
+        "type": "object"
+      },
+      "Error": {
+        "properties": {
+          "error": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "details": {},
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "Health": {
+        "properties": {
+          "build": {
+            "description": "Hash of the deployed API function source; equals BUILD_STAMP in supabase/functions/api/build-stamp.ts on the commit it was built from.",
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "time": {
+            "type": "string"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Links": {
+        "properties": {
+          "api": {
+            "type": "string"
+          },
+          "app": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "MediaJobList": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/MediaJobObject"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "MediaJobObject": {
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "demo_job_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "output_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "post_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "review": {
+            "oneOf": [
+              {
+                "properties": {
+                  "dirty": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "reason": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reviewed_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "seed_image_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "PersonalKeyCreate": {
+        "properties": {
+          "name": {
+            "description": "1 to 80 characters after trimming, with at least one visible character and no line breaks, tabs or other control characters.",
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "PersonalKeyCreated": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PersonalKeyCreatedObject"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "PersonalKeyCreatedObject": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "key": {
+            "description": "Shown once; store it now.",
+            "type": "string"
+          },
+          "key_prefix": {
+            "type": "string"
+          },
+          "last_used_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scopes": {
+            "items": {
+              "enum": [
+                "read"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "PersonalKeyList": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/PersonalKeyObject"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "PersonalKeyObject": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "key_prefix": {
+            "type": "string"
+          },
+          "last_used_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scopes": {
+            "items": {
+              "enum": [
+                "read"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "PersonalKeyRevoked": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PersonalKeyRevokedObject"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "PersonalKeyRevokedObject": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "revoked_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "revoked_at"
+        ],
+        "type": "object"
+      },
+      "Post": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PostObject"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "PostList": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/PostObject"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "PostObject": {
+        "properties": {
+          "approved": {
+            "type": "boolean"
+          },
+          "approved_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "archived": {
+            "type": "boolean"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "concept": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "copy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "cta": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "demo_job_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "finishing": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "format": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hashtags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "links": {
+            "properties": {
+              "api": {
+                "type": "string"
+              },
+              "app": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "media_urls": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "rejected_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rejection_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "report_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "selected": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "variant_angle": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "variant_group_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "version": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "visual_direction": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "Report": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ReportObject"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "ReportList": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ReportObject"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "ReportObject": {
+        "properties": {
+          "analysis": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "calendar": {
+            "items": {
+              "properties": {
+                "date_label": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "day": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "posts": {
+                  "items": {
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              },
+              "type": "object"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "counts": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "deck": {
+            "properties": {
+              "status": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "demo_job_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "duration_minutes": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "industry_trends": {
+            "description": "The themes the weekly trend collection stored for the weeks that start inside the report's period (newest week first), each with its example posts. Null when none.",
+            "oneOf": [
+              {
+                "properties": {
+                  "themes": {
+                    "items": {
+                      "properties": {
+                        "angle": {
+                          "type": "string"
+                        },
+                        "happening": {
+                          "type": "string"
+                        },
+                        "platforms": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "posts": {
+                          "items": {
+                            "properties": {
+                              "author": {
+                                "type": "string"
+                              },
+                              "format": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "platform": {
+                                "type": "string"
+                              },
+                              "posted_at": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "text": {
+                                "type": "string"
+                              },
+                              "url": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "why_it_matters": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "themes"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "links": {
+            "properties": {
+              "api": {
+                "type": "string"
+              },
+              "app": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "metrics_summary": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "performance": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "period": {
+            "properties": {
+              "end": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "start": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "previous_period": {
+            "oneOf": [
+              {
+                "properties": {
+                  "end": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "start": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "trend_status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "trends": {
+            "oneOf": [
+              {
+                "properties": {
+                  "instagram": {
+                    "properties": {
+                      "patterns": {
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      "posts": {
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "tiktok": {
+                    "properties": {
+                      "patterns": {
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      "posts": {
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "ScheduleList": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ScheduleObject"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "ScheduleObject": {
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "frequency": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "last_result": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_run_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "next_run_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "range_mode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "run_day_of_month": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ScheduledPostList": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ScheduledPostObject"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "ScheduledPostObject": {
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "content": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "media_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "platform": {
+            "type": "string"
+          },
+          "report_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scheduled_time": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Setup": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SetupObject"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "SetupIssue": {
+        "properties": {
+          "fix": {
+            "enum": [
+              "setup",
+              "competitive"
+            ],
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "brand_identity_missing",
+              "pillars_missing",
+              "keywords_missing",
+              "sprout_missing",
+              "competitors_missing",
+              "design_style_missing",
+              "schedule_missing"
+            ],
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "SetupObject": {
+        "properties": {
+          "issues": {
+            "items": {
+              "properties": {
+                "fix": {
+                  "enum": [
+                    "setup",
+                    "competitive"
+                  ],
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "brand_identity_missing",
+                    "pillars_missing",
+                    "keywords_missing",
+                    "sprout_missing",
+                    "competitors_missing",
+                    "design_style_missing",
+                    "schedule_missing"
+                  ],
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "ready": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ready",
+          "issues"
+        ],
+        "type": "object"
+      },
+      "Status": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StatusObject"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "StatusObject": {
+        "properties": {
+          "counts": {
+            "type": "object"
+          },
+          "demo_jobs": {
+            "properties": {
+              "failed_24h": {
+                "type": "integer"
+              },
+              "running": {
+                "type": "integer"
+              },
+              "stuck": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "findings": {
+            "items": {
+              "properties": {
+                "client": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "client_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "detail": {
+                  "type": "string"
+                },
+                "job_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "link": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "report_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "severity": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "time": {
+            "type": "string"
+          },
+          "tool": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "ApiKey": {
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "Session": {
+        "description": "A Socialytics sign-in session token, for Moburst staff only.",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "Everything Socialytics holds for the clients a key may see (clients with their brand, pillars and design, social and competitive reports with their decks, competitor sets, generated posts and media, schedules, scheduled posts, competitive alerts, design systems, Sprout performance, health), plus the ad-hoc demo job that onboards any brand from a name and a website and runs every feature for it, and what Socialytics' paid providers cost per client, service and period (the costs scope). Authenticate with `Authorization: Bearer <key>`. The personal key routes under /v1/me take a Socialytics sign-in session instead, for Moburst staff only. Lists are paginated with `limit` and `cursor`.",
+    "title": "Socialytics API",
+    "version": "1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/v1/admin/keys": {
+      "get": {
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "List API keys",
+        "tags": [
+          "Admin"
+        ],
+        "x-auth": "admin"
+      },
+      "post": {
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyCreated"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "Create an API key (the key is returned once)",
+        "tags": [
+          "Admin"
+        ],
+        "x-auth": "admin"
+      }
+    },
+    "/v1/admin/keys/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Empty"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "Revoke an API key",
+        "tags": [
+          "Admin"
+        ],
+        "x-auth": "admin"
+      }
+    },
+    "/v1/alerts": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "client_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The next_cursor of the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "List competitive alerts",
+        "tags": [
+          "Competitive"
+        ],
+        "x-scope": "read"
+      }
+    },
+    "/v1/clients": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Part of the client name.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "company_slug",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_archived",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The next_cursor of the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "List clients",
+        "tags": [
+          "Clients"
+        ],
+        "x-scope": "read"
+      }
+    },
+    "/v1/clients/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Client"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "One client with its profiles, competitor sets and schedules",
+        "tags": [
+          "Clients"
+        ],
+        "x-scope": "read"
+      }
+    },
+    "/v1/clients/{id}/analytics": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "yyyy-mm-dd",
+            "in": "query",
+            "name": "start",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "yyyy-mm-dd",
+            "in": "query",
+            "name": "end",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Analytics"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "Sprout performance for a client over a window (default: the last 30 days)",
+        "tags": [
+          "Clients"
+        ],
+        "x-scope": "read"
+      }
+    },
+    "/v1/clients/{id}/setup": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Setup"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "Readiness of a client (brand, pillars, keywords, Sprout, competitors, design, schedule)",
+        "tags": [
+          "Clients"
+        ],
+        "x-scope": "read"
+      }
+    },
+    "/v1/competitive-reports": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "client_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "enum": [
+                "running",
+                "complete",
+                "failed"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The next_cursor of the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompetitiveReportList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "List competitive reports",
+        "tags": [
+          "Competitive"
+        ],
+        "x-scope": "read"
+      }
+    },
+    "/v1/competitive-reports/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompetitiveReport"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "One competitive report with its analysis and per-company aggregates",
+        "tags": [
+          "Competitive"
+        ],
+        "x-scope": "read"
+      }
+    },
+    "/v1/competitor-sets": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "client_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "enum": [
+                "draft",
+                "confirmed",
+                "analyzing",
+                "complete",
+                "failed"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The next_cursor of the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompetitorSetList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "List competitor sets with their competitors and handles",
+        "tags": [
+          "Competitive"
+        ],
+        "x-scope": "read"
+      }
+    },
+    "/v1/competitor-sets/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompetitorSet"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "One competitor set",
+        "tags": [
+          "Competitive"
+        ],
+        "x-scope": "read"
+      }
+    },
+    "/v1/cost-events": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "client_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "company_slug",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "enum": [
+                "anthropic",
+                "openai",
+                "gemini",
+                "lovable_ai",
+                "apify",
+                "gamma",
+                "higgsfield",
+                "firecrawl",
+                "tribe",
+                "snowflake",
+                "jina"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "resource",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "feature",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "bucket",
+            "required": false,
+            "schema": {
+              "enum": [
+                "client",
+                "shared",
+                "dev_qa"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "env",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "execution_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The next_cursor of the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CostEventList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "Individual charges, newest first",
+        "tags": [
+          "Costs"
+        ],
+        "x-scope": "costs"
+      }
+    },
+    "/v1/cost-pricing": {
+      "get": {
+        "parameters": [
+          {
+            "description": "ISO date. Default: today.",
+            "in": "query",
+            "name": "at",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CostPricing"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "The price list in force on a date",
+        "tags": [
+          "Costs"
+        ],
+        "x-scope": "costs"
+      }
+    },
+    "/v1/costs": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Start, inclusive (ISO date or date-time). Default: 30 days before to.",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "End, exclusive. Default: now.",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma list of day, week, month, client, provider, resource, feature, bucket, env. Empty: one total.",
+            "in": "query",
+            "name": "group_by",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "client_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "company_slug",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "enum": [
+                "anthropic",
+                "openai",
+                "gemini",
+                "lovable_ai",
+                "apify",
+                "gamma",
+                "higgsfield",
+                "firecrawl",
+                "tribe",
+                "snowflake",
+                "jina"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "A model or actor id.",
+            "in": "query",
+            "name": "resource",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "feature",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "bucket",
+            "required": false,
+            "schema": {
+              "enum": [
+                "client",
+                "shared",
+                "dev_qa"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "env",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "execution_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CostSummary"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "What this tool's paid providers cost, per client, service and period",
+        "tags": [
+          "Costs"
+        ],
+        "x-scope": "costs"
+      }
+    },
+    "/v1/demo-jobs": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "client_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The next_cursor of the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemoJobList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "List demo jobs",
+        "tags": [
+          "Demo"
+        ],
+        "x-scope": "demo"
+      },
+      "post": {
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DemoInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemoJob"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "Onboard a client and run every feature for it",
+        "tags": [
+          "Demo"
+        ],
+        "x-scope": "demo"
+      }
+    },
+    "/v1/demo-jobs/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemoJob"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "Progress and outputs of a demo job",
+        "tags": [
+          "Demo"
+        ],
+        "x-scope": "demo"
+      }
+    },
+    "/v1/demo-jobs/{id}/cancel": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemoJob"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "Cancel a queued or running demo job",
+        "tags": [
+          "Demo"
+        ],
+        "x-scope": "demo"
+      }
+    },
+    "/v1/demo-jobs/{id}/discard": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Discarded"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "Remove what a finished demo job created",
+        "tags": [
+          "Demo"
+        ],
+        "x-scope": "demo"
+      }
+    },
+    "/v1/design-systems": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "client_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The next_cursor of the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesignSystemList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "List design systems",
+        "tags": [
+          "Design"
+        ],
+        "x-scope": "read"
+      }
+    },
+    "/v1/health": {
+      "get": {
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Liveness, and the build of the API function that answered",
+        "tags": [
+          "System"
+        ]
+      }
+    },
+    "/v1/me/keys": {
+      "get": {
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonalKeyList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "Session": []
+          }
+        ],
+        "summary": "List your personal API keys (needs your signed-in Socialytics session)",
+        "tags": [
+          "Personal keys"
+        ]
+      },
+      "post": {
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PersonalKeyCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonalKeyCreated"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "Session": []
+          }
+        ],
+        "summary": "Make a personal API key, read only for 90 days (the key is returned once; needs your signed-in Socialytics session)",
+        "tags": [
+          "Personal keys"
+        ]
+      }
+    },
+    "/v1/me/keys/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonalKeyRevoked"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "Session": []
+          }
+        ],
+        "summary": "Revoke one of your personal API keys (needs your signed-in Socialytics session)",
+        "tags": [
+          "Personal keys"
+        ]
+      }
+    },
+    "/v1/media-jobs": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "client_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The next_cursor of the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaJobList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "List media generation jobs",
+        "tags": [
+          "Posts"
+        ],
+        "x-scope": "read"
+      }
+    },
+    "/v1/openapi.json": {
+      "get": {
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Empty"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "This API's OpenAPI document",
+        "tags": [
+          "System"
+        ]
+      }
+    },
+    "/v1/posts": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "client_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "report_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "enum": [
+                "calendar",
+                "ad_hoc",
+                "recommendation"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "approved",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_archived",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The next_cursor of the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "List generated posts",
+        "tags": [
+          "Posts"
+        ],
+        "x-scope": "read"
+      }
+    },
+    "/v1/posts/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Post"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "One generated post",
+        "tags": [
+          "Posts"
+        ],
+        "x-scope": "read"
+      }
+    },
+    "/v1/reports": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "client_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "enum": [
+                "running",
+                "completed",
+                "failed"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The next_cursor of the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "List social reports",
+        "tags": [
+          "Reports"
+        ],
+        "x-scope": "read"
+      }
+    },
+    "/v1/reports/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Report"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "One social report with its analysis, calendar, performance, trends and the industry trends stored for its period",
+        "tags": [
+          "Reports"
+        ],
+        "x-scope": "read"
+      }
+    },
+    "/v1/scheduled-posts": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "client_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The next_cursor of the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduledPostList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "List posts scheduled to Sprout",
+        "tags": [
+          "Schedules"
+        ],
+        "x-scope": "read"
+      }
+    },
+    "/v1/schedules": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "client_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The next_cursor of the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "List report schedules",
+        "tags": [
+          "Schedules"
+        ],
+        "x-scope": "read"
+      }
+    },
+    "/v1/status": {
+      "get": {
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Status"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "Pipeline health and demo job status (a company-scoped key sees its own clients' findings only)",
+        "tags": [
+          "System"
+        ],
+        "x-scope": "read"
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "https://rwouwxqggjjacbpbhqsn.supabase.co/functions/v1/api"
+    }
+  ]
+}

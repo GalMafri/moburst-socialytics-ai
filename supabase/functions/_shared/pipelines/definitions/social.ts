@@ -64,12 +64,12 @@ import { runInsights } from "../social/runInsights.ts";
 import { readStoredTrends, type IndustryTrends } from "../social/storedTrends.ts";
 import { FALLBACK_SPROUT_CUSTOMER_ID } from "../../sprout/customer.ts";
 import { anthropicMessages } from "../../anthropic.ts";
+import { runCost } from "../cost.ts";
 import type { InsightsDeps, InsightsHistory, InsightsRow } from "../../reports/insights.ts";
 import { shownSocial } from "../../reports/shownFields.ts";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
-type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
 export const SOCIAL_PIPELINE = "social_v1";
 /** Tries of the brief analysis before the report goes on with the raw brief. */
@@ -97,8 +97,6 @@ const INSIGHTS_ANSWER = "insights.answer";
 export interface SocialDeps {
   sprout?: (ctx: StepContext) => SproutReader;
   gamma?: (ctx: StepContext) => GammaClient;
-  /** For the Message Batches API calls. */
-  claudeFetch?: Fetch;
   /** The insights' one Messages API call (left out: anthropic.ts, ended before the step's time is up). */
   insights?: (ctx: StepContext) => InsightsDeps["complete"];
 }
@@ -122,7 +120,7 @@ const reusing = (ctx: StepContext) => !!replayOf(ctx)?.reuse_analysis;
 
 export function socialPipeline(deps: SocialDeps = {}): PipelineDefinition {
   const sprout = (ctx: StepContext) => (deps.sprout ?? ((c) => sproutReader({ customerId: customerOf(c), signal: c.signal })))(ctx);
-  const gamma = (ctx: StepContext) => (deps.gamma ?? ((c) => gammaClient({ apiKey: String(c.env(GAMMA_API_KEY) ?? ""), signal: c.signal })))(ctx);
+  const gamma = (ctx: StepContext) => (deps.gamma ?? ((c) => gammaClient({ cost: runCost(c, "report.social.deck"), signal: c.signal })))(ctx);
   /** The insights call, as the job makes it (anthropic.ts), ended in time for the step to go on to the deck without them. */
   const insightsCall = (ctx: StepContext): InsightsDeps["complete"] => deps.insights?.(ctx) ?? (async (body) => {
     const stop = new AbortController();
@@ -130,7 +128,7 @@ export function socialPipeline(deps: SocialDeps = {}): PipelineDefinition {
     const timer = setTimeout(end, Math.max(1_000, ctx.deadline.getTime() - ctx.now().getTime() - INSIGHTS_MARGIN_MS));
     ctx.signal.addEventListener("abort", end, { once: true });
     try {
-      return await anthropicMessages({ apiKey: String(ctx.env(ANTHROPIC_API_KEY) ?? ""), body, signal: stop.signal });
+      return await anthropicMessages({ cost: runCost(ctx, "report.social.insights"), body, signal: stop.signal });
     } finally {
       clearTimeout(timer);
       ctx.signal.removeEventListener("abort", end);
@@ -158,12 +156,12 @@ export function socialPipeline(deps: SocialDeps = {}): PipelineDefinition {
   const briefBatch = claudeBatchStep({
     async build(ctx) {
       const prepared = await need(ctx, "prepared");
-      return { apiKey: String(ctx.env(ANTHROPIC_API_KEY) ?? ""), body: briefRequest(prepared.brief_text) };
+      return { body: briefRequest(prepared.brief_text) };
     },
+    feature: "report.social.brief",
     saveAs: KEPT.brief,
     keepDays: KEEP.keepDays,
     next: "combine",
-    fetchImpl: deps.claudeFetch,
   });
 
   /** The accepted analysis, kept, then the insights and the deck. */
@@ -281,11 +279,11 @@ export function socialPipeline(deps: SocialDeps = {}): PipelineDefinition {
 
       synthesis: claudeBatchStep({
         async build(ctx) {
-          return { apiKey: String(ctx.env(ANTHROPIC_API_KEY) ?? ""), body: synthesisRequest(await need(ctx, "normalized")) };
+          return { body: synthesisRequest(await need(ctx, "normalized")) };
         },
+        feature: "report.social.synthesis",
         saveAs: "synthesis.answer",
         next: "parse",
-        fetchImpl: deps.claudeFetch,
       }),
 
       async parse(ctx) {
@@ -304,11 +302,11 @@ export function socialPipeline(deps: SocialDeps = {}): PipelineDefinition {
       repair: claudeBatchStep({
         async build(ctx) {
           const answer = await need<{ text: string }>(ctx, "synthesis.answer");
-          return { apiKey: String(ctx.env(ANTHROPIC_API_KEY) ?? ""), body: repairRequest(answer.text, String(ctx.state.repair_error ?? "")) };
+          return { body: repairRequest(answer.text, String(ctx.state.repair_error ?? "")) };
         },
+        feature: "report.social.repair",
         saveAs: "synthesis.repaired",
         next: "parse_repair",
-        fetchImpl: deps.claudeFetch,
       }),
 
       async parse_repair(ctx) {

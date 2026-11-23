@@ -6,11 +6,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { anthropicMessages } from "../../functions/_shared/anthropic";
 import { answerText, PERSON_WAIT_MS, replySample, replyStopped, roomFor, THINKING_ROOM, TIMED_OUT } from "../../functions/_shared/anthropicReply";
+import { TEST_COST } from "../paid/testMeter";
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 const answers = (data: unknown) => vi.stubGlobal("fetch", async () => new Response(JSON.stringify(data)));
-const ask = (max = 400) => anthropicMessages({ apiKey: "k", body: { model: "claude-opus-5-5", max_tokens: max, messages: [{ role: "user", content: "Where is the logo?" }] } });
+const ask = (max = 400) => anthropicMessages({ cost: TEST_COST, body: { model: "claude-opus-5-5", max_tokens: max, messages: [{ role: "user", content: "Where is the logo?" }] } });
 
 describe("room for thinking", () => {
   it("is the answer's own size on top of the room every call leaves the model", () => {
@@ -101,6 +102,8 @@ describe("anthropicMessages and a wait that runs out", () => {
     const signals: Array<AbortSignal | null | undefined> = [];
     vi.stubGlobal("fetch", (_url: string, init?: RequestInit) => new Promise((_resolve, reject) => {
       signals.push(init?.signal);
+      // As fetch does: a signal that ended before the request was sent ends it at once.
+      if (init?.signal?.aborted) return reject(init.signal.reason);
       init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), { once: true });
     }));
     return signals;
@@ -114,7 +117,7 @@ describe("anthropicMessages and a wait that runs out", () => {
   it("ends the request when the wait runs out, throws nothing, and reads as no answer", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const signals = never();
-    const r = await anthropicMessages({ apiKey: "k", body, waitMs: 30 });
+    const r = await anthropicMessages({ cost: TEST_COST, body, waitMs: 30 });
     expect(r).toEqual({ text: "", stopReason: "timed_out", raw: null });
     expect(replyStopped(r)).toBe("timed_out");
     expect(answerText(r)).toBe("");
@@ -125,30 +128,30 @@ describe("anthropicMessages and a wait that runs out", () => {
   it("makes no request when no time is left", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const signals = never();
-    expect(await anthropicMessages({ apiKey: "k", body, waitMs: 0 })).toMatchObject({ stopReason: "timed_out" });
-    expect(await anthropicMessages({ apiKey: "k", body, waitMs: -5 })).toMatchObject({ stopReason: "timed_out" });
+    expect(await anthropicMessages({ cost: TEST_COST, body, waitMs: 0 })).toMatchObject({ stopReason: "timed_out" });
+    expect(await anthropicMessages({ cost: TEST_COST, body, waitMs: -5 })).toMatchObject({ stopReason: "timed_out" });
     expect(signals).toEqual([]);
   });
 
   it("returns an answer that arrives inside the wait as it is", async () => {
     answers({ content: [{ type: "text", text: '{"logo":"none"}' }], stop_reason: "end_turn" });
-    expect(await anthropicMessages({ apiKey: "k", body, waitMs: 5_000 })).toMatchObject({ text: '{"logo":"none"}', stopReason: "end_turn" });
+    expect(await anthropicMessages({ cost: TEST_COST, body, waitMs: 5_000 })).toMatchObject({ text: '{"logo":"none"}', stopReason: "end_turn" });
   });
 
   it("still throws when the caller's own signal ends the call, and for a failure that is not the wait", async () => {
     never();
     const stop = new AbortController();
-    const asked = anthropicMessages({ apiKey: "k", body, signal: stop.signal, waitMs: 5_000 });
+    const asked = anthropicMessages({ cost: TEST_COST, body, signal: stop.signal, waitMs: 5_000 });
     stop.abort(new Error("The step ran out of time."));
     await expect(asked).rejects.toThrow("The step ran out of time.");
     vi.stubGlobal("fetch", async () => new Response("overloaded", { status: 529 }));
-    await expect(anthropicMessages({ apiKey: "k", body, waitMs: 5_000 })).rejects.toThrow("Anthropic API error 529");
+    await expect(anthropicMessages({ cost: TEST_COST, body, waitMs: 5_000 })).rejects.toThrow("Anthropic API error 529");
   });
 
   it("sends no signal at all for a call with no wait and no signal of its own", async () => {
     const inits: Array<RequestInit | undefined> = [];
     vi.stubGlobal("fetch", async (_url: string, init?: RequestInit) => { inits.push(init); return new Response(JSON.stringify({ content: [{ type: "text", text: "ok" }], stop_reason: "end_turn" })); });
-    await anthropicMessages({ apiKey: "k", body });
+    await anthropicMessages({ cost: TEST_COST, body });
     expect(inits[0]).not.toHaveProperty("signal");
   });
 });

@@ -14,7 +14,9 @@
 // Either way the answer goes to the payload store, never into the job's
 // state, so a long answer never grows the queue row.
 
-import { anthropicFetch, anthropicMessages } from "../anthropic.ts";
+import { anthropicFetch, anthropicMessages, recordBatchAnswer } from "../anthropic.ts";
+import type { CostContext } from "../cost/context.ts";
+import { runCost } from "./cost.ts";
 import { CLAUDE_DIRECT_DEADLINE_MS, CLAUDE_DIRECT_FUNCTION, directFailedKey, directKey, type DirectAnswer, type DirectFailure } from "./claudeDirect.ts";
 
 /** The direct calls a step asked for: the last start, the first start of the round, when the last was asked, and whether the round took its answer. */
@@ -37,7 +39,7 @@ export const CLAUDE_DIRECT_POLL_SECONDS = 20;
 export const CLAUDE_DIRECT_STARTS = 2;
 
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
-const headers = (apiKey: string) => ({ "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" });
+const JSON_HEADERS = { "Content-Type": "application/json" };
 
 export interface SavedAnswer { key: string; bytes: number; stopReason: string }
 
@@ -47,19 +49,19 @@ export function answerText(message: { content?: Array<{ type?: string; text?: st
 }
 
 /** A Claude call that fits inside one step. The answer is saved as saveAs; a cut answer says so in stopReason. */
-export async function claudeInline(ctx: StepContext, a: { apiKey: string; body: Record<string, unknown>; saveAs: string }): Promise<SavedAnswer> {
+export async function claudeInline(ctx: StepContext, a: { cost: CostContext; body: Record<string, unknown>; saveAs: string }): Promise<SavedAnswer> {
   const max = Number(a.body.max_tokens);
   if (!(max > 0) || max > CLAUDE_INLINE_MAX_TOKENS) {
     throw new Error(`An inline Claude call asks for at most ${CLAUDE_INLINE_MAX_TOKENS} output tokens; a longer one runs as a message batch (claudeBatchStep).`);
   }
-  const r = await anthropicMessages({ apiKey: a.apiKey, body: a.body, signal: ctx.signal });
+  const r = await anthropicMessages({ cost: a.cost, body: a.body, signal: ctx.signal });
   const saved = await ctx.payloads.put(a.saveAs, { text: r.text, stop_reason: r.stopReason });
   return { ...saved, stopReason: r.stopReason };
 }
 
 /** Submits a one-request message batch. */
-export async function claudeBatchSubmit(ctx: StepContext, a: { apiKey: string; body: Record<string, unknown>; customId: string; fetchImpl?: Fetch }): Promise<string> {
-  const r = await anthropicFetch("/v1/messages/batches", { method: "POST", headers: headers(a.apiKey), body: JSON.stringify({ requests: [{ custom_id: a.customId, params: a.body }] }), signal: ctx.signal }, a.fetchImpl);
+export async function claudeBatchSubmit(ctx: StepContext, a: { cost: CostContext; body: Record<string, unknown>; customId: string }): Promise<string> {
+  const r = await anthropicFetch(a.cost, "/v1/messages/batches", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ requests: [{ custom_id: a.customId, params: a.body }] }), signal: ctx.signal });
   if (!r.ok) throw new Error(`Claude batch was not accepted [${r.status}]: ${(await r.text().catch(() => "")).slice(0, 200)}`);
   const batch = await r.json() as { id?: string };
   if (!batch.id) throw new Error("Claude batch answer had no id.");
@@ -69,14 +71,14 @@ export async function claudeBatchSubmit(ctx: StepContext, a: { apiKey: string; b
 export type BatchRead = { state: "pending" } | ({ state: "done" } & SavedAnswer) | { state: "failed"; reason: string };
 
 /** Looks at a batch; once it ended, saves its answer as saveAs. */
-export async function claudeBatchRead(ctx: StepContext, a: { apiKey: string; batchId: string; customId: string; saveAs: string; keepDays?: number; fetchImpl?: Fetch }): Promise<BatchRead> {
-  const f = a.fetchImpl ?? fetch;
-  const r = await anthropicFetch(`/v1/messages/batches/${encodeURIComponent(a.batchId)}`, { headers: headers(a.apiKey), signal: ctx.signal }, a.fetchImpl);
+export async function claudeBatchRead(ctx: StepContext, a: { cost: CostContext; batchId: string; customId: string; saveAs: string; keepDays?: number }): Promise<BatchRead> {
+  const r = await anthropicFetch(a.cost, `/v1/messages/batches/${encodeURIComponent(a.batchId)}`, { signal: ctx.signal });
   if (!r.ok) throw new Error(`Claude batch could not be read [${r.status}].`);
   const batch = await r.json() as { processing_status?: string; results_url?: string | null };
   if (batch.processing_status !== "ended") return { state: "pending" };
   if (!batch.results_url) return { state: "failed", reason: "the batch ended with no results" };
-  const res = await f(batch.results_url, { headers: headers(a.apiKey), signal: ctx.signal });
+  // The results are on the API's own host: read through the desk, which records them at the batch price.
+  const res = await anthropicFetch(a.cost, batch.results_url, { signal: ctx.signal });
   if (!res.ok) throw new Error(`Claude batch results could not be read [${res.status}].`);
   // JSONL, one line per request, in any order.
   for (const line of (await res.text()).split("\n")) {
@@ -84,6 +86,7 @@ export async function claudeBatchRead(ctx: StepContext, a: { apiKey: string; bat
     const row = JSON.parse(line) as { custom_id?: string; result?: { type?: string; message?: { content?: Array<{ type?: string; text?: string }>; stop_reason?: string; usage?: { input_tokens?: number; output_tokens?: number } }; error?: unknown } };
     if (row.custom_id !== a.customId) continue;
     if (row.result?.type !== "succeeded") return { state: "failed", reason: `the request ${row.result?.type ?? "had no result"}` };
+    await recordBatchAnswer(a.cost, a.batchId, row);
     const stopReason = String(row.result.message?.stop_reason ?? "");
     const u = row.result.message?.usage;
     const usage = u ? { input_tokens: Number(u.input_tokens) || 0, output_tokens: Number(u.output_tokens) || 0 } : undefined;
@@ -94,12 +97,12 @@ export async function claudeBatchRead(ctx: StepContext, a: { apiKey: string; bat
 }
 
 /** Cancels a batch whose answer is no longer needed, so a request it has not reached is not paid for. */
-export async function claudeBatchCancel(a: { apiKey: string; batchId: string; fetchImpl?: Fetch }): Promise<void> {
-  await anthropicFetch(`/v1/messages/batches/${encodeURIComponent(a.batchId)}/cancel`, { method: "POST", headers: headers(a.apiKey), signal: AbortSignal.timeout(10_000) }, a.fetchImpl);
+export async function claudeBatchCancel(a: { cost: CostContext; batchId: string }): Promise<void> {
+  await anthropicFetch(a.cost, `/v1/messages/batches/${encodeURIComponent(a.batchId)}/cancel`, { method: "POST", signal: AbortSignal.timeout(10_000) });
 }
 
 /** Asks for a direct call of the request; resolves once it is under way (claudeDirect.ts). */
-export type DirectStarter = (a: { runId: string; saveAs: string; body: Record<string, unknown>; start: number; keepDays?: number }) => Promise<void>;
+export type DirectStarter = (a: { runId: string; saveAs: string; body: Record<string, unknown>; start: number; keepDays?: number; feature: string }) => Promise<void>;
 
 /**
  * The claude-direct function, when this step runs where it can reach it: the
@@ -111,11 +114,11 @@ export function directThroughFunction(ctx: StepContext, fetchImpl?: Fetch): Dire
   const secret = ctx.env("SOCIALYTICS_N8N_SECRET");
   if (!base || !secret) return null;
   const f = fetchImpl ?? fetch;
-  return async ({ runId, saveAs, body, start, keepDays }) => {
+  return async ({ runId, saveAs, body, start, keepDays, feature }) => {
     const r = await f(`${base.replace(/\/$/, "")}/functions/v1/${CLAUDE_DIRECT_FUNCTION}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Socialytics-Secret": secret },
-      body: JSON.stringify({ run_id: runId, save_as: saveAs, body, start, ...(keepDays ? { keep_days: keepDays } : {}) }),
+      body: JSON.stringify({ run_id: runId, save_as: saveAs, body, start, feature, ...(keepDays ? { keep_days: keepDays } : {}) }),
       signal: AbortSignal.timeout(15_000),
     });
     if (!r.ok) throw new Error(`${CLAUDE_DIRECT_FUNCTION} did not take the request [${r.status}]`);
@@ -136,8 +139,10 @@ export function directThroughFunction(ctx: StepContext, fetchImpl?: Fetch): Dire
  * the direct call existed asks for one the next time it looks.
  */
 export function claudeBatchStep(o: {
-  /** The request and the key, built from the run and the payload store. */
-  build(ctx: StepContext): Promise<{ apiKey: string; body: Record<string, unknown> }>;
+  /** The request, built from the run and the payload store. */
+  build(ctx: StepContext): Promise<{ body: Record<string, unknown> }>;
+  /** What the call is, for its cost: the run's client and the run are added (pipelines/cost.ts). */
+  feature: string;
   saveAs: string;
   /** How long to keep the answer (the payload store's default when left out). */
   keepDays?: number;
@@ -150,7 +155,8 @@ export function claudeBatchStep(o: {
   return async (ctx): Promise<StepResult> => {
     // A batch request id is 1 to 64 letters, digits, - or _.
     const customId = `${ctx.run.id}_${o.saveAs}`.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
-    const { apiKey, body } = await o.build(ctx);
+    const { body } = await o.build(ctx);
+    const cost = runCost(ctx, o.feature);
     const keep = o.keepDays ? { keepDays: o.keepDays } : undefined;
     const direct = o.direct === undefined ? directThroughFunction(ctx, o.fetchImpl) : o.direct;
     const handle = (ctx.poll?.handle ?? {}) as { claude_batch_id?: unknown; direct_starts?: unknown; direct_started_at?: unknown };
@@ -189,7 +195,7 @@ export function claudeBatchStep(o: {
     // The direct call answered first: it is the answer.
     if (direct && answer && typeof answer.text === "string" && Number(answer.start) >= first && Number(answer.start) <= last) {
       const saved = await ctx.payloads.put(o.saveAs, { text: answer.text, stop_reason: answer.stop_reason, ...(answer.usage ? { usage: answer.usage } : {}) }, keep);
-      if (batchId) await claudeBatchCancel({ apiKey, batchId, fetchImpl: o.fetchImpl }).catch(() => undefined);
+      if (batchId) await claudeBatchCancel({ cost, batchId }).catch(() => undefined);
       return await finish({ saved: saved.key, bytes: saved.bytes, stop_reason: answer.stop_reason, answered_by: "direct", direct_seconds: answer.seconds });
     }
 
@@ -205,7 +211,7 @@ export function claudeBatchStep(o: {
         await ctx.payloads.put(directAskedKey(o.saveAs), { start, first, at: startedAt } satisfies DirectAsked);
         last = start;
         try {
-          await direct({ runId: ctx.run.id, saveAs: o.saveAs, body, start, keepDays: o.keepDays });
+          await direct({ runId: ctx.run.id, saveAs: o.saveAs, body, start, keepDays: o.keepDays, feature: o.feature });
           note = { direct: "asked", direct_start: start, ...(failed ? { direct_failed: failed.message } : {}) };
         } catch (e) {
           // Kept as a failure, so the next look asks once more.
@@ -220,11 +226,11 @@ export function claudeBatchStep(o: {
     const handleFor = (id: string) => ({ claude_batch_id: id, direct_starts: Math.max(0, roundStarts()), ...(startedAt ? { direct_started_at: startedAt } : {}) });
 
     const submit = async (resubmits: number): Promise<StepResult> => {
-      const id = await claudeBatchSubmit(ctx, { apiKey, body, customId, fetchImpl: o.fetchImpl });
+      const id = await claudeBatchSubmit(ctx, { cost, body, customId });
       return { type: "poll", waitSeconds, handle: handleFor(id), state: { ...ctx.state, [counter]: resubmits }, detail: { claude_batch_id: id, ...note } };
     };
     if (!batchId) return submit(Number(ctx.state[counter] ?? 0));
-    const read = await claudeBatchRead(ctx, { apiKey, batchId, customId, saveAs: o.saveAs, keepDays: o.keepDays, fetchImpl: o.fetchImpl });
+    const read = await claudeBatchRead(ctx, { cost, batchId, customId, saveAs: o.saveAs, keepDays: o.keepDays });
     if (read.state === "pending") return { type: "poll", waitSeconds, handle: handleFor(batchId), ...(Object.keys(note).length ? { detail: note } : {}) };
     if (read.state === "failed") {
       const resubmits = Number(ctx.state[counter] ?? 0);

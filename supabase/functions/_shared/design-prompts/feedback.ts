@@ -16,6 +16,8 @@
 // client's own users and staff, design options).
 
 import { anthropicMessages } from "../anthropic.ts";
+import type { CostContext } from "../cost/context.ts";
+import { costCtx, hasKey } from "../paid/index.ts";
 
 /** The small model that turns feedback into rules (the one call Not right already made). */
 const LEARNER_MODEL = "claude-haiku-4-5-20251001";
@@ -61,11 +63,10 @@ function parseRules(text: string): Learning[] | null {
 }
 
 /** Ask the learner; null when there is no key, the call fails or the reply cannot be read. */
-async function ask(system: string, content: string): Promise<Learning[] | null> {
-  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!apiKey) return null;
+async function ask(cost: CostContext, system: string, content: string): Promise<Learning[] | null> {
+  if (!(await hasKey("anthropic"))) return null;
   try {
-    const { text } = await anthropicMessages({ apiKey, body: { model: LEARNER_MODEL, max_tokens: 400, system, messages: [{ role: "user", content }] } });
+    const { text } = await anthropicMessages({ cost, body: { model: LEARNER_MODEL, max_tokens: 400, system, messages: [{ role: "user", content }] } });
     return parseRules(text);
   } catch (e) {
     console.log("design memory: learning skipped:", String(e));
@@ -101,6 +102,7 @@ export async function recordFeedback(admin: any, it: FeedbackRow, verdict: "reje
   const named = Object.prototype.hasOwnProperty.call(REASONS, String(reason)) && reason !== "other";
   const why = named ? REASONS[String(reason)] : REASONS.other;
   let learnings = await ask(
+    costCtx({ clientId: it.client_id, feature: "design.feedback", actor: "user", userId }),
     "You turn one design rejection into durable guidance for future designs for the same client. " +
       "Write 1 or 2 rules from the reason, general enough to apply beyond this one post. " +
       "Use the note only where it says something lasting about the brand's designs; a part about this one post gives no rule. " +
@@ -137,6 +139,7 @@ export async function learnFromNote(admin: any, n: { clientId: string; platform?
   const note = excerpt(n.note, 500);
   if (!note) return [];
   const learnings = await ask(
+    costCtx({ clientId: n.clientId, feature: "design.note", actor: "user", userId: n.userId }),
     "You decide whether a note someone left when asking for a new design says something lasting about the same client's designs. " +
       "When the note is about this one post (its topic, its words, its picture, its date), write no rule. " +
       "When it says how the brand's designs should look or what they should never show, write 1 or 2 rules, general enough to apply beyond this one post. " +

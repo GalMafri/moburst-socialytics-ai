@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import {
   classifyPollResponse,
   HiggsfieldError,
@@ -12,7 +12,19 @@ import {
   uploadInput,
 } from "../../../supabase/functions/_shared/higgsfield/client";
 
-const CREDS = { keyId: "kid", keySecret: "ksec" };
+import { useTestMeter } from "../../../supabase/tests/paid/testMeter";
+
+// Every request goes through the paying desk, which builds the Key header from the secrets.
+const COST = { tool: "socialytics" as const, clientId: "c1", feature: "post.image", actor: "user" as const };
+const REST = { cost: COST, baseUrl: "https://api.higgsfield.ai" };
+const STATUS = "https://api.higgsfield.ai/requests/r1/status";
+
+/** The desk sends to this fake, with the credentials read from these secrets. */
+function desk(fetchImpl: ReturnType<typeof vi.fn>) {
+  vi.stubGlobal("Deno", { env: { get: (k: string) => ({ HIGGSFIELD_API_KEY_ID: "kid", HIGGSFIELD_API_KEY_SECRET: "ksec" } as Record<string, string>)[k] } });
+  useTestMeter(fetchImpl as never, { auth: true });
+}
+afterEach(() => { vi.unstubAllGlobals(); useTestMeter(); });
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -69,24 +81,22 @@ describe("submit", () => {
       }),
     );
 
-    const out = await submit("/higgsfield-ai/soul/v2/standard", { prompt: "x" }, {
-      credentials: CREDS,
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-    });
+    desk(fetchImpl);
+    const out = await submit("/higgsfield-ai/soul/v2/standard", { prompt: "x" }, REST);
 
     expect(out.request_id).toBe("r1");
     const [url, init] = fetchImpl.mock.calls[0];
     expect(url).toBe("https://api.higgsfield.ai/higgsfield-ai/soul/v2/standard");
-    expect(init.headers.Authorization).toBe("Key kid:ksec");
+    expect(new Headers(init.headers).get("Authorization")).toBe("Key kid:ksec");
   });
 
   it("appends hf_webhook url-encoded when a webhook is requested", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       jsonResponse({ status: "queued", request_id: "r1", status_url: "s", cancel_url: "c" }),
     );
+    desk(fetchImpl);
     await submit("/m", { prompt: "x" }, {
-      credentials: CREDS,
-      fetchImpl: fetchImpl as unknown as typeof fetch,
+      ...REST,
       webhookUrl: "https://hooks.example.com/higgsfield?t=abc",
     });
     const [url] = fetchImpl.mock.calls[0];
@@ -100,21 +110,27 @@ describe("submit", () => {
         status: 400,
       }),
     );
-    const err = await submit("/m", {}, {
-      credentials: CREDS,
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-    }).catch((e) => e);
+    desk(fetchImpl);
+    const err = await submit("/m", {}, REST).catch((e) => e);
     expect(err).toBeInstanceOf(HiggsfieldError);
     expect(err.code).toBe("concurrency_exhausted");
     expect(err.userMessage).toMatch(/limit/i);
   });
 
+  it("says not_configured when the key secrets are not set", async () => {
+    const fetchImpl = vi.fn();
+    vi.stubGlobal("Deno", { env: { get: () => undefined } });
+    useTestMeter(fetchImpl as never, { auth: true });
+    const err = await submit("/m", {}, REST).catch((e) => e);
+    expect(err).toBeInstanceOf(HiggsfieldError);
+    expect(err.code).toBe("not_configured");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("maps 401 to unauthorized", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response("nope", { status: 401 }));
-    const err = await submit("/m", {}, {
-      credentials: CREDS,
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-    }).catch((e) => e);
+    desk(fetchImpl);
+    const err = await submit("/m", {}, REST).catch((e) => e);
     expect(err.code).toBe("unauthorized");
   });
 });
@@ -129,9 +145,9 @@ describe("pollUntilTerminal", () => {
         jsonResponse({ status: "completed", request_id: "r1", images: [{ url: "https://cdn/x.jpg" }] }),
       );
 
-    const out = await pollUntilTerminal("https://s/r1", {
-      credentials: CREDS,
-      fetchImpl: fetchImpl as unknown as typeof fetch,
+    desk(fetchImpl);
+    const out = await pollUntilTerminal(STATUS, {
+      cost: COST,
       sleepImpl: instantSleep,
       randomImpl: noJitter,
       timeoutMs: 60_000,
@@ -145,9 +161,9 @@ describe("pollUntilTerminal", () => {
       .fn()
       .mockResolvedValueOnce(new Response("boom", { status: 503 }))
       .mockResolvedValueOnce(jsonResponse({ status: "completed", request_id: "r1", video: { url: "v" } }));
-    const out = await pollUntilTerminal("https://s/r1", {
-      credentials: CREDS,
-      fetchImpl: fetchImpl as unknown as typeof fetch,
+    desk(fetchImpl);
+    const out = await pollUntilTerminal(STATUS, {
+      cost: COST,
       sleepImpl: instantSleep,
       randomImpl: noJitter,
       timeoutMs: 60_000,
@@ -157,9 +173,9 @@ describe("pollUntilTerminal", () => {
 
   it("aborts immediately on 404 without exhausting the timeout", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response("", { status: 404 }));
-    const err = await pollUntilTerminal("https://s/r1", {
-      credentials: CREDS,
-      fetchImpl: fetchImpl as unknown as typeof fetch,
+    desk(fetchImpl);
+    const err = await pollUntilTerminal(STATUS, {
+      cost: COST,
       sleepImpl: instantSleep,
       randomImpl: noJitter,
       timeoutMs: 60_000,
@@ -170,9 +186,9 @@ describe("pollUntilTerminal", () => {
 
   it("throws moderated for nsfw and generation_failed for failed", async () => {
     const nsfw = vi.fn().mockResolvedValue(jsonResponse({ status: "nsfw", request_id: "r1" }));
-    const e1 = await pollUntilTerminal("https://s/r1", {
-      credentials: CREDS,
-      fetchImpl: nsfw as unknown as typeof fetch,
+    desk(nsfw);
+    const e1 = await pollUntilTerminal(STATUS, {
+      cost: COST,
       sleepImpl: instantSleep,
       randomImpl: noJitter,
       timeoutMs: 60_000,
@@ -182,9 +198,9 @@ describe("pollUntilTerminal", () => {
     const failed = vi
       .fn()
       .mockResolvedValue(jsonResponse({ status: "failed", request_id: "r1", error: "GPU melted" }));
-    const e2 = await pollUntilTerminal("https://s/r1", {
-      credentials: CREDS,
-      fetchImpl: failed as unknown as typeof fetch,
+    desk(failed);
+    const e2 = await pollUntilTerminal(STATUS, {
+      cost: COST,
       sleepImpl: instantSleep,
       randomImpl: noJitter,
       timeoutMs: 60_000,
@@ -200,9 +216,9 @@ describe("pollUntilTerminal", () => {
       .mockImplementation(() => Promise.resolve(jsonResponse({ status: "queued", request_id: "r1" })));
     // Sleeps are instant but `waited` accumulates the *intended* pause, so a
     // low ceiling exhausts after a handful of iterations.
-    const err = await pollUntilTerminal("https://s/r1", {
-      credentials: CREDS,
-      fetchImpl: fetchImpl as unknown as typeof fetch,
+    desk(fetchImpl);
+    const err = await pollUntilTerminal(STATUS, {
+      cost: COST,
       sleepImpl: instantSleep,
       randomImpl: noJitter,
       timeoutMs: 5_000,
@@ -225,10 +241,8 @@ describe("uploadInput", () => {
       )
       .mockResolvedValueOnce(new Response(null, { status: 200 }));
 
-    const url = await uploadInput(new Uint8Array([1, 2, 3]), "image/jpeg", {
-      credentials: CREDS,
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-    });
+    desk(fetchImpl);
+    const url = await uploadInput(new Uint8Array([1, 2, 3]), "image/jpeg", { ...REST, storageFetch: fetchImpl as unknown as typeof fetch });
 
     expect(url).toBe("https://cdn/in.jpg");
     const [, putInit] = fetchImpl.mock.calls[1];

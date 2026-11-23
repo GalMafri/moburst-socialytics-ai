@@ -175,7 +175,7 @@ describe("moment_feedback", () => {
     m.learn.mockResolvedValue({ ops: 1 });
     const db = fakeDb({ moment_removals: [{ id: "r1", client_id: "mob", moment_name: "Election Day", category: "civic_political", post_date: "2026-11-03" }] });
     expect(await runMomentFeedback(db, job({ kind: "moment_feedback", payload: { removal_id: "r1" } }), NOW)).toMatchObject({ status: "done", result: { ops: 1 } });
-    expect(m.learn).toHaveBeenCalledWith(db, "mob", { kind: "moment_removed", moment: "Election Day", category: "civic_political", date: "2026-11-03" });
+    expect(m.learn).toHaveBeenCalledWith(db, "mob", { kind: "moment_removed", moment: "Election Day", category: "civic_political", date: "2026-11-03" }, { actor: "schedule", executionId: expect.any(String) });
   });
 });
 

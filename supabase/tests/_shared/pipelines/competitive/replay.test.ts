@@ -18,6 +18,7 @@ import { ANALYSIS_MODEL } from "../../../../functions/_shared/pipelines/competit
 import { ANALYSIS_SYSTEM_PROMPT } from "../../../../functions/_shared/pipelines/competitive/prompt";
 import { compareCompetitive, compareCompetitiveRun, competitiveFigures, shownCompetitiveReport, startCompetitiveReplay, startCompetitiveShadow } from "../../../../functions/_shared/pipelines/competitive/harness";
 import { pickReplaySnapshots, replayAttempt } from "../../../../functions/_shared/pipelines/competitive/replay";
+import { viaTestMeter } from "../../../paid/testMeter";
 
 const here = dirname(fileURLToPath(import.meta.url));
 // deno-lint-ignore no-explicit-any
@@ -76,7 +77,7 @@ async function replay(o: { reuse: boolean; answers?: string[]; engines?: Array<R
   const claude = claudeBatches(o.answers ?? []);
   const calls: string[] = [];
   const pipeline = competitivePipeline({
-    claudeFetch: claude.fetchImpl,
+    ...viaTestMeter(claude.fetchImpl),
     rivaliq: () => async (path) => { calls.push(`rivaliq ${path}`); throw new Error("no RivalIQ in a replay"); },
     apify: () => { calls.push("apify"); throw new Error("no Apify in a replay"); },
     owned: async () => { calls.push("sprout"); throw new Error("no Sprout in a replay"); },

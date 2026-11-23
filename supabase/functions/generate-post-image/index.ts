@@ -13,6 +13,8 @@ import { renderImageWithHiggsfield } from "../_shared/higgsfield/renderImage.ts"
 import { HiggsfieldError } from "../_shared/higgsfield/generate.ts";
 import { resolveContextImageUrls } from "../_shared/higgsfield/context.ts";
 import { anthropicFetch } from "../_shared/anthropic.ts";
+import type { CostContext } from "../_shared/cost/context.ts";
+import { costCtx, hasKey, paid } from "../_shared/paid/index.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -32,16 +34,12 @@ const corsHeaders = {
 async function detectContactSheet(
   imageB64: string,
   mimeType: string,
-  anthropicKey: string,
+  cost: CostContext,
 ): Promise<{ isContactSheet: boolean; reason: string; raw: string }> {
   try {
-    const resp = await anthropicFetch("/v1/messages", {
+    const resp = await anthropicFetch(cost, "/v1/messages", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": anthropicKey,
-        "anthropic-version": "2023-06-01",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
         max_tokens: 150,
@@ -146,7 +144,7 @@ Deno.serve(async (req) => {
     // This function runs with verify_jwt = false, so nothing checks the caller
     // unless it does so itself. It spends money on every call — a Gemini key,
     // or the team's Higgsfield credits — so it checks.
-    await requireStaff(req);
+    const caller = await requireStaff(req);
 
     const {
       prompt,
@@ -179,6 +177,9 @@ Deno.serve(async (req) => {
     // is_admin, so can_write_client passes for all of them.
     const resolvedClientId = client_id || client_context?.client_id;
     if (resolvedClientId) await requireStaff(req, { writeClientId: resolvedClientId });
+    // Who the image is for: the client checked above (a legacy call with no client is recorded as unattributed).
+    const imageCost = (feature: string, executionId?: string): CostContext =>
+      costCtx({ clientId: resolvedClientId ?? null, feature, actor: "user", userId: caller.userId, executionId });
 
     // Resolve the brand from the caller, falling back to the client row. A call
     // that arrives without context used to generate a perfectly generic image
@@ -238,12 +239,12 @@ Deno.serve(async (req) => {
       const key={creative_plan_id:creative.id,creative_frame_index,creative_attempt:attempt};
       const {data:existing}=await brandDb.from('media_jobs').select('id,status').eq('client_id',resolvedClientId).contains('input',key).maybeSingle();
       if(existing) return jsonResp({job_id:existing.id,status:existing.status,rendered_by:'reference_creative'},202);
-      const {data:row,error}=await brandDb.from('media_jobs').insert({client_id:resolvedClientId,kind:'image',provider:'higgsfield',created_by:(await requireStaff(req)).userId,status:'pending',input:key}).select('id').single();
+      const {data:row,error}=await brandDb.from('media_jobs').insert({client_id:resolvedClientId,kind:'image',provider:'higgsfield',created_by:caller.userId,status:'pending',input:key}).select('id').single();
       if(error) throw new Error('The image job could not be reserved. Reopen the design to resume it.');
       try {
         const {referenceUrls}=await resolveContextImageUrls({design_references:resolvedRefs},brandDb);
         if(referenceUrls.length!==resolvedRefs.length) throw new Error('The selected client references could not be opened.');
-        const started=await startImageWithHiggsfield(brandDb,creativeImagePrompt(creative.plan,creative_frame_index,typeof creative_correction==='string'?creative_correction:'',platformDesignSpec(platform,format)),imageAspectRatio(platform,format),referenceUrls);
+        const started=await startImageWithHiggsfield(brandDb,imageCost('post.image',row.id),creativeImagePrompt(creative.plan,creative_frame_index,typeof creative_correction==='string'?creative_correction:'',platformDesignSpec(platform,format)),imageAspectRatio(platform,format),referenceUrls);
         const {error:recordError}=await brandDb.from('media_jobs').update({request_id:started.jobId,model_path:started.model,status:'submitted'}).eq('id',row.id);
         if(recordError) throw new Error(`Image submitted as ${started.jobId} but recording failed. Do not resubmit.`);
       } catch(error) {
@@ -254,22 +255,8 @@ Deno.serve(async (req) => {
     }
 
 
-    // ── Get Gemini API key (try env, then app_settings) ──
-    let geminiKey = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_AI_API_KEY");
-
-    if (!geminiKey) {
-      const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-      // Try gemini key first, then google key
-      for (const keyName of ["gemini_api_key", "google_ai_api_key"]) {
-        const { data: setting } = await supabase.from("app_settings").select("value").eq("key", keyName).maybeSingle();
-        if (setting?.value) {
-          geminiKey = setting.value;
-          break;
-        }
-      }
-    }
-
-    if (!geminiKey && backend === "gemini") {
+    // ── The Gemini key (the paying desk reads it: env, then app_settings) ──
+    if (backend === "gemini" && !(await hasKey("gemini"))) {
       return jsonResp(
         {
           error:
@@ -392,7 +379,6 @@ Deno.serve(async (req) => {
     // Two providers, one output shape: base64 bytes and a mime type. Nothing
     // below this block knows or cares which one ran.
     const geminiModel = "gemini-3.1-flash-image-preview";
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${geminiKey}`;
 
     let imageB64: string | null = null;
     let imageMime: string | null = null;
@@ -401,7 +387,7 @@ Deno.serve(async (req) => {
 
     /** One Gemini call. Returns the LAST inline image across all candidates. */
     async function callGemini(parts: any[]): Promise<{ b64: string | null; mime: string | null; text: string | null; raw: any }> {
-      const response = await fetch(apiUrl, {
+      const response = await paid.fetch(imageCost("post.image"), "gemini", `/v1beta/models/${geminiModel}:generateContent`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -441,6 +427,7 @@ Deno.serve(async (req) => {
       if (backend === "higgsfield") {
         const again = await renderImageWithHiggsfield({
           supabase: brandDb,
+          cost: imageCost("post.image"),
           prompt: promptText,
           aspectRatio,
           referenceUrls: [],
@@ -469,6 +456,7 @@ Deno.serve(async (req) => {
       }
       const rendered = await renderImageWithHiggsfield({
         supabase: brandDb,
+        cost: imageCost("post.image"),
         prompt: designPrompt,
         aspectRatio,
         referenceUrls,
@@ -515,20 +503,9 @@ Deno.serve(async (req) => {
     let validationReason = "";
 
     if (!creative && slide_context && imageB64 && imageMime) {
-      // Need an Anthropic key for validation. Try env first, then app_settings.
-      let anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
-      if (!anthropicKey) {
-        const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-        const { data: s } = await sb
-          .from("app_settings")
-          .select("value")
-          .eq("key", "anthropic_api_key")
-          .maybeSingle();
-        anthropicKey = s?.value;
-      }
-
-      if (anthropicKey) {
-        const validation = await detectContactSheet(imageB64, imageMime, anthropicKey);
+      // Validation needs an Anthropic key (the paying desk reads it: env, then app_settings).
+      if (await hasKey("anthropic")) {
+        const validation = await detectContactSheet(imageB64, imageMime, imageCost("post.image_check"));
         validationLayout = validation.isContactSheet ? "multi" : "single";
         validationReason = validation.reason;
         console.log(

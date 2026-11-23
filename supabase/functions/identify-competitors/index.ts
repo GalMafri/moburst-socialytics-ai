@@ -10,6 +10,7 @@
 import { createClient } from "../_shared/supabase.ts";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { IDENTIFY_COLUMNS, IdentifyError, identifyCompetitors } from "../_shared/competitive/identify.ts";
+import { costCtx, hasKey } from "../_shared/paid/index.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -27,20 +28,16 @@ Deno.serve(async (req) => {
     if (!client_id) return jsonResp({ error: "client_id is required" }, 400);
 
     // Caller must be staff with write access to this client.
-    await requireStaff(req, { writeClientId: client_id });
+    const caller = await requireStaff(req, { writeClientId: client_id });
 
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const { data: client, error: clientErr } = await supabase.from("clients").select(IDENTIFY_COLUMNS).eq("id", client_id).maybeSingle();
     if (clientErr || !client) return jsonResp({ error: "Client not found" }, 404);
 
-    let anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
-    if (!anthropicKey) {
-      const { data: s } = await supabase.from("app_settings").select("value").eq("key", "anthropic_api_key").maybeSingle();
-      anthropicKey = s?.value;
-    }
-    if (!anthropicKey) return jsonResp({ error: "Anthropic API key not configured." }, 400);
+    if (!(await hasKey("anthropic"))) return jsonResp({ error: "Anthropic API key not configured." }, 400);
 
-    const result = await identifyCompetitors(supabase, client, anthropicKey);
+    const cost = costCtx({ clientId: client_id, feature: "competitors.identify", actor: "user", userId: caller.userId });
+    const result = await identifyCompetitors(supabase, client, cost);
     return jsonResp(result);
   } catch (err: unknown) {
     if (err instanceof AuthzError) return jsonResp({ error: err.message }, err.status);
