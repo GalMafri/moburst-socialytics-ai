@@ -84,6 +84,7 @@ describe(FILE, () => {
     expect(plans.match(/canceled_by\??: string \| null/g)).toHaveLength(3);
     const archive = types.slice(types.indexOf("      calendar_posts_archive: {"), types.indexOf("Relationships", types.indexOf("      calendar_posts_archive: {")));
     expect(archive.match(/story_of\??: string \| null/g)).toHaveLength(3);
-    expect(types).toMatch(/calendar_stop_plan: \{\s+Args: \{ p_plan: string; p_user\?: string \}\s+Returns: \{[\s\S]*?canceled_at: string \| null/);
+    // 20261122131000_calendar_stop_plan_intent.sql added p_intent (QA 22 Nov 2026, P56-07); the types are generated in Lovable.
+    expect(types).toMatch(/calendar_stop_plan: \{\s+Args: \{ p_intent\?: string; p_plan: string; p_user\?: string \}\s+Returns: \{[\s\S]*?canceled_at: string \| null/);
   });
 });
