@@ -74,3 +74,16 @@ export const lastPortal = (): PortalSource | null => {
 
 // The one place a portal link comes from.
 export const portalUrl = (): string => (lastPortal() === "hub" ? LEGACY_PORTAL_URL : PORTAL_URL);
+
+/**
+ * Where "sign in" sends someone: the portal's own launch of this tool, which
+ * asks for the moburst.ai sign-in when needed (/login?next=/tool/socialytics)
+ * and then hands the person straight back to Socialytics, where ReturnTo takes
+ * them on to the page they were trying to reach (the Claude connector's
+ * consent page among them). The portal home asked them to find the tool
+ * themselves after signing in, so the journey stopped there.
+ * People last signed in from the legacy portal keep its address.
+ */
+export const GOS_TOOL_SLUG = "socialytics";
+export const signInUrl = (): string =>
+  lastPortal() === "hub" ? LEGACY_PORTAL_URL : `${PORTAL_URL.replace(/\/+$/, "")}/tool/${GOS_TOOL_SLUG}`;
