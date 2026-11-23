@@ -1724,6 +1724,114 @@ export type Database = {
           },
         ]
       }
+      cost_events: {
+        Row: {
+          actor_kind: string
+          api_key_id: string | null
+          bucket_hint: string
+          client_id: string | null
+          cost_source: string
+          cost_usd: number | null
+          duration_ms: number | null
+          env: string
+          execution_id: string | null
+          feature: string
+          id: string
+          idempotency_key: string
+          occurred_at: string
+          price_ref: string | null
+          provider: string
+          provider_ref: string | null
+          quantities: Json
+          recorded_at: string
+          resource: string
+          tool: string
+          unattributed: boolean
+          user_id: string | null
+        }
+        Insert: {
+          actor_kind: string
+          api_key_id?: string | null
+          bucket_hint: string
+          client_id?: string | null
+          cost_source: string
+          cost_usd?: number | null
+          duration_ms?: number | null
+          env: string
+          execution_id?: string | null
+          feature: string
+          id?: string
+          idempotency_key: string
+          occurred_at: string
+          price_ref?: string | null
+          provider: string
+          provider_ref?: string | null
+          quantities?: Json
+          recorded_at?: string
+          resource: string
+          tool: string
+          unattributed?: boolean
+          user_id?: string | null
+        }
+        Update: {
+          actor_kind?: string
+          api_key_id?: string | null
+          bucket_hint?: string
+          client_id?: string | null
+          cost_source?: string
+          cost_usd?: number | null
+          duration_ms?: number | null
+          env?: string
+          execution_id?: string | null
+          feature?: string
+          id?: string
+          idempotency_key?: string
+          occurred_at?: string
+          price_ref?: string | null
+          provider?: string
+          provider_ref?: string | null
+          quantities?: Json
+          recorded_at?: string
+          resource?: string
+          tool?: string
+          unattributed?: boolean
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      cost_reconciliation: {
+        Row: {
+          checked_at: string
+          day: string
+          id: string
+          note: string | null
+          ours_usd: number
+          provider: string
+          status: string
+          theirs_usd: number | null
+        }
+        Insert: {
+          checked_at?: string
+          day: string
+          id?: string
+          note?: string | null
+          ours_usd?: number
+          provider: string
+          status: string
+          theirs_usd?: number | null
+        }
+        Update: {
+          checked_at?: string
+          day?: string
+          id?: string
+          note?: string | null
+          ours_usd?: number
+          provider?: string
+          status?: string
+          theirs_usd?: number | null
+        }
+        Relationships: []
+      }
       creative_directions: {
         Row: {
           client_id: string
@@ -4471,6 +4579,48 @@ export type Database = {
       }
     }
     Views: {
+      cost_ledger: {
+        Row: {
+          actor_kind: string | null
+          api_key_id: string | null
+          bucket: string | null
+          bucket_hint: string | null
+          client_id: string | null
+          client_name: string | null
+          company_slug: string | null
+          cost_source: string | null
+          cost_usd: number | null
+          duration_ms: number | null
+          env: string | null
+          execution_id: string | null
+          feature: string | null
+          id: string | null
+          idempotency_key: string | null
+          occurred_at: string | null
+          price_ref: string | null
+          provider: string | null
+          provider_ref: string | null
+          quantities: Json | null
+          recorded_at: string | null
+          resource: string | null
+          tool: string | null
+          unattributed: boolean | null
+          user_id: string | null
+        }
+        Relationships: []
+      }
+      cost_reconciliation_latest: {
+        Row: {
+          checked_at: string | null
+          day: string | null
+          note: string | null
+          ours_usd: number | null
+          provider: string | null
+          status: string | null
+          theirs_usd: number | null
+        }
+        Relationships: []
+      }
       gos_events: {
         Row: {
           company_slug: string | null
@@ -4711,6 +4861,15 @@ export type Database = {
       client_value_is_set: {
         Args: { p_field: string; p_value: Json }
         Returns: boolean
+      }
+      cost_summary: {
+        Args: {
+          p_filters?: Json
+          p_from: string
+          p_group?: string[]
+          p_to: string
+        }
+        Returns: Json[]
       }
       demo_jobs_lease: {
         Args: { p_lease_seconds?: number; p_limit?: number }
