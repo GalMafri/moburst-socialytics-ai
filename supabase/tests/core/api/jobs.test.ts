@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { advanceJob, finalStatus, initialSteps, nextStep, type JobRecord, type StepDef } from "./jobs";
+import { advanceJob, finalStatus, initialSteps, nextStep, type JobRecord, type StepDef } from "../../../functions/_shared/api/jobs";
 
 type Ctx = { log: string[] };
 const job = (over: Partial<JobRecord> = {}): JobRecord => ({

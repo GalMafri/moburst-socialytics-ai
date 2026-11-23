@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { authenticateKey, handleRequest, type AuditRow, type CoreDeps } from "./core";
-import { ApiError } from "./errors";
-import { hashKey } from "./keys";
-import type { Route } from "./router";
+import { authenticateKey, handleRequest, type AuditRow, type CoreDeps } from "../../../functions/_shared/api/core";
+import { ApiError } from "../../../functions/_shared/api/errors";
+import { hashKey } from "../../../functions/_shared/api/keys";
+import type { Route } from "../../../functions/_shared/api/router";
 
 const GOOD = "adv_good_key";
 const REVOKED = "adv_revoked_key";
@@ -148,7 +148,7 @@ describe("handleRequest", () => {
 
   // QA 22 Nov 2026 (P24-06): the internal secrets are compared in constant time, never with ===.
   it("compares the internal secrets in constant time, and refuses a near miss or a missing secret", async () => {
-    const source = readFileSync(join(__dirname, "core.ts"), "utf8");
+    const source = readFileSync(join(__dirname, "../../../functions/_shared/api/core.ts"), "utf8");
     expect(source).not.toMatch(/\bcron\s*===|===\s*`Bearer|===\s*deps\.(cronSecret|serviceKey)/);
     const d = await deps();
     expect((await handleRequest(req("POST", "/internal/w", { "X-Cron-Secret": "cron-t" }, {}), d.deps)).status).toBe(401);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffOpenApi, renderChangeEntry, renderReference, stableJson, unacknowledged } from "./docs";
+import { diffOpenApi, renderChangeEntry, renderReference, stableJson, unacknowledged } from "../../../functions/_shared/api/docs";
 
 const doc = (over: { paths?: Record<string, unknown>; schemas?: Record<string, unknown> } = {}) => ({
   info: { title: "T API", version: "1", description: "d" },

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { bearerFrom, demoSlug, generateKey, hashKey, hasScope, isDemoSlug, keyIsLive, resolveScope, scopeAll, scopeOf, type KeyRow } from "./keys";
+import { bearerFrom, demoSlug, generateKey, hashKey, hasScope, isDemoSlug, keyIsLive, resolveScope, scopeAll, scopeOf, type KeyRow } from "../../../functions/_shared/api/keys";
 
 const row = (over: Partial<KeyRow> = {}): KeyRow => ({
   id: "k1", name: "gOS", key_prefix: "adv_abcdefgh", scopes: ["read"], company_slugs: null, client_ids: null,

@@ -13,11 +13,13 @@ import { readRoutes, type ReadDeps } from "../_shared/socialytics-api/routes-rea
 import { systemRoutes } from "./routes-system.ts";
 import { SCHEMAS } from "./schemas.ts";
 import { PRICES } from "../_shared/cost/pricing.ts";
-import { costRoutes, type CostStore } from "../_shared/cost/routes.ts";
+import { costCheckRoute, costRoutes, type CostCheckDeps, type CostStore } from "../_shared/cost/routes.ts";
 import { actionRoutes, type ActionRunStore } from "../_shared/api/actions.ts";
 import { socialyticsActions, type ActionAdapterDeps } from "../_shared/socialytics-api/actions.ts";
 
 /** Answers every cost read with an error; only stubs (tests, the docs generator) build routes without a store. */
+/** Answers the admin cost check with an error; only stubs build routes without it. */
+const NO_COST_CHECK: CostCheckDeps = { run: async () => { throw new Error("cost checks not configured"); } };
 const NO_COST_STORE: CostStore = {
   summary: async () => { throw new Error("cost store not configured"); },
   events: async () => { throw new Error("cost store not configured"); },
@@ -36,6 +38,8 @@ export interface AllDeps extends ReadDeps, DemoDeps, MeDeps {
   serverUrl: string;
   /** cost_events reads (the cost routes); see _shared/cost/store.ts. */
   costs?: CostStore;
+  /** The cost checks over a day range (POST /v1/admin/cost-check); see _shared/paid/checks.ts. */
+  costCheck?: CostCheckDeps;
   /** What the public actions call (actions.ts), and where their idempotency keys are kept (action-runs-store.ts). */
   actions?: Omit<ActionAdapterDeps, "store">;
   actionRuns?: ActionRunStore;
@@ -62,7 +66,7 @@ export function socialyticsOpenApi(routes: Route[], serverUrl: string): Record<s
 export function socialyticsRoutes(deps: AllDeps): Route[] {
   let all: Route[] = [];
   const system = systemRoutes({ tool: TOOL, version: API_VERSION, openapi: () => socialyticsOpenApi(all, deps.serverUrl) });
-  all = [...system, ...readRoutes(deps), ...actionRoutes(socialyticsActions({ store: deps.store, ...(deps.actions ?? NO_ACTIONS) }), { runs: deps.actionRuns ?? NO_ACTION_RUNS }), ...demoRoutes(deps), ...adminRoutes({ keys: deps.keys, tool: "soc" }), ...meRoutes(deps), ...costRoutes({ tool: TOOL, store: deps.costs ?? NO_COST_STORE, prices: PRICES }), ...(deps.extraRoutes ?? [])];
+  all = [...system, ...readRoutes(deps), ...actionRoutes(socialyticsActions({ store: deps.store, ...(deps.actions ?? NO_ACTIONS) }), { runs: deps.actionRuns ?? NO_ACTION_RUNS }), ...demoRoutes(deps), ...adminRoutes({ keys: deps.keys, tool: "soc" }), ...meRoutes(deps), ...costRoutes({ tool: TOOL, store: deps.costs ?? NO_COST_STORE, prices: PRICES }), costCheckRoute(deps.costCheck ?? NO_COST_CHECK), ...(deps.extraRoutes ?? [])];
   return all;
 }
 

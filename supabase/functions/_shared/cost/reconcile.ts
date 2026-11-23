@@ -1,5 +1,6 @@
 /**
- * The daily cost reconciliation: for one UTC day, ask each provider that has
+ * The daily cost reconciliation (run through audit.ts runChecks, with the
+ * intent, Apify and alert checks): for one UTC day, ask each provider that has
  * a billing API what it charged, and compare that with what our meter
  * recorded in cost_events. Code checks cannot see a provider changing its
  * prices or spend made outside the app; this can.
@@ -233,6 +234,8 @@ const SHARED_NOTE = "Billing is account-wide: ours_usd is this tool's recorded s
 export interface Ours {
   usd: number;
   unpricedEvents: number;
+  /** Recorded cost with no client that should have had one. */
+  unattributedUsd?: number;
 }
 
 export async function reconcileProvider(day: string, provider: ProviderId, ours: Ours, deps: ReconcileDeps, threshold: Threshold = DEFAULT_THRESHOLD): Promise<ReconcileRow> {
@@ -264,9 +267,9 @@ export async function oursForDay(db: Db, day: string): Promise<Partial<Record<Pr
   if (error) throw new Error(`cost_summary failed: ${error.message}`);
   const out: Partial<Record<ProviderId, Ours>> = {};
   for (const raw of (data ?? []) as unknown[]) {
-    const r = (typeof raw === "object" && raw && "cost_summary" in raw ? (raw as { cost_summary: unknown }).cost_summary : raw) as { provider?: string; cost_usd?: number | string; unpriced_events?: number | string };
+    const r = (typeof raw === "object" && raw && "cost_summary" in raw ? (raw as { cost_summary: unknown }).cost_summary : raw) as { provider?: string; cost_usd?: number | string; unpriced_events?: number | string; unattributed_usd?: number | string };
     if (!r?.provider || !(r.provider in PROVIDERS)) continue;
-    out[r.provider as ProviderId] = { usd: Number(r.cost_usd ?? 0), unpricedEvents: Number(r.unpriced_events ?? 0) };
+    out[r.provider as ProviderId] = { usd: Number(r.cost_usd ?? 0), unpricedEvents: Number(r.unpriced_events ?? 0), unattributedUsd: Number(r.unattributed_usd ?? 0) };
   }
   return out;
 }

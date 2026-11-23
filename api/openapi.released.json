@@ -1564,6 +1564,80 @@
         },
         "type": "object"
       },
+      "CostCheckResult": {
+        "properties": {
+          "data": {
+            "description": "One row per provider and day (rows), a per-day table (daily), totals per provider and for Apify (summary), the Apify run audit (apify) and the alerts raised (alerts).",
+            "properties": {
+              "alerts": {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "apify": {
+                "type": "object"
+              },
+              "daily": {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "days": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "drift": {
+                "type": "integer"
+              },
+              "dry_run": {
+                "type": "boolean"
+              },
+              "error": {
+                "type": "integer"
+              },
+              "from": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "mode": {
+                "enum": [
+                  "check",
+                  "history"
+                ],
+                "type": "string"
+              },
+              "ok": {
+                "type": "integer"
+              },
+              "rows": {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "summary": {
+                "type": "object"
+              },
+              "to": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "unreconciled": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "CostEventList": {
         "properties": {
           "data": {
@@ -1698,6 +1772,61 @@
         "properties": {
           "data": {
             "properties": {
+              "alerts": {
+                "description": "Open alerts from the daily cost checks (empty for a key limited to some clients).",
+                "items": {
+                  "properties": {
+                    "count": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "day": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "object"
+                    },
+                    "first_seen_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "drift",
+                        "unrecorded_calls",
+                        "apify_unclaimed",
+                        "apify_recorded",
+                        "unattributed_share",
+                        "unpriced"
+                      ],
+                      "type": "string"
+                    },
+                    "last_seen_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "provider": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "usd": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "currency": {
                 "enum": [
                   "USD"
@@ -4098,6 +4227,88 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/v1/admin/cost-check": {
+      "post": {
+        "parameters": [
+          {
+            "description": "First day, YYYY-MM-DD (UTC).",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Last day, included, YYYY-MM-DD. At most 90 days after from, and before today.",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "1: answer without writing anything.",
+            "in": "query",
+            "name": "dry_run",
+            "required": false,
+            "schema": {
+              "enum": [
+                "1",
+                "0"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "history: also load past Apify runs of this tool's own actors, assigned to clients. Default check.",
+            "in": "query",
+            "name": "mode",
+            "required": false,
+            "schema": {
+              "enum": [
+                "check",
+                "history"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CostCheckResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "summary": "Run the cost checks over a range of past days (bills, unrecorded calls, Apify runs, alerts)",
+        "tags": [
+          "Admin"
+        ],
+        "x-auth": "admin"
+      }
+    },
     "/v1/admin/keys": {
       "get": {
         "parameters": [],

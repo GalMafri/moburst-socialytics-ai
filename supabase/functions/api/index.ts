@@ -25,6 +25,8 @@ import { buildFindings, loadHealthRows } from "./health.ts";
 import { DEMO_STEPS, makeDemoCtx, refreshOutputs } from "./demo/steps.ts";
 import { discardJob, workerRoute } from "./worker.ts";
 import { costStore } from "../_shared/cost/store.ts";
+import { runChecks } from "../_shared/cost/audit.ts";
+import { socialyticsCheckDeps } from "../_shared/paid/checks.ts";
 import { makeActionRunStore } from "../_shared/socialytics-api/action-runs-store.ts";
 import { makeActionDeps } from "../_shared/socialytics-api/action-deps.ts";
 
@@ -67,7 +69,7 @@ const routeDeps: Omit<AllDeps, "sessionToken"> = {
     return { ok: r.ok, status: r.status, data: r.data };
   },
   jobs, kickWorker: async () => { await callFunction("api/internal/worker", { kick: true }, env); }, discard: (job) => discardJob(job, { db, call: (name, body, actAs) => callFunction(name, body, { ...env, actAs }) }),
-  capacity: 3, stepNames: DEMO_STEPS.map((s) => s.name), keys, serverUrl, costs: costStore(db), refresh: (job) => refreshOutputs(job, ctx),
+  capacity: 3, stepNames: DEMO_STEPS.map((s) => s.name), keys, serverUrl, costs: costStore(db), costCheck: { run: (opts) => runChecks(opts, socialyticsCheckDeps(db)) }, refresh: (job) => refreshOutputs(job, ctx),
   actions: makeActionDeps(db, env),
   actionRuns: makeActionRunStore(db),
   extraRoutes: [workerRoute({ jobs, ctx, steps: DEMO_STEPS })],

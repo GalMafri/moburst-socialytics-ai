@@ -28,6 +28,13 @@ const res = await paid.fetch(ctx, "anthropic", "/v1/messages", { method: "POST",
 - QA and smoke scripts pass `qa: true`, so their spend is dev/QA.
 - A test client is marked with `clients.exclude_from_reporting = true` (the same flag the gOS usage contract uses); its spend, past and future, then reports under development & QA.
 
+### Safeguards (`_shared/cost/meter.ts`, `apify.ts`, `audit.ts`)
+- The meter retries a failed cost insert 3 times before logging `COST_EVENT_DROPPED`, and writes a `cost_intents` row before each paid call (Apify excepted), completed once the cost rows are written. An intent still open an hour later is an unrecorded call.
+- Every Apify actor or task run started through `paid.fetch` (`POST /v2/acts/<id>/runs` or `/v2/actor-tasks/<id>/runs`) carries an ad-hoc webhook to `cost-apify-webhook` (secret `COST_WEBHOOK_SECRET`), which records the run as `apify:<runId>`.
+- `APIFY_ACTORS` in `_shared/paid/config.ts` lists the actors Socialytics runs: `owned` (only Socialytics) or `shared` (another Moburst tool on the same Apify account may run it). A new actor fails the cost-guard test until it is listed. The audit records a missed run only for an `owned` actor; others go to `cost_unclaimed_runs` for review.
+- `cost-reconcile` (daily cron; or `POST /v1/admin/cost-check?from=&to=[&dry_run=1]` with an admin key, up to 90 days) compares bills, counts unrecorded calls, audits Apify runs and keeps alerts in `cost_alerts`, shown on `GET /v1/costs` as `alerts`. Alerts stay in the app: never post them to Slack, email or n8n. Unattributed-share threshold: `COST_ALERT_UNATTRIBUTED_PCT` (default 0.1).
+- One-off Apify history load: `POST /v1/admin/cost-check?from=YYYY-MM-DD&to=YYYY-MM-DD&mode=history&dry_run=1`, check `data.apify.missing`, then repeat without `dry_run`, in windows of at most 90 days. Trends runs go to the client whose trends week was running, LinkedIn posts runs to the client whose report was running, unattributed when several clients or none match (`_shared/paid/checks.ts`). Trends runs inside a week whose Apify dollars the 23 Nov 2026 backfill already loaded count as recorded and are never written again.
+
 ### Adding a paid provider
 1. Add it to `PROVIDERS` in `supabase/functions/_shared/cost/registry.ts` (base URL, hosts, key names) and a usage reader in `usage.ts`. These files are the shared core: make the change in the AdVisor repo and sync it here with its `scripts/sync-api-core.sh`. Never edit them in this repo.
 2. Add its credentials to `authHeaders` in `_shared/paid/index.ts`.

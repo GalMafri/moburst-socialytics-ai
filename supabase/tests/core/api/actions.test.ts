@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { actionRoutes, ownerOf, requestHash, type ActionClaim, type ActionDef, type ActionRunRecord, type ActionRunStore } from "./actions.ts";
-import { handleRequest, type CoreDeps } from "./core.ts";
-import { ApiError } from "./errors.ts";
-import { hashKey, scopeAll } from "./keys.ts";
+import { actionRoutes, ownerOf, requestHash, type ActionClaim, type ActionDef, type ActionRunRecord, type ActionRunStore } from "../../../functions/_shared/api/actions.ts";
+import { handleRequest, type CoreDeps } from "../../../functions/_shared/api/core.ts";
+import { ApiError } from "../../../functions/_shared/api/errors.ts";
+import { hashKey, scopeAll } from "../../../functions/_shared/api/keys.ts";
 
 function memoryRuns() {
   const rows = new Map<string, ActionRunRecord>();
@@ -82,8 +82,10 @@ describe("action routes", () => {
   it("refuse the same idempotency_key for a different request, and one still running", async () => {
     let release!: () => void;
     const hold = new Promise<void>((r) => (release = r));
-    const { post } = await app({ hold });
+    const { post, started } = await app({ hold });
     const first = post("/v1/clients/c-1/things", { size: 1, idempotency_key: "k" });
+    // The first request holds the key before the second one asks for it.
+    while (started() === 0) await new Promise((r) => setTimeout(r, 0));
     const during = await post("/v1/clients/c-1/things", { size: 1, idempotency_key: "k" });
     expect(during).toMatchObject({ status: 409, body: { error: { code: "conflict" } } });
     release();

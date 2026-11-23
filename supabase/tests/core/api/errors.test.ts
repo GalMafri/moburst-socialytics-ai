@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ApiError, errorBody, invalid, notFound } from "./errors";
+import { ApiError, errorBody, invalid, notFound } from "../../../functions/_shared/api/errors";
 
 describe("ApiError", () => {
   it("carries status, code and message into the error body", () => {

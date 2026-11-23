@@ -15,10 +15,11 @@
 // Deno is only touched inside functions, so tests can import this module.
 
 import type { Actor, CostContext } from "../cost/context.ts";
-import { createMeter, type FetchOptions, type Meter } from "../cost/meter.ts";
+import type { ApifyWebhookTarget } from "../cost/apify.ts";
+import { createMeter, type FetchOptions, type Meter, type RecordOptions } from "../cost/meter.ts";
 import { PRICES } from "../cost/pricing.ts";
 import type { ProviderId } from "../cost/registry.ts";
-import { costSink, type Db } from "../cost/store.ts";
+import { costSink, intentSink, type Db } from "../cost/store.ts";
 import type { Usage } from "../cost/usage.ts";
 import { SHARED_FEATURES, TOOL } from "./config.ts";
 
@@ -125,6 +126,18 @@ export async function hasKey(provider: ProviderId): Promise<boolean> {
   }
 }
 
+/**
+ * Where Apify reports a finished run: this app's cost-apify-webhook function,
+ * authenticated by COST_WEBHOOK_SECRET. Without the secret no webhook is
+ * attached (the daily audit still finds the run).
+ */
+export function apifyWebhookTarget(): ApifyWebhookTarget | null {
+  const secret = env("COST_WEBHOOK_SECRET");
+  const base = env("SUPABASE_URL");
+  if (!secret || !base) return null;
+  return { url: `${base.replace(/\/+$/, "")}/functions/v1/cost-apify-webhook`, secret };
+}
+
 let meter: Meter | null = null;
 
 async function theMeter(): Promise<Meter> {
@@ -134,6 +147,8 @@ async function theMeter(): Promise<Meter> {
     tool: TOOL,
     env: env("COST_ENV") ?? "prod",
     sink: costSink(db),
+    intents: intentSink(db),
+    apifyWebhook: apifyWebhookTarget,
     prices: PRICES,
     sharedFeatures: SHARED_FEATURES,
     getEnv: env,
@@ -166,9 +181,9 @@ export const paid = {
     const auth = await withAuth(provider, init);
     return (await theMeter()).fetch(ctx, provider, path, auth, opts);
   },
-  /** Records a cost the meter cannot read from an answer (a Higgsfield generation's quoted price). */
-  async record(ctx: CostContext, provider: ProviderId, usage: Usage): Promise<void> {
-    return (await theMeter()).record(ctx, provider, usage);
+  /** Records a cost the meter cannot read from an answer (a Higgsfield generation's quoted price). True when the row is written. */
+  async record(ctx: CostContext, provider: ProviderId, usage: Usage, opts?: RecordOptions): Promise<boolean> {
+    return (await theMeter()).record(ctx, provider, usage, opts);
   },
 };
 

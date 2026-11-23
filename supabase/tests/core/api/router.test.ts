@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { apiPath, buildOpenApi, matchRoute, type Route } from "./router";
+import { apiPath, buildOpenApi, matchRoute, type Route } from "../../../functions/_shared/api/router";
 
 const ok = async () => ({ status: 200, body: {} });
 const routes: Route[] = [
