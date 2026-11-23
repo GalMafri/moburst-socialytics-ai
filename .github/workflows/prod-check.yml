@@ -1,0 +1,28 @@
+name: prod-check
+
+# Every morning: is the live API up, running the code on main, and answering
+# keyed reads, demo jobs and the cost report? See scripts/prod-check.mjs.
+# A failure here means production differs from main (often: an edge function
+# changed on main but not redeployed through Lovable). No paid provider is called.
+on:
+  schedule:
+    - cron: '0 5 * * *'
+  workflow_dispatch:
+
+jobs:
+  prod-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check production
+        env:
+          API_BASE_URL: https://rwouwxqggjjacbpbhqsn.supabase.co/functions/v1/api
+          MCP_URL: https://rwouwxqggjjacbpbhqsn.supabase.co/functions/v1/mcp
+          PROD_CHECK_KEY: ${{ secrets.PROD_CHECK_KEY }}
+          PROD_COSTS_KEY: ${{ secrets.PROD_COSTS_KEY }}
+        run: node scripts/prod-check.mjs
