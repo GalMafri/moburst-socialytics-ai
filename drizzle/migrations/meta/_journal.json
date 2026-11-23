@@ -120,6 +120,13 @@
       "when": 1795451789516,
       "tag": "0016_personal_keys_run_and_companies",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1795464247343,
+      "tag": "0017_cost_safeguards",
+      "breakpoints": true
     }
   ]
 }

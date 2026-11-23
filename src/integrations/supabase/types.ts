@@ -1766,6 +1766,54 @@ export type Database = {
           },
         ]
       }
+      cost_alerts: {
+        Row: {
+          count: number | null
+          day: string
+          dedupe_key: string
+          details: Json
+          first_seen_at: string
+          id: string
+          kind: string
+          last_seen_at: string
+          message: string
+          provider: string | null
+          resolved_at: string | null
+          tool: string
+          usd: number | null
+        }
+        Insert: {
+          count?: number | null
+          day: string
+          dedupe_key: string
+          details?: Json
+          first_seen_at?: string
+          id?: string
+          kind: string
+          last_seen_at?: string
+          message: string
+          provider?: string | null
+          resolved_at?: string | null
+          tool: string
+          usd?: number | null
+        }
+        Update: {
+          count?: number | null
+          day?: string
+          dedupe_key?: string
+          details?: Json
+          first_seen_at?: string
+          id?: string
+          kind?: string
+          last_seen_at?: string
+          message?: string
+          provider?: string | null
+          resolved_at?: string | null
+          tool?: string
+          usd?: number | null
+        }
+        Relationships: []
+      }
       cost_events: {
         Row: {
           actor_kind: string
@@ -1841,6 +1889,45 @@ export type Database = {
         }
         Relationships: []
       }
+      cost_intents: {
+        Row: {
+          client_id: string | null
+          completed_at: string | null
+          env: string
+          events: number | null
+          execution_id: string | null
+          feature: string
+          id: string
+          provider: string
+          started_at: string
+          tool: string
+        }
+        Insert: {
+          client_id?: string | null
+          completed_at?: string | null
+          env: string
+          events?: number | null
+          execution_id?: string | null
+          feature: string
+          id: string
+          provider: string
+          started_at?: string
+          tool: string
+        }
+        Update: {
+          client_id?: string | null
+          completed_at?: string | null
+          env?: string
+          events?: number | null
+          execution_id?: string | null
+          feature?: string
+          id?: string
+          provider?: string
+          started_at?: string
+          tool?: string
+        }
+        Relationships: []
+      }
       cost_reconciliation: {
         Row: {
           checked_at: string
@@ -1871,6 +1958,51 @@ export type Database = {
           provider?: string
           status?: string
           theirs_usd?: number | null
+        }
+        Relationships: []
+      }
+      cost_unclaimed_runs: {
+        Row: {
+          actor_class: string
+          actor_id: string
+          actor_task_id: string | null
+          finished_at: string | null
+          first_seen_at: string
+          last_seen_at: string
+          note: string | null
+          run_id: string
+          started_at: string
+          status: string
+          tool: string
+          usage_usd: number
+        }
+        Insert: {
+          actor_class: string
+          actor_id: string
+          actor_task_id?: string | null
+          finished_at?: string | null
+          first_seen_at?: string
+          last_seen_at?: string
+          note?: string | null
+          run_id: string
+          started_at: string
+          status: string
+          tool: string
+          usage_usd?: number
+        }
+        Update: {
+          actor_class?: string
+          actor_id?: string
+          actor_task_id?: string | null
+          finished_at?: string | null
+          first_seen_at?: string
+          last_seen_at?: string
+          note?: string | null
+          run_id?: string
+          started_at?: string
+          status?: string
+          tool?: string
+          usage_usd?: number
         }
         Relationships: []
       }
