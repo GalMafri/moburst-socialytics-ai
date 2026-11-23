@@ -14,6 +14,48 @@ export type Database = {
   }
   public: {
     Tables: {
+      api_action_runs: {
+        Row: {
+          action: string
+          client_id: string | null
+          completed_at: string | null
+          created_at: string
+          id: string
+          idempotency_key: string
+          owner: string
+          request_hash: string
+          response: Json | null
+          response_status: number | null
+          status: string
+        }
+        Insert: {
+          action: string
+          client_id?: string | null
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          idempotency_key: string
+          owner: string
+          request_hash: string
+          response?: Json | null
+          response_status?: number | null
+          status?: string
+        }
+        Update: {
+          action?: string
+          client_id?: string | null
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          idempotency_key?: string
+          owner?: string
+          request_hash?: string
+          response?: Json | null
+          response_status?: number | null
+          status?: string
+        }
+        Relationships: []
+      }
       api_keys: {
         Row: {
           client_ids: string[] | null
@@ -4673,6 +4715,22 @@ export type Database = {
       }
     }
     Functions: {
+      api_action_claim: {
+        Args: {
+          p_action: string
+          p_client: string
+          p_hash: string
+          p_key: string
+          p_owner: string
+        }
+        Returns: {
+          claimed: boolean
+          request_hash: string
+          response: Json
+          response_status: number
+          status: string
+        }[]
+      }
       api_key_touch: {
         Args: { p_key_hash: string }
         Returns: {
