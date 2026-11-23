@@ -90,7 +90,7 @@ export function thresholdFrom(env: (name: string) => string | undefined): Thresh
   return { pct: num(env("COST_RECONCILE_DRIFT_PCT"), DEFAULT_THRESHOLD.pct), minUsd: num(env("COST_RECONCILE_DRIFT_MIN_USD"), DEFAULT_THRESHOLD.minUsd) };
 }
 
-async function getJson(deps: ReconcileDeps, provider: ProviderId, url: string, headers: Record<string, string>): Promise<{ ok: true; body: any } | { ok: false; reason: string }> {
+async function getJson(deps: ReconcileDeps, provider: ProviderId, url: string, headers: Record<string, string>): Promise<{ ok: true; body: any; reason?: undefined } | { ok: false; body?: undefined; reason: string }> {
   let res: Response;
   try {
     const signal = typeof AbortSignal !== "undefined" && "timeout" in AbortSignal ? AbortSignal.timeout(deps.timeoutMs ?? 30_000) : undefined;

@@ -167,6 +167,8 @@ export interface ApifyDayCounts {
   owned_missing_usd: number;
   unclaimed: number;
   unclaimed_usd: number;
+  /** Dollars of every finished run on the Apify account that day, whoever started it: what the account's bill is compared with. */
+  account_usd: number;
 }
 
 export interface ApifyAudit {
@@ -182,7 +184,7 @@ export interface ApifyAudit {
   missing: Array<{ run_id: string; day: string; actor_id: string; class: ActorClass; usd: number; attributed_to?: Array<{ client_id: string | null; share: number }> }>;
 }
 
-const zero = (): ApifyDayCounts => ({ runs: 0, running: 0, recorded: 0, owned_missing: 0, owned_missing_usd: 0, unclaimed: 0, unclaimed_usd: 0 });
+const zero = (): ApifyDayCounts => ({ runs: 0, running: 0, recorded: 0, owned_missing: 0, owned_missing_usd: 0, unclaimed: 0, unclaimed_usd: 0, account_usd: 0 });
 
 export interface AuditStore {
   /** Our recorded spend for the day, by provider (cost_summary). */
@@ -265,6 +267,7 @@ export async function auditApify(days: string[], opts: CheckOptions, deps: Check
       c.running++;
       continue;
     }
+    c.account_usd = round6(c.account_usd + round6(r.usageTotalUsd));
     if (recorded.has(r.id)) {
       c.recorded++;
       continue;
@@ -399,7 +402,10 @@ export async function runChecks(opts: CheckOptions, deps: CheckDeps): Promise<Ch
 
   const perDay = await mapLimit(days, deps.concurrency ?? 4, async (day) => {
     const ours = await deps.store.ours(day);
-    const rows = opts.bills === false ? [] : await reconcileDay(day, ours, deps, deps.threshold);
+    // Apify bills the whole account, which other Moburst tools share, so its bill is compared with every
+    // finished run on the account that day (the audit's account_usd), not with this tool's own records.
+    const billed = apify.status === "ok" ? { ...ours, apify: { usd: apify.by_day[day]?.account_usd ?? 0, unpricedEvents: 0 } } : ours;
+    const rows = opts.bills === false ? [] : await reconcileDay(day, billed, deps, deps.threshold);
     if (!opts.dryRun && rows.length) await deps.store.saveReconciliation(rows);
     return { day, ours, rows };
   });

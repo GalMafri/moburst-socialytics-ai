@@ -134,6 +134,16 @@ describe("the Apify audit", () => {
     }
   });
 
+  it("compares Apify's bill with every run on the account, not only this tool's", async () => {
+    // 0.5 + 0.2 + 0.3 + 0.4 finished on the 20th and 21st; the running one is not counted.
+    const s = setup({ runs, recorded: ["RUNa0000000000002"], billed: { "2026-11-20": 0.7, "2026-11-21": 0.7 }, ours: { "2026-11-20": { apify: { usd: 0.2, unpricedEvents: 0 } } } });
+    const r = await runChecks({ days: ["2026-11-20", "2026-11-21"], dryRun: true, mode: "check" }, s.deps);
+    expect(r.apify.by_day["2026-11-20"].account_usd).toBe(0.7);
+    expect(r.apify.by_day["2026-11-21"].account_usd).toBe(0.7);
+    const apifyRows = r.rows.filter((x) => x.provider === "apify");
+    expect(apifyRows.map((x) => [x.day, x.ours_usd, x.status])).toEqual([["2026-11-20", 0.7, "ok"], ["2026-11-21", 0.7, "ok"]]);
+  });
+
   it("without an Apify key the audit is unreconciled, and its alerts are not resolved", async () => {
     const s = setup({ runs, apifyKey: false });
     const r = await runChecks({ days: ["2026-11-20"], dryRun: false, mode: "check" }, s.deps);
@@ -163,7 +173,8 @@ describe("the checks over a range", () => {
     expect(r.daily.map((d) => [d.day, d.total_usd, d.unattributed_usd])).toEqual([["2026-11-20", 12, 2], ["2026-11-21", 4, 0]]);
     expect(r.daily[0].providers.apify).toMatchObject({ recorded_usd: 10, billed_usd: 30, status: "drift" });
     expect(r.daily[1].providers.anthropic).toMatchObject({ recorded_usd: 0, stale_intents: 2, status: "unreconciled" });
-    expect(r.summary.providers.apify).toMatchObject({ recorded_usd: 14, billed_usd: 34.5, gap_usd: 20.5, billed_days: 2, ok: 1, drift: 1 });
+    // The bill is compared with every run on the account (none here), so the gap is the whole bill.
+    expect(r.summary.providers.apify).toMatchObject({ recorded_usd: 14, billed_usd: 34.5, gap_usd: 34.5, billed_days: 2, ok: 1, drift: 1 });
     expect(r.summary.providers.anthropic).toMatchObject({ stale_intents: 2, unreconciled: 2, billed_usd: null });
     expect(r.summary).toMatchObject({ total_recorded_usd: 16, unattributed_usd: 2, stale_intents: 2 });
     expect(r.alerts.map((a) => a.dedupe_key).sort()).toEqual([
