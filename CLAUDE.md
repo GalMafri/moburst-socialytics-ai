@@ -2,6 +2,13 @@
 
 Read `.agents/qa-project-context.md` for the stack, test commands, data model and release rules. This file adds the rules that keep cost tracking and the public API correct as the product changes. Tests enforce every rule below; when one fails, its message names the file, the line and what to do.
 
+## How Socialytics is built and deployed (do not ask the owner to explain this)
+
+- Socialytics is a Lovable project ("Socialytics AI", id `9444db2d-9d44-473f-b34f-26767e1c6c0c`). The backend is Lovable Cloud: Supabase project `rwouwxqggjjacbpbhqsn`, managed by Lovable, not reachable with a personal Supabase connector.
+- Code lives in GitHub `GalMafri/moburst-socialytics-ai`. Merging or pushing to `main` syncs into Lovable within a minute and deploys the website through GitHub Actions.
+- Edge functions and database migrations go live through Lovable: ask the project's Lovable agent (the Lovable connector's `send_message`) to apply the new migrations and deploy the named functions. Read production data with the connector's `query_database`.
+- GitHub access: the owner's token is in the macOS Keychain and `gh` is signed in. Open, merge and follow pull requests yourself.
+
 ## Paid calls and cost tracking
 
 Every call to a paid provider (Claude, OpenAI, Gemini, Apify, Gamma, Firecrawl, Higgsfield, Jina) goes through the paying desk:
