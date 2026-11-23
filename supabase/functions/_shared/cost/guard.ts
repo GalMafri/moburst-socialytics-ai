@@ -186,7 +186,8 @@ export function unlistedApifyActors(files: SourceFile[], actors: ApifyActors): s
   const out: string[] = [];
   const seen = new Set<string>();
   for (const f of files) {
-    if (/\.test\.tsx?$|__fixtures__|\/fixtures\/|\.fake\.ts$/.test(f.path)) continue;
+    // The actor lists themselves (paid/config.ts) are not code that runs an actor.
+    if (/\.test\.tsx?$|__fixtures__|\/fixtures\/|\.fake\.ts$|_shared\/paid\/config\.ts$/.test(f.path)) continue;
     for (const { ref, index } of apifyActorRefs(f.text)) {
       if (isCommentLine(f.text, index) || actorListed(actors, ref) || seen.has(normActor(ref))) continue;
       seen.add(normActor(ref));
