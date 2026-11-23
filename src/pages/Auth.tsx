@@ -4,7 +4,7 @@ import { Loading } from "@/components/ui/loading";
 import { Navigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
-import { portalUrl } from "@/utils/gosAuth";
+import { signInUrl } from "@/utils/gosAuth";
 import { authMessage, isAuthErrorCode, isTransient, type AuthErrorCode } from "@/lib/authMessages";
 import { BarChart3, TrendingUp, Zap, AlertCircle } from "lucide-react";
 
@@ -83,7 +83,7 @@ export default function Auth() {
           )}
           <div className="pt-2">
             <Button asChild>
-              <a href={portalUrl()}>Open the Moburst portal</a>
+              <a href={signInUrl()}>Open the Moburst portal</a>
             </Button>
           </div>
         </div>

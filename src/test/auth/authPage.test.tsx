@@ -91,7 +91,8 @@ describe("the sign-in page", () => {
 
   it("links to the moburst.ai portal when none is recorded or moburst.ai was last", async () => {
     await open();
-    expect(screen.getByRole("link", { name: "Open the Moburst portal" }).getAttribute("href")).toMatch(/^https:\/\/(moburst\.ai|mobtools\.ai)$/);
+    // The portal's launch of Socialytics: sign in there, then straight back here (QA 23 Nov: the portal home left people there).
+    expect(screen.getByRole("link", { name: "Open the Moburst portal" }).getAttribute("href")).toMatch(/^https:\/\/(moburst\.ai|mobtools\.ai)\/tool\/socialytics$/);
     cleanup();
     window.localStorage.setItem("socialytics.lastPortal", "gos");
     await open();
