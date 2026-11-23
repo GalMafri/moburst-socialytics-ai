@@ -82,8 +82,10 @@ describe("action routes", () => {
   it("refuse the same idempotency_key for a different request, and one still running", async () => {
     let release!: () => void;
     const hold = new Promise<void>((r) => (release = r));
-    const { post } = await app({ hold });
+    const { post, started } = await app({ hold });
     const first = post("/v1/clients/c-1/things", { size: 1, idempotency_key: "k" });
+    // The first request holds the key before the second one asks for it.
+    while (started() === 0) await new Promise((r) => setTimeout(r, 0));
     const during = await post("/v1/clients/c-1/things", { size: 1, idempotency_key: "k" });
     expect(during).toMatchObject({ status: 409, body: { error: { code: "conflict" } } });
     release();
