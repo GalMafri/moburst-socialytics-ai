@@ -134,6 +134,16 @@ describe("the Apify audit", () => {
     }
   });
 
+  it("counts runs of another Moburst tool's actors apart: neither recorded nor up for review", async () => {
+    const s = setup({ runs });
+    s.deps.actors = { ...ACTORS, others: [{ name: "them/scraper", id: "OTHERid0000000000" }] };
+    const r = await runChecks({ days: ["2026-11-20", "2026-11-21"], dryRun: false, mode: "check" }, s.deps);
+    expect(s.saved.unclaimed.map((u) => u.run_id)).toEqual(["RUNa0000000000003"]);
+    expect(r.apify.by_day["2026-11-21"]).toMatchObject({ unclaimed: 1, other_tool: 1, other_tool_usd: 0.4, account_usd: 0.7 });
+    // This tool's own missing runs come first in the list.
+    expect(r.apify.missing.map((m) => m.class)).toEqual(["owned", "owned", "shared"]);
+  });
+
   it("compares Apify's bill with every run on the account, not only this tool's", async () => {
     // 0.5 + 0.2 + 0.3 + 0.4 finished on the 20th and 21st; the running one is not counted.
     const s = setup({ runs, recorded: ["RUNa0000000000002"], billed: { "2026-11-20": 0.7, "2026-11-21": 0.7 }, ours: { "2026-11-20": { apify: { usd: 0.2, unpricedEvents: 0 } } } });

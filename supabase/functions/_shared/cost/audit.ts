@@ -97,7 +97,7 @@ export interface UnclaimedRun {
   tool: Tool;
   actor_id: string;
   actor_task_id: string | null;
-  actor_class: Exclude<ActorClass, "owned">;
+  actor_class: Exclude<ActorClass, "owned" | "other">;
   status: string;
   started_at: string;
   finished_at: string | null;
@@ -167,6 +167,9 @@ export interface ApifyDayCounts {
   owned_missing_usd: number;
   unclaimed: number;
   unclaimed_usd: number;
+  /** Runs of actors another Moburst tool on the account owns: theirs to record, counted here only. */
+  other_tool: number;
+  other_tool_usd: number;
   /** Dollars of every finished run on the Apify account that day, whoever started it: what the account's bill is compared with. */
   account_usd: number;
 }
@@ -184,7 +187,7 @@ export interface ApifyAudit {
   missing: Array<{ run_id: string; day: string; actor_id: string; class: ActorClass; usd: number; attributed_to?: Array<{ client_id: string | null; share: number }> }>;
 }
 
-const zero = (): ApifyDayCounts => ({ runs: 0, running: 0, recorded: 0, owned_missing: 0, owned_missing_usd: 0, unclaimed: 0, unclaimed_usd: 0, account_usd: 0 });
+const zero = (): ApifyDayCounts => ({ runs: 0, running: 0, recorded: 0, owned_missing: 0, owned_missing_usd: 0, unclaimed: 0, unclaimed_usd: 0, other_tool: 0, other_tool_usd: 0, account_usd: 0 });
 
 export interface AuditStore {
   /** Our recorded spend for the day, by provider (cost_summary). */
@@ -259,6 +262,9 @@ export async function auditApify(days: string[], opts: CheckOptions, deps: Check
 
   const out: ApifyAudit = { status: "ok", note: null, recorded_now: 0, recorded_now_usd: 0, totals: zero(), by_day, unresolved_actors: resolved.unresolved, missing: [] };
   const unclaimed: UnclaimedRun[] = [];
+  // This tool's own missing runs are listed first, then the ones up for review, at most 500 of each.
+  const ownList: ApifyAudit["missing"] = [];
+  const reviewList: ApifyAudit["missing"] = [];
   for (const r of runs) {
     const day = r.startedAt.slice(0, 10);
     const c = (by_day[day] ??= zero());
@@ -274,17 +280,22 @@ export async function auditApify(days: string[], opts: CheckOptions, deps: Check
     }
     const cls = classifyActor(resolved, r.actId);
     const usd = round6(r.usageTotalUsd);
+    if (cls === "other") {
+      c.other_tool++;
+      c.other_tool_usd = round6(c.other_tool_usd + usd);
+      continue;
+    }
     if (cls !== "owned") {
       c.unclaimed++;
       c.unclaimed_usd = round6(c.unclaimed_usd + usd);
       unclaimed.push({ run_id: r.id, tool: deps.tool, actor_id: r.actId, actor_task_id: r.actorTaskId, actor_class: cls, status: r.status, started_at: r.startedAt, finished_at: r.finishedAt, usage_usd: usd });
-      if (out.missing.length < 500) out.missing.push({ run_id: r.id, day, actor_id: r.actId, class: cls, usd });
+      if (reviewList.length < 500) reviewList.push({ run_id: r.id, day, actor_id: r.actId, class: cls, usd });
       continue;
     }
     c.owned_missing++;
     c.owned_missing_usd = round6(c.owned_missing_usd + usd);
     const parts = opts.mode === "history" ? normalise(attributions.get(r.id)) : [{ clientId: null, executionId: null, share: 1 }];
-    if (out.missing.length < 500) out.missing.push({ run_id: r.id, day, actor_id: r.actId, class: cls, usd, ...(opts.mode === "history" ? { attributed_to: parts.map((p) => ({ client_id: p.clientId, share: p.share })) } : {}) });
+    if (ownList.length < 500) ownList.push({ run_id: r.id, day, actor_id: r.actId, class: cls, usd, ...(opts.mode === "history" ? { attributed_to: parts.map((p) => ({ client_id: p.clientId, share: p.share })) } : {}) });
     let ok = true;
     if (!opts.dryRun) {
       for (const [i, p] of parts.entries()) {
@@ -305,6 +316,7 @@ export async function auditApify(days: string[], opts: CheckOptions, deps: Check
       out.recorded_now_usd = round6(out.recorded_now_usd + usd);
     }
   }
+  out.missing = [...ownList, ...reviewList];
   if (!opts.dryRun && unclaimed.length) await deps.store.saveUnclaimed(unclaimed);
   for (const c of Object.values(by_day)) {
     for (const k of Object.keys(out.totals) as Array<keyof ApifyDayCounts>) out.totals[k] = round6(out.totals[k] + c[k]);

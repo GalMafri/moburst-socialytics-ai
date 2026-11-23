@@ -127,10 +127,16 @@ export interface ApifyActorRef {
   note?: string;
 }
 
-/** The app's Apify actors. owned: only this app runs them. shared: other Moburst tools on the account may run them too. */
+/**
+ * The app's Apify actors. owned: only this app runs them. shared: other Moburst
+ * tools on the account may run them too. others: actors another Moburst tool on
+ * the same account owns (its own list); their runs are that tool's to record,
+ * so this app counts them apart and neither records nor flags them.
+ */
 export interface ApifyActors {
   owned: readonly ApifyActorRef[];
   shared: readonly ApifyActorRef[];
+  others?: readonly ApifyActorRef[];
 }
 
 /** "apify/x", "apify~x" and " APIFY~x " are one name; an id is kept as written. */
@@ -147,12 +153,14 @@ export function actorListed(actors: ApifyActors, ref: string): boolean {
   return [...actors.owned, ...actors.shared].some((r) => refKeys(r).includes(k));
 }
 
-export type ActorClass = "owned" | "shared" | "unknown";
+export type ActorClass = "owned" | "shared" | "other" | "unknown";
 
 /** Owned and shared actors as sets of Apify ids, names resolved to ids once. */
 export interface ResolvedActors {
   owned: Set<string>;
   shared: Set<string>;
+  /** Actors another Moburst tool on the account owns. */
+  other: Set<string>;
   /** Names that could not be resolved to an id, with why. */
   unresolved: string[];
 }
@@ -188,14 +196,17 @@ export async function resolveActors(actors: ApifyActors, lookup: (name: string) 
   };
   const owned = await ids(actors.owned);
   const shared = await ids(actors.shared);
+  const other = await ids(actors.others ?? []);
   // An actor on both lists is shared: a run is never claimed when another tool may own it.
   for (const id of shared) owned.delete(id);
-  return { owned, shared, unresolved };
+  for (const id of [...owned, ...shared]) other.delete(id);
+  return { owned, shared, other, unresolved };
 }
 
 export function classifyActor(resolved: ResolvedActors, actId: string): ActorClass {
   if (resolved.shared.has(actId)) return "shared";
   if (resolved.owned.has(actId)) return "owned";
+  if (resolved.other?.has(actId)) return "other";
   return "unknown";
 }
 

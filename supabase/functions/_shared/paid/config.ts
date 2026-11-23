@@ -79,4 +79,9 @@ export const APIFY_ACTORS: ApifyActors = {
     { name: "apify/playwright-scraper", note: "generic" },
     { name: "apify/puppeteer-scraper", note: "generic" },
   ],
+  // AdVisor's own actors (its paid/config.ts): its runs on the shared account, counted apart and not flagged here.
+  others: [
+    { name: "apify/facebook-ads-scraper", id: "JJghSZmShuco4j9gJ" },
+    { name: "memo23/google-ad-transparency-scraper-cheerio", id: "VQOu2GOHbeRAoOSGi" },
+  ],
 };
