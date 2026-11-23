@@ -50,6 +50,48 @@
       "when": 1790150102638,
       "tag": "0006_rivaliq_setup_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795420866010,
+      "tag": "0007_brand_assets_replace",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795420885406,
+      "tag": "0008_calendar_stop_plan_intent",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1795420902978,
+      "tag": "0009_storage_upsert_update_policies",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795420913994,
+      "tag": "0010_client_notes_read_tries",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795420931802,
+      "tag": "0011_client_member_needs_role",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1795420944508,
+      "tag": "0012_video_clip_unorder",
+      "breakpoints": true
     }
   ]
 }

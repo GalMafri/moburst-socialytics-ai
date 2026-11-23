@@ -882,12 +882,14 @@ export type Database = {
           output_tokens: number
           parts_done: number
           read_at: string | null
+          read_tries: number
           source: string
           state: string
           text: string | null
           text_chars: number | null
           text_hash: string | null
           title: string
+          unread_reason: string | null
           updated_at: string
         }
         Insert: {
@@ -905,12 +907,14 @@ export type Database = {
           output_tokens?: number
           parts_done?: number
           read_at?: string | null
+          read_tries?: number
           source?: string
           state?: string
           text?: string | null
           text_chars?: number | null
           text_hash?: string | null
           title?: string
+          unread_reason?: string | null
           updated_at?: string
         }
         Update: {
@@ -928,12 +932,14 @@ export type Database = {
           output_tokens?: number
           parts_done?: number
           read_at?: string | null
+          read_tries?: number
           source?: string
           state?: string
           text?: string | null
           text_chars?: number | null
           text_hash?: string | null
           title?: string
+          unread_reason?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -4627,7 +4633,7 @@ export type Database = {
         }
       }
       calendar_stop_plan: {
-        Args: { p_plan: string; p_user?: string }
+        Args: { p_intent?: string; p_plan: string; p_user?: string }
         Returns: {
           canceled_at: string | null
           canceled_by: string | null
@@ -5277,6 +5283,10 @@ export type Database = {
       }
       video_clip_stop: {
         Args: { p_job: string; p_reason: string }
+        Returns: boolean
+      }
+      video_clip_unorder: {
+        Args: { p_at: string; p_job: string }
         Returns: boolean
       }
       video_style_claim_kit: {
