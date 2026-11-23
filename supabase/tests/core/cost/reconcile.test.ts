@@ -10,8 +10,8 @@ import {
   thresholdFrom,
   type Credentials,
   type ReconcileDeps,
-} from "./reconcile";
-import type { ProviderId } from "./registry";
+} from "../../../functions/_shared/cost/reconcile";
+import type { ProviderId } from "../../../functions/_shared/cost/registry";
 
 /**
  * Fake billing answers in the shapes the providers document:
@@ -195,7 +195,7 @@ describe("database side", () => {
       },
       from: (t: string) => ({ upsert: async (rows: any[], opts: unknown) => { upserted = { rows, opts }; expect(t).toBe("cost_reconciliation"); return { error: null }; } }),
     };
-    expect(await oursForDay(db, DAY)).toEqual({ openai: { usd: 1.5, unpricedEvents: 2 }, apify: { usd: 0.25, unpricedEvents: 0 } });
+    expect(await oursForDay(db, DAY)).toEqual({ openai: { usd: 1.5, unpricedEvents: 2, unattributedUsd: 0 }, apify: { usd: 0.25, unpricedEvents: 0, unattributedUsd: 0 } });
     expect(rpcCalls[0]).toEqual({ fn: "cost_summary", args: { p_from: "2026-11-22T00:00:00.000Z", p_to: "2026-11-23T00:00:00.000Z", p_group: ["provider"], p_filters: {} } });
     await saveRows(db, [{ day: DAY, provider: "openai", ours_usd: 1, theirs_usd: 1, status: "ok", note: "" }]);
     expect(upserted!.opts).toEqual({ onConflict: "day,provider" });

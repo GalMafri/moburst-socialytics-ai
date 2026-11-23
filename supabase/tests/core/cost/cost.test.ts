@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { bucketOf, type CostContext } from "./context";
-import { paidKeysOutside, providerHostsOutside, unclassifiedSecrets, unexplainedNullClients, unpricedModels, type GuardConfig } from "./guard";
-import { createMeter, type CostEventRow } from "./meter";
-import { findPrice, lintPrices, priceUsage, QUANTITIES, type PriceRow } from "./price";
-import { PRICES } from "./pricing";
-import { PROVIDERS, providerUrl } from "./registry";
-import { READERS, readAnswer } from "./usage";
+import { bucketOf, type CostContext } from "../../../functions/_shared/cost/context";
+import { paidKeysOutside, providerHostsOutside, unclassifiedSecrets, unexplainedNullClients, unpricedModels, type GuardConfig } from "../../../functions/_shared/cost/guard";
+import { createMeter, type CostEventRow } from "../../../functions/_shared/cost/meter";
+import { findPrice, lintPrices, priceUsage, QUANTITIES, type PriceRow } from "../../../functions/_shared/cost/price";
+import { PRICES } from "../../../functions/_shared/cost/pricing";
+import { PROVIDERS, providerUrl } from "../../../functions/_shared/cost/registry";
+import { READERS, readAnswer } from "../../../functions/_shared/cost/usage";
 
 const ctx = (over: Partial<CostContext> = {}): CostContext => ({ tool: "advisor", clientId: "c1", feature: "weekly_report.vision", actor: "schedule", executionId: "run-1", ...over });
 const json = (body: unknown, headers: Record<string, string> = {}) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json", ...headers } });

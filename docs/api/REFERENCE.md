@@ -88,6 +88,19 @@ List API keys. Admin only.
 
 Returns: [ApiKeyList](#apikeylist)
 
+#### `POST /v1/admin/cost-check`
+
+Run the cost checks over a range of past days (bills, unrecorded calls, Apify runs, alerts). Admin only.
+
+| Query | Type | Description |
+|---|---|---|
+| `from` | string | First day, YYYY-MM-DD (UTC). |
+| `to` | string | Last day, included, YYYY-MM-DD. At most 90 days after from, and before today. |
+| `dry_run` | "1" \| "0" | 1: answer without writing anything. |
+| `mode` | "check" \| "history" | history: also load past Apify runs of this tool's own actors, assigned to clients. Default check. |
+
+Returns: [CostCheckResult](#costcheckresult)
+
 #### `POST /v1/admin/keys`
 
 Create an API key (the key is returned once). Admin only.
@@ -1164,6 +1177,26 @@ Returns: [Status](#status)
 | `status` |  |  |
 | `tracked` |  |  |
 
+### CostCheckResult
+
+| Field | Required | Values |
+|---|---|---|
+| `data` | yes |  |
+| `data.alerts` |  |  |
+| `data.apify` |  |  |
+| `data.daily` |  |  |
+| `data.days` |  |  |
+| `data.drift` |  |  |
+| `data.dry_run` |  |  |
+| `data.error` |  |  |
+| `data.from` |  |  |
+| `data.mode` |  | `check`, `history` |
+| `data.ok` |  |  |
+| `data.rows` |  |  |
+| `data.summary` |  |  |
+| `data.to` |  |  |
+| `data.unreconciled` |  |  |
+
 ### CostEventList
 
 | Field | Required | Values |
@@ -1203,6 +1236,16 @@ Returns: [Status](#status)
 | Field | Required | Values |
 |---|---|---|
 | `data` | yes |  |
+| `data.alerts` |  |  |
+| `data.alerts[].count` |  |  |
+| `data.alerts[].day` |  |  |
+| `data.alerts[].details` |  |  |
+| `data.alerts[].first_seen_at` |  |  |
+| `data.alerts[].kind` |  | `drift`, `unrecorded_calls`, `apify_unclaimed`, `apify_recorded`, `unattributed_share`, `unpriced` |
+| `data.alerts[].last_seen_at` |  |  |
+| `data.alerts[].message` |  |  |
+| `data.alerts[].provider` |  |  |
+| `data.alerts[].usd` |  |  |
 | `data.currency` | yes | `USD` |
 | `data.filters` |  |  |
 | `data.from` | yes |  |

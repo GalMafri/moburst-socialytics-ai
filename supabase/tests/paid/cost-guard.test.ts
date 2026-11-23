@@ -5,9 +5,9 @@
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { paidKeysOutside, providerHostsOutside, unclassifiedSecrets, unexplainedNullClients, unpricedModels, type GuardConfig, type SourceFile } from "../../functions/_shared/cost/guard";
+import { paidKeysOutside, providerHostsOutside, unclassifiedSecrets, unexplainedNullClients, unlistedApifyActors, unpricedModels, type GuardConfig, type SourceFile } from "../../functions/_shared/cost/guard";
 import { PRICES } from "../../functions/_shared/cost/pricing";
-import { CHOKEPOINT, NOT_MODELS, NOT_PAID_SECRETS, QA_PATHS, SHARED_FEATURES } from "../../functions/_shared/paid/config";
+import { APIFY_ACTORS, CHOKEPOINT, NOT_MODELS, NOT_PAID_SECRETS, QA_PATHS, SHARED_FEATURES } from "../../functions/_shared/paid/config";
 
 const ROOT = join(__dirname, "../../..");
 const SCAN = ["supabase/functions", "api", "scripts", "server/src", "src"];
@@ -61,5 +61,9 @@ describe("cost guardrails", () => {
 
   it("a cost is recorded without a client only for shared features", () => {
     expect(unexplainedNullClients(server, cfg)).toEqual([]);
+  });
+
+  it("every Apify actor the code runs is on APIFY_ACTORS (owned or shared)", () => {
+    expect(unlistedApifyActors(server, APIFY_ACTORS)).toEqual([]);
   });
 });

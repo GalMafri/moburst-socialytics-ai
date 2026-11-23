@@ -108,7 +108,7 @@ describe("deploy packaging", () => {
       if (d.isDirectory()) return tests(path);
       return /\.(test|spec)\.tsx?$|\.snap$/.test(d.name) ? [rel(path)] : [];
     });
-    expect(tests(functionsDir).filter((f) => !f.startsWith("_shared/api/") && !f.startsWith("_shared/cost/"))).toEqual([]);
+    expect(tests(functionsDir)).toEqual([]);
   });
 
   it("keeps every function's upload under the deploy limit", () => {

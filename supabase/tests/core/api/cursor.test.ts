@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { decodeCursor, encodeCursor, pageOf, parseLimit } from "./cursor";
+import { decodeCursor, encodeCursor, pageOf, parseLimit } from "../../../functions/_shared/api/cursor";
 
 describe("cursor", () => {
   it("round-trips through base64url", () => {

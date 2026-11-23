@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { actionRoutes, ownerOf, requestHash, type ActionClaim, type ActionDef, type ActionRunRecord, type ActionRunStore } from "./actions.ts";
-import { handleRequest, type CoreDeps } from "./core.ts";
-import { ApiError } from "./errors.ts";
-import { hashKey, scopeAll } from "./keys.ts";
+import { actionRoutes, ownerOf, requestHash, type ActionClaim, type ActionDef, type ActionRunRecord, type ActionRunStore } from "../../../functions/_shared/api/actions.ts";
+import { handleRequest, type CoreDeps } from "../../../functions/_shared/api/core.ts";
+import { ApiError } from "../../../functions/_shared/api/errors.ts";
+import { hashKey, scopeAll } from "../../../functions/_shared/api/keys.ts";
 
 function memoryRuns() {
   const rows = new Map<string, ActionRunRecord>();

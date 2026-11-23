@@ -9,10 +9,13 @@
  *   unpricedModels         a model id in code with no price in pricing.ts
  *   unexplainedNullClients a call that says clientId: null for a feature
  *                          that is not on the shared list
+ *   unlistedApifyActors    an Apify actor the code runs that is not on the
+ *                          app's actor list (owned or shared, see apify.ts)
  *
  * Shared between the Moburst tools: written in AdVisor, copied by
  * scripts/sync-api-core.sh. Never edit the copy in another repo.
  */
+import { actorListed, normActor, type ApifyActors } from "./apify.ts";
 import { findPrice, type PriceRow } from "./price.ts";
 import { PROVIDERS, type ProviderId } from "./registry.ts";
 
@@ -155,6 +158,39 @@ export function unexplainedNullClients(files: SourceFile[], cfg: GuardConfig): s
       const feature = /feature:\s*["'`]([a-z0-9_.]+)["'`]/.exec(literal)?.[1];
       const shared = feature && (cfg.sharedFeatures.has(feature) || [...cfg.sharedFeatures].some((s) => s.endsWith(".*") && feature.startsWith(s.slice(0, -1))));
       if (!shared) out.push(`${f.path}:${lineOf(f.text, at)} records a cost with clientId: null for "${feature ?? "?"}", which is not on SHARED_FEATURES. Pass the client, or add the feature to SHARED_FEATURES if it truly serves every client.`);
+    }
+  }
+  return out;
+}
+
+/**
+ * Apify actors named in code: a literal in an actor or task path
+ * (/acts/user~name/runs) and a string constant whose name says ACTOR
+ * (const META_ACTOR = "JJghSZmShuco4j9gJ").
+ */
+export function apifyActorRefs(text: string): Array<{ ref: string; index: number }> {
+  const out: Array<{ ref: string; index: number }> = [];
+  for (const m of text.matchAll(/\/(?:acts|actor-tasks)\/([A-Za-z0-9_.-]+(?:[~][A-Za-z0-9_.-]+)?)(?=[/?"'`])/g)) out.push({ ref: m[1], index: m.index ?? 0 });
+  for (const m of text.matchAll(/\b[A-Z][A-Z0-9_]*ACTOR[A-Z0-9_]*\s*(?::\s*string\s*)?=\s*["'`]([A-Za-z0-9_.-]+(?:[~/][A-Za-z0-9_.-]+)?)["'`]/g)) out.push({ ref: m[1], index: m.index ?? 0 });
+  // An actor described as an object, { id: "<17-char id or owner~name>", name: "owner/name" }, in either order (Socialytics' actor tables).
+  for (const m of text.matchAll(/\{[^{}]*\}/g)) {
+    const body = m[0];
+    const id = body.match(/\bid\s*:\s*["'`]([A-Za-z0-9]{17}|[A-Za-z0-9_-]+~[A-Za-z0-9_.-]+)["'`]/);
+    const name = body.match(/\bname\s*:\s*["'`]([A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+)["'`]/);
+    if (id && name) out.push({ ref: name[1], index: (m.index ?? 0) + (name.index ?? 0) });
+  }
+  return out;
+}
+
+export function unlistedApifyActors(files: SourceFile[], actors: ApifyActors): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const f of files) {
+    if (/\.test\.tsx?$|__fixtures__|\/fixtures\/|\.fake\.ts$/.test(f.path)) continue;
+    for (const { ref, index } of apifyActorRefs(f.text)) {
+      if (isCommentLine(f.text, index) || actorListed(actors, ref) || seen.has(normActor(ref))) continue;
+      seen.add(normActor(ref));
+      out.push(`${f.path}:${lineOf(f.text, index)} runs the Apify actor ${ref}, which is not on APIFY_ACTORS (paid/config.ts). Add it to owned if only this app runs it, or to shared if another Moburst tool on the Apify account may run it too.`);
     }
   }
   return out;

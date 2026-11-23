@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { CALLBACK_TIMEOUT_MS, deliverCallback, deliverOnce, signBody } from "./callback";
+import { CALLBACK_TIMEOUT_MS, deliverCallback, deliverOnce, signBody } from "../../../functions/_shared/api/callback";
 
 function fakeFetch(statuses: Array<number | Error>) {
   const calls: Array<{ url: string; init: RequestInit }> = [];

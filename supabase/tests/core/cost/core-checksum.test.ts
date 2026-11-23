@@ -10,8 +10,8 @@ import { join } from "node:path";
  */
 describe("shared core", () => {
   it("matches the synced checksum", () => {
-    const dir = __dirname;
-    const files = readdirSync(dir).filter((f) => f.endsWith(".ts") && f !== "core-checksum.test.ts").sort();
+    const dir = join(__dirname, "../../../functions/_shared/cost");
+    const files = readdirSync(dir).filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts")).sort();
     const hash = createHash("sha256");
     for (const f of files) hash.update(readFileSync(join(dir, f)));
     expect(hash.digest("hex")).toBe(readFileSync(join(dir, "CORE.sha256"), "utf8").trim());

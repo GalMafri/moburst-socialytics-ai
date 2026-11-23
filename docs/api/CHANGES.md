@@ -4,6 +4,20 @@
 
 ## 2026-11-23
 
+- Added `POST /v1/admin/cost-check`
+- GET /v1/costs: response field data.alerts added
+- GET /v1/costs: response field data.alerts[].count added
+- GET /v1/costs: response field data.alerts[].day added
+- GET /v1/costs: response field data.alerts[].details added
+- GET /v1/costs: response field data.alerts[].first_seen_at added
+- GET /v1/costs: response field data.alerts[].kind added
+- GET /v1/costs: response field data.alerts[].last_seen_at added
+- GET /v1/costs: response field data.alerts[].message added
+- GET /v1/costs: response field data.alerts[].provider added
+- GET /v1/costs: response field data.alerts[].usd added
+
+## 2026-11-23
+
 - GET /v1/admin/keys: response field data[].created_by_email added
 - GET /v1/me/keys: response field data[].company_slugs added
 - POST /v1/admin/keys: response field data.created_by_email added

@@ -197,3 +197,7 @@ verify_jwt = false
 
 [functions.cost-reconcile]
 verify_jwt = false
+
+# Apify calls it when a run ends; the URL carries COST_WEBHOOK_SECRET.
+[functions.cost-apify-webhook]
+verify_jwt = false
