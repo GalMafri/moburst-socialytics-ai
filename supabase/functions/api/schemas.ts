@@ -3,6 +3,8 @@
  * A contract test scans them for internal field names and checks that
  * every route's doc.response exists here.
  */
+import { SCOPES } from "../_shared/api/router.ts";
+import { COST_SCHEMAS } from "../_shared/cost/routes.ts";
 type S = Record<string, unknown>;
 const str = { type: ["string", "null"] };
 const num = { type: ["number", "null"] };
@@ -89,8 +91,8 @@ const DemoJob = obj({
   links: obj({ self: { type: "string" }, client: str }),
 });
 const Discarded = obj({ job_id: { type: "string" }, removed: obj({ client: bool, competitor_sets: { type: "integer" }, reports: { type: "integer" }, competitive_reports: { type: "integer" }, posts: { type: "integer" }, media_jobs: { type: "integer" } }) });
-const ApiKey = obj({ id: { type: "string" }, name: { type: "string" }, key_prefix: { type: "string" }, scopes: arr({ type: "string", enum: ["read", "demo", "admin"] }), company_slugs: { type: ["array", "null"], items: { type: "string" } }, client_ids: { type: ["array", "null"], items: { type: "string" } }, rate_limit_per_minute: { type: "integer" }, created_at: { type: "string" }, expires_at: str, last_used_at: str, revoked_at: str, note: str, owner_user_id: str, owner_email: str });
-const ApiKeyCreate = obj({ name: { type: "string" }, scopes: arr({ type: "string", enum: ["read", "demo", "admin"] }), company_slugs: arr({ type: "string" }), client_ids: arr({ type: "string" }), rate_limit_per_minute: { type: "integer" }, expires_at: str, note: str }, ["name", "scopes"]);
+const ApiKey = obj({ id: { type: "string" }, name: { type: "string" }, key_prefix: { type: "string" }, scopes: arr({ type: "string", enum: [...SCOPES] }), company_slugs: { type: ["array", "null"], items: { type: "string" } }, client_ids: { type: ["array", "null"], items: { type: "string" } }, rate_limit_per_minute: { type: "integer" }, created_at: { type: "string" }, expires_at: str, last_used_at: str, revoked_at: str, note: str, owner_user_id: str, owner_email: str });
+const ApiKeyCreate = obj({ name: { type: "string" }, scopes: arr({ type: "string", enum: [...SCOPES] }), company_slugs: arr({ type: "string" }), client_ids: arr({ type: "string" }), rate_limit_per_minute: { type: "integer" }, expires_at: str, note: str }, ["name", "scopes"]);
 const ApiKeyCreated = obj({ ...(ApiKey.properties as Record<string, unknown>), key: { type: "string", description: "Shown once; store it now." }, warning: { type: "string" } });
 // A person's own key (/v1/me/keys): read only, 90 days, reaching what its owner can see in Socialytics at the time of each call.
 const PersonalKey = obj({ id: { type: "string" }, name: { type: "string" }, key_prefix: { type: "string" }, scopes: arr({ type: "string", enum: ["read"] }), created_at: { type: "string" }, expires_at: str, last_used_at: str, revoked_at: str });
@@ -99,6 +101,8 @@ const PersonalKeyCreated = obj({ ...(PersonalKey.properties as Record<string, un
 const PersonalKeyRevoked = obj({ id: { type: "string" }, revoked_at: { type: "string" } }, ["id", "revoked_at"]);
 
 export const SCHEMAS: Record<string, S> = {
+  // The cost routes' schemas, shared with every Moburst tool.
+  ...(COST_SCHEMAS as Record<string, S>),
   Error: obj({ error: obj({ code: { type: "string" }, message: { type: "string" }, details: {} }, ["code", "message"]) }, ["error"]),
   Empty: obj({}), Links, SetupIssue,
   SetupObject: Setup, Setup: one("SetupObject"),
