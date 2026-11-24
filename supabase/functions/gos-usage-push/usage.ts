@@ -210,7 +210,30 @@ export interface PushDeps {
   writeState(patch: Partial<PushState> & { last_run_at: string; last_result: unknown }): Promise<void>;
   now(): Date;
   log(line: Record<string, unknown>): void;
+  /**
+   * The tool's live clients with no gOS company slug yet, as §15 "The client key" asks a tool with its
+   * own client table to register them. Absent: no registration step.
+   */
+  unslugged?(): Promise<ClientToRegister[]>;
+  /** Stores the slugs the Auth Service resolved, by the tool's own client id. Returns how many were saved. */
+  saveSlugs?(resolved: Record<string, string>): Promise<number>;
 }
+
+/** One client sent to POST /usage/clients: the tool's own id and the client's name. */
+export interface ClientToRegister {
+  external_id: string;
+  name: string;
+  slug?: string;
+}
+
+/** The Auth Service takes up to 1000 clients per call (§15). */
+export const MAX_CLIENTS_PER_CALL = 1000;
+/**
+ * How long an event whose client has no slug waits before it is sent without one. Registration runs
+ * every push, so a client normally has its slug within minutes; the wait only matters when the Auth
+ * Service keeps failing, and it never stops an event from being sent in the end.
+ */
+export const HOLD_UNSLUGGED_DAYS = 3;
 
 export interface PushOptions {
   /** ISO time: rows that occurred at or after it are considered. */
@@ -224,6 +247,8 @@ export interface PushOptions {
   /** Pages per run (default 10), so one run stays short. */
   maxPages?: number;
   timeoutMs?: number;
+  /** Days an event without a client slug waits for its client to be registered (default HOLD_UNSLUGGED_DAYS). */
+  holdUnsluggedDays?: number;
 }
 
 export type PushStatus = "sent" | "nothing_to_send" | "deferred" | "blocked" | "not_configured" | "dry_run" | "more_pending";
@@ -238,6 +263,12 @@ export interface PushResult {
   rejected: number;
   batches: number;
   skipped: number;
+  /** Events waiting for their client's slug. */
+  held?: number;
+  /** Clients sent to POST /usage/clients this run, slugs saved, and slugs gOS asks a person to review. */
+  clients_registered?: number;
+  slugs_saved?: number;
+  pending_review?: string[];
   reason?: string;
   sample?: UsageEvent[];
 }
@@ -311,8 +342,62 @@ async function post(deps: PushDeps, batch: UsageEvent[], timeoutMs: number): Pro
   return { kind: "down", detail: `HTTP ${res.status}: ${detail}` };
 }
 
+type Registration = { ok: true; registered: number; saved: number; pendingReview: string[] } | { ok: false; badToken?: { status: number; detail: string }; detail: string; registered: number; saved: number };
+
 /**
- * One run: read what is pending, send it in batches, record each answered
+ * Registers the tool's clients that have no gOS slug (POST /usage/clients) and stores the slugs the
+ * Auth Service resolves. gOS links a client by name to its company catalog, creating a company when
+ * it has none and listing it for review; the slug comes back either way. A run that cannot register
+ * holds every event without a slug, so none is sent without a client while a fix is one run away.
+ */
+export async function registerClients(deps: PushDeps, timeoutMs: number): Promise<Registration> {
+  if (!deps.unslugged || !deps.saveSlugs) return { ok: true, registered: 0, saved: 0, pendingReview: [] };
+  let clients: ClientToRegister[];
+  try {
+    clients = (await deps.unslugged()).filter((c) => c.external_id && c.name?.trim());
+  } catch (e) {
+    return { ok: false, detail: `reading clients failed: ${e instanceof Error ? e.message : String(e)}`, registered: 0, saved: 0 };
+  }
+  let registered = 0;
+  let saved = 0;
+  const pendingReview: string[] = [];
+  for (let i = 0; i < clients.length; i += MAX_CLIENTS_PER_CALL) {
+    const chunk = clients.slice(i, i + MAX_CLIENTS_PER_CALL).map((c) => ({ external_id: String(c.external_id), name: c.name.trim(), ...(c.slug ? { slug: c.slug } : {}) }));
+    let res: Response;
+    try {
+      const signal = typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(timeoutMs) : undefined;
+      res = await deps.fetch(`${deps.authServiceUrl}/usage/clients`, {
+        method: "POST",
+        headers: { "X-Tool-Token": String(deps.token), "Content-Type": "application/json", Accept: "application/json", "User-Agent": deps.userAgent },
+        body: JSON.stringify({ clients: chunk }),
+        signal,
+      });
+    } catch (e) {
+      return { ok: false, detail: `network: ${e instanceof Error ? e.message : String(e)}`, registered, saved };
+    }
+    let body: any = null;
+    const text = await res.text().catch(() => "");
+    try { body = text ? JSON.parse(text) : null; } catch { /* not JSON */ }
+    const detail = typeof body?.detail === "string" ? body.detail : text.slice(0, 300);
+    if (res.status === 401 || res.status === 403) return { ok: false, badToken: { status: res.status, detail }, detail: `HTTP ${res.status}: ${detail}`, registered, saved };
+    if (res.status < 200 || res.status >= 300) return { ok: false, detail: `HTTP ${res.status}: ${detail}`, registered, saved };
+    const resolved: Record<string, string> = {};
+    for (const [id, slug] of Object.entries(body?.resolved ?? {})) if (typeof slug === "string" && slug) resolved[id] = slug;
+    registered += chunk.length;
+    if (Array.isArray(body?.pending_review)) pendingReview.push(...body.pending_review.filter((x: unknown) => typeof x === "string"));
+    if (Object.keys(resolved).length) {
+      try {
+        saved += await deps.saveSlugs(resolved);
+      } catch (e) {
+        return { ok: false, detail: `saving slugs failed: ${e instanceof Error ? e.message : String(e)}`, registered, saved };
+      }
+    }
+  }
+  return { ok: true, registered, saved, pendingReview };
+}
+
+/**
+ * One run: register clients without a slug, then read what is pending, send it in batches, record each answered
  * batch. Stops at the first batch the Auth Service does not answer; what was
  * not recorded is sent again by the next run.
  */
@@ -344,12 +429,45 @@ export async function pushUsage(deps: PushDeps, opts: PushOptions): Promise<Push
   const pageSize = opts.pageSize ?? 2000;
   const maxPages = opts.maxPages ?? 10;
   const timeoutMs = opts.timeoutMs ?? 20000;
+  const holdMs = Math.max(0, opts.holdUnsluggedDays ?? HOLD_UNSLUGGED_DAYS) * 86_400_000;
+
+  // Clients first, so this run's events already carry the slugs gOS gave them.
+  let holdAllUnslugged = false;
+  if (opts.dryRun) {
+    if (deps.unslugged) {
+      try { result.clients_registered = (await deps.unslugged()).length; } catch { /* reported as 0 */ }
+    }
+  } else {
+    const reg = await registerClients(deps, timeoutMs);
+    result.clients_registered = reg.registered;
+    result.slugs_saved = reg.saved;
+    if (reg.ok) {
+      if (reg.pendingReview.length) result.pending_review = reg.pendingReview;
+      if (reg.registered) deps.log({ event: "GOS_USAGE_CLIENTS_REGISTERED", registered: reg.registered, saved: reg.saved, pending_review: reg.pendingReview });
+    } else if (reg.badToken) {
+      deps.log({ event: "GOS_USAGE_PUSH_TOKEN_REFUSED", status: reg.badToken.status, detail: reg.badToken.detail });
+      return finish(
+        { ...result, status: "blocked", reason: `HTTP ${reg.badToken.status}: ${reg.badToken.detail}` },
+        { blocked_token_fp: fp, blocked_reason: `HTTP ${reg.badToken.status}: ${reg.badToken.detail}`.slice(0, 500), blocked_at: deps.now().toISOString() },
+      );
+    } else {
+      holdAllUnslugged = true;
+      deps.log({ event: "GOS_USAGE_CLIENTS_REGISTER_FAILED", detail: reg.detail });
+    }
+  }
 
   for (let page = 0; page < maxPages; page++) {
     const rows = await deps.loadPending(opts.since, pageSize);
     result.read += rows.length;
     const ready: Array<{ row: SourceRow; ev: UsageEvent }> = [];
+    const nowMs = deps.now().getTime();
     for (const row of rows) {
+      // An event whose client has no slug yet waits for it: always while registration is failing,
+      // otherwise for at most the hold window, after which it is sent without one (never lost).
+      if (!row.company_slug && (holdAllUnslugged || nowMs - Date.parse(row.occurred_at) < holdMs)) {
+        result.held = (result.held ?? 0) + 1;
+        continue;
+      }
       const ev = await toUsageEvent(row, deps.cfg);
       if (ev) ready.push({ row, ev });
       else result.skipped++;

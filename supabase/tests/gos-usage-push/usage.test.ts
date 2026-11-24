@@ -363,3 +363,78 @@ describe("Socialytics content calendars", () => {
     expect(out).toMatchObject({ output_kind: "content_calendar", quantity: 24, output_ref: REPORT, attrs: { has_deck: true, posts: 24 } });
   });
 });
+
+describe("client registration (POST /usage/clients)", () => {
+  /** The harness, with a gOS that also answers /usage/clients and a client table in memory. */
+  function withClients(opts: { pending: SourceRow[]; clients: Array<{ id: string; name: string }>; clientsAnswer?: () => Response }) {
+    const h = harness({ pending: opts.pending });
+    const slugs = new Map<string, string>();
+    const registered: Array<{ external_id: string; name: string }> = [];
+    const eventsFetch = h.deps.fetch;
+    h.deps.fetch = async (url, init) => {
+      if (!url.endsWith("/usage/clients")) return eventsFetch(url, init);
+      const body = JSON.parse(String(init.body)) as { clients: Array<{ external_id: string; name: string }> };
+      registered.push(...body.clients);
+      if (opts.clientsAnswer) return opts.clientsAnswer();
+      const resolved = Object.fromEntries(body.clients.map((c) => [c.external_id, c.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")]));
+      return new Response(JSON.stringify({ resolved, created: body.clients.length, already_known: 0, linked: body.clients.length, pending_review: Object.values(resolved) }), { status: 200 });
+    };
+    h.deps.unslugged = async () => opts.clients.filter((c) => !slugs.has(c.id)).map((c) => ({ external_id: c.id, name: c.name }));
+    h.deps.saveSlugs = async (resolved) => {
+      for (const [id, slug] of Object.entries(resolved)) slugs.set(id, slug);
+      // The view reads the slug live, so the pending rows of that client now carry it.
+      for (const r of opts.pending) if (!r.company_slug && r.props?.client_id && resolved[String(r.props.client_id)]) r.company_slug = resolved[String(r.props.client_id)];
+      return Object.keys(resolved).length;
+    };
+    return { ...h, slugs, registered };
+  }
+  const recent = (id: string, clientId: string) => row({ execution_id: id, company_slug: null, occurred_at: "2026-11-24T11:00:00Z", props: { kind: "competitor_sweep", client_id: clientId } });
+
+  it("registers clients without a slug first, saves the slugs, and this run's events carry them", async () => {
+    const h = withClients({ pending: [recent(RUN, "c-1")], clients: [{ id: "c-1", name: "Nanobebe" }] });
+    const r = await pushUsage(h.deps, { since: SINCE });
+    expect(h.registered).toEqual([{ external_id: "c-1", name: "Nanobebe" }]);
+    expect(r).toMatchObject({ clients_registered: 1, slugs_saved: 1, posted: 1, pending_review: ["nanobebe"] });
+    expect(h.calls.find((c) => c.url.endsWith("/usage/events"))!.events[0].company_slug).toBe("nanobebe");
+    // A second run has nobody left to register.
+    const again = await pushUsage(h.deps, { since: SINCE });
+    expect(again.clients_registered).toBe(0);
+  });
+
+  it("holds every event without a slug while registration fails, and sends the rest", async () => {
+    const h = withClients({
+      pending: [recent(RUN, "c-1"), row({ execution_id: TEST, occurred_at: "2026-10-01T00:00:00Z", company_slug: null }), row({ execution_id: "e-3", occurred_at: "2026-11-24T10:00:00Z" })],
+      clients: [{ id: "c-1", name: "Nanobebe" }],
+      clientsAnswer: () => new Response("upstream down", { status: 503 }),
+    });
+    const r = await pushUsage(h.deps, { since: SINCE });
+    expect(r).toMatchObject({ held: 2, posted: 1 });
+    expect(h.logs.some((l) => l.event === "GOS_USAGE_CLIENTS_REGISTER_FAILED")).toBe(true);
+  });
+
+  it("once registration works, an event still without a slug waits 3 days, then goes without one", async () => {
+    const h = withClients({
+      pending: [recent(RUN, "unknown"), row({ execution_id: TEST, occurred_at: "2026-11-01T00:00:00Z", company_slug: null })],
+      clients: [],
+    });
+    const r = await pushUsage(h.deps, { since: SINCE });
+    expect(r).toMatchObject({ held: 1, posted: 1 });
+    const sent = h.calls.find((c) => c.url.endsWith("/usage/events"))!.events[0];
+    expect(sent.execution_id).toBe(TEST);
+    expect(sent.company_slug).toBeUndefined();
+  });
+
+  it("a refused token on registration blocks the run like a refused event batch", async () => {
+    const h = withClients({ pending: [recent(RUN, "c-1")], clients: [{ id: "c-1", name: "Nanobebe" }], clientsAnswer: () => new Response(JSON.stringify({ detail: "revoked" }), { status: 401 }) });
+    const r = await pushUsage(h.deps, { since: SINCE });
+    expect(r).toMatchObject({ status: "blocked", posted: 0 });
+    expect(h.getState()?.blocked_token_fp).toBeTruthy();
+  });
+
+  it("a dry run only counts the clients it would register", async () => {
+    const h = withClients({ pending: [recent(RUN, "c-1")], clients: [{ id: "c-1", name: "Nanobebe" }] });
+    const r = await pushUsage(h.deps, { since: SINCE, dryRun: true });
+    expect(r).toMatchObject({ status: "dry_run", clients_registered: 1 });
+    expect(h.registered).toEqual([]);
+  });
+});

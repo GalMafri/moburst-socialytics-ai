@@ -95,6 +95,25 @@ serve(async (req) => {
         },
         now: () => new Date(),
         log: (line) => console.log(JSON.stringify(line)),
+        // Live clients with no gOS slug: registered with gOS every run, so a new client never stays unattributed.
+        async unslugged() {
+          const { data, error } = await db.from("clients").select("id, name")
+            .is("company_slug", null).is("archived_at", null).or("exclude_from_reporting.is.null,exclude_from_reporting.eq.false");
+          if (error) throw new Error(`clients: ${error.message}`);
+          return ((data ?? []) as Array<{ id: string; name: string | null }>)
+            .filter((c) => c.name?.trim())
+            .map((c) => ({ external_id: c.id, name: c.name!.trim() }));
+        },
+        // A slug is only ever set where none was: a slug a person or the gOS bridge set is never replaced.
+        async saveSlugs(resolved) {
+          let saved = 0;
+          for (const [id, slug] of Object.entries(resolved)) {
+            const { data, error } = await db.from("clients").update({ company_slug: slug }).eq("id", id).is("company_slug", null).select("id");
+            if (error) throw new Error(`clients ${id}: ${error.message}`);
+            saved += (data ?? []).length;
+          }
+          return saved;
+        },
       },
       { since, dryRun: flag("dry_run"), force: flag("force") },
     );
