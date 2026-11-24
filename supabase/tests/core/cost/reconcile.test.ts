@@ -8,6 +8,8 @@ import {
   RECONCILED,
   saveRows,
   thresholdFrom,
+  clearOwnKeyCache,
+  hintMatches,
   type Credentials,
   type ReconcileDeps,
 } from "../../../functions/_shared/cost/reconcile";
@@ -205,5 +207,102 @@ describe("database side", () => {
   it("days are UTC", () => {
     expect(daysAgo(new Date("2026-11-23T00:30:00Z"), 1)).toBe("2026-11-22");
     expect(daysAgo(new Date("2026-03-01T23:59:00Z"), 1)).toBe("2026-02-28");
+  });
+});
+
+describe("this tool's own share of a shared organization", () => {
+  /** A fake routed by path, so key lists and cost reports on one host answer differently. */
+  function pathDeps(routes: Record<string, unknown | ((u: URL) => { status?: number; body: unknown; headers?: Record<string, string> })>, own: Partial<Record<ProviderId, string | null>>) {
+    const calls: URL[] = [];
+    const slept: number[] = [];
+    const d: ReconcileDeps = {
+      env: () => undefined,
+      credentials: (p): Credentials => ({ headers: { "x-test-key": p } }),
+      ownKey: (p) => own[p] ?? null,
+      sleep: async (ms) => { slept.push(ms); },
+      fetch: async (url) => {
+        const u = new URL(url);
+        calls.push(u);
+        const r = routes[u.pathname];
+        if (r === undefined) throw new Error(`unexpected call to ${url}`);
+        const a = typeof r === "function" ? (r as (u: URL) => { status?: number; body: unknown; headers?: Record<string, string> })(u) : { body: r };
+        return new Response(JSON.stringify(a.body), { status: a.status ?? 200, headers: a.headers });
+      },
+    };
+    return { d, calls, slept };
+  }
+
+  it("matches a key to a provider's hint by its visible start and end only", () => {
+    expect(hintMatches("sk-ant-api03-R2D...igAA", "sk-ant-api03-R2Dxxxxxxxxxxxxxxxxxxxxxxx-igAA")).toBe(true);
+    expect(hintMatches("sk-ant-api03-R2D...igAA", "sk-ant-api03-ZZZxxxxxxxxxxxxxxxxxxxxxxx-igAA")).toBe(false);
+    expect(hintMatches("sk-abc...def", "sk-abcXXXXXXXXdef")).toBe(true);
+    expect(hintMatches("sk...", "sk-anything")).toBe(false);
+    expect(hintMatches(null, "sk-anything")).toBe(false);
+  });
+
+  it("Anthropic: reads the bill of this tool's key only, found once in the organization's key list", async () => {
+    clearOwnKeyCache();
+    const key = "sk-ant-api03-MINExxxxxxxxxxxxxxxxxxxxxxxx-kEY1";
+    const { d, calls } = pathDeps({
+      "/v1/organizations/api_keys": (u: URL) => (u.searchParams.get("after_id")
+        ? { body: { data: [{ id: "apikey_mine", partial_key_hint: "sk-ant-api03-MIN...kEY1" }], has_more: false, last_id: "apikey_mine" } }
+        : { body: { data: [{ id: "apikey_other", partial_key_hint: "sk-ant-api03-OTH...zzzz" }], has_more: true, last_id: "apikey_other" } }),
+      "/v1/organizations/analytics/cost": anthropicAnswer("1234.000000"),
+    }, { anthropic: key });
+    const row = await reconcileProvider(DAY, "anthropic", ours(12.34), d);
+    expect(row).toMatchObject({ theirs_usd: 12.34, status: "ok" });
+    expect(row.note).toMatch(/this tool's own API key only/);
+    expect(row.note).not.toMatch(/account-wide/);
+    const cost = calls.find((u) => u.pathname === "/v1/organizations/analytics/cost")!;
+    expect(cost.searchParams.getAll("api_key_ids[]")).toEqual(["apikey_mine"]);
+    // The key list is read once per process.
+    await reconcileProvider("2026-11-21", "anthropic", ours(12.34), d);
+    expect(calls.filter((u) => u.pathname === "/v1/organizations/api_keys")).toHaveLength(2);
+    // The key itself never leaves the tool.
+    expect(calls.map(String).join(" ")).not.toContain(key);
+  });
+
+  it("a tool with no key of its own for a provider is unreconciled, not compared with the whole bill", async () => {
+    clearOwnKeyCache();
+    const { d, calls } = pathDeps({}, { anthropic: null });
+    const row = await reconcileProvider(DAY, "anthropic", ours(0), d);
+    expect(row).toMatchObject({ status: "unreconciled", theirs_usd: null });
+    expect(row.note).toMatch(/no Anthropic calls with a key of its own/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("a key that is not in the admin key's organization is unreconciled", async () => {
+    clearOwnKeyCache();
+    const { d } = pathDeps({ "/v1/organizations/api_keys": { data: [{ id: "apikey_x", partial_key_hint: "sk-ant-api03-XXX...xxxx" }], has_more: false, last_id: "apikey_x" } }, { anthropic: "sk-ant-api03-MINExxxxxxxxxxxx-kEY1" });
+    const row = await reconcileProvider(DAY, "anthropic", ours(1), d);
+    expect(row).toMatchObject({ status: "unreconciled" });
+    expect(row.note).toMatch(/not in the key list/);
+  });
+
+  it("OpenAI: groups the day's costs by key and sums only this tool's keys, across projects", async () => {
+    clearOwnKeyCache();
+    const key = "sk-proj-MINExxxxxxxxxxxxxxxxxxxxQ9z";
+    const bucket = (results: Array<[string, number]>) => ({ object: "page", data: [{ object: "bucket", start_time: Date.UTC(2026, 10, 22) / 1000, end_time: Date.UTC(2026, 10, 23) / 1000, results: results.map(([id, v]) => ({ object: "organization.costs.result", amount: { value: v, currency: "usd" }, api_key_id: id })) }], has_more: false, next_page: null });
+    const { d, calls } = pathDeps({
+      "/v1/organization/projects": { data: [{ id: "proj_a" }, { id: "proj_b" }], has_more: false, last_id: "proj_b" },
+      "/v1/organization/projects/proj_a/api_keys": { data: [{ id: "key_other", redacted_value: "sk-oth...aaa" }], has_more: false, last_id: "key_other" },
+      "/v1/organization/projects/proj_b/api_keys": { data: [{ id: "key_mine", redacted_value: "sk-proj-MIN...Q9z" }], has_more: false, last_id: "key_mine" },
+      "/v1/organization/costs": bucket([["key_mine", 3.5], ["key_other", 40], ["key_mine", 0.5]]),
+    }, { openai: key });
+    const row = await reconcileProvider(DAY, "openai", ours(4), d);
+    expect(row).toMatchObject({ theirs_usd: 4, status: "ok" });
+    expect(calls.find((u) => u.pathname === "/v1/organization/costs")!.searchParams.get("group_by")).toBe("api_key_id");
+  });
+
+  it("waits and tries again when a billing API says too many requests", async () => {
+    clearOwnKeyCache();
+    let n = 0;
+    const { d, slept } = pathDeps({
+      "/v1/organization/costs": () => (++n < 3 ? { status: 429, body: { error: "slow down" }, headers: { "retry-after": "3" } } : { body: openaiAnswer([2]) }),
+    }, {});
+    d.ownKey = undefined;
+    const row = await reconcileProvider(DAY, "openai", ours(2), d);
+    expect(row).toMatchObject({ theirs_usd: 2, status: "ok" });
+    expect(slept).toEqual([3000, 3000]);
   });
 });

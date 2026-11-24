@@ -56,6 +56,15 @@ export interface ReconcileDeps {
   credentials: (provider: ProviderId) => Credentials;
   /** Milliseconds before a billing call is abandoned. */
   timeoutMs?: number;
+  /**
+   * This tool's own API key for a provider (from _shared/paid), used only to find
+   * that key's id in the organization's key list, so the bill check reads this
+   * tool's share of a shared organization. Null when the tool has no key of its
+   * own for that provider. Left out, the whole organization's bill is compared.
+   */
+  ownKey?: (provider: ProviderId) => Promise<string | null> | string | null;
+  /** Waits between retries after a provider says "too many requests". Tests make it instant. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export type Adapter = (day: string, deps: ReconcileDeps) => Promise<Theirs>;
@@ -90,15 +99,25 @@ export function thresholdFrom(env: (name: string) => string | undefined): Thresh
   return { pct: num(env("COST_RECONCILE_DRIFT_PCT"), DEFAULT_THRESHOLD.pct), minUsd: num(env("COST_RECONCILE_DRIFT_MIN_USD"), DEFAULT_THRESHOLD.minUsd) };
 }
 
+/** Tries after a 429, waiting as the provider asks (Retry-After) or 2, 4, 8 s, at most 30 s each. */
+const RATE_LIMIT_TRIES = 4;
+
 async function getJson(deps: ReconcileDeps, provider: ProviderId, url: string, headers: Record<string, string>): Promise<{ ok: true; body: any; reason?: undefined } | { ok: false; body?: undefined; reason: string }> {
-  let res: Response;
-  try {
-    const signal = typeof AbortSignal !== "undefined" && "timeout" in AbortSignal ? AbortSignal.timeout(deps.timeoutMs ?? 30_000) : undefined;
-    res = await deps.fetch(url, { method: "GET", headers, signal });
-  } catch (e) {
-    return { ok: false, reason: `${PROVIDERS[provider].label} billing API could not be reached: ${e instanceof Error ? e.message : String(e)}` };
+  let res!: Response;
+  let text = "";
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const signal = typeof AbortSignal !== "undefined" && "timeout" in AbortSignal ? AbortSignal.timeout(deps.timeoutMs ?? 30_000) : undefined;
+      res = await deps.fetch(url, { method: "GET", headers, signal });
+    } catch (e) {
+      return { ok: false, reason: `${PROVIDERS[provider].label} billing API could not be reached: ${e instanceof Error ? e.message : String(e)}` };
+    }
+    text = await res.text().catch(() => "");
+    if (res.status !== 429 || attempt >= RATE_LIMIT_TRIES) break;
+    const asked = Number(res.headers.get("retry-after"));
+    await sleep(Math.min(30_000, Number.isFinite(asked) && asked > 0 ? asked * 1000 : 2000 * 2 ** (attempt - 1)));
   }
-  const text = await res.text().catch(() => "");
   if (!res.ok) return { ok: false, reason: `${PROVIDERS[provider].label} billing API answered ${res.status}: ${text.slice(0, 300)}` };
   try {
     return { ok: true, body: JSON.parse(text) };
@@ -108,6 +127,95 @@ async function getJson(deps: ReconcileDeps, provider: ProviderId, url: string, h
 }
 
 const MAX_PAGES = 20;
+
+/**
+ * A provider's key hint ("sk-ant-api03-R2D...igAA", OpenAI's "sk-abc...def")
+ * matches a key that starts and ends with its two visible parts.
+ */
+export function hintMatches(hint: unknown, key: string): boolean {
+  if (typeof hint !== "string") return false;
+  const i = hint.indexOf("...");
+  if (i < 0) return false;
+  const head = hint.slice(0, i);
+  const tail = hint.slice(i + 3);
+  return head.length + tail.length >= 6 && key.length > head.length + tail.length && key.startsWith(head) && key.endsWith(tail);
+}
+
+/** Which of the organization's keys are this tool's: all of them (no ownKey), some ids, none, or the lookup failed. */
+type OwnKeys = { kind: "all" } | { kind: "ids"; ids: string[] } | { kind: "unreconciled"; reason: string } | { kind: "error"; reason: string };
+
+const ownKeyCache = new Map<string, string[]>();
+/** Tests reset the cache of key ids. */
+export function clearOwnKeyCache(): void {
+  ownKeyCache.clear();
+}
+
+/** Finds this tool's key ids once per process, from the organization's key list read with the admin key. */
+async function ownKeyIds(provider: ProviderId, deps: ReconcileDeps, list: (key: string) => Promise<{ ids: string[] } | { error: string }>): Promise<OwnKeys> {
+  if (!deps.ownKey) return { kind: "all" };
+  let key: string | null;
+  try {
+    key = (await deps.ownKey(provider)) ?? null;
+  } catch {
+    key = null;
+  }
+  const label = PROVIDERS[provider].label;
+  if (!key) return { kind: "unreconciled", reason: `this tool makes no ${label} calls with a key of its own, so no part of the organization's ${label} bill is its to compare` };
+  const cacheKey = `${provider}:${key.slice(0, 12)}:${key.slice(-4)}`;
+  const cached = ownKeyCache.get(cacheKey);
+  if (cached) return { kind: "ids", ids: cached };
+  const found = await list(key);
+  if ("error" in found) return { kind: "error", reason: found.error };
+  if (!found.ids.length) return { kind: "unreconciled", reason: `this tool's ${label} key is not in the key list of the organization the admin key belongs to, so its share of the bill cannot be read` };
+  ownKeyCache.set(cacheKey, found.ids);
+  return { kind: "ids", ids: found.ids };
+}
+
+/** Anthropic: GET /v1/organizations/api_keys (Admin API), paged with after_id; each key has partial_key_hint. */
+async function anthropicKeyIds(deps: ReconcileDeps, headers: Record<string, string>): Promise<OwnKeys> {
+  return ownKeyIds("anthropic", deps, async (key) => {
+    const ids: string[] = [];
+    let after: string | null = null;
+    for (let i = 0; i < MAX_PAGES; i++) {
+      const q = new URLSearchParams({ limit: "100" });
+      if (after) q.set("after_id", after);
+      const r = await getJson(deps, "anthropic", providerUrl("anthropic", `/v1/organizations/api_keys?${q}`, deps.env), headers);
+      if (!r.ok) return { error: r.reason };
+      for (const k of Array.isArray(r.body?.data) ? r.body.data : []) if (hintMatches(k?.partial_key_hint, key) && typeof k?.id === "string") ids.push(k.id);
+      if (!r.body?.has_more || !r.body?.last_id) return { ids };
+      after = String(r.body.last_id);
+    }
+    return { ids };
+  });
+}
+
+/** OpenAI: GET /v1/organization/projects, then each project's /api_keys, paged with after; each key has redacted_value. */
+async function openaiKeyIds(deps: ReconcileDeps, headers: Record<string, string>): Promise<OwnKeys> {
+  const pages = async (path: string, each: (item: any) => void): Promise<string | null> => {
+    let after: string | null = null;
+    for (let i = 0; i < MAX_PAGES; i++) {
+      const q = new URLSearchParams({ limit: "100" });
+      if (after) q.set("after", after);
+      const r = await getJson(deps, "openai", providerUrl("openai", `${path}?${q}`, deps.env), headers);
+      if (!r.ok) return r.reason;
+      for (const item of Array.isArray(r.body?.data) ? r.body.data : []) each(item);
+      if (!r.body?.has_more || !r.body?.last_id) return null;
+      after = String(r.body.last_id);
+    }
+    return null;
+  };
+  return ownKeyIds("openai", deps, async (key) => {
+    const projects: string[] = [];
+    const err = await pages("/v1/organization/projects", (p) => { if (typeof p?.id === "string") projects.push(p.id); });
+    if (err) return { error: err };
+    const ids: string[] = [];
+    for (const project of projects) {
+      const e = await pages(`/v1/organization/projects/${encodeURIComponent(project)}/api_keys`, (k) => { if (hintMatches(k?.redacted_value, key) && typeof k?.id === "string") ids.push(k.id); });
+      if (e) return { error: e };
+    }
+    return { ids };
+  });
+}
 
 /**
  * Anthropic: the Usage and Cost Analytics API, cost endpoint.
@@ -126,10 +234,14 @@ export const anthropicCostAnalytics: Adapter = async (day, deps) => {
   if ("missing" in cred) return { kind: "unreconciled", reason: `${cred.missing} is not set, so Anthropic's cost report cannot be read` };
   const { start, end } = dayBounds(day);
   const headers = { ...cred.headers, "anthropic-version": "2026-10-21", "anthropic-beta": "analytics-usage-cost-2026-08-24" };
+  // Only this tool's keys: the organization is shared with other Moburst work.
+  const own = await anthropicKeyIds(deps, headers);
+  if (own.kind === "unreconciled" || own.kind === "error") return { kind: own.kind, reason: own.reason };
   let cents = 0;
   let page: string | null = null;
   for (let i = 0; i < MAX_PAGES; i++) {
     const q = new URLSearchParams({ starting_at: start.toISOString().replace(".000Z", "Z"), ending_at: end.toISOString().replace(".000Z", "Z"), limit: "1000" });
+    if (own.kind === "ids") for (const id of own.ids) q.append("api_key_ids[]", id);
     if (page) q.set("page", page);
     const r = await getJson(deps, "anthropic", providerUrl("anthropic", `/v1/organizations/analytics/cost?${q}`, deps.env), headers);
     if (!r.ok) return { kind: "error", reason: r.reason };
@@ -142,7 +254,7 @@ export const anthropicCostAnalytics: Adapter = async (day, deps) => {
       if (row?.cost?.currency !== "USD" || !Number.isFinite(amt)) return { kind: "unreconciled", reason: `Anthropic's cost report had a row in an unexpected shape or currency (${row?.cost?.currency})` };
       cents += amt;
     }
-    if (!r.body.has_more || !r.body.next_page) return { kind: "usd", usd: round6(cents / 100) };
+    if (!r.body.has_more || !r.body.next_page) return { kind: "usd", usd: round6(cents / 100), ...(own.kind === "ids" ? { note: OWN_KEYS_NOTE } : {}) };
     page = String(r.body.next_page);
   }
   return { kind: "error", reason: `Anthropic's cost report had more than ${MAX_PAGES} pages for one day` };
@@ -164,10 +276,15 @@ export const openaiCosts: Adapter = async (day, deps) => {
   const { start, end } = dayBounds(day);
   const s = start.getTime() / 1000;
   const e = end.getTime() / 1000;
+  // Only this tool's keys: grouped by key, the results carry api_key_id.
+  const own = await openaiKeyIds(deps, cred.headers);
+  if (own.kind === "unreconciled" || own.kind === "error") return { kind: own.kind, reason: own.reason };
+  const mine = own.kind === "ids" ? new Set(own.ids) : null;
   let usd = 0;
   let page: string | null = null;
   for (let i = 0; i < MAX_PAGES; i++) {
     const q = new URLSearchParams({ start_time: String(s), end_time: String(e), bucket_width: "1d", limit: "1" });
+    if (mine) q.set("group_by", "api_key_id");
     if (page) q.set("page", page);
     const r = await getJson(deps, "openai", providerUrl("openai", `/v1/organization/costs?${q}`, deps.env), cred.headers);
     if (!r.ok) return { kind: "error", reason: r.reason };
@@ -175,12 +292,13 @@ export const openaiCosts: Adapter = async (day, deps) => {
     for (const bucket of r.body.data) {
       if (bucket?.start_time !== s) continue;
       for (const res of bucket.results ?? []) {
+        if (mine && !mine.has(String(res?.api_key_id))) continue;
         const v = Number(res?.amount?.value);
         if (String(res?.amount?.currency).toLowerCase() !== "usd" || !Number.isFinite(v)) return { kind: "unreconciled", reason: `OpenAI's cost report had a result in an unexpected shape or currency (${res?.amount?.currency})` };
         usd += v;
       }
     }
-    if (!r.body.has_more || !r.body.next_page) return { kind: "usd", usd: round6(usd), note: "OpenAI does not say when a day's costs are final; a recent day can still grow." };
+    if (!r.body.has_more || !r.body.next_page) return { kind: "usd", usd: round6(usd), note: ["OpenAI does not say when a day's costs are final; a recent day can still grow.", ...(mine ? [OWN_KEYS_NOTE] : [])].join(" ") };
     page = String(r.body.next_page);
   }
   return { kind: "error", reason: `OpenAI's cost report had more than ${MAX_PAGES} pages for one day` };
@@ -230,6 +348,7 @@ export const ADAPTERS: Partial<Record<ProviderId, Adapter>> = {
 export const RECONCILED: ProviderId[] = (Object.keys(PROVIDERS) as ProviderId[]).filter((p) => PROVIDERS[p].reconcile !== "none");
 
 const SHARED_NOTE = "Billing is account-wide: ours_usd is this tool's recorded spend only, so a provider account shared with another Moburst tool shows as theirs > ours.";
+const OWN_KEYS_NOTE = "theirs_usd is the bill for this tool's own API key only (matched in the organization's key list), so other work in the same organization is left out.";
 
 export interface Ours {
   usd: number;
@@ -253,7 +372,8 @@ export async function reconcileProvider(day: string, provider: ProviderId, ours:
   if (theirs.note) notes.unshift(theirs.note);
   const status = compare(ours.usd, theirs.usd, threshold);
   const head = `${status === "ok" ? "Within" : "Outside"} the tolerance of max(${Math.round(threshold.pct * 1000) / 10}% of theirs, $${threshold.minUsd}).`;
-  return { ...base, theirs_usd: theirs.usd, status, note: [head, SHARED_NOTE, ...notes].join(" ") };
+  const scoped = theirs.note?.includes(OWN_KEYS_NOTE) || provider === "apify";
+  return { ...base, theirs_usd: theirs.usd, status, note: [head, ...(scoped ? [] : [SHARED_NOTE]), ...notes].join(" ") };
 }
 
 export async function reconcileDay(day: string, ours: Partial<Record<ProviderId, Ours>>, deps: ReconcileDeps, threshold: Threshold = DEFAULT_THRESHOLD, providers: ProviderId[] = RECONCILED): Promise<ReconcileRow[]> {
