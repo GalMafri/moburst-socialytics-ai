@@ -67,7 +67,20 @@ export interface ConnectorDeps {
   now?(): Date;
 }
 
-export const SERVER_INFO = { name: "socialytics", version: "1.1.0" };
+/**
+ * Who the connector is, as Claude shows it: the Moburst mark (the same icon the
+ * Socialytics site uses) rather than the icon of the supabase.co address it runs on.
+ */
+export const SERVER_INFO = {
+  name: "socialytics",
+  title: "Socialytics by Moburst",
+  version: "1.1.0",
+  websiteUrl: "https://socialytics.moburst.ai",
+  icons: [
+    { src: "https://socialytics.moburst.ai/images/icon-192.png", mimeType: "image/png", sizes: ["192x192"] },
+    { src: "https://socialytics.moburst.ai/favicon.svg", mimeType: "image/svg+xml", sizes: ["any"] },
+  ],
+};
 const INSTRUCTIONS = "Socialytics is Moburst's organic social tool. Find a client with socialytics_clients_list, then read its social and competitive reports, Sprout Social performance, weekly trend themes and content calendar, and, for Moburst staff, its content strategy and client notes. socialytics_api_schema lists every read endpoint of the Socialytics API and socialytics_api calls any of them. Moburst staff can also save to Socialytics: client notes (socialytics_note_save), approved calendar copy (socialytics_post_copy_save), strategy sections (socialytics_strategy_section_save) and finished decks on a report (socialytics_report_deck_upload, then socialytics_report_deck_save). They can start work too (reports, a drafted post, a post's designs, competitor proposals, a competitor feed refresh, a calendar week): each work tool first answers what it will do with an estimate and a confirm_token and starts nothing; call it again with the token only after the person agrees. Every save names the client by id and name, and reaches only the clients the signed-in person can change in Socialytics. Reads reach only the clients they can see.";
 const SIGN_IN = "Connect Socialytics from Claude to use this connector.";
 
