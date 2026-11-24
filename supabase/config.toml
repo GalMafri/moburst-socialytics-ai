@@ -198,6 +198,10 @@ verify_jwt = false
 [functions.cost-reconcile]
 verify_jwt = false
 
+# pg_cron calls it every 15 minutes with x-socialytics-secret; it refuses any other caller.
+[functions.gos-usage-push]
+verify_jwt = false
+
 # Apify calls it when a run ends; the URL carries COST_WEBHOOK_SECRET.
 [functions.cost-apify-webhook]
 verify_jwt = false
