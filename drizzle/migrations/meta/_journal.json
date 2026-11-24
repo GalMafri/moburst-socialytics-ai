@@ -127,6 +127,13 @@
       "when": 1795464247343,
       "tag": "0017_cost_safeguards",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1795505743145,
+      "tag": "0018_report_decks_storage_access",
+      "breakpoints": true
     }
   ]
 }
