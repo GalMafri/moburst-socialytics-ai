@@ -116,6 +116,21 @@ export function billingCredentials(provider: ProviderId): { headers: Record<stri
   }
 }
 
+/**
+ * This app's own key for a provider, or null when it has none. Used only by the
+ * bill check (cost/reconcile.ts) to find the key's id in the organization's key
+ * list, so it reads this app's share of a shared organization. Never logged.
+ */
+export async function ownKey(provider: ProviderId): Promise<string | null> {
+  try {
+    if (provider === "anthropic") return await secret(provider, ["ANTHROPIC_API_KEY"], ["anthropic_api_key"]);
+    if (provider === "openai") return await secret(provider, ["OPENAI_API_KEY"], ["openai_api_key"]);
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 /** Whether a provider's credentials are set, for features that skip a step when they are not. */
 export async function hasKey(provider: ProviderId): Promise<boolean> {
   try {

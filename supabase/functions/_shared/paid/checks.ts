@@ -25,7 +25,7 @@ import { thresholdFrom } from "../cost/reconcile.ts";
 import { auditStore, type Db } from "../cost/store.ts";
 import { normActor } from "../cost/apify.ts";
 import { APIFY_ACTORS, TOOL } from "./config.ts";
-import { billingCredentials, paid } from "./index.ts";
+import { billingCredentials, ownKey, paid } from "./index.ts";
 
 const env = (name: string): string | undefined => (typeof Deno !== "undefined" ? Deno.env.get(name) : undefined);
 
@@ -143,6 +143,7 @@ export function socialyticsCheckDeps(db: Db): CheckDeps {
     fetch: (u, init) => fetch(u, init),
     env,
     credentials: billingCredentials,
+    ownKey,
     actors: APIFY_ACTORS,
     threshold: thresholdFrom(env),
     unattributedPct: unattributedPctFrom(env),
