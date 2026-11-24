@@ -4,6 +4,7 @@ import { paidKeysOutside, providerHostsOutside, unclassifiedSecrets, unexplained
 import { createMeter, type CostEventRow } from "../../../functions/_shared/cost/meter";
 import { findPrice, lintPrices, priceUsage, QUANTITIES, type PriceRow } from "../../../functions/_shared/cost/price";
 import { PRICES } from "../../../functions/_shared/cost/pricing";
+import { PRICES } from "../../../functions/_shared/cost/pricing";
 import { PROVIDERS, providerUrl } from "../../../functions/_shared/cost/registry";
 import { READERS, readAnswer } from "../../../functions/_shared/cost/usage";
 
@@ -226,5 +227,20 @@ describe("the guardrail checks", () => {
       f("scripts/qa/smoke.ts", '{ clientId: null, feature: "smoke" }'),
     ];
     expect(unexplainedNullClients(files, cfg)).toEqual([expect.stringMatching(/"draft_brief"/)]);
+  });
+});
+
+describe("shared tools are priced per unit, at what Moburst pays", () => {
+  const at = new Date("2026-11-25");
+  const usd = (provider: Parameters<typeof priceUsage>[1], resource: string, quantities: Record<string, number>) => priceUsage(PRICES, provider, { resource, quantities } as never, at, false).costUsd;
+  it("Higgsfield: $0.08 a credit, and a 2k image at its quoted credits", () => {
+    expect(usd("higgsfield", "seedance_2_5", { credits: 128 })).toBe(10.24);
+    expect(usd("higgsfield", "nano_banana_pro", { images: 1 })).toBe(0.16);
+    expect(usd("higgsfield", "gpt_image_2_5", { images: 1 })).toBe(0.18);
+  });
+  it("TRIBE: $0.40 per GPU hour of run time; Gamma: $0.004 a credit", () => {
+    expect(usd("tribe", "tribe-space", { gpu_seconds: 3600 })).toBe(0.4);
+    expect(usd("tribe", "tribe-space-estimate", { gpu_seconds: 473 })).toBeCloseTo(0.052556, 6);
+    expect(usd("gamma", "generation", { credits: 63 })).toBe(0.252);
   });
 });

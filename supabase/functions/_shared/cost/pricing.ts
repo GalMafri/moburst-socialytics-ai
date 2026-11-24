@@ -10,13 +10,13 @@
  * on the date in the note. verified: false means it is an estimate or depends
  * on Moburst's plan; the costs API shows which events used such rows.
  *
- * Not priced yet (their events record cost_usd null, cost_source "unpriced",
- * and are counted in the API totals until a row is added here):
- *   Gamma credits              USD per credit depends on Moburst's Gamma plan
- *   Higgsfield nano_banana_pro, gpt_image_2_5   no public price; see console.higgsfield.ai
- *                              (seedance_2_5 is from $0.118 per second of video; the app records
- *                              the USD Higgsfield quotes before a run, as costUsd)
- *   TRIBE GPU seconds          depends on the Space's hardware tier
+ * Events with no row here record cost_usd null and cost_source "unpriced", and
+ * are counted in the API totals until a row is added. A new row prices events
+ * from then on; it does not reprice earlier ones.
+ *
+ * Gamma, Higgsfield and the TRIBE Space are shared with other Moburst teams.
+ * Their rows are the price of one unit (a credit, a GPU second), so a tool is
+ * charged for what it used and never for the rest of the shared bill.
  *
  * Shared between the Moburst tools: written in AdVisor, copied by
  * scripts/sync-api-core.sh. Never edit the copy in another repo.
@@ -113,6 +113,54 @@ export const PRICES: readonly PriceRow[] = [
     rates: { credits: { usd: 0.00099, per: 1 }, requests: { usd: 0.00099, per: 1 } },
     source: "https://www.firecrawl.dev/pricing", verified: false,
     note: "Standard plan rate; Moburst's plan may differ. A scrape reports no creditsUsed, so it counts as one credit.",
+  },
+
+  // Gamma: credits drawn from the key owner's balance. No Gamma charge was found in Mesh, so this is the
+  // public top-up rate ($6 for 1,500 credits) until Moburst's plan is confirmed. A generation that reports
+  // no credit count is priced at about what the first decks used (63 credits for 2 decks).
+  {
+    provider: "gamma", resource: "generation", effectiveFrom: "2026-11-24",
+    rates: { credits: { usd: 0.004, per: 1 }, requests: { usd: 0.128, per: 1 } },
+    source: "https://help.gamma.app/en/articles/12466653-how-to-purchase-more-credits", verified: false,
+    note: "Public top-up rate, $0.004 a credit, read 2026-11-24. Moburst's Gamma plan is not confirmed (no Gamma charge found in Mesh).",
+  },
+
+  // Higgsfield: Moburst's team workspace ("scale" plan) pays $0.08 a credit: an auto top-up of 4,000 credits
+  // was charged $320.00 on 2026-11-23 (Mesh, HIGGSFIELD INC.), and the plan reports 8 cents a credit.
+  // Videos are recorded in the credits Higgsfield quoted; images as one image at the app's fixed 2k settings.
+  {
+    provider: "higgsfield", resource: "*", effectiveFrom: "2026-11-23",
+    rates: { credits: { usd: 0.08, per: 1 } },
+    source: "https://higgsfield.ai/pricing", verified: true,
+    note: "Moburst's rate, $0.08 a credit: 4,000 credits for $320.00 on 2026-11-23 (Mesh) and price_per_credit_cents 8 on the team plan.",
+  },
+  {
+    provider: "higgsfield", resource: "nano_banana_pro", effectiveFrom: "2026-11-23",
+    rates: { images: { usd: 0.16, per: 1 }, credits: { usd: 0.08, per: 1 } },
+    source: "https://higgsfield.ai/pricing", verified: true,
+    note: "2 credits per 2k image (Higgsfield's quote, 2026-11-24) at $0.08 a credit. Re-quote if the app's resolution changes.",
+  },
+  {
+    provider: "higgsfield", resource: "gpt_image_2_5", effectiveFrom: "2026-11-23",
+    rates: { images: { usd: 0.18, per: 1 }, credits: { usd: 0.08, per: 1 } },
+    source: "https://higgsfield.ai/pricing", verified: true,
+    note: "2.25 credits per 2k high-quality image (Higgsfield's quote, 2026-11-24) at $0.08 a credit. Re-quote if the app's settings change.",
+  },
+
+  // TRIBE: the Hugging Face Space MoburstAI/tribe-v2-analyzer runs on an Nvidia T4 small, $0.40 an hour
+  // (Mesh: about $10 from HUGGINGFACE every 25 hours). An analysis is charged for the seconds it ran.
+  // The Space never sleeps, so its idle hours are a fixed overhead that no analysis is charged for.
+  {
+    provider: "tribe", resource: "tribe-space", effectiveFrom: "2026-10-01",
+    rates: { gpu_seconds: { usd: 0.4, per: 3600 } },
+    source: "https://huggingface.co/pricing", verified: true,
+    note: "T4 small, $0.40 an hour, read 2026-11-24; the Space's hardware per the Hugging Face API. Busy time only.",
+  },
+  {
+    provider: "tribe", resource: "tribe-space-estimate", effectiveFrom: "2026-10-01",
+    rates: { gpu_seconds: { usd: 0.4, per: 3600 } },
+    source: "https://huggingface.co/pricing", verified: false,
+    note: "An analysis whose run time the server never sees (started from the browser), charged at the median run time of queued analyses.",
   },
 
   // Jina Reader without a key is free (20 requests a minute).
