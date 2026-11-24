@@ -16,6 +16,7 @@ import { pushUsage, type OutboxRow, type PushState, type SourceRow, type UsageCo
  *                                GOS_USAGE_LOOKBACK_DAYS days (default 30)
  *   ?backfill_from=YYYY-MM-DD    one-off: send history from that day (UTC)
  *   ?dry_run=1                   map and count, send and record nothing
+ *   ?register_all=1              also re-register every live client that has a slug (daily at 03:00 UTC)
  *   ?force=1                     try again with a token the Auth Service refused
  *
  * Executions: reports.id (content calendars), the only executions gos_events
@@ -63,6 +64,7 @@ serve(async (req) => {
     since = new Date(now.getTime() - days * 86_400_000).toISOString();
   }
   const flag = (k: string) => ["1", "true"].includes(url.searchParams.get(k) ?? "");
+  const registerAll = flag("register_all") || (now.getUTCHours() === 3 && now.getUTCMinutes() < 15);
 
   const db = createClient(env("SUPABASE_URL")!, env("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
 
@@ -96,13 +98,18 @@ serve(async (req) => {
         now: () => new Date(),
         log: (line) => console.log(JSON.stringify(line)),
         // Live clients with no gOS slug: registered with gOS every run, so a new client never stays unattributed.
+        // The clients to register with gOS: every run, the live clients with no slug yet; once a day
+        // (03:00 UTC) or with ?register_all=1, also the live clients that have a slug, with it as a hint,
+        // so a slug set in the app (or one gOS dropped) is always in gOS's catalog. Demo brands
+        // (demo_job_id set or a demo- slug) are left out: they are prospects, not catalog companies.
         async unslugged() {
-          const { data, error } = await db.from("clients").select("id, name")
-            .is("company_slug", null).is("archived_at", null).or("exclude_from_reporting.is.null,exclude_from_reporting.eq.false");
+          let q = db.from("clients").select("id, name, company_slug, demo_job_id").is("archived_at", null).or("exclude_from_reporting.is.null,exclude_from_reporting.eq.false");
+          if (!registerAll) q = q.is("company_slug", null);
+          const { data, error } = await q;
           if (error) throw new Error(`clients: ${error.message}`);
-          return ((data ?? []) as Array<{ id: string; name: string | null }>)
-            .filter((c) => c.name?.trim())
-            .map((c) => ({ external_id: c.id, name: c.name!.trim() }));
+          return ((data ?? []) as Array<{ id: string; name: string | null; company_slug: string | null; demo_job_id: string | null }>)
+            .filter((c) => c.name?.trim() && !c.demo_job_id && !(c.company_slug ?? "").startsWith("demo-"))
+            .map((c) => ({ external_id: c.id, name: c.name!.trim(), ...(c.company_slug ? { slug: c.company_slug } : {}) }));
         },
         // A slug is only ever set where none was: a slug a person or the gOS bridge set is never replaced.
         async saveSlugs(resolved) {
