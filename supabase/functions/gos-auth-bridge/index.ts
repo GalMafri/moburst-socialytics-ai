@@ -28,6 +28,7 @@ import { createClient } from "../_shared/supabase.ts";
 import { portalStatusCode, provisionAndSignIn } from "../_shared/auth/session.ts";
 import { linkPortalCompanies } from "../_shared/lifecycle/portal.ts";
 import { mapGosRole, type ToolRole } from "./role.ts";
+import { authServiceFor } from "../_shared/gos/authService.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -40,19 +41,10 @@ const TOOL_ID = Deno.env.get("TOOL_ID") || "socialytics";
 // Choose the gOS Auth Service by request origin so a single deployment serves both
 // portals correctly: dev-portal (mobtools.ai / lovable) handoffs exchange against the
 // dev auth service, prod (moburst.ai / .com) against prod. AUTH_SERVICE_URL, if set,
-// forces a specific endpoint and overrides the origin heuristic.
+// forces a specific endpoint and overrides the origin heuristic. The rule lives in
+// _shared/gos/authService.ts so gos-usage-push picks the same service.
 function pickAuthService(origin: string): string {
-  const override = Deno.env.get("AUTH_SERVICE_URL");
-  if (override) return override;
-  let host = "";
-  try { host = new URL(origin).hostname.toLowerCase(); } catch { /* no origin */ }
-  const isDev =
-    host.endsWith(".mobtools.ai") ||
-    host.endsWith(".lovable.app") ||
-    host.endsWith(".lovableproject.com") ||
-    host === "localhost" ||
-    host === "127.0.0.1";
-  return isDev ? "https://auth.dev-mobtools.com" : "https://auth.prod-mobtools.com";
+  return authServiceFor(origin, Deno.env.get("AUTH_SERVICE_URL"));
 }
 
 // The gOS exchange-token response (see the gOS Auth integration guide, §6/§8).

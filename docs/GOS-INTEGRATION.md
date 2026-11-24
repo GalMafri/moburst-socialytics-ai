@@ -83,6 +83,30 @@ slug. Admins and Moburst users are never limited by company (`can_access_client`
   recent hub's role/company; a still-open session from the other hub may need a
   reload. This is the "moburst.ai wins / last-write-wins" behavior to confirm as policy.
 
+## Usage reporting (guide §15)
+
+`supabase/functions/gos-usage-push` sends the executions in `public.gos_events`
+to `POST {AUTH_SERVICE_URL}/usage/events`, every 15 minutes from pg_cron
+(`20261124150000_gos_usage_push.sql`). Rules are in `gos-usage-push/usage.ts`,
+the same text as AdVisor's `_shared/gos-usage.ts`:
+
+- Sent: `execution_start`, `execution_complete` (success or failed),
+  `output_delivered`. Never `tool_open`: the Auth Service records it at handoff.
+- Executions: `reports.id` (kind `content_calendar`), the only executions
+  `gos_events` has. Competitive reports and trend weeks are not in the view, so
+  they are not sent.
+- `event_id` is `socialytics-<start|complete|output>-<report id>`, so a resend
+  is a no-op. `gos_usage_outbox` keeps every event the service answered for; an
+  outage records nothing and the next run sends the same events again.
+- A 401/403 stops the push for that token (`gos_usage_push_state`) until the
+  token changes or the function is called with `?force=1`.
+- Clients with `exclude_from_reporting` are left out by `gos_usage_pending()`
+  (here `gos_events` itself does not filter them), so nothing of theirs is sent.
+- Secrets: `MOBTOOLS_TOOL_TOKEN` (nothing is sent while it is unset) and
+  optionally `AUTH_SERVICE_URL` (defaults to production, the bridge's rule).
+- One-off history: `POST /functions/v1/gos-usage-push?backfill_from=YYYY-MM-DD`
+  with `x-socialytics-secret`; `?dry_run=1` shows what would be sent.
+
 ## Known follow-ups / things to verify
 
 - **company_slug accuracy & uniqueness.** Slugs are backfilled by slugifying the
