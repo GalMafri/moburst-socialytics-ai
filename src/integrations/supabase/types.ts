@@ -2699,6 +2699,72 @@ export type Database = {
         }
         Relationships: []
       }
+      gos_usage_outbox: {
+        Row: {
+          company_slug: string | null
+          event_id: string
+          event_name: string
+          execution_id: string
+          occurred_at: string
+          payload: Json
+          reject_reason: string | null
+          sent_at: string
+          source_event: string
+          status: string
+        }
+        Insert: {
+          company_slug?: string | null
+          event_id: string
+          event_name: string
+          execution_id: string
+          occurred_at: string
+          payload: Json
+          reject_reason?: string | null
+          sent_at?: string
+          source_event: string
+          status: string
+        }
+        Update: {
+          company_slug?: string | null
+          event_id?: string
+          event_name?: string
+          execution_id?: string
+          occurred_at?: string
+          payload?: Json
+          reject_reason?: string | null
+          sent_at?: string
+          source_event?: string
+          status?: string
+        }
+        Relationships: []
+      }
+      gos_usage_push_state: {
+        Row: {
+          blocked_at: string | null
+          blocked_reason: string | null
+          blocked_token_fp: string | null
+          id: number
+          last_result: Json | null
+          last_run_at: string | null
+        }
+        Insert: {
+          blocked_at?: string | null
+          blocked_reason?: string | null
+          blocked_token_fp?: string | null
+          id?: number
+          last_result?: Json | null
+          last_run_at?: string | null
+        }
+        Update: {
+          blocked_at?: string | null
+          blocked_reason?: string | null
+          blocked_token_fp?: string | null
+          id?: number
+          last_result?: Json | null
+          last_run_at?: string | null
+        }
+        Relationships: []
+      }
       gos_usage_snapshot: {
         Row: {
           company_slug: string | null
@@ -5238,6 +5304,21 @@ export type Database = {
       google_token_clear: { Args: never; Returns: undefined }
       google_token_read: { Args: never; Returns: string }
       google_token_save: { Args: { p_token: string }; Returns: undefined }
+      gos_usage_pending: {
+        Args: { p_limit?: number; p_since: string }
+        Returns: {
+          company_slug: string
+          duration_ms: number
+          event: string
+          execution_id: string
+          occurred_at: string
+          ok: boolean
+          props: Json
+          user_email: string
+          via_api: boolean
+          via_schedule: boolean
+        }[]
+      }
       is_admin: { Args: never; Returns: boolean }
       is_client_member: { Args: { _client_id: string }; Returns: boolean }
       is_company_restricted: { Args: never; Returns: boolean }
