@@ -277,6 +277,8 @@ describe("this tool's own share of a shared organization", () => {
     const row = await reconcileProvider(DAY, "anthropic", ours(1), d);
     expect(row).toMatchObject({ status: "unreconciled" });
     expect(row.note).toMatch(/not in the key list/);
+    // It says what it looked through, in the provider's own masked forms only.
+    expect(row.note).toMatch(/looked through 1 key\(s\); their masked forms look like sk-ant-api03-XXX\.\.\.xxxx/);
   });
 
   it("OpenAI: groups the day's costs by key and sums only this tool's keys, across projects", async () => {
