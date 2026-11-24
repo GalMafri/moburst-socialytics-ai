@@ -18,6 +18,8 @@ import { sectionVersion } from "../../functions/mcp/reads";
 const migrations = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "migrations");
 const read = (f: string) => readFileSync(join(migrations, f), "utf8");
 const SYNC = read("20261110150000_claude_sync.sql");
+// The deck file read rule, restated with its own access check (applied after SYNC, as in production).
+const DECK_FILES = read("20261124080000_report_decks_storage_access.sql");
 
 const BADER = "00000000-0000-4000-8000-000000000001";
 const CALM = "00000000-0000-4000-8000-000000000002";
@@ -121,6 +123,8 @@ beforeAll(async () => {
   await db.query(`insert into public.client_notes (client_id, kind, title, text) values ($1, 'typed', 'Old note', $2)`, [BADER, "  Never say\t\"cheap\".\n\nSay  \"affordable\".  "]);
   await db.exec(SYNC);
   await db.exec(SYNC);
+  await db.exec(DECK_FILES);
+  await db.exec(DECK_FILES);
   report = (await one(`insert into public.reports (client_id, status) values ($1, 'completed') returning id`, [BADER])).id as string;
   competitive = (await one(`insert into public.competitive_reports (client_id, status) values ($1, 'complete') returning id`, [BADER])).id as string;
   calmReport = (await one(`insert into public.reports (client_id, status) values ($1, 'completed') returning id`, [CALM])).id as string;
