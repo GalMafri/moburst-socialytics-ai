@@ -5,7 +5,7 @@ Read `.agents/qa-project-context.md` for the stack, test commands, data model an
 ## How Socialytics is built and deployed (do not ask the owner to explain this)
 
 - Socialytics is a Lovable project ("Socialytics AI", id `9444db2d-9d44-473f-b34f-26767e1c6c0c`). The backend is Lovable Cloud: Supabase project `rwouwxqggjjacbpbhqsn`, managed by Lovable, not reachable with a personal Supabase connector.
-- Code lives in GitHub `GalMafri/moburst-socialytics-ai`. Merging or pushing to `main` syncs into Lovable within a minute and deploys the website through GitHub Actions.
+- Code lives in GitHub `GalMafri/moburst-socialytics-ai`. Merging or pushing to `main` syncs the code into Lovable within a minute. That does NOT make the website live: the site (the custom domain and the *.lovable.app copy serve the same build) changes only when the project is published in Lovable. After every merge that touches what the site serves, publish it (the Lovable connector's `deploy_project`, without a name) and check the live bundle changed.
 - Edge functions and database migrations go live through Lovable: ask the project's Lovable agent (the Lovable connector's `send_message`) to apply the new migrations and deploy the named functions. Read production data with the connector's `query_database`.
 - GitHub access: the owner's token is in the macOS Keychain and `gh` is signed in. Open, merge and follow pull requests yourself.
 
