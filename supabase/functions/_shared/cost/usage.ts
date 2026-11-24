@@ -244,7 +244,10 @@ export const READERS: Record<ProviderId, Reader> = {
   gamma,
   firecrawl,
   jina,
-  tribe: timed("gpu_seconds", "tribe-space"),
+  // The TRIBE Space answers a start call in under a second and runs the analysis afterwards, so the call's
+  // own time says nothing. The app records the run time explicitly: from the Space's callback
+  // (elapsed_seconds), or the median run time when the analysis is followed from the browser.
+  tribe: () => [],
   snowflake: timed("warehouse_seconds", "warehouse"),
   // Higgsfield runs through its MCP transport; the app records its credits explicitly when a generation finishes.
   higgsfield: () => [],
