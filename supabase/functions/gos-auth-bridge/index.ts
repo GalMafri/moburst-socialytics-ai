@@ -28,7 +28,7 @@ import { createClient } from "../_shared/supabase.ts";
 import { portalStatusCode, provisionAndSignIn } from "../_shared/auth/session.ts";
 import { linkPortalCompanies } from "../_shared/lifecycle/portal.ts";
 import { mapGosRole, type ToolRole } from "./role.ts";
-import { authServiceFor } from "../_shared/gos/authService.ts";
+import { authServiceFor, exchangeHandoff } from "../_shared/gos/authService.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -87,13 +87,7 @@ Deno.serve(async (req) => {
     const authServiceUrl = pickAuthService(origin);
     let exchRes: Response;
     try {
-      exchRes = await fetch(`${authServiceUrl}/auth/exchange-token`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // tool_id is advisory — lets the auth service bind the token to this tool if
-        // it chooses to; harmless if ignored.
-        body: JSON.stringify({ handoff_token: handoffToken, tool_id: TOOL_ID }),
-      });
+      exchRes = await exchangeHandoff({ authServiceUrl, handoffToken, toolId: TOOL_ID, toolToken: Deno.env.get("MOBTOOLS_TOOL_TOKEN"), log: (l) => console.error(l) });
     } catch (err) {
       console.error("gOS exchange request error:", err);
       return json({ error: "portal_unreachable", debug: { tool_id: TOOL_ID } });

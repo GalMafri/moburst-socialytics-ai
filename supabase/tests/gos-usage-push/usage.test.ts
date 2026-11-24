@@ -3,7 +3,7 @@
 // _shared/gos-usage.ts, so these cases match AdVisor's tests, with the
 // Socialytics mapping (content calendars) added below.
 import { describe, expect, it } from "vitest";
-import { authServiceFor, GOS_AUTH_DEV, GOS_AUTH_PROD } from "../../functions/_shared/gos/authService.ts";
+import { authServiceFor, exchangeHandoff, GOS_AUTH_DEV, GOS_AUTH_PROD } from "../../functions/_shared/gos/authService.ts";
 import {
   eventIdFor,
   MAX_BATCH,
@@ -436,5 +436,40 @@ describe("client registration (POST /usage/clients)", () => {
     const r = await pushUsage(h.deps, { since: SINCE, dryRun: true });
     expect(r).toMatchObject({ status: "dry_run", clients_registered: 1 });
     expect(h.registered).toEqual([]);
+  });
+});
+
+describe("exchangeHandoff (sign-in, guide §7)", () => {
+  type Call = { url: string; headers: Record<string, string> };
+  const fake = (answers: Array<[number, string]>) => {
+    const calls: Call[] = [];
+    return { calls, fetch: async (url: string, init: RequestInit) => { calls.push({ url, headers: init.headers as Record<string, string> }); const [s, b] = answers[Math.min(calls.length - 1, answers.length - 1)]; return new Response(b, { status: s }); } };
+  };
+  it("sends the tool token and a User-Agent to production", async () => {
+    const f = fake([[200, "{}"]]);
+    await exchangeHandoff({ authServiceUrl: GOS_AUTH_PROD, handoffToken: "h", toolId: "advisor", toolToken: "mbt_usg_x", fetch: f.fetch });
+    expect(f.calls).toHaveLength(1);
+    expect(f.calls[0].headers).toMatchObject({ "X-Tool-Token": "mbt_usg_x", "User-Agent": "advisor/1.0 (gos-auth-bridge)" });
+  });
+  it("never sends the production token to the dev Auth Service, and works with no token set", async () => {
+    const f = fake([[200, "{}"]]);
+    await exchangeHandoff({ authServiceUrl: GOS_AUTH_DEV, handoffToken: "h", toolId: "advisor", toolToken: "mbt_usg_x", fetch: f.fetch });
+    await exchangeHandoff({ authServiceUrl: GOS_AUTH_PROD, handoffToken: "h", toolId: "advisor", toolToken: null, fetch: f.fetch });
+    expect(f.calls.map((c) => c.headers["X-Tool-Token"])).toEqual([undefined, undefined]);
+    expect(f.calls.every((c) => c.headers["User-Agent"])).toBe(true);
+  });
+  it("retries once without the token when the Auth Service refuses the token itself", async () => {
+    const logs: string[] = [];
+    const f = fake([[401, JSON.stringify({ detail: "Invalid or revoked tool token" })], [200, "{}"]]);
+    const res = await exchangeHandoff({ authServiceUrl: GOS_AUTH_PROD, handoffToken: "h", toolId: "advisor", toolToken: "mbt_usg_old", fetch: f.fetch, log: (l) => logs.push(l) });
+    expect(res.status).toBe(200);
+    expect(f.calls.map((c) => c.headers["X-Tool-Token"])).toEqual(["mbt_usg_old", undefined]);
+    expect(logs[0]).toMatch(/GOS_TOOL_TOKEN_REFUSED/);
+  });
+  it("returns a refused handoff as is, without a second try", async () => {
+    const f = fake([[401, JSON.stringify({ detail: "Invalid or already used handoff token" })]]);
+    const res = await exchangeHandoff({ authServiceUrl: GOS_AUTH_PROD, handoffToken: "h", toolId: "advisor", toolToken: "mbt_usg_x", fetch: f.fetch });
+    expect(res.status).toBe(401);
+    expect(f.calls).toHaveLength(1);
   });
 });
