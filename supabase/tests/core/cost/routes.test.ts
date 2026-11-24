@@ -119,4 +119,31 @@ describe("the admin cost check", () => {
     await expect(call(r, "from=2026-06-01&to=2026-11-01")).rejects.toMatchObject({ status: 400 });
     await expect(call(r, "from=2026-11-01&mode=guess")).rejects.toMatchObject({ status: 400 });
   });
+
+  it("shows only this tool's own Apify spend: no account-wide bill figures or account alerts", async () => {
+    const calls: Array<{ filters: Filters; from: string }> = [];
+    const own: CostStore = {
+      summary: async (from, _to, _g, filters) => { calls.push({ filters, from }); return [{ cost_usd: 9.84, events: 30, unattributed_usd: 0, unattributed_events: 0, estimated_usd: 0, unpriced_events: 0, quantities: {} }]; },
+      events: async () => [],
+      reconciliation: async () => [
+        { provider: "apify", day: "2026-11-22", status: "ok", ours_usd: 52.35, theirs_usd: 52.44 },
+        { provider: "openai", day: "2026-11-22", status: "ok", ours_usd: 1, theirs_usd: 1.01 },
+      ],
+      alerts: async () => [
+        { ...ALERT, kind: "drift", provider: "apify", usd: 9.6 },
+        { ...ALERT, kind: "apify_unclaimed", provider: "apify", usd: 3.5 },
+        { ...ALERT, kind: "apify_recorded", provider: "apify", usd: 0.2 },
+        ALERT,
+      ],
+    };
+    const r = costRoutes({ tool: "advisor", store: own, prices: PRICES, now: () => new Date("2026-11-23T00:00:00Z") }).find((x) => x.path === "/v1/costs")!;
+    const res = await r.handler({ params: {}, query: new URLSearchParams(""), body: null, auth: ALL, requestId: "r", url: new URL("https://x/v1/costs") });
+    const data = (res.body as { data: { reconciliation: Array<Record<string, unknown>>; alerts: OpenAlert[] } }).data;
+    const apify = data.reconciliation.find((x) => x.provider === "apify")!;
+    expect(apify).toMatchObject({ day: "2026-11-22", status: "ok", ours_usd: 9.84, theirs_usd: null });
+    expect(JSON.stringify(data)).not.toContain("52.35");
+    expect(data.reconciliation.find((x) => x.provider === "openai")).toMatchObject({ ours_usd: 1, theirs_usd: 1.01 });
+    expect(calls.some((c) => c.filters.provider === "apify" && c.from === "2026-11-22T00:00:00.000Z")).toBe(true);
+    expect(data.alerts.map((a) => a.kind)).toEqual(["apify_recorded", "unrecorded_calls"]);
+  });
 });

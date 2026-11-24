@@ -122,6 +122,27 @@ function groups(ctx: RouteContext): Group[] {
   return [...new Set(list)] as Group[];
 }
 
+/**
+ * Apify bills one account that other Moburst work also runs on, so the daily check compares its
+ * bill with every job on the account (audit.ts). Those account-wide figures, and the alerts about the
+ * account as a whole, stay in the tool's own checks: the API shows only what this tool spent.
+ */
+const ACCOUNT_WIDE_ALERTS: ReadonlySet<string> = new Set(["drift", "apify_unclaimed"]);
+export const isAccountWideAlert = (a: Pick<OpenAlert, "kind" | "provider">): boolean => a.provider === "apify" && ACCOUNT_WIDE_ALERTS.has(a.kind);
+
+type ReconRow = { provider: string; day: string; status: string; ours_usd: number; theirs_usd: number | null };
+const APIFY_NOTE = "Checked against Apify's bill for the shared Moburst account, which also covers work outside this tool. ours_usd is this tool's own Apify spend that day; the account's figures are not shown.";
+
+async function ownReconciliation(store: CostStore, rows: ReconRow[]): Promise<Array<ReconRow & { note?: string }>> {
+  return Promise.all(rows.map(async (r) => {
+    if (r.provider !== "apify") return r;
+    const next = new Date(Date.parse(`${r.day}T00:00:00Z`) + 86_400_000).toISOString();
+    const own = await store.summary(`${r.day}T00:00:00.000Z`, next, [], { provider: "apify" }).catch(() => [] as SummaryRow[]);
+    const usd = Math.round(own.reduce((n, x) => n + (Number(x.cost_usd) || 0), 0) * 1e6) / 1e6;
+    return { provider: r.provider, day: r.day, status: r.status, ours_usd: usd, theirs_usd: null, note: APIFY_NOTE };
+  }));
+}
+
 const totalsOf = (rows: SummaryRow[]) => {
   const t = rows[0];
   return {
@@ -173,8 +194,8 @@ export function costRoutes(deps: CostRouteDeps): Route[] {
               filters: f,
               totals: totalsOf(total),
               rows: g.length ? rows : [],
-              reconciliation: recon,
-              alerts,
+              reconciliation: await ownReconciliation(deps.store, recon),
+              alerts: alerts.filter((a) => !isAccountWideAlert(a)),
               notes: "cost_usd sums known costs. unpriced_events have no price yet and are not in cost_usd. estimated_usd is the part of cost_usd that is estimated.",
             },
           },
