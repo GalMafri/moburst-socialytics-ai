@@ -99,8 +99,14 @@ export function thresholdFrom(env: (name: string) => string | undefined): Thresh
   return { pct: num(env("COST_RECONCILE_DRIFT_PCT"), DEFAULT_THRESHOLD.pct), minUsd: num(env("COST_RECONCILE_DRIFT_MIN_USD"), DEFAULT_THRESHOLD.minUsd) };
 }
 
-/** Tries after a 429, waiting as the provider asks (Retry-After) or 2, 4, 8 s, at most 30 s each. */
-const RATE_LIMIT_TRIES = 4;
+/**
+ * Tries after a 429, waiting as the provider asks (Retry-After) or 10, 20, 30, 30 s. OpenAI's
+ * organization endpoints allow 30 requests a minute, shared by every tool on the same admin
+ * key, so a wait must outlast the rest of that minute (short waits of a few seconds failed on
+ * 24 Nov 2026, when both tools checked at once).
+ */
+const RATE_LIMIT_TRIES = 5;
+const RATE_LIMIT_WAITS_MS = [10_000, 20_000, 30_000, 30_000];
 
 async function getJson(deps: ReconcileDeps, provider: ProviderId, url: string, headers: Record<string, string>): Promise<{ ok: true; body: any; reason?: undefined } | { ok: false; body?: undefined; reason: string }> {
   let res!: Response;
@@ -116,7 +122,7 @@ async function getJson(deps: ReconcileDeps, provider: ProviderId, url: string, h
     text = await res.text().catch(() => "");
     if (res.status !== 429 || attempt >= RATE_LIMIT_TRIES) break;
     const asked = Number(res.headers.get("retry-after"));
-    await sleep(Math.min(30_000, Number.isFinite(asked) && asked > 0 ? asked * 1000 : 2000 * 2 ** (attempt - 1)));
+    await sleep(Math.min(30_000, Number.isFinite(asked) && asked > 0 ? asked * 1000 : RATE_LIMIT_WAITS_MS[attempt - 1]));
   }
   if (!res.ok) return { ok: false, reason: `${PROVIDERS[provider].label} billing API answered ${res.status}: ${text.slice(0, 300)}` };
   try {
@@ -146,9 +152,12 @@ export function hintMatches(hint: unknown, key: string): boolean {
 type OwnKeys = { kind: "all" } | { kind: "ids"; ids: string[] } | { kind: "unreconciled"; reason: string } | { kind: "error"; reason: string };
 
 const ownKeyCache = new Map<string, string[]>();
+/** Lookups in flight, so the days a run checks at the same time share one key-list read instead of each paging the organization. */
+const ownKeyInFlight = new Map<string, Promise<Scanned | { error: string }>>();
 /** Tests reset the cache of key ids. */
 export function clearOwnKeyCache(): void {
   ownKeyCache.clear();
+  ownKeyInFlight.clear();
 }
 
 /** Finds this tool's key ids once per process, from the organization's key list read with the admin key. */
@@ -168,7 +177,17 @@ async function ownKeyIds(provider: ProviderId, deps: ReconcileDeps, list: (key: 
   const cacheKey = `${provider}:${key.slice(0, 12)}:${key.slice(-4)}`;
   const cached = ownKeyCache.get(cacheKey);
   if (cached) return { kind: "ids", ids: cached };
-  const found = await list(key);
+  let pending = ownKeyInFlight.get(cacheKey);
+  if (!pending) {
+    pending = list(key);
+    ownKeyInFlight.set(cacheKey, pending);
+  }
+  let found: Scanned | { error: string };
+  try {
+    found = await pending;
+  } finally {
+    ownKeyInFlight.delete(cacheKey);
+  }
   if ("error" in found) return { kind: "error", reason: found.error };
   if (!found.ids.length) {
     const where = `${found.keys} key(s)${found.projects != null ? ` in ${found.projects} project(s)` : ""}`;

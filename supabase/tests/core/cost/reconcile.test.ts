@@ -312,4 +312,29 @@ describe("this tool's own share of a shared organization", () => {
     expect(row).toMatchObject({ theirs_usd: 2, status: "ok" });
     expect(slept).toEqual([3000, 3000]);
   });
+
+  it("waits long enough for a per-minute limit when the provider names no wait", async () => {
+    clearOwnKeyCache();
+    let n = 0;
+    const { d, slept } = pathDeps({
+      "/v1/organization/costs": () => (++n < 4 ? { status: 429, body: { error: "slow down" } } : { body: openaiAnswer([2]) }),
+    }, {});
+    d.ownKey = undefined;
+    const row = await reconcileProvider(DAY, "openai", ours(2), d);
+    expect(row).toMatchObject({ theirs_usd: 2, status: "ok" });
+    expect(slept).toEqual([10_000, 20_000, 30_000]);
+  });
+
+  it("OpenAI: days checked at the same time read the organization's key list once", async () => {
+    clearOwnKeyCache();
+    const key = "sk-proj-MINExxxxxxxxxxxxxxxxxxxxQ9z";
+    const { d, calls } = pathDeps({
+      "/v1/organization/projects": { data: [{ id: "proj_a" }], has_more: false, last_id: "proj_a" },
+      "/v1/organization/projects/proj_a/api_keys": { data: [{ id: "key_mine", redacted_value: "sk-proj-MIN...Q9z" }], has_more: false, last_id: "key_mine" },
+      "/v1/organization/costs": openaiAnswer([1]),
+    }, { openai: key });
+    await Promise.all([reconcileProvider("2026-11-22", "openai", ours(1), d), reconcileProvider("2026-11-23", "openai", ours(1), d)]);
+    expect(calls.filter((u) => u.pathname === "/v1/organization/projects")).toHaveLength(1);
+    expect(calls.filter((u) => u.pathname === "/v1/organization/projects/proj_a/api_keys")).toHaveLength(1);
+  });
 });
