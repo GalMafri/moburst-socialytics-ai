@@ -238,6 +238,11 @@ describe("this tool's own share of a shared organization", () => {
     expect(hintMatches("sk-abc...def", "sk-abcXXXXXXXXdef")).toBe(true);
     expect(hintMatches("sk...", "sk-anything")).toBe(false);
     expect(hintMatches(null, "sk-anything")).toBe(false);
+    // OpenAI hides the middle with a run of asterisks.
+    const openaiKey = "sk-proj-" + "x".repeat(20) + "8aQA";
+    expect(hintMatches("sk-proj-" + "*".repeat(20) + "8aQA", openaiKey)).toBe(true);
+    expect(hintMatches("sk-proj-" + "*".repeat(150) + "8aQA", openaiKey)).toBe(true);
+    expect(hintMatches("sk-proj-" + "*".repeat(20) + "vg4A", openaiKey)).toBe(false);
   });
 
   it("Anthropic: reads the bill of this tool's key only, found once in the organization's key list", async () => {

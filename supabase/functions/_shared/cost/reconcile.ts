@@ -129,16 +129,17 @@ async function getJson(deps: ReconcileDeps, provider: ProviderId, url: string, h
 const MAX_PAGES = 20;
 
 /**
- * A provider's key hint ("sk-ant-api03-R2D...igAA", OpenAI's "sk-abc...def")
- * matches a key that starts and ends with its two visible parts.
+ * A provider's key hint matches a key that starts and ends with its two visible
+ * parts. Anthropic hides the middle with "..." ("sk-ant-api03-R2D...igAA");
+ * OpenAI with a run of asterisks ("sk-proj-****…8aQA").
  */
 export function hintMatches(hint: unknown, key: string): boolean {
   if (typeof hint !== "string") return false;
-  const i = hint.indexOf("...");
-  if (i < 0) return false;
-  const head = hint.slice(0, i);
-  const tail = hint.slice(i + 3);
-  return head.length + tail.length >= 6 && key.length > head.length + tail.length && key.startsWith(head) && key.endsWith(tail);
+  const m = hint.match(/^(.*?)(\.\.\.|\*+)(.*)$/s);
+  if (!m) return false;
+  const [, head, , tail] = m;
+  if (head.length + tail.length < 6 || key.length <= head.length + tail.length) return false;
+  return key.startsWith(head) && key.endsWith(tail);
 }
 
 /** Which of the organization's keys are this tool's: all of them (no ownKey), some ids, none, or the lookup failed. */
