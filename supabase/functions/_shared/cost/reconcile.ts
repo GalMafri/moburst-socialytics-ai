@@ -151,7 +151,10 @@ export function clearOwnKeyCache(): void {
 }
 
 /** Finds this tool's key ids once per process, from the organization's key list read with the admin key. */
-async function ownKeyIds(provider: ProviderId, deps: ReconcileDeps, list: (key: string) => Promise<{ ids: string[] } | { error: string }>): Promise<OwnKeys> {
+/** What a key-list search looked through, said when this tool's key is not found (the hints are the provider's own masked forms). */
+interface Scanned { ids: string[]; keys: number; projects?: number; hints: string[] }
+
+async function ownKeyIds(provider: ProviderId, deps: ReconcileDeps, list: (key: string) => Promise<Scanned | { error: string }>): Promise<OwnKeys> {
   if (!deps.ownKey) return { kind: "all" };
   let key: string | null;
   try {
@@ -166,7 +169,11 @@ async function ownKeyIds(provider: ProviderId, deps: ReconcileDeps, list: (key: 
   if (cached) return { kind: "ids", ids: cached };
   const found = await list(key);
   if ("error" in found) return { kind: "error", reason: found.error };
-  if (!found.ids.length) return { kind: "unreconciled", reason: `this tool's ${label} key is not in the key list of the organization the admin key belongs to, so its share of the bill cannot be read` };
+  if (!found.ids.length) {
+    const where = `${found.keys} key(s)${found.projects != null ? ` in ${found.projects} project(s)` : ""}`;
+    const looks = found.hints.length ? `; their masked forms look like ${found.hints.slice(0, 3).join(", ")}` : "";
+    return { kind: "unreconciled", reason: `this tool's ${label} key is not in the key list of the organization the admin key belongs to (looked through ${where}${looks}), so its share of the bill cannot be read` };
+  }
   ownKeyCache.set(cacheKey, found.ids);
   return { kind: "ids", ids: found.ids };
 }
@@ -174,18 +181,22 @@ async function ownKeyIds(provider: ProviderId, deps: ReconcileDeps, list: (key: 
 /** Anthropic: GET /v1/organizations/api_keys (Admin API), paged with after_id; each key has partial_key_hint. */
 async function anthropicKeyIds(deps: ReconcileDeps, headers: Record<string, string>): Promise<OwnKeys> {
   return ownKeyIds("anthropic", deps, async (key) => {
-    const ids: string[] = [];
+    const found: Scanned = { ids: [], keys: 0, hints: [] };
     let after: string | null = null;
     for (let i = 0; i < MAX_PAGES; i++) {
       const q = new URLSearchParams({ limit: "100" });
       if (after) q.set("after_id", after);
       const r = await getJson(deps, "anthropic", providerUrl("anthropic", `/v1/organizations/api_keys?${q}`, deps.env), headers);
       if (!r.ok) return { error: r.reason };
-      for (const k of Array.isArray(r.body?.data) ? r.body.data : []) if (hintMatches(k?.partial_key_hint, key) && typeof k?.id === "string") ids.push(k.id);
-      if (!r.body?.has_more || !r.body?.last_id) return { ids };
+      for (const k of Array.isArray(r.body?.data) ? r.body.data : []) {
+        found.keys++;
+        if (typeof k?.partial_key_hint === "string" && found.hints.length < 3) found.hints.push(k.partial_key_hint);
+        if (hintMatches(k?.partial_key_hint, key) && typeof k?.id === "string") found.ids.push(k.id);
+      }
+      if (!r.body?.has_more || !r.body?.last_id) return found;
       after = String(r.body.last_id);
     }
-    return { ids };
+    return found;
   });
 }
 
@@ -208,12 +219,16 @@ async function openaiKeyIds(deps: ReconcileDeps, headers: Record<string, string>
     const projects: string[] = [];
     const err = await pages("/v1/organization/projects", (p) => { if (typeof p?.id === "string") projects.push(p.id); });
     if (err) return { error: err };
-    const ids: string[] = [];
+    const found: Scanned = { ids: [], keys: 0, projects: projects.length, hints: [] };
     for (const project of projects) {
-      const e = await pages(`/v1/organization/projects/${encodeURIComponent(project)}/api_keys`, (k) => { if (hintMatches(k?.redacted_value, key) && typeof k?.id === "string") ids.push(k.id); });
+      const e = await pages(`/v1/organization/projects/${encodeURIComponent(project)}/api_keys`, (k) => {
+        found.keys++;
+        if (typeof k?.redacted_value === "string" && found.hints.length < 3) found.hints.push(k.redacted_value);
+        if (hintMatches(k?.redacted_value, key) && typeof k?.id === "string") found.ids.push(k.id);
+      });
       if (e) return { error: e };
     }
-    return { ids };
+    return found;
   });
 }
 
