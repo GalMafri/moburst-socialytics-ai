@@ -102,8 +102,9 @@ serve(async (req) => {
         // (03:00 UTC) or with ?register_all=1, also the live clients that have a slug, with it as a hint,
         // so a slug set in the app (or one gOS dropped) is always in gOS's catalog. Demo brands
         // (demo_job_id set or a demo- slug) are left out: they are prospects, not catalog companies.
+        // Archived and deleted clients are included: their past runs are still usage to attribute.
         async unslugged() {
-          let q = db.from("clients").select("id, name, company_slug, demo_job_id").is("archived_at", null).or("exclude_from_reporting.is.null,exclude_from_reporting.eq.false");
+          let q = db.from("clients").select("id, name, company_slug, demo_job_id").or("exclude_from_reporting.is.null,exclude_from_reporting.eq.false");
           if (!registerAll) q = q.is("company_slug", null);
           const { data, error } = await q;
           if (error) throw new Error(`clients: ${error.message}`);
