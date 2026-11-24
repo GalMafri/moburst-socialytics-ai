@@ -94,7 +94,9 @@ describe("the Apify audit", () => {
     const list = new URL(s.urls.find((u) => u.includes("/v2/actor-runs"))!);
     expect(list.searchParams.get("startedAfter")).toBe("2026-11-20T00:00:00.000Z");
     expect(list.searchParams.get("startedBefore")).toBe("2026-11-22T00:00:00.000Z");
-    expect(r.alerts.map((a) => a.dedupe_key)).toEqual(expect.arrayContaining(["apify_recorded:2026-11-20:apify", "apify_unclaimed:2026-11-21:apify"]));
+    expect(r.alerts.map((a) => a.dedupe_key)).toEqual(expect.arrayContaining(["apify_recorded:2026-11-20:apify"]));
+    // Runs of actors this tool does not own are listed, not alerted: they are other work on the shared account.
+    expect(r.alerts.map((a) => a.kind)).not.toContain("apify_unclaimed");
   });
 
   it("a dry run writes nothing and says what it would do", async () => {

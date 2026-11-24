@@ -462,7 +462,9 @@ export async function runChecks(opts: CheckOptions, deps: CheckDeps): Promise<Ch
       alerts.push(alert(deps.tool, "unattributed_share", day, null, `${Math.round((row.unattributed_usd / row.total_usd) * 1000) / 10}% of ${day}'s recorded cost has no client (threshold ${Math.round(deps.unattributedPct * 1000) / 10}%).`, null, row.unattributed_usd, { total_usd: row.total_usd }));
     }
     const a = apify.by_day[day];
-    if (a?.unclaimed) alerts.push(alert(deps.tool, "apify_unclaimed", day, "apify", `${a.unclaimed} finished Apify run(s) on ${day} are in no tool's records and their actor is not owned by this tool; review cost_unclaimed_runs.`, a.unclaimed, a.unclaimed_usd));
+    // Runs of actors this tool does not own are other work on the shared Apify account (other tools, n8n,
+    // research): counted in the audit and kept in cost_unclaimed_runs, but not an alert for this tool.
+    // A new actor in this tool's own code is caught by the cost guard test instead.
     if (a?.owned_missing) alerts.push(alert(deps.tool, "apify_recorded", day, "apify", `${a.owned_missing} Apify run(s) on ${day} of this tool's own actors were missing from cost_events and ${opts.mode === "history" ? "were loaded from history" : "were recorded unattributed"}.`, a.owned_missing, a.owned_missing_usd));
     daily.push(row);
   }
