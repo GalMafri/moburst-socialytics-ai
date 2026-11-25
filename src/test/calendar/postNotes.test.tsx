@@ -53,7 +53,8 @@ function editor(p: any = post()) {
 }
 const rewrite = (copy = 'Join us Friday.') => ({ data: { post: { caption_angle: copy, CTA: 'Join', hashtags: '' } }, error: null });
 async function regenerateWith(note: string) {
-  fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }));
+  // The Copy tab's button opens the box (Regenerate copy, or Regenerate message for a Story); the box's Regenerate starts it.
+  fireEvent.click(screen.getByRole('button', { name: /^Regenerate (copy|message)$/ }));
   fireEvent.change(screen.getByLabelText('What should change? (optional)'), { target: { value: note } });
   fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }));
 }
@@ -105,7 +106,7 @@ describe("the Copy tab's Regenerate", () => {
   it('opens a box in place; an empty box regenerates as before, with no line', async () => {
     f.answers['regenerate-post-copy:'] = rewrite();
     editor();
-    fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Regenerate copy' }));
     expect(screen.getByLabelText('What should change? (optional)')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }));
@@ -155,7 +156,7 @@ describe("the Copy tab's Regenerate", () => {
   it("is offered to the client's own users too", () => {
     f.staff = false;
     editor();
-    expect(screen.getByRole('button', { name: 'Regenerate' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Regenerate copy' })).toBeInTheDocument();
   });
 
   it("rewrites a Story's message too, telling the server it is a Story", async () => {

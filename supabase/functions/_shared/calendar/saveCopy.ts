@@ -104,6 +104,8 @@ export type SaveCopyResult =
 export const COPY_MAX = 10_000;
 export const HASHTAGS_MAX = 30;
 export const CTA_MAX = 300;
+/** The longest "Visual:" line a save writes on the post. */
+export const VISUAL_MAX = 1_000;
 /** A calendar row's key starts with this; a report's own post has a key of another shape and no calendar row. */
 export const CALENDAR_KEY_PREFIX = "post:";
 
@@ -164,7 +166,10 @@ export async function saveCopy(w: CopyWrites, a: SaveCopy, memory?: CopyMemory):
     const format = before?.format ?? ((a.format as string) || null);
     // The calendar post holds the current copy too, for every view that reads it directly. It is written
     // first: a post the calendar does not have (a post: key) is answered 404 before any revision exists.
-    const updatedAt = await w.updatePost(a.clientId, a.key, { copy, touched_at: a.now.toISOString(), ...(hashtags ? { hashtags } : {}), ...(a.cta ? { cta: String(a.cta) } : {}) });
+    // The post's "Visual:" line is written too when the save carries one: the calendar and a design read it from the post,
+    // and a regenerated post kept its old one (Social AI sync, 18 Nov 2026). A save without one leaves it as it is.
+    const visual = typeof a.visualDirection === "string" ? a.visualDirection.trim().slice(0, VISUAL_MAX) : "";
+    const updatedAt = await w.updatePost(a.clientId, a.key, { copy, touched_at: a.now.toISOString(), ...(hashtags ? { hashtags } : {}), ...(a.cta ? { cta: String(a.cta) } : {}), ...(visual ? { visual_direction: visual } : {}) });
     if (!updatedAt && a.key.startsWith(CALENDAR_KEY_PREFIX)) return { ok: false, status: 404, error: "No post with that key in this client's calendar." };
     await writeRevision(w, a.clientId, a.key, {
       client_id: a.clientId, report_id: (a.reportId as string) || null, calendar_post_key: a.key,

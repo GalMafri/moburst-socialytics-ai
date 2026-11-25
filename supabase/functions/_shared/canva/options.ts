@@ -278,6 +278,17 @@ export function otherPlatformsLine(args: { platform: string; otherPlatforms?: bo
  * regenerate, Lital 3 Nov 2026), as one line every planner gets; "" without
  * one. Every option follows it.
  */
+/**
+ * The post's "Visual:" line, which the calendar shows on the post. A still or
+ * a carousel was planned without it, so a design could come out unlike what
+ * the post said it would show (Social AI sync, 18 Nov 2026, Sinéad). Its
+ * picture follows it, drawn the way the chosen posts look.
+ */
+export function plannedVisualLine(visual: string | null | undefined, brand: string): string {
+  const v = String(visual ?? "").trim();
+  return v ? `The post's planned visual: ${v}\nEvery option's picture shows this: its subject and setting, drawn the way ${brand}'s chosen posts look. The options still differ in layout and headline.` : "";
+}
+
 export function noteLine(note: string | null | undefined): string {
   const n = String(note ?? "").trim();
   return n ? `A note from the person who asked for this design: "${n}". Every option follows it.` : "";
@@ -299,7 +310,7 @@ function shapeLine(shape: string | null | undefined): string {
 }
 
 /** The planner's instruction for carousels: every option is a set of slides read in order. */
-export function carouselPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; slides: number; postCount: number; recent: string; guidance?: string; otherPlatforms?: boolean; note?: string | null; shape?: string | null }): string {
+export function carouselPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; visual?: string | null; count: number; slides: number; postCount: number; recent: string; guidance?: string; otherPlatforms?: boolean; note?: string | null; shape?: string | null }): string {
   return [
     `The images are ${args.brand}'s own published posts, numbered Post 1 to Post ${args.postCount}.`,
     otherPlatformsLine(args),
@@ -308,6 +319,7 @@ export function carouselPlannerPrompt(args: { brand: string; platform: string; c
     `Plan ${args.count} different carousel options for a new ${args.platform} carousel post with this copy:`,
     `"""${args.copy}"""`,
     args.voice ? `${args.brand}'s voice: ${args.voice}` : "",
+    plannedVisualLine(args.visual, args.brand),
     shapeLine(args.shape),
     noteLine(args.note),
     `Each option has exactly ${args.slides} slides, read in order. Slide 1 carries the hook. The middle slides each carry one point from the copy, in the copy's order. The last slide closes with the copy's call to action or takeaway.`,
@@ -628,7 +640,7 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
  * they are. A Story (story: true) gets one line more; its headline limits are
  * a feed post's.
  */
-export function plannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; postCount: number; recent: string; guidance?: string; story?: boolean; otherPlatforms?: boolean; note?: string | null; shape?: string | null }): string {
+export function plannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; visual?: string | null; count: number; postCount: number; recent: string; guidance?: string; story?: boolean; otherPlatforms?: boolean; note?: string | null; shape?: string | null }): string {
   return [
     `The images are ${args.brand}'s own published posts, numbered Post 1 to Post ${args.postCount}.`,
     otherPlatformsLine(args),
@@ -637,6 +649,7 @@ export function plannerPrompt(args: { brand: string; platform: string; copy: str
     `Plan ${args.count} different design options for a new ${args.platform} post with this copy:`,
     `"""${args.copy}"""`,
     args.voice ? `${args.brand}'s voice: ${args.voice}` : "",
+    plannedVisualLine(args.visual, args.brand),
     shapeLine(args.shape),
     args.story ? "This post is a Story: its frame is seen full screen for a few seconds, so the headline carries the message, and a second line may carry the call to action." : "",
     noteLine(args.note),

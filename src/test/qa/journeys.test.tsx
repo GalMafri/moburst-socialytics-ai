@@ -90,7 +90,7 @@ describe('QA-02 actual copy and scheduling components',()=>{
  });
  it('uses regenerated copy in the actual scheduler',async()=>{
   // Regenerate opens its note box; an empty note regenerates as before.
-  mount(panels());fireEvent.click(screen.getByRole('button',{name:'Regenerate'}));fireEvent.click(screen.getByRole('button',{name:'Regenerate'}));await waitFor(()=>expect(screen.getByText('Regenerated fixture copy')).toBeInTheDocument());
+  mount(panels());fireEvent.click(screen.getByRole('button',{name:'Regenerate copy'}));fireEvent.click(screen.getByRole('button',{name:'Regenerate'}));await waitFor(()=>expect(screen.getByText('Regenerated fixture copy')).toBeInTheDocument());
   fireEvent.click(screen.getByRole('tab',{name:'Schedule'}));fireEvent.click(screen.getByRole('button',{name:'Send to Sprout'}));expect(screen.getByLabelText('Post copy (includes hashtags)')).toHaveValue('Regenerated fixture copy');
  });
 });
@@ -156,7 +156,7 @@ describe('QA-06 actual schedule form',()=>{
 describe('QA-13 and QA-15 actual UI branches',()=>{
  // Lital, 3 Nov 2026 (decision 1): the client's own users regenerate copy too; scheduling stays with staff.
  it('client can regenerate copy but cannot see scheduling',()=>{
-  f.role='client';mount(panels());expect(screen.getByRole('button',{name:'Regenerate'})).toBeInTheDocument();expect(screen.queryByRole('tab',{name:'Schedule'})).toBeNull();
+  f.role='client';mount(panels());expect(screen.getByRole('button',{name:'Regenerate copy'})).toBeInTheDocument();expect(screen.queryByRole('tab',{name:'Schedule'})).toBeNull();
  });
  it('shows independent activity counts without invented conversion',()=>{
   mount(<FunnelCard rows={[{step:'Analysis finished',step_order:1,users:1,events:1},{step:'Opened the report',step_order:2,users:5,events:5}]} windowDays={90}/>);

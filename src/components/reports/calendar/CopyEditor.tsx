@@ -47,6 +47,14 @@ export function CopyEditor({ post, clientId, reportId, brand, onCopySaved }: Pro
   const [noteResult, setNoteResult] = useState<NoteResult | null>(null);
   const [undoing, setUndoing] = useState(false);
   const [notUndone, setNotUndone] = useState(false);
+  // The post's "Visual:" line, which Regenerate now writes too (Social AI sync, 18 Nov 2026).
+  const [displayVisual, setDisplayVisual] = useState<string>(post.visual_direction || "");
+  const [isRegeneratingVisual, setIsRegeneratingVisual] = useState(false);
+  const [visualNotRegenerated, setVisualNotRegenerated] = useState(false);
+  useEffect(() => {
+    setDisplayVisual(post.visual_direction || "");
+    setVisualNotRegenerated(false);
+  }, [post.visual_direction, post._calendarPostKey]);
   useEffect(() => {
     setDisplayCopy(initialCopy);
     setEditedCopy(initialCopy);
@@ -71,6 +79,8 @@ export function CopyEditor({ post, clientId, reportId, brand, onCopySaved }: Pro
       // A list, the shape every calendar post holds: a regenerate's answer may be one string (QA 22 Nov 2026).
       hashtags: generated?.hashtags !== undefined ? hashtagList(generated.hashtags) : post.hashtags,
       CTA: generated?.CTA ?? generated?.cta ?? post.CTA ?? post.cta,
+      // A regenerate's new visual replaces the post's; otherwise the post keeps its own.
+      visual_direction: (typeof generated?.visual_direction === "string" && generated.visual_direction.trim()) || displayVisual || post.visual_direction,
     };
     // Saved through calendar-posts, which checks the caller belongs to the
     // client: a client's own users can edit their posts' copy too. A save is
@@ -81,7 +91,7 @@ export function CopyEditor({ post, clientId, reportId, brand, onCopySaved }: Pro
         client_id: clientId, report_id: reportId ?? null, calendar_post_key: post._calendarPostKey,
         version: updated._copyVersion, platform: post.platform || null, post_copy: copy,
         hashtags: Array.isArray(updated.hashtags) ? updated.hashtags : typeof updated.hashtags === "string" ? updated.hashtags.split(/[\s,]+/).filter(Boolean) : null,
-        cta: updated.CTA || null, concept: post.concept || null, visual_direction: post.visual_direction || null,
+        cta: updated.CTA || null, concept: post.concept || null, visual_direction: updated.visual_direction || null,
         format: post.format || null, source: generated ? "regeneration" : "calendar",
         // The note a rewrite was asked with: the server decides whether it is a lasting preference.
         ...(generated && rewriteNote ? { note: rewriteNote, previous_copy: displayCopy } : {}),
@@ -177,6 +187,7 @@ export function CopyEditor({ post, clientId, reportId, brand, onCopySaved }: Pro
           format: post.format || null,
           current_copy: displayCopy,
           current_cta: post.CTA || post.cta || null,
+          current_visual: displayVisual || null,
           ...(rewriteNote ? { note: rewriteNote } : {}),
         },
       }));
@@ -186,7 +197,8 @@ export function CopyEditor({ post, clientId, reportId, brand, onCopySaved }: Pro
       const newCopy = postResult?.caption_angle || postResult?.copy || postResult?.post_copy;
       if (!newCopy?.trim()) throw new Error("not rewritten");
       if (newCopy) {
-        const { learned } = await saveRevision(newCopy, postResult, rewriteNote);
+        const { learned, updated } = await saveRevision(newCopy, postResult, rewriteNote);
+        if (updated.visual_direction) setDisplayVisual(updated.visual_direction);
 
         // A high regeneration count on one post is the clearest "the model is
         // not giving them what they want" signal the product emits.
@@ -225,6 +237,32 @@ export function CopyEditor({ post, clientId, reportId, brand, onCopySaved }: Pro
       setNotRewritten(true);
     } finally {
       setIsRegenerating(false);
+    }
+  };
+
+  // A completely new visual idea for the post, its copy kept (Sinéad, Social AI sync, 18 Nov 2026).
+  const handleRegenerateVisual = async () => {
+    if (!clientId) return;
+    setIsRegeneratingVisual(true);
+    setVisualNotRegenerated(false);
+    try {
+      const { data, error } = await sendQuietly(() => supabase.functions.invoke("regenerate-post-copy", {
+        body: {
+          client_id: clientId, mode: "visual", platform: post.platform || null, format: post.format || null, pillar: post.pillar || null,
+          concept: post.concept || displayCopy || "social media post", current_copy: displayCopy, current_visual: displayVisual || null,
+        },
+      }));
+      const visual = !error && !data?.error && typeof data?.post?.visual_direction === "string" ? data.post.visual_direction.trim() : "";
+      if (!visual) throw new Error("not regenerated");
+      await saveRevision(displayCopy, { visual_direction: visual });
+      setDisplayVisual(visual);
+      track("post_visual_regenerated", { client_id: clientId, platform: post.platform || null, ok: true });
+    } catch {
+      // The post keeps its visual; the line says so.
+      track("post_visual_regenerated", { client_id: clientId, platform: post.platform || null, ok: false });
+      setVisualNotRegenerated(true);
+    } finally {
+      setIsRegeneratingVisual(false);
     }
   };
 
@@ -314,7 +352,7 @@ export function CopyEditor({ post, clientId, reportId, brand, onCopySaved }: Pro
                   setEditedCopy(displayCopy);
                   beginEdit();
                 }}
-                disabled={isRegenerating}
+                disabled={isRegenerating || isRegeneratingVisual}
               >
                 <Pencil className="h-3.5 w-3.5 mr-1" /> Edit
               </Button>
@@ -322,18 +360,32 @@ export function CopyEditor({ post, clientId, reportId, brand, onCopySaved }: Pro
                 variant="ghost"
                 size="sm"
                 onClick={() => setNoteOpen(true)}
-                disabled={isRegenerating}
+                disabled={isRegenerating || isRegeneratingVisual}
               >
                 <RefreshCw className="h-3.5 w-3.5 mr-1" />
-                Regenerate
+                {story ? "Regenerate message" : "Regenerate copy"}
               </Button>
             </div>
           )}
-          {post.visual_direction && (
+          {displayVisual && (
             <p className="text-base text-muted-foreground leading-relaxed">
               <span className="font-medium text-foreground">Visual: </span>
-              {post.visual_direction}
+              {displayVisual}
             </p>
+          )}
+          {clientId && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => void handleRegenerateVisual()}
+                disabled={isRegeneratingVisual || isRegenerating}
+              >
+                {isRegeneratingVisual ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5 mr-1" />}
+                {isRegeneratingVisual ? "Regenerating..." : "Regenerate visual"}
+              </Button>
+              {visualNotRegenerated && <span role="status" className="t-secondary">The visual is not regenerated yet.</span>}
+            </div>
           )}
           {post.rationale && (
             <p className="text-base text-muted-foreground leading-relaxed">
