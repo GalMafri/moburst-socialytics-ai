@@ -136,6 +136,9 @@ function PillarEntries({ entries, variant }: { entries: string[]; variant: "seco
   );
 }
 
+/** What a report covers, said under its title. */
+const ORGANIC_LINE = "Organic social report: the posts on the brand's own profiles. Paid ad campaigns are not included.";
+
 export default function ReportView() {
   const { id, reportId } = useParams();
   const navigate = useNavigate();
@@ -352,8 +355,10 @@ export default function ReportView() {
   // A report with trends of its own keeps its tab while the themes are read: it shows trends either way.
   const hasTrends = trends.source === "industry" || hasOwnTrends;
   // Reports since 19 Oct 2026 write no posts (the calendar is planned a week at a
-  // time); the tab still links to the calendar.
-  const hasContent = !!aiAnalysis || contentCalendar.length > 0;
+  // time), so only an older report that wrote its own week keeps the tab: its
+  // posts are seen nowhere else. The tab came off the newer ones (Social AI
+  // sync, 18 Nov 2026), since the calendar is where the ideas live now.
+  const hasContent = contentCalendar.length > 0;
   const gammaUrl = report.gamma_url || rd?.gamma_url;
 
   // Every recommendation that asks for a decision, gathered in one place and
@@ -513,6 +518,10 @@ export default function ReportView() {
               <span>Generated {formatDate(report.created_at, { timeZone: clientContext.timezone })}</span>
               {countryNames(rd?.context?.geo) && (<><span className="opacity-50">·</span><span className="flex items-center gap-1"><Globe className="h-3.5 w-3.5" />{countryNames(rd.context.geo)}</span></>)}
               {languageNames(rd?.context?.languages) && (<><span className="opacity-50">·</span><span className="flex items-center gap-1"><Languages className="h-3.5 w-3.5" />{languageNames(rd.context.languages)}</span></>)}
+              {/* Social AI sync, 18 Nov 2026 (Sinéad): clients who also run paid read this as organic only. Sprout's API
+                  carries no ad-account data; whether a boosted post's figures hold its paid reach is not stated, so the
+                  line claims no more than that. Printed with the report. */}
+              <span className="basis-full">{ORGANIC_LINE}</span>
             </span>
           }
           actions={
