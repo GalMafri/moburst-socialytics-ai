@@ -198,7 +198,7 @@ export function CopyEditor({ post, clientId, reportId, brand, onCopySaved }: Pro
       if (!newCopy?.trim()) throw new Error("not rewritten");
       if (newCopy) {
         const { learned, updated } = await saveRevision(newCopy, postResult, rewriteNote);
-        if (updated.visual_direction) setDisplayVisual(updated.visual_direction);
+        if (typeof updated.visual_direction === "string" && updated.visual_direction) setDisplayVisual(updated.visual_direction);
 
         // A high regeneration count on one post is the clearest "the model is
         // not giving them what they want" signal the product emits.
