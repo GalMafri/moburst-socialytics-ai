@@ -29,6 +29,18 @@ describe("saving a post with its visual", () => {
     expect(iterations[0].visual_direction).toBe(" Two skates crossed on the ice. ");
   });
 
+  it("puts the old visual back when the revision cannot be written", async () => {
+    const post: Record<string, unknown> = { ...POST, visual_direction: "A dim rink at night." };
+    const w: CopyWrites = {
+      post: async () => ({ ...post }) as CopyPost,
+      lastVersion: async () => 1,
+      insertIteration: async () => { throw new Error("insert failed"); },
+      updatePost: async (_c, _k, fields) => { Object.assign(post, fields); return "2026-11-03T12:00:00.5+00:00"; },
+    };
+    await expect(saveCopy(w, { clientId: CLIENT, key: KEY, copy: "Captains pay last.", visualDirection: "Two skates crossed on the ice.", source: "regeneration", userId: "u", now: NOW })).rejects.toThrow("insert failed");
+    expect(post.visual_direction).toBe("A dim rink at night.");
+  });
+
   it("leaves the post's visual alone when the save carries none", async () => {
     const { w, updates } = writes();
     await saveCopy(w, { clientId: CLIENT, key: KEY, copy: "Captains always pay last.", source: "calendar", userId: "u", now: NOW });

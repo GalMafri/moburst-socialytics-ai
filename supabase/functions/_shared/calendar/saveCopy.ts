@@ -37,6 +37,8 @@ export interface CopyPost {
   format?: string | null;
   /** When someone last worked on it; read so a revision that fails to save can put it back. */
   touched_at?: string | null;
+  /** Its "Visual:" line; read so a revision that fails to save can put it back. */
+  visual_direction?: string | null;
   updated_at: string;
 }
 
@@ -137,7 +139,7 @@ async function writeRevision(w: CopyWrites, clientId: string, key: string, row: 
   } catch (e) {
     if (before) {
       try {
-        await w.updatePost(clientId, key, { copy: before.copy, hashtags: before.hashtags, cta: before.cta, ..."touched_at" in before ? { touched_at: before.touched_at ?? null } : {} });
+        await w.updatePost(clientId, key, { copy: before.copy, hashtags: before.hashtags, cta: before.cta, ..."touched_at" in before ? { touched_at: before.touched_at ?? null } : {}, ..."visual_direction" in before ? { visual_direction: before.visual_direction ?? null } : {} });
       } catch (back) {
         console.warn("[saveCopy] could not put the copy back after a failed revision:", back instanceof Error ? back.message : back);
       }
@@ -242,7 +244,7 @@ type Db = any;
 export function copyWrites(db: Db): CopyWrites {
   return {
     async post(clientId, key) {
-      const { data } = await db.from("calendar_posts").select("copy, hashtags, cta, platform, format, touched_at, updated_at").eq("client_id", clientId).eq("post_key", key).maybeSingle();
+      const { data } = await db.from("calendar_posts").select("copy, hashtags, cta, platform, format, touched_at, visual_direction, updated_at").eq("client_id", clientId).eq("post_key", key).maybeSingle();
       return (data as CopyPost | null) ?? null;
     },
     async lastVersion(clientId, key) {
