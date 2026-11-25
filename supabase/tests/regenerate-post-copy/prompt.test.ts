@@ -11,7 +11,7 @@ const input = (over: Partial<RewriteInput> = {}): RewriteInput => ({
 });
 
 describe("rewritePrompt", () => {
-  it("is today's prompt when no note is left", () => {
+  it("is the prompt with no note: today's, plus the visual that goes with the new copy (Social AI sync, 18 Nov 2026)", () => {
     expect(rewritePrompt(input())).toBe(`Rewrite this social media post copy with a fresh take. Keep the same strategic angle and concept, but create completely new wording.
 
 PLATFORM: Instagram
@@ -28,7 +28,8 @@ Return ONLY this JSON:
 {
   "caption_angle": "the new post caption",
   "CTA": "new call to action",
-  "hashtags": "relevant hashtags"
+  "hashtags": "relevant hashtags",
+  "visual_direction": "the picture for the new copy: one or two sentences describing the picture: its subject, setting, light and mood, with no words, logos or real people in it. Keep the current visual where it still fits the new copy, and change it where it no longer does"
 }`);
   });
 

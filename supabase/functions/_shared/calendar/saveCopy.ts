@@ -37,6 +37,8 @@ export interface CopyPost {
   format?: string | null;
   /** When someone last worked on it; read so a revision that fails to save can put it back. */
   touched_at?: string | null;
+  /** Its "Visual:" line; read so a revision that fails to save can put it back. */
+  visual_direction?: string | null;
   updated_at: string;
 }
 
@@ -104,6 +106,8 @@ export type SaveCopyResult =
 export const COPY_MAX = 10_000;
 export const HASHTAGS_MAX = 30;
 export const CTA_MAX = 300;
+/** The longest "Visual:" line a save writes on the post. */
+export const VISUAL_MAX = 1_000;
 /** A calendar row's key starts with this; a report's own post has a key of another shape and no calendar row. */
 export const CALENDAR_KEY_PREFIX = "post:";
 
@@ -135,7 +139,7 @@ async function writeRevision(w: CopyWrites, clientId: string, key: string, row: 
   } catch (e) {
     if (before) {
       try {
-        await w.updatePost(clientId, key, { copy: before.copy, hashtags: before.hashtags, cta: before.cta, ..."touched_at" in before ? { touched_at: before.touched_at ?? null } : {} });
+        await w.updatePost(clientId, key, { copy: before.copy, hashtags: before.hashtags, cta: before.cta, ..."touched_at" in before ? { touched_at: before.touched_at ?? null } : {}, ..."visual_direction" in before ? { visual_direction: before.visual_direction ?? null } : {} });
       } catch (back) {
         console.warn("[saveCopy] could not put the copy back after a failed revision:", back instanceof Error ? back.message : back);
       }
@@ -164,7 +168,10 @@ export async function saveCopy(w: CopyWrites, a: SaveCopy, memory?: CopyMemory):
     const format = before?.format ?? ((a.format as string) || null);
     // The calendar post holds the current copy too, for every view that reads it directly. It is written
     // first: a post the calendar does not have (a post: key) is answered 404 before any revision exists.
-    const updatedAt = await w.updatePost(a.clientId, a.key, { copy, touched_at: a.now.toISOString(), ...(hashtags ? { hashtags } : {}), ...(a.cta ? { cta: String(a.cta) } : {}) });
+    // The post's "Visual:" line is written too when the save carries one: the calendar and a design read it from the post,
+    // and a regenerated post kept its old one (Social AI sync, 18 Nov 2026). A save without one leaves it as it is.
+    const visual = typeof a.visualDirection === "string" ? a.visualDirection.trim().slice(0, VISUAL_MAX) : "";
+    const updatedAt = await w.updatePost(a.clientId, a.key, { copy, touched_at: a.now.toISOString(), ...(hashtags ? { hashtags } : {}), ...(a.cta ? { cta: String(a.cta) } : {}), ...(visual ? { visual_direction: visual } : {}) });
     if (!updatedAt && a.key.startsWith(CALENDAR_KEY_PREFIX)) return { ok: false, status: 404, error: "No post with that key in this client's calendar." };
     await writeRevision(w, a.clientId, a.key, {
       client_id: a.clientId, report_id: (a.reportId as string) || null, calendar_post_key: a.key,
@@ -237,7 +244,7 @@ type Db = any;
 export function copyWrites(db: Db): CopyWrites {
   return {
     async post(clientId, key) {
-      const { data } = await db.from("calendar_posts").select("copy, hashtags, cta, platform, format, touched_at, updated_at").eq("client_id", clientId).eq("post_key", key).maybeSingle();
+      const { data } = await db.from("calendar_posts").select("copy, hashtags, cta, platform, format, touched_at, visual_direction, updated_at").eq("client_id", clientId).eq("post_key", key).maybeSingle();
       return (data as CopyPost | null) ?? null;
     },
     async lastVersion(clientId, key) {

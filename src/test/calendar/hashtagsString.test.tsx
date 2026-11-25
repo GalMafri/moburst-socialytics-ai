@@ -32,7 +32,7 @@ describe("copy editor with hashtags returned as a string", () => {
     const week = [{ day: "Monday", date_label: "Nov 9", posts: [{ _calendarPostKey: "a", platform: "Instagram", copy: "Monday on Instagram", format: "Single Image", hashtags: ["monday"] }] }];
     render(<QueryClientProvider client={qc}><ContentIdeasTab mode="calendar" contentCalendar={week} aiAnalysis={null} sproutPerformance={null} clientId="c1" availablePlatforms={["Instagram"]} availableLanguages={["en"]} /></QueryClientProvider>);
     fireEvent.click(await screen.findByRole("button", { name: /Open post/ }));
-    fireEvent.click(await screen.findByRole("button", { name: /^Regenerate$/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Regenerate copy" }));
     const boxes = await screen.findAllByRole("button", { name: /^Regenerate$/ });
     let thrown: unknown = null;
     try { fireEvent.click(boxes[boxes.length - 1]); await screen.findByText("A brand new caption.", undefined, { timeout: 3000 }); } catch (e) { thrown = e; }

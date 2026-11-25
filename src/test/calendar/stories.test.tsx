@@ -107,7 +107,7 @@ describe("a Story's panel", () => {
     expect(await screen.findByText('The words on the Story are written from this message.')).toBeInTheDocument();
     expect(screen.getByText('Captains pay last.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Edit/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Regenerate' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Regenerate message' })).toBeInTheDocument();
   });
 
   it('says the Story is posted by hand, and downloads its PNG under the Story\'s name', async () => {

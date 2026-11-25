@@ -79,7 +79,8 @@ describe("saveCopy from the calendar", () => {
       client_id: CLIENT, report_id: "r1", calendar_post_key: KEY, version: 3, platform: "instagram", post_copy: "Hurt in a crash? We answer 24/7.",
       hashtags: ["injurylaw", "7"], cta: "Call", concept: "c", visual_direction: "v", format: "reel", source: "calendar", created_by: PERSON,
     }]);
-    expect(updates).toEqual([{ fields: { copy: "Hurt in a crash? We answer 24/7.", touched_at: NOW.toISOString(), hashtags: ["injurylaw", "7"], cta: "Call" }, unchangedSince: undefined }]);
+    // The post's "Visual:" line is written with it (Social AI sync, 18 Nov 2026).
+    expect(updates).toEqual([{ fields: { copy: "Hurt in a crash? We answer 24/7.", touched_at: NOW.toISOString(), hashtags: ["injurylaw", "7"], cta: "Call", visual_direction: "v" }, unchangedSince: undefined }]);
     // In the background: the answer does not wait for the memory.
     expect(taught).toEqual([{ kind: "copy_edit", before: POST.copy, after: "Hurt in a crash? We answer 24/7.", platform: "Instagram" }]);
     expect(later).toHaveLength(1);

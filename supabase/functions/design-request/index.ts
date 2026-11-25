@@ -338,12 +338,12 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
   const cost = requestCost(request, "design.plan");
   const carousel = request.kind === "carousel";
   const video = request.kind === "video";
-  const common = { brand, platform: request.platform ?? "social", copy: request.post_copy, voice, count: BRIEFS_PLANNED, postCount: library.length, recent, guidance, otherPlatforms, note: request.note ?? null };
+  const common = { brand, platform: request.platform ?? "social", copy: request.post_copy, voice, visual: (request as any).visual_direction ?? null, count: BRIEFS_PLANNED, postCount: library.length, recent, guidance, otherPlatforms, note: request.note ?? null };
   const filmed = video && request.footage_path ? (request.on_camera || "the speaker") : null;
   // A still whose platform is uploaded in another shape than 4:5 is planned for that shape (the request's own size).
   const shape = video ? null : plannerShape(request.upload_size, isStoryPost(request));
   // A video is planned in the shape its platform is uploaded in (the request's own size; vertical when it has none).
-  const instruction = video ? videoPlannerPrompt({ ...common, visual: (request as any).visual_direction ?? null, filmed, style: videoStyle?.profile ?? null, videos: videoStyle?.videos, framesPer: videoStyle?.frames_per_video, frame: videoFrameOf(request.upload_size) }) : carousel ? carouselPlannerPrompt({ ...common, shape, slides: CAROUSEL_SLIDES }) : plannerPrompt({ ...common, shape, story: isStoryPost(request) });
+  const instruction = video ? videoPlannerPrompt({ ...common, filmed, style: videoStyle?.profile ?? null, videos: videoStyle?.videos, framesPer: videoStyle?.frames_per_video, frame: videoFrameOf(request.upload_size) }) : carousel ? carouselPlannerPrompt({ ...common, shape, slides: CAROUSEL_SLIDES }) : plannerPrompt({ ...common, shape, story: isStoryPost(request) });
   let briefs = [] as ReturnType<typeof parseBriefs>;
   for (let attempt = 0; attempt < 2 && briefs.length < OPTIONS_WANTED; attempt++) {
     const result = await anthropicMessages({

@@ -34,6 +34,9 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json().catch(() => ({}));
     const { client_id, platform, concept, pillar, current_copy, current_cta, format } = body ?? {};
+    // "visual": a new visual idea for the post, its copy kept (Social AI sync, 18 Nov 2026).
+    const mode = body?.mode === "visual" ? "visual" : "copy";
+    const currentVisual = typeof body?.current_visual === "string" ? body.current_visual.trim().slice(0, 1000) : "";
 
     const effectiveConcept = concept || current_copy || "";
     if (!client_id || !effectiveConcept) {
@@ -67,7 +70,7 @@ Deno.serve(async (req) => {
     const prompt = rewritePrompt({
       platform: platform ? String(platform) : null, format: format ? String(format) : null, pillar: pillar ? String(pillar) : null,
       concept: String(effectiveConcept), currentCopy: String(current_copy ?? ""), currentCta: current_cta ? String(current_cta) : null,
-      competitive, voiceBlock, note: cleanNote(body?.note),
+      competitive, voiceBlock, note: cleanNote(body?.note), currentVisual: currentVisual || null, mode,
     });
 
     const result = await anthropicMessages({
@@ -88,9 +91,19 @@ Deno.serve(async (req) => {
       post = null;
     }
 
+    const visualOf = (p: { visual_direction?: unknown } | null) => (typeof p?.visual_direction === "string" ? p.visual_direction.trim() : "");
+    if (mode === "visual") {
+      // Only the visual is answered: the copy on the post stays as it is.
+      const visual = visualOf(post);
+      if (!visual) return jsonResp({ error: "Failed to parse a visual from AI response" }, 500);
+      return jsonResp({ post: { visual_direction: visual } });
+    }
     if (!post || typeof post.caption_angle !== "string" || !post.caption_angle.trim()) {
       return jsonResp({ error: "Failed to parse copy from AI response" }, 500);
     }
+    // A new visual comes with the new copy; an answer without one leaves the post's own.
+    if (visualOf(post)) post.visual_direction = visualOf(post);
+    else delete post.visual_direction;
     // Hashtags answer as a list, the shape every calendar post holds; the
     // prompt asks the model for one string (QA 22 Nov 2026). A Story has none.
     // When the model gave none, the answer leaves them out, so the post keeps

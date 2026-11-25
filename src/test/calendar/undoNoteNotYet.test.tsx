@@ -28,7 +28,7 @@ describe("P08-05 Undo of what a copy note taught, when the undo does not go thro
     const qc = new QueryClient();
     const post = { _calendarPostKey: "k1", platform: "Instagram", format: "Single image", copy: "A long caption." };
     render(<QueryClientProvider client={qc}><CopyEditor post={post} clientId="c1" brand="Acme" /></QueryClientProvider>);
-    fireEvent.click(screen.getByRole("button", { name: /Regenerate/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Regenerate copy" }));
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "shorter please" } });
     fireEvent.click(screen.getAllByRole("button", { name: /^Regenerate$/ }).pop()!);
     const undo = await screen.findByRole("button", { name: "Undo" });

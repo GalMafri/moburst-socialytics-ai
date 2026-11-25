@@ -212,3 +212,17 @@ describe("a note on Regenerate", () => {
     }
   });
 });
+
+// Social AI sync, 18 Nov 2026 (Sinéad): a still design came out unlike the "Visual:" line its post showed,
+// because only a video's planner was given the post's planned visual.
+describe("the post's planned visual", () => {
+  const args = { brand: "Pay The Pyper", platform: "Instagram", copy: "Captains pay last.", voice: null, count: 3, postCount: 8, recent: "" };
+  const visual = "A dim rink at night, one helmet on the bench.";
+  it("reaches a still's planner and a carousel's", () => {
+    expect(plannerPrompt({ ...args, visual })).toContain(`The post's planned visual: ${visual}`);
+    expect(carouselPlannerPrompt({ ...args, slides: 5, visual })).toContain(`The post's planned visual: ${visual}`);
+  });
+  it("is left out when the post has none", () => {
+    expect(plannerPrompt(args)).not.toContain("planned visual");
+  });
+});

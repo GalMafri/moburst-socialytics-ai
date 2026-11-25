@@ -406,3 +406,22 @@ describe("report screen: trend recommendations come from the theme angles", () =
     expect(card.textContent).toMatch(/Instagram trends\s*1/);
   });
 });
+
+// Social AI sync, 18 Nov 2026 (Sinéad): say on the report that it covers organic social, for clients who also run
+// paid. Sprout's API carries no ad-account data, so ad campaigns are never in it; the line says only that.
+describe("report screen: what it covers", () => {
+  it("says it is an organic social report of the brand's own posts, with paid ad campaigns left out, also in the PDF", async () => {
+    mount(); await settle();
+    const line = await screen.findByText(/Organic social report/);
+    expect(line.textContent).toBe("Organic social report: the posts on the brand's own profiles. Paid ad campaigns are not included.");
+    expect(line.closest('[data-print="hide"]')).toBeNull();
+  });
+});
+
+// The report's Content ideas tab came off reports that wrote no week of their own (Social AI sync, 18 Nov 2026).
+describe("report screen: Content ideas", () => {
+  it("is not offered on a report with no week of its own posts", async () => {
+    mount(); await settle();
+    expect(screen.queryByRole("tab", { name: "Content ideas" })).toBeNull();
+  });
+});
