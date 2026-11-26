@@ -167,20 +167,29 @@ export function reportPeriod(r: ReportLike | null | undefined): Period | null {
   return start && end ? { start: String(start), end: String(end) } : null;
 }
 
+/** Days in a period, both ends counted. */
+const periodDays = (p: Period) => Math.round((Date.parse(p.end) - Date.parse(p.start)) / DAY) + 1;
+
 /**
- * The report on the same landscape covering the latest period that sits before this
- * one. Ordered by period, not by creation date, so a month filled in later still
- * serves as the baseline for the month after it.
+ * The report on the same landscape whose period ends latest before this one, of a similar length (the shorter at
+ * least three quarters of the longer). Ordered by period, not by creation date, so a month filled in later still
+ * serves as the baseline for the month after it. QA 26 Nov 2026: ordered by start alone, Bader Law's October was
+ * compared with a one-week test report (10 to 16 Sep) instead of September, and showed -99.5% impressions.
  */
 export function pickComparableReport<T extends ReportLike>(current: T, candidates: T[]): T | null {
   const landscape = String(current?.report_data?.landscape?.id ?? "");
   const cur = reportPeriod(current);
+  if (!cur) return null;
+  const similar = (p: Period) => {
+    const a = periodDays(p), b = periodDays(cur);
+    return Math.min(a, b) / Math.max(a, b) >= 0.75;
+  };
   const ordered = candidates
     .map((c) => ({ c, p: reportPeriod(c) }))
     .filter((x) => x.p && String(x.c?.report_data?.landscape?.id ?? "") === landscape
       && sameSourceCoverage(x.c.report_data, current.report_data))
-    .sort((a, b) => Date.parse(b.p!.start) - Date.parse(a.p!.start));
-  for (const { c, p } of ordered) if (comparablePeriods(p, cur)) return c;
+    .sort((a, b) => Date.parse(b.p!.end) - Date.parse(a.p!.end) || Date.parse(b.p!.start) - Date.parse(a.p!.start));
+  for (const { c, p } of ordered) if (comparablePeriods(p, cur) && similar(p!)) return c;
   return null;
 }
 
