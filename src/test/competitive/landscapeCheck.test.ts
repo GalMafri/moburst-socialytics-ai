@@ -17,7 +17,7 @@ import {
   RIVALIQ_BUSY,
   RIVALIQ_UNAVAILABLE,
 } from "../../../supabase/functions/_shared/competitive/landscapeCheck";
-import { fakeDb } from "../../../supabase/functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../../supabase/tests/support/lifecycleFakeDb";
 
 const client = { name: "Fixture", website_url: "https://fixture.agency" };
 const own = { id: 10, name: "Socialytics - Fixture - set-1", focusCompanyId: 1, companies: [{ id: 1, name: "Fixture", url: "https://fixture.agency" }, { id: 2, name: "Rival", url: "https://rival.studio" }] };
