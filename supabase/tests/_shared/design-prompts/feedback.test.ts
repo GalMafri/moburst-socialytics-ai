@@ -1,5 +1,5 @@
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { learnFromNote, recordFeedback } from "../../../functions/_shared/design-prompts/feedback";
+import { learnFromNote, ONE_OFF_DESIGN_NOTE, recordFeedback } from "../../../functions/_shared/design-prompts/feedback";
 import { DESIGN_LEARNINGS_LIMIT, loadDesignLearnings } from "../../../functions/_shared/design-prompts/learnings";
 import { fakeDb, type FakeDb } from "../../support/lifecycleFakeDb";
 
@@ -28,6 +28,10 @@ describe("learnFromNote", () => {
     expect(call.model).toBe("claude-haiku-4-5-20251001");
     expect(call.max_tokens).toBe(400);
     expect(call.system).toContain("When the note is about this one post (its topic, its words, its picture, its date), write no rule.");
+    // End-to-end test, 26 Nov 2026: a colour asked of one design was kept as a rule; a note teaches only when it says so.
+    expect(call.system).toContain(ONE_OFF_DESIGN_NOTE);
+    expect(ONE_OFF_DESIGN_NOTE).toContain("a colour, a background, an object, a layout) is a one-off");
+    expect(ONE_OFF_DESIGN_NOTE).toContain("When unsure, write no rule.");
     expect(call.messages[0].content).toContain('"Use the Friday sale photo"');
   });
 

@@ -1,5 +1,5 @@
 import { afterAll, afterEach, describe, it, expect, vi } from "vitest";
-import { consolidatePrompt, mergePrompt, parseConsolidation, parseMergeOps, namesInVoice, plainVoice, parseOverallVoice, parseVoiceProfile, VOICE_RULE, voicePlatforms, voicePromptBlock, voiceProfilePrompt, voiceReady, voiceSample, type ClientVoice, type Preference } from "../../../functions/_shared/voice/voice";
+import { consolidatePrompt, mergePrompt, ONE_OFF_COPY_NOTE, parseConsolidation, parseMergeOps, namesInVoice, plainVoice, parseOverallVoice, parseVoiceProfile, VOICE_RULE, voicePlatforms, voicePromptBlock, voiceProfilePrompt, voiceReady, voiceSample, type ClientVoice, type Preference } from "../../../functions/_shared/voice/voice";
 import { buildVoiceProfile, loadClientVoice } from "../../../functions/_shared/voice/load";
 import type { OwnPost } from "../../../functions/_shared/calendar/evidence";
 
@@ -247,6 +247,10 @@ describe("the preference memory", () => {
     expect(prompt).toContain("Before:\nA long post.");
     expect(prompt).toContain("After (the rewrite that followed the note):\nShort post. Friday webinar.");
     expect(prompt).toContain("A note about this post's own topic, offer or date is a one-off: do nothing for that part.");
+    // End-to-end test, 26 Nov 2026: "Shorter, and end with a question", asked of one rewrite, became a rule for every post.
+    expect(prompt).toContain(ONE_OFF_COPY_NOTE);
+    expect(ONE_OFF_COPY_NOTE).toContain("(shorter, end with a question, more playful, mention the offer) is a one-off");
+    expect(ONE_OFF_COPY_NOTE).toContain("When unsure, do nothing.");
     expect(prompt).not.toContain("Story");
   });
 
