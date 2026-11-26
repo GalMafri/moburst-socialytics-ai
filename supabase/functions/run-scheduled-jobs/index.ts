@@ -146,6 +146,8 @@ import { repairStoredReports } from "../_shared/reports/repairStored.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
 import { costCtx, hasKey } from "../_shared/paid/index.ts";
 import type { CostContext } from "../_shared/cost/context.ts";
+import { callEnvFromDeno, callFunction } from "../_shared/invoke.ts";
+import type { JobOutcome } from "../_shared/scheduled-jobs/types.ts";
 
 /** A scheduled job's paid calls: its client, the job as the execution, the schedule as the one who asked. */
 const jobCost = (job: ScheduledJob, feature: string): CostContext => costCtx({ clientId: job.client_id, feature, actor: "schedule", executionId: job.id });
@@ -177,6 +179,7 @@ const JOB_LABELS: Partial<Record<ScheduledJob["kind"], string>> = {
   moment_feedback: "removed seasonal post",
   strategy_deck: "strategy deck",
   platform_sizes: "platform upload sizes",
+  social_read: "public profile read",
 };
 
 Deno.serve(async (req) => {
@@ -286,6 +289,8 @@ Deno.serve(async (req) => {
           case "strategy_deck": return import("../_shared/strategy/deckLive.ts").then((m) => runStrategyDeck(db, job, m.liveDeckDeps(env)));
           // The weekly read of the image sizes guide into platform_sizes (_shared/design/platformSizeRefresh.ts).
           case "platform_sizes": return runPlatformSizes(db, job, liveSizeDeps(env));
+          // One public profile read of the own competitor analysis, run by its own function (social-read/readJob.ts).
+          case "social_read": return runElsewhere("social-read", job);
           default: return Promise.resolve({ status: "failed" as const, reason: `Unknown job kind ${(job as ScheduledJob).kind}` });
         }
       }),
@@ -561,6 +566,18 @@ Deno.serve(async (req) => {
     return json({ error: err instanceof Error ? err.message : String(err) }, mode === "status" ? 200 : 500);
   }
 });
+
+/**
+ * A job whose code lives in a function of its own (to keep this function's upload under its budget): the
+ * function runs the job and answers its outcome. A call that does not answer one is thrown, so the job is
+ * tried again like any job that threw.
+ */
+async function runElsewhere(fn: string, job: ScheduledJob): Promise<JobOutcome> {
+  const res = await callFunction(fn, { mode: "job", job }, callEnvFromDeno());
+  const outcome = res.data as JobOutcome | null;
+  if (!res.ok || !outcome || typeof outcome.status !== "string") throw new Error(`${fn} answered ${res.status}: ${res.text.slice(0, 300)}`);
+  return outcome;
+}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
