@@ -47,7 +47,7 @@ export function DesignWeekBand({ clientId, clientName, week }: { clientId: strin
   };
 
   const weekCounts = preview && !preview.code ? preview.counts : undefined;
-  // Videos whose price could not be read are left out of this run: what a press designs now leaves them out.
+  // Videos whose price could not be read are left out of this run, quietly (no on-screen notes, Lital 26 Nov 2026): the server logs why.
   const unpriced = !!preview?.price_unavailable && (weekCounts?.video ?? 0) > 0;
   const counts = weekCounts && unpriced ? { ...weekCounts, video: 0 } : weekCounts;
   const n = postsToDesign(counts);
@@ -59,11 +59,6 @@ export function DesignWeekBand({ clientId, clientName, week }: { clientId: strin
   const designed = !active && progress && progress.ready > 0 ? progress.ready : 0;
   const filming = offered ? filmingLine(counts!.filming) : null;
   const waiting = isMoburstStaff && preview?.code === "not_set_up" ? waitingLine(preview.waiting_for, preview.client_name ?? clientName) : null;
-  const priceLine = isMoburstStaff && unpriced
-    ? (n > 0
-      ? "Video prices are unavailable right now, so this run leaves the videos out. The other posts go ahead."
-      : "Video prices are unavailable right now, so the videos are not designed yet.")
-    : null;
 
   const press = async () => {
     if (!counts) return;
@@ -76,10 +71,7 @@ export function DesignWeekBand({ clientId, clientName, week }: { clientId: strin
     setBusy(false);
     if (!started) notYet.say(NOT_YET.start);
     if (started?.run) {
-      const description = (started.left_out_no_price ?? 0) > 0
-        ? "The videos are left out of this run; the other posts are being designed."
-        : "Each post shows where it stands on its card.";
-      toast.success("Designing this week's posts", { description });
+      toast.success("Designing this week's posts", { description: "Each post shows where it stands on its card." });
     }
     refresh();
   };
@@ -92,7 +84,7 @@ export function DesignWeekBand({ clientId, clientName, week }: { clientId: strin
     refresh();
   };
 
-  if (!active && !designed && !waiting && !offered && !priceLine && !notYet.line) return null;
+  if (!active && !designed && !waiting && !offered && !notYet.line) return null;
 
   return (
     <div className="flex flex-wrap items-center gap-3">
@@ -104,7 +96,6 @@ export function DesignWeekBand({ clientId, clientName, week }: { clientId: strin
       {designed > 0 && <p className="t-secondary">{doneLine(designed, isMoburstStaff && run && preview?.run_id === run.id ? preview.credits_used : null)}</p>}
       {waiting && <p className="t-secondary">{waiting}</p>}
       {offered && <p className="t-secondary">{previewLine(counts!, credits, minutes)}</p>}
-      {priceLine && <p className="t-secondary">{priceLine}</p>}
       {filming && <p className="t-secondary">{filming}</p>}
       {notYet.line && <NotYet>{notYet.line}</NotYet>}
       {offered && (

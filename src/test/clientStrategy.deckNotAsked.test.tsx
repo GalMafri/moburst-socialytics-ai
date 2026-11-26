@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- Partial query doubles. */
-// QA 22 Nov 2026 (P09): a deck request that never gets through leaves the deck button exactly as it was,
-// with no "not asked yet" line, although StrategyExports.tsx:9-10 promises it is "said in words".
+// A deck request that never gets through (QA 22 Nov 2026, P09) brings the button back for another press.
+// No on-screen note says so (Lital, 26 Nov 2026: no user-facing notes).
 import React from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -21,13 +21,13 @@ vi.mock('@/integrations/supabase/client', () => ({ supabase: {
 import { StrategyExports } from '@/components/strategy/StrategyExports';
 afterEach(cleanup);
 
-it('says the deck is not asked for yet once every quiet resend failed', async () => {
+it('brings the deck button back, with no note, once every quiet resend failed', async () => {
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
     <StrategyExports clientId="c1" client="Acme" writtenAt="2026-11-03T10:00:00Z" newestEdit={null} contentRef={{ current: document.createElement('div') }} />
   </QueryClientProvider>);
   fireEvent.click(await screen.findByRole('button', { name: /Google Slides deck/ }));
   await waitFor(() => expect(f.rpcs.length).toBe(4)); // first send + 3 quiet resends
   await waitFor(() => expect(screen.getByRole('button', { name: /Google Slides deck/ })).toBeEnabled());
-  // Expected: a status line with the true state ("not asked for yet" / "not made yet"). Actual: none.
-  expect(screen.getByRole('status')).toHaveTextContent('The deck is not asked for yet.');
+  expect(screen.queryByRole('status')).toBeNull();
+  expect(screen.queryByText(/not asked/)).toBeNull();
 });

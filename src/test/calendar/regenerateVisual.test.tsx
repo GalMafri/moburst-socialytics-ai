@@ -53,11 +53,12 @@ describe("Regenerate visual", () => {
     expect(await screen.findByText("Two skates crossed on the ice.")).toBeTruthy();
   });
 
-  it("keeps the old visual and says so when no new one came back", async () => {
+  it("keeps the old visual and brings the button back when no new one came back, with no note on screen", async () => {
     calls.answers["regenerate-post-copy"] = { error: "Failed to parse" };
     mount();
     fireEvent.click(screen.getByRole("button", { name: "Regenerate visual" }));
-    expect(await screen.findByText("The visual is not regenerated yet.")).toBeTruthy();
+    await waitFor(() => expect((screen.getByRole("button", { name: "Regenerate visual" }) as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.queryByText(/not regenerated/)).toBeNull();
     expect(screen.getByText("A dim rink at night.")).toBeTruthy();
     expect(calls.list.map((c) => c.name)).toEqual(["regenerate-post-copy"]);
   });
