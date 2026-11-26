@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { adHocFormat, settleFormat } from "../../functions/generate-ad-hoc-post/format";
+import { adHocFormat, settleFormat, settlePillar } from "../../functions/generate-ad-hoc-post/format";
 
 // The New post dialog's format, as generate-ad-hoc-post asks the model for it
 // and saves what comes back (Stories design, 2 Nov 2026).
@@ -58,5 +58,20 @@ describe("settleFormat hashtags (QA 22 Nov 2026)", () => {
     const f = adHocFormat("Carousel", "Instagram");
     if ("refused" in f) throw new Error("refused");
     expect(settleFormat({ format: "Carousel", hashtags: "#fall #sale" }, f)).toEqual({ format: "Carousel", hashtags: ["#fall", "#sale"] });
+  });
+});
+
+// QA 26 Nov 2026: a new Moburst post's card showed "Innovation in Execution - AI & Technology. This post addresses the
+// endorsed gap ... It borrows Gummicube's mechanic ..." where the pillar belongs.
+describe("settlePillar", () => {
+  const names = ["Innovation in Execution - AI & Technology", "Innovation in Execution", "Visionary Voices - Thought Leadership"];
+  it("keeps only the pillar's name when the reply wrote its reasoning after it", () => {
+    const post = { pillar: "Innovation in Execution - AI & Technology. This post addresses the endorsed gap that LinkedIn engagement trails." };
+    expect(settlePillar(post, names).pillar).toBe("Innovation in Execution - AI & Technology");
+  });
+  it("leaves a pillar that is already a name, or names none, as it came", () => {
+    expect(settlePillar({ pillar: "Visionary Voices - Thought Leadership" }, names).pillar).toBe("Visionary Voices - Thought Leadership");
+    expect(settlePillar({ pillar: "Something else" }, names).pillar).toBe("Something else");
+    expect(settlePillar({}, names)).toEqual({});
   });
 });

@@ -98,7 +98,8 @@ export function CopyEditor({ post, clientId, reportId, brand, onCopySaved }: Pro
       },
     }), { again: (e) => invokeResendable(e, { idempotent: true }) });
     if (error || data?.error) throw new Error("The copy is not saved yet.");
-    onCopySaved?.(updated);
+    // A regeneration clears the planner's explanation, as the save does (saveCopy.ts): it described what was replaced.
+    onCopySaved?.(generated ? { ...updated, rationale: null } : updated);
     return { updated, learned: data?.learned && Array.isArray(data.learned.changes) ? data.learned : null };
   };
 

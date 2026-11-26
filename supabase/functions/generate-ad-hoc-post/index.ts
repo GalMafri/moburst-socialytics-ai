@@ -12,7 +12,7 @@ import { costCtx, hasKey } from "../_shared/paid/index.ts";
 import { answerText, PERSON_WAIT_MS, roomFor } from "../_shared/anthropicReply.ts";
 import { COPY_MODEL, loadClientVoice } from "../_shared/voice/load.ts";
 import { voicePromptBlock } from "../_shared/voice/voice.ts";
-import { adHocFormat, settleFormat } from "./format.ts";
+import { adHocFormat, settleFormat, settlePillar } from "./format.ts";
 import { strategyOnlyRefusal } from "../_shared/sprout/strategyOnly.ts";
 
 Deno.serve(async (req) => {
@@ -82,7 +82,7 @@ ${pillarLines}
 BRAND BRIEF: ${client?.brand_book_text?.slice(0, 500) || "Not available"}
 
 ${voiceBlock}
-${competitive ? `\n${competitive}\nWhere the request allows, make the post act on an endorsed gap and say which one in "pillar" or "concept".\n` : ""}
+${competitive ? `\n${competitive}\nWhere the request allows, make the post act on one of these gaps, and say which in "concept", in plain words a client could read: never the word "endorsed".\n` : ""}
 CREATIVE TYPE: ${format.creative}
 
 USER REQUEST: ${topic}
@@ -91,7 +91,7 @@ Generate a complete post recommendation. Return ONLY this JSON:
 {
   "platform": "${platform}",
   "format": "${format.formatField}",
-  "pillar": "which content pillar this aligns with",
+  "pillar": "exactly one pillar name from CONTENT PILLARS, as written there, and nothing else",
   "hook": "attention-grabbing opening line",
   "concept": "3-5 sentence concept with visual description",
   "visual_direction": "detailed design/visual prompt for image or video generation",
@@ -122,7 +122,9 @@ Generate a complete post recommendation. Return ONLY this JSON:
       return jsonResp({ error: "Failed to parse post from AI response" }, 500);
     }
 
-    return jsonResp({ post: settleFormat(post, format) });
+    // The card shows the pillar: a reply that wrote its reasoning there keeps only the pillar's name (QA 26 Nov 2026).
+    const pillarNames = (Array.isArray(client?.content_pillars) ? client!.content_pillars : []).map((p: any) => (typeof p === "string" ? p : p?.name)).filter(Boolean);
+    return jsonResp({ post: settlePillar(settleFormat(post, format), pillarNames) });
   } catch (err: any) {
     return jsonResp({ error: err.message }, 500);
   }

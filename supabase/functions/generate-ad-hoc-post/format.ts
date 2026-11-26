@@ -56,3 +56,15 @@ export function settleFormat<T extends { format?: unknown; hashtags?: unknown }>
   if (isStoryFormat(typeof post.format === "string" ? post.format : "")) return { ...post, format: "Image", hashtags };
   return { ...post, hashtags };
 }
+
+/**
+ * The post's pillar as one of the client's pillar names. QA 26 Nov 2026: asked to name the competitive gap "in pillar
+ * or concept", the model wrote a paragraph into the pillar ("Innovation in Execution - AI & Technology. This post
+ * addresses the endorsed gap ..."), and the calendar card showed it. A pillar that starts with a known name keeps just
+ * that name; one that names none stays as it came.
+ */
+export function settlePillar<T extends { pillar?: unknown }>(post: T, names: string[]): T {
+  const said = String(post.pillar ?? "").trim();
+  const known = [...names].sort((a, b) => b.length - a.length).find((n) => n && said.toLowerCase().startsWith(n.trim().toLowerCase()));
+  return known && known.trim() !== said ? { ...post, pillar: known.trim() } : post;
+}
