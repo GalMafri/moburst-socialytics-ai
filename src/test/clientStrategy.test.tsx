@@ -186,7 +186,7 @@ describe('a client strategy', () => {
     const start = within(await screen.findByTestId('strategy-start-instagram'));
     for (const t of ['From connected accounts', 'Followers', '1,800', '2.4', '42', 'Engagement', 'median per post', 'Rate', 'per impression', '3.1%']) expect(start.getAllByText(t).length).toBeGreaterThan(0);
     // The tiles, and the brand against its competitors on the same two measures.
-    expect(start.getByText('Last 90 days a week')).toBeInTheDocument();
+    expect(start.getByText('Posts')).toBeInTheDocument(); expect(start.getByText('a week, last 90 days')).toBeInTheDocument();
     expect(start.getByText('Posts a week')).toBeInTheDocument();
     expect(start.getByText('Engagement per post')).toBeInTheDocument();
     expect(within(screen.getByTestId('strategy-compare-instagram')).getAllByText('BenchApp').length).toBeGreaterThan(0);
@@ -421,7 +421,7 @@ describe('the strategy page: labels, bars and states', () => {
     const tiktok = within(screen.getByTestId('strategy-platform-tiktok'));
     expect(tiktok.queryByText('Planned a week')).toBeNull();
     expect(tiktok.getByText('Usual pace in this category')).toBeInTheDocument();
-    expect(within(screen.getByTestId('strategy-start-instagram')).getByText('Last 90 days a week')).toBeInTheDocument();
+    expect(within(screen.getByTestId('strategy-start-instagram')).getByText('a week, last 90 days')).toBeInTheDocument();
   });
 
   it('shows no vendor or pipeline word anywhere on the page, the measures table included', async () => {

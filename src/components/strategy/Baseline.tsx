@@ -70,7 +70,7 @@ export function PlatformStart({ client, p }: { client: string; p: PagePlatform }
       {/* Short labels with the measure under the figure, so a tile never cuts its own name off at phone width. A figure nobody has gets no tile. */}
       <StatGrid min={120}>
         {f.followers !== null && Number.isFinite(f.followers) && <StatCard size="compact" label="Followers" value={figure(f.followers)} />}
-        <StatCard size="compact" label="Last 90 days a week" value={f.posts === 0 ? "No posts yet" : figure(f.posts_per_week)} />
+        <StatCard size="compact" label="Posts" value={f.posts === 0 ? "No posts yet" : figure(f.posts_per_week)} sub="a week, last 90 days" />
         {(f.basis === "thin" || f.median_engagement !== null) && <StatCard size="compact" label="Engagement" value={f.basis === "thin" ? "Not enough posts yet" : figure(f.median_engagement)} sub="median per post" />}
         {f.rate_kind && f.rate !== null && <StatCard size="compact" label="Rate" value={percentOf(f.rate)} sub={rateLabel(f.rate_kind)} />}
       </StatGrid>
