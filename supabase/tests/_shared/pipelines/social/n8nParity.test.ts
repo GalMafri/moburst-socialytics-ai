@@ -17,7 +17,7 @@ import vm from "node:vm";
 import { describe, expect, it } from "vitest";
 import { MOBURST, mirror, moburstPages, moburstRequest, nodeCode, nodeOf, TRENDS } from "../../../../fixtures/pipelines/social";
 import { BRIEF_SYSTEM, PROMPT_EDITS, synthesisSystem, synthesisText, TREND_EDITS } from "../../../../functions/_shared/pipelines/social/prompt";
-import { sproutRequests } from "../../../../functions/_shared/pipelines/social/providers";
+import { BOOSTED_FIELD, sproutRequests } from "../../../../functions/_shared/pipelines/social/providers";
 import {
   aggregateSprout, attachCompetitiveContext, attachPostThumbnails, buildNormalizedClient, buildPresentationContent, checkGammaState, combineBrief, DECK_EDITS,
   DECK_TREND_EDITS, generateRunSummary, prepareBriefText, skipSproutAnalytics, sproutSetup, workflowConfiguration,
@@ -176,7 +176,11 @@ describe("Sprout", () => {
     for (const [node, read] of pairs) {
       const p = nodeOf(node).parameters;
       expect(p.url).toBe(`=https://api.sproutsocial.com/v1/1676448/analytics/${ports[read].path}`);
-      expect(JSON.parse(template(p.jsonBody, setup, nodes)), node).toEqual(ports[read].body);
+      // The one field the port adds (26 Nov 2026): Sprout's boosted flag on the month's posts, so boosted posts are marked.
+      const body = ports[read].body as { fields?: string[] };
+      const asN8n = Array.isArray(body.fields) ? { ...body, fields: body.fields.filter((f) => f !== BOOSTED_FIELD) } : body;
+      expect(JSON.parse(template(p.jsonBody, setup, nodes)), node).toEqual(asN8n);
+      expect(body.fields?.includes(BOOSTED_FIELD) ?? false).toBe(read === "posts");
       // Pages: page 1, 2, ... in the body until the answer says it is the last.
       expect(p.options.pagination.pagination.parameters.parameters).toEqual([{ type: "body", name: "page", value: "={{ $pageCount + 1 }}" }]);
     }
@@ -189,9 +193,10 @@ describe("Sprout", () => {
       "Get Sprout Social Post Analytics": pages.posts, "Get Previous Month Post Analytics": pages.previous_posts,
     };
     const n8n = await runNode(mirror("social-aggregate"), nodes, []);
-    const { top_posts_by_platform_impressions: added, ...port } = plain(aggregateSprout({ pages, combined, config, setup: MOBURST.sprout_setup }));
-    // The one key the port adds (nodes.ts header); everything else is n8n's, key for key.
+    const { top_posts_by_platform_impressions: added, boosted_posts: boosted, ...port } = plain(aggregateSprout({ pages, combined, config, setup: MOBURST.sprout_setup }));
+    // The keys the port adds (nodes.ts header; boosted posts, 26 Nov 2026); everything else is n8n's, key for key.
     expect(Object.keys(added).sort()).toEqual(Object.keys(port.top_posts_by_platform).sort());
+    expect(boosted).toBe(0);
     expect(port).toEqual(n8n[0]);
     expect(port).toEqual(MOBURST.aggregate);
   });
