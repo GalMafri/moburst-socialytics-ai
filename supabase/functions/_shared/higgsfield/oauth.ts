@@ -24,7 +24,9 @@ export const CLERK_ISSUER = "https://clerk.higgsfield.ai";
 export const AUTHORIZE_URL = `${CLERK_ISSUER}/oauth/authorize`;
 export const TOKEN_URL = `${CLERK_ISSUER}/oauth/token`;
 export const REGISTER_URL = `${CLERK_ISSUER}/oauth/register`;
-export const SCOPES = "openid email offline_access";
+// user:org:read (26 Nov 2026): Higgsfield's estimate tools read the account's workspaces (its organisations), and a token
+// without it is refused ("GET /mcp/workspaces failed (403)"), so no video could be priced. Takes effect at the next link.
+export const SCOPES = "openid email offline_access user:org:read";
 export const PROVIDER = "higgsfield";
 
 /** Refresh a little early, so a call never races the expiry. */
@@ -503,10 +505,9 @@ export async function handleAuthRequest(req: Request, deps: AuthDeps): Promise<R
       const caller = await deps.requireStaff(req);
       if (!(await caller.isAdmin())) return json({ error: "Linking the team's Higgsfield account is an admin action." }, 403);
 
-      // Reuse the registered client if we have one; Clerk issues a public
-      // client per redirect URI and there is no reason to make more.
-      const { data: existing } = await db.from("integration_tokens").select("client_id").eq("provider", PROVIDER).maybeSingle();
-      const clientId = existing?.client_id || (await registerClient(redirectUri, f));
+      // A client is registered at every link, with today's scopes: one registered earlier holds the scopes it was
+      // registered with, and Higgsfield's workspaces need user:org:read (26 Nov 2026). Linking is a rare admin action.
+      const clientId = await registerClient(redirectUri, f);
 
       const { verifier, challenge } = await makePkce();
       const state = randomState();
