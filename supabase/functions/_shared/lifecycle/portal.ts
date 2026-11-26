@@ -75,3 +75,37 @@ export async function linkPortalCompanies(db: Db, slugs: string[], organization:
     return [];
   }
 }
+
+/**
+ * The client a tools.moburst (Hub) company names, for a client user whose company no client's hub company name
+ * matches yet. Socialytics is opened from moburst.ai, which scopes by company slug, and from tools.moburst, which
+ * scopes by the Hub's company name; on 26 Nov 2026 16 of 18 clients had no Hub company name, so their users from
+ * tools.moburst were given no client. The client whose name is the company's, or gives the same slug: exactly one,
+ * with no hub company name yet and none a person set. Pure.
+ */
+export function hubCompanyMatch(clients: PortalClient[], company: string | null | undefined): string | null {
+  const name = String(company || "").trim();
+  if (!name) return null;
+  const open = clients.filter((c) => !String(c.hub_company_name || "").trim() && lifecycleMayWrite(c.field_sources, "hub_company_name"));
+  let fits = open.filter((c) => sameName(c.name, name));
+  const slug = slugify(name);
+  if (fits.length === 0 && slug !== "client") fits = open.filter((c) => slugify(c.name) === slug || String(c.company_slug || "") === slug);
+  return fits.length === 1 ? fits[0].id : null;
+}
+
+/** Saves the company as that client's hub company name, and gives its id. Never throws: a sign-in never fails because of it. */
+export async function linkHubCompany(db: Db, company: string): Promise<string[]> {
+  try {
+    const { data, error } = await db.from("clients").select("id, name, company_slug, hub_company_name, field_sources").is("archived_at", null).is("demo_job_id", null);
+    if (error) throw new Error(error.message);
+    const id = hubCompanyMatch((data ?? []) as PortalClient[], company);
+    if (!id) return [];
+    const written = await writeClientFields(db, id, { hub_company_name: company.trim() }, "portal");
+    if (!written.written.includes("hub_company_name")) return [];
+    console.log("[hub-link]", JSON.stringify({ client_id: id }));
+    return [id];
+  } catch (e) {
+    console.warn("[hub-link] could not link the Hub company:", e instanceof Error ? e.message : String(e));
+    return [];
+  }
+}

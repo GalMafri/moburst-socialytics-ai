@@ -121,7 +121,7 @@ export function HubCompanySync() {
       layout="split"
       eyebrow="Portal access"
       title="Hub company mapping"
-      description="Client users see the clients whose Hub company matches their own."
+      description="moburst.ai matches client users by company slug, set for every client automatically. tools.moburst matches them by the Hub company name below: a client without one is linked by its own name the first time one of its users signs in there."
       action={
         <Button variant="outline" size="sm" onClick={() => refetchHub()} disabled={!hubToken || hubLoading}>
           <RefreshCw className={hubLoading ? "animate-spin" : ""} />

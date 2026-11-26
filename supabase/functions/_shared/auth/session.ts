@@ -34,6 +34,7 @@
 // Nothing here imports from https: or npm: so the tests can run it as it is.
 
 import { findAuthUserByEmail } from "./findUser.ts";
+import { linkHubCompany } from "../lifecycle/portal.ts";
 import type { ToolRole } from "./moburstPeople.ts";
 
 /** The only error values a bridge answers with. src/lib/authMessages.ts has the sentence for each. */
@@ -150,13 +151,17 @@ async function ensureUser(admin: Admin, person: PortalPerson): Promise<{ id: str
   return { id: created.user.id as string };
 }
 
-/** The clients whose hub company name is exactly this company (case and edge spaces aside). */
+/**
+ * The clients whose hub company name is exactly this company (case and edge spaces aside). When none is, the client
+ * of that name is linked to it once (lifecycle/portal.ts linkHubCompany), as moburst.ai's sign-in links by slug.
+ */
 export async function clientsForCompany(admin: Admin, company: string): Promise<string[]> {
   const { data, error } = await admin.from("clients").select("id, hub_company_name").not("hub_company_name", "is", null);
   if (error) throw error;
-  return ((data ?? []) as Array<{ id: string; hub_company_name: string }>)
+  const ids = ((data ?? []) as Array<{ id: string; hub_company_name: string }>)
     .filter((c) => sameText(c.hub_company_name, company))
     .map((c) => c.id);
+  return ids.length ? ids : await linkHubCompany(admin, company);
 }
 
 /** Provision the shadow user for a verified portal person and mint a session for it. */
