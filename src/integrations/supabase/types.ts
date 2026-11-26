@@ -1103,6 +1103,7 @@ export type Database = {
           social_voice: Json | null
           sprout_customer_id: string | null
           strategy_doc_file_path: string | null
+          strategy_doc_look: Json | null
           timezone: string | null
           updated_at: string | null
           video_references: Json
@@ -1147,6 +1148,7 @@ export type Database = {
           social_voice?: Json | null
           sprout_customer_id?: string | null
           strategy_doc_file_path?: string | null
+          strategy_doc_look?: Json | null
           timezone?: string | null
           updated_at?: string | null
           video_references?: Json
@@ -1191,6 +1193,7 @@ export type Database = {
           social_voice?: Json | null
           sprout_customer_id?: string | null
           strategy_doc_file_path?: string | null
+          strategy_doc_look?: Json | null
           timezone?: string | null
           updated_at?: string | null
           video_references?: Json
