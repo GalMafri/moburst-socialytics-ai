@@ -32,7 +32,7 @@ afterEach(() => { Object.assign(deps, original); });
 // deno-lint-ignore no-explicit-any
 const epic = (over: Record<string, any> = {}) => ({
   id: "c1", name: "EPIC Studios", sprout_customer_id: null, design_references: null, harvested_design_references: [], design_style_synthesis: null,
-  brand_book_file_path: "c1/epic-brand-book.pdf", look_version: null, look_from: null, field_sources: {}, ...over,
+  brand_book_file_path: "c1/epic-brand-book.pdf", look_at: null, look_version: null, look_from: null, field_sources: {}, ...over,
 });
 const dbFor = (c: Record<string, unknown>, profiles: Record<string, unknown>[] = []) =>
   fakeDb({ clients: [c], sprout_profiles: profiles, design_reference_reviews: [], design_reference_choices: [] }, { lifecycle_write_client: writeClientRpc });
@@ -57,7 +57,7 @@ describe("design_refs for a client with no posts and a brand book", () => {
   });
 
   it("does not pay again for the same book on its weekly check", async () => {
-    const c = epic({ look_from: "brand_book" });
+    const c = epic({ look_from: "brand_book", look_at: "2026-11-20T10:00:00.000Z" });
     const before = doneRow({ learned_from: "brand_book", from: "c1/epic-brand-book.pdf|", synthesized_at: "2026-11-20T10:00:00.000Z", sources: 1 });
     const out = await STEPS.design_refs.run(dbFor(c), c, ctx(before));
     expect(learned.calls).toBe(0);
@@ -65,7 +65,7 @@ describe("design_refs for a client with no posts and a brand book", () => {
   });
 
   it("learns again when a new brand book is uploaded", async () => {
-    const c = epic({ look_from: "brand_book", brand_book_file_path: "c1/epic-brand-book-2027.pdf" });
+    const c = epic({ look_from: "brand_book", look_at: "2026-11-20T10:00:00.000Z", brand_book_file_path: "c1/epic-brand-book-2027.pdf" });
     const before = doneRow({ learned_from: "brand_book", from: "c1/epic-brand-book.pdf|", synthesized_at: "2026-11-20T10:00:00.000Z", sources: 1 });
     await STEPS.design_refs.run(dbFor(c), c, ctx(before));
     expect(learned.calls).toBe(1);
@@ -73,6 +73,13 @@ describe("design_refs for a client with no posts and a brand book", () => {
 
   it("never replaces a look learned from the posts", async () => {
     const c = epic({ look_version: "3" });
+    const out = await STEPS.design_refs.run(dbFor(c), c, ctx());
+    expect(learned.calls).toBe(0);
+    expect(out).toEqual({ status: "waiting", reason: "social_accounts" });
+  });
+
+  it("never replaces an older look learned from the posts that carries no version", async () => {
+    const c = epic({ look_at: "2026-09-01T10:00:00.000Z", look_version: null, look_from: null });
     const out = await STEPS.design_refs.run(dbFor(c), c, ctx());
     expect(learned.calls).toBe(0);
     expect(out).toEqual({ status: "waiting", reason: "social_accounts" });

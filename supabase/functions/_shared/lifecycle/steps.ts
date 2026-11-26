@@ -101,7 +101,7 @@ export const CLIENT_COLUMNS = [
   // The day a new look began in the client's posts (design_refs): brand_read reads the site again for it.
   "look_since:design_style_synthesis->look_change->>since",
   // Whether the look was learned from the posts (their rulebook's version) or from the brand book (design_refs, lookFromBook).
-  "brand_book_file_path", "look_version:design_style_synthesis->>reference_pipeline_version", "look_from:design_style_synthesis->>learned_from",
+  "brand_book_file_path", "look_at:design_style_synthesis->>synthesized_at", "look_version:design_style_synthesis->>reference_pipeline_version", "look_from:design_style_synthesis->>learned_from",
 ].join(", ");
 
 /** The most other logo files kept from a client's website (brand_read), and so the most the picture service is sent for one logo set. */
@@ -1075,7 +1075,8 @@ const bookInputs = (client: ClientRow): string =>
  * replaced. Null when there is no book or the posts already gave a look, so the step waits as before.
  */
 async function lookFromBook(db: Db, client: ClientRow, previous: StepRow | null, by?: StepBy): Promise<StepOutcome | null> {
-  if (!str(client.brand_book_file_path) || client.look_version) return null;
+  // Any look not learned from the book came from the posts (an older rulebook may carry no version) and stays.
+  if (!str(client.brand_book_file_path) || client.look_version || (client.look_at && client.look_from !== "brand_book")) return null;
   const from = bookInputs(client);
   if (client.look_from === "brand_book" && previous?.result?.learned_from === "brand_book" && previous.result.from === from) return { status: "done", result: previous.result };
   try {
