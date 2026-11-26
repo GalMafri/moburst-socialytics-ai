@@ -189,8 +189,11 @@ export async function costOf(
     const tool = kind === "image" ? "estimate_image_cost" : "estimate_video_cost";
     const data = payload(await mcp.callTool(tool, { params: { ...params, use_unlim: false } }), tool);
     const credits = Number(data?.cost?.credits_exact ?? data?.cost?.credits);
+    if (!Number.isFinite(credits)) console.warn(`[higgsfield] ${tool} answered no price:`, JSON.stringify(data ?? null).slice(0, 300));
     return Number.isFinite(credits) ? credits : null;
-  } catch {
+  } catch (e) {
+    // A price that cannot be read is unknown, never a failure; the reason is logged so it can be found (26 Nov 2026).
+    console.warn(`[higgsfield] price not read:`, e instanceof Error ? e.message.slice(0, 300) : String(e).slice(0, 300));
     return null;
   }
 }

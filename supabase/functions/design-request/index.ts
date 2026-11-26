@@ -693,7 +693,8 @@ async function clipPrice(admin: any, cost: CostContext, aspect?: string): Promis
   try {
     const mcp = new McpClient({ cost, accessToken: await accessTokenFor(admin), timeoutMs: 30_000 });
     return await quoteClip(mcp, aspect);
-  } catch {
+  } catch (e) {
+    console.warn("[design-request] clip price not read:", e instanceof Error ? e.message.slice(0, 300) : String(e).slice(0, 300));
     return null;
   }
 }
