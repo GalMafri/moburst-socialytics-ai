@@ -68,7 +68,12 @@ export const APIFY_ACTORS: ApifyActors = {
     { name: "scraper_one/facebook-posts-search", id: "TMBawM4LZpKN15DZX", note: "trends: Facebook" },
     { name: "harvestapi/linkedin-company-posts", id: "WI0tj4Ieb5Kq458gB", note: "social and competitive reports, competitor feed: LinkedIn posts" },
     { name: "apify/instagram-profile-scraper", note: "onboarding: Instagram profile" },
-    { name: "harvestapi/linkedin-company", note: "onboarding: LinkedIn page" },
+    { name: "harvestapi/linkedin-company", note: "onboarding: LinkedIn page; competitor reads: LinkedIn page check" },
+    // Own competitor reads (_shared/social/readers, 26 Nov 2026). No other tool on the account ran these from
+    // 24 Oct to 26 Nov 2026 (cost_unclaimed_runs), so a run nobody recorded is this app's.
+    { name: "apify/instagram-post-scraper", id: "nH2AHrwxeTRJoN5hX", note: "competitor reads: Instagram posts" },
+    { name: "apify/facebook-pages-scraper", id: "4Hv5RhChiaDk6iwad", note: "competitor reads: Facebook page check" },
+    { name: "clockworks/tiktok-profile-scraper", id: "0FXVyOXXEmdGcV88a", note: "competitor reads: TikTok profile and posts" },
   ],
   // Generic actors another Moburst tool on the account may run (the same list as AdVisor's).
   shared: [
@@ -78,6 +83,8 @@ export const APIFY_ACTORS: ApifyActors = {
     { name: "apify/cheerio-scraper", note: "generic" },
     { name: "apify/playwright-scraper", note: "generic" },
     { name: "apify/puppeteer-scraper", note: "generic" },
+    // Competitor reads: Facebook posts. Another tool on the account ran it on 29 Oct 2026 (cost_unclaimed_runs).
+    { name: "apify/facebook-posts-scraper", id: "KoJrdxJCTtpon81KY", note: "competitor reads: Facebook posts" },
   ],
   // AdVisor's own actors (its paid/config.ts): its runs on the shared account, counted apart and not flagged here.
   others: [
