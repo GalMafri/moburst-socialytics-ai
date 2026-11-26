@@ -310,12 +310,13 @@ function shapeLine(shape: string | null | undefined): string {
 }
 
 /** The planner's instruction for carousels: every option is a set of slides read in order. */
-export function carouselPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; visual?: string | null; count: number; slides: number; postCount: number; recent: string; guidance?: string; otherPlatforms?: boolean; note?: string | null; shape?: string | null }): string {
+export function carouselPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; visual?: string | null; count: number; slides: number; postCount: number; recent: string; guidance?: string; guide?: string; otherPlatforms?: boolean; note?: string | null; shape?: string | null }): string {
   return [
     `The images are ${args.brand}'s own published posts, numbered Post 1 to Post ${args.postCount}.`,
     otherPlatformsLine(args),
     args.recent,
     args.guidance ?? "",
+    args.guide ?? "",
     `Plan ${args.count} different carousel options for a new ${args.platform} carousel post with this copy:`,
     `"""${args.copy}"""`,
     args.voice ? `${args.brand}'s voice: ${args.voice}` : "",
@@ -563,7 +564,7 @@ export function styleLines(brand: string, s: VideoStyle): string {
  * type of the client's posts, with the client's logo file (13 Oct: video must
  * follow the client's own videos, carry the exact copy and logo, and have sound).
  */
-export function videoPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; visual?: string | null; count: number; postCount: number; recent: string; guidance?: string; filmed?: string | null; style?: VideoStyle | null; videos?: number; framesPer?: number; otherPlatforms?: boolean; note?: string | null; frame?: VideoShape }): string {
+export function videoPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; visual?: string | null; count: number; postCount: number; recent: string; guidance?: string; guide?: string; filmed?: string | null; style?: VideoStyle | null; videos?: number; framesPer?: number; otherPlatforms?: boolean; note?: string | null; frame?: VideoShape }): string {
   if (args.style && !args.filmed) {
     // Planned from the client's own videos (14 Oct: "make videos in a similar
     // style to their VIDEOS, not statics"): the images are stills from them.
@@ -575,6 +576,7 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
       `The images are stills from ${args.brand}'s own published videos, ${args.framesPer ?? 8} per video in time order${args.videos ? ` (${args.videos} videos)` : ""}.`,
       styleLines(args.brand, s),
       args.guidance ?? "",
+      args.guide ?? "",
       `Plan ${args.count} different options for a new ${args.platform} ${videoShape(args.frame)} video post (${videoLabel(args.frame)}) with this copy:`,
       `"""${args.copy}"""`,
       args.visual ? `The post's planned visual: ${args.visual}` : "",
@@ -600,6 +602,7 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
     return [
       `The images are ${args.brand}'s own published posts, numbered Post 1 to Post ${args.postCount}.`,
       otherPlatformsLine(args),
+      args.guide ?? "",
       `Plan ${args.count} different hooks for a new ${args.platform} ${videoShape(args.frame)} video post (${videoLabel(args.frame)}) with this copy:`,
       `"""${args.copy}"""`,
       args.visual ? `The post's planned visual: ${args.visual}` : "",
@@ -619,6 +622,7 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
     otherPlatformsLine(args),
     args.recent,
     args.guidance ?? "",
+    args.guide ?? "",
     `Plan ${args.count} different options for a new ${args.platform} ${videoShape(args.frame)} video post (${videoLabel(args.frame)}) with this copy:`,
     `"""${args.copy}"""`,
     args.visual ? `The post's planned visual: ${args.visual}` : "",
@@ -640,12 +644,13 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
  * they are. A Story (story: true) gets one line more; its headline limits are
  * a feed post's.
  */
-export function plannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; visual?: string | null; count: number; postCount: number; recent: string; guidance?: string; story?: boolean; otherPlatforms?: boolean; note?: string | null; shape?: string | null }): string {
+export function plannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; visual?: string | null; count: number; postCount: number; recent: string; guidance?: string; guide?: string; story?: boolean; otherPlatforms?: boolean; note?: string | null; shape?: string | null }): string {
   return [
     `The images are ${args.brand}'s own published posts, numbered Post 1 to Post ${args.postCount}.`,
     otherPlatformsLine(args),
     args.recent,
     args.guidance ?? "",
+    args.guide ?? "",
     `Plan ${args.count} different design options for a new ${args.platform} post with this copy:`,
     `"""${args.copy}"""`,
     args.voice ? `${args.brand}'s voice: ${args.voice}` : "",

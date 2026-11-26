@@ -73,6 +73,8 @@ import { designFeedback } from "./feedback.ts";
 import { putDesignInUse } from "./use.ts";
 import { type NoteDeps, type NoteLearned, learnDesignNote, noteLearnedOf, undoDesignNote } from "./note.ts";
 import { cleanNote } from "../_shared/notes/regenerateNote.ts";
+import { brandBookRules, brandGuideLines } from "../_shared/design/brandGuide.ts";
+import { designStrategyBlock } from "../_shared/strategy/prompt.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -276,7 +278,7 @@ async function plan(admin: any, request: DesignRequest, settings: Settings): Pro
 }
 
 async function planNow(admin: any, request: DesignRequest, settings: Settings): Promise<void> {
-  const { data: client } = await admin.from("clients").select("name, brand_identity, video_references, video_style, harvested_design_references").eq("id", request.client_id).maybeSingle();
+  const { data: client } = await admin.from("clients").select("name, brand_identity, brand_book_file_path, video_references, video_style, harvested_design_references").eq("id", request.client_id).maybeSingle();
   // A video is planned from the client's own videos (14 Oct: "make videos in a
   // similar style to their VIDEOS, not statics"). Until their style has been
   // read, the request waits; the video worker plans it when the style is in.
@@ -333,12 +335,14 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
   const recent = recentLines(recentList, library);
   // What people who turned down this client's earlier designs asked for.
   const guidance = learningLines(await loadDesignLearnings(admin, request.client_id));
+  // The brand book, which wins where the brand's look changed since its posts, and the strategy every design serves (Social AI sync, 18 Nov 2026).
+  const guide = brandGuideLines(brand, { brandBook: brandBookRules(client?.brand_identity, client?.brand_book_file_path), strategy: await designStrategyBlock(admin, request.client_id) });
 
   if (!(await hasKey("anthropic"))) throw new Error("ANTHROPIC_API_KEY is not set.");
   const cost = requestCost(request, "design.plan");
   const carousel = request.kind === "carousel";
   const video = request.kind === "video";
-  const common = { brand, platform: request.platform ?? "social", copy: request.post_copy, voice, visual: (request as any).visual_direction ?? null, count: BRIEFS_PLANNED, postCount: library.length, recent, guidance, otherPlatforms, note: request.note ?? null };
+  const common = { brand, platform: request.platform ?? "social", copy: request.post_copy, voice, visual: (request as any).visual_direction ?? null, count: BRIEFS_PLANNED, postCount: library.length, recent, guidance, guide, otherPlatforms, note: request.note ?? null };
   const filmed = video && request.footage_path ? (request.on_camera || "the speaker") : null;
   // A still whose platform is uploaded in another shape than 4:5 is planned for that shape (the request's own size).
   const shape = video ? null : plannerShape(request.upload_size, isStoryPost(request));
