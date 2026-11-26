@@ -282,6 +282,28 @@ describe("making a key", () => {
     expect(JSON.stringify(qc.getMutationCache().getAll().map((m) => m.state.data))).not.toContain(PLAIN);
   });
 
+  // Lovable's scan, 26 Nov 2026: the picker offers the date 90 days from today, and the dialog sent the end of that
+  // day, later than the 90 days from now the server allows (routes-me.ts), so the longest choice was refused.
+  it("sends an end the server accepts when the last date the picker offers is chosen", async () => {
+    respond((method, url, body) => {
+      if (method === "POST" && url.endsWith("/me/keys")) return { status: 201, body: { data: { ...NEW, name: body.name, expires_at: body.expires_at, key: PLAIN } } };
+      if (method === "GET" && url.endsWith("/me/keys")) return list([]);
+      return undefined;
+    });
+    mountPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Create token" }));
+    fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Longest" } });
+    const ends = document.getElementById("token-ends") as HTMLInputElement;
+    fireEvent.change(ends, { target: { value: ends.max } });
+    const sentAt = Date.now();
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await screen.findByText(PLAIN);
+    const at = Date.parse(calls.find((c) => c.method === "POST")!.body.expires_at);
+    // The server's rule: after now, and no later than 90 days from now (a minute of grace).
+    expect(at).toBeGreaterThan(sentAt);
+    expect(at).toBeLessThanOrEqual(sentAt + 90 * DAY + 60_000);
+  });
+
   it("shows the 10-key limit as the server words it, and keeps the name", async () => {
     respond((method, url) => {
       if (method === "POST") return { status: 409, body: { error: { code: "conflict", message: "You have 10 active keys. Revoke one to make another." } } };
