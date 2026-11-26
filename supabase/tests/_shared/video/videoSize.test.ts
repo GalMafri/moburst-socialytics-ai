@@ -212,7 +212,8 @@ describe("a landscape video", () => {
     expect(await quoteClip({ callTool } as never, wide.aspect)).toBe(128);
     expect(await quoteClip({ callTool } as never)).toBe(128);
     const sent = callTool.mock.calls.map((c) => (c as unknown as [string, { params: Record<string, unknown> }])[1].params);
-    expect(sent[0]).toMatchObject({ aspect_ratio: "16:9", get_cost: true, duration: 8, resolution: "1080p" });
-    expect(sent[1]).toMatchObject({ aspect_ratio: "9:16", get_cost: true });
+    expect(callTool.mock.calls.map((c) => (c as unknown as [string])[0])).toEqual(["estimate_video_cost", "estimate_video_cost"]);
+    expect(sent[0]).toMatchObject({ aspect_ratio: "16:9", duration: 8, resolution: "1080p" });
+    expect(sent[1]).toMatchObject({ aspect_ratio: "9:16" });
   });
 });

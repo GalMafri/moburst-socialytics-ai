@@ -9,7 +9,7 @@
 //   generate_image_batch {requests[]}    → {jobs:[{index,job_id,status}], submitted_count, failed_count}
 //   jobs_wait {jobs[],timeout_seconds}   → {jobs:[{index,job_id,status,type,model,result_url}],
 //                                           summary:{total,completed,failed,active,errors}, all_terminal}
-//   generate_image {…,get_cost:true}     → {cost:{credits, credits_exact}} and submits nothing
+//   estimate_image_cost / estimate_video_cost {params} → {cost:{credits, credits_exact}, quote_ref} and submits nothing
 //   balance {}                           → {credits, subscription_plan_type}
 //
 // Four things about this API will bite anyone who assumes otherwise:
@@ -175,9 +175,10 @@ export async function creditBalance(mcp: ToolCaller): Promise<Balance | null> {
 /**
  * What this exact generation would cost, without submitting it.
  *
- * Not supported inside the batch tools, so it goes through the single-shot
- * tool with get_cost set — which the server answers without opening a widget
- * and without creating a job.
+ * Asked of Higgsfield's estimate tools, which take the same params as the
+ * generate tools and submit no job. Until 26 Nov 2026 this was the generate
+ * tool with get_cost set; Higgsfield now refuses that ("get_cost is not accepted
+ * here"), so every video read as unpriced and the week's design left videos out.
  */
 export async function costOf(
   mcp: ToolCaller,
@@ -185,8 +186,8 @@ export async function costOf(
   params: Record<string, unknown>,
 ): Promise<number | null> {
   try {
-    const tool = kind === "image" ? "generate_image" : "generate_video";
-    const data = payload(await mcp.callTool(tool, { params: { ...params, use_unlim: false, get_cost: true } }), tool);
+    const tool = kind === "image" ? "estimate_image_cost" : "estimate_video_cost";
+    const data = payload(await mcp.callTool(tool, { params: { ...params, use_unlim: false } }), tool);
     const credits = Number(data?.cost?.credits_exact ?? data?.cost?.credits);
     return Number.isFinite(credits) ? credits : null;
   } catch {
