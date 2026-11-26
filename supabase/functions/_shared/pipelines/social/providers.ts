@@ -38,7 +38,13 @@ const POST_METRICS = [
   "lifetime.sentiment_comments_positive_count", "lifetime.sentiment_comments_negative_count", "lifetime.sentiment_comments_neutral_count",
 ];
 const PREVIOUS_POST_METRICS = ["lifetime.impressions", "lifetime.engagements", "lifetime.reactions", "lifetime.likes", "lifetime.comments_count", "lifetime.shares_count", "lifetime.post_link_clicks", "lifetime.post_content_clicks", "lifetime.video_views"];
-const POST_FIELDS = ["created_time", "perma_link", "text", "post_type", "content_category", "network", "visual_media"];
+/**
+ * Sprout's flag on a post the brand paid to promote (Facebook and TikTok; Sprout API docs, Message Fields, "is_boosted",
+ * posts endpoint only). The brand or the client may boost a post from its own ad account (26 Nov 2026), so the report
+ * marks it rather than presenting its figures as purely organic.
+ */
+export const BOOSTED_FIELD = "is_boosted";
+const POST_FIELDS = ["created_time", "perma_link", "text", "post_type", "content_category", "network", "visual_media", BOOSTED_FIELD];
 const PREVIOUS_POST_FIELDS = ["created_time", "perma_link", "text", "post_type", "network", "visual_media"];
 
 export type SproutRead = "current" | "posts" | "previous" | "previous_posts";
@@ -60,6 +66,21 @@ export function sproutRequests(setup: Any, combined: Any): Record<SproutRead, { 
       body: { timezone, filters: [ids, `created_time.in(${setup.previous_month_start}T00:00:00...${setup.previous_month_end}T23:59:59)`], metrics: PREVIOUS_POST_METRICS, fields: PREVIOUS_POST_FIELDS, sort: ["lifetime.impressions:desc"], limit: 50 },
     },
   };
+}
+
+/**
+ * One read, as sproutRequests gives it. A Sprout that refuses the boosted flag (a 400) is asked once more without it,
+ * so a report reads exactly as it did before the flag was asked for.
+ */
+export async function readSprout(reader: SproutReader, req: { path: "profiles" | "posts"; body: Record<string, unknown> }): Promise<Any[]> {
+  try {
+    return await reader.pages(req.path, req.body);
+  } catch (e) {
+    const fields = req.body.fields;
+    if (!Array.isArray(fields) || !fields.includes(BOOSTED_FIELD) || !/answered 400/.test(String((e as Error)?.message ?? e))) throw e;
+    console.warn("[sprout] the boosted flag was refused; the posts are read without it", e);
+    return reader.pages(req.path, { ...req.body, fields: fields.filter((f) => f !== BOOSTED_FIELD) });
+  }
 }
 
 export interface SproutReader {

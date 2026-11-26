@@ -57,7 +57,7 @@ import {
   aggregateSprout, attachCompetitiveContext, attachPostThumbnails, buildNormalizedClient, buildPresentationContent, checkGammaState, combineBrief,
   generateRunSummary, hasSproutProfiles, prepareBriefText, readsTrends, skipSproutAnalytics, sproutSetup, workflowConfiguration,
 } from "../social/nodes.ts";
-import { gammaClient, GAMMA_POLL_SECONDS, sproutReader, sproutRequests, SPROUT_READS, type GammaClient, type SproutReader } from "../social/providers.ts";
+import { gammaClient, GAMMA_POLL_SECONDS, readSprout, sproutReader, sproutRequests, SPROUT_READS, type GammaClient, type SproutReader } from "../social/providers.ts";
 import { KEEP, KEPT, keptAnswer, replayOf } from "../social/replay.ts";
 import { PayloadUnread } from "../store.ts";
 import { runInsights } from "../social/runInsights.ts";
@@ -233,7 +233,7 @@ export function socialPipeline(deps: SocialDeps = {}): PipelineDefinition {
           const read = SPROUT_READS[done];
           const pages = replayOf(ctx)
             ? await keptAnswer<Any[]>(ctx, KEPT.sprout(read))
-            : await sprout(ctx).pages(sproutRequests(setup, combined)[read].path, sproutRequests(setup, combined)[read].body);
+            : await readSprout(sprout(ctx), sproutRequests(setup, combined)[read]);
           if (!Array.isArray(pages)) throw new Error(`The replayed run kept no Sprout ${read} read.`);
           await ctx.payloads.put(KEPT.sprout(read), pages, KEEP);
           return { type: "next", step: "sprout", state: { ...ctx.state, sprout_reads: done + 1 }, detail: { read, pages: pages.length, rows: pages.reduce((s, p) => s + (Array.isArray(p?.data) ? p.data.length : 0), 0) } };

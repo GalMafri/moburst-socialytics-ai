@@ -250,7 +250,7 @@ describe("social_v1, live, on what the providers answered n8n for fd501cba", () 
     // The stored report (n8n's) kept no post pictures; the app's keeps each one Sprout gave (social.thumbnails.test.ts), and that and the per-network lists by impressions (nodes.ts header) are the only differences.
     expect(c.comparison).toMatchObject({ typeMismatches: [], otherDifferences: [], onlyReal: [] });
     expect(c.comparison.onlyShadow.length).toBeGreaterThan(0);
-    expect(c.comparison.onlyShadow.every((k: string) => /\.(thumbnail_url|media_type)$|^sprout_performance\.top_posts_by_platform_impressions\b/.test(k))).toBe(true);
+    expect(c.comparison.onlyShadow.every((k: string) => /\.(thumbnail_url|media_type)$|^sprout_performance\.top_posts_by_platform_impressions\b|^sprout_performance\.boosted_posts$/.test(k))).toBe(true);
     // The providers were asked what n8n asked them.
     expect(calls.sprout).toEqual(["current", "posts", "previous", "previous_posts"]);
     expect(calls.gamma.filter((c) => c.startsWith("create"))).toHaveLength(1);

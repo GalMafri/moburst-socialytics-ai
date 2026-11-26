@@ -415,6 +415,16 @@ describe("report screen: what it covers", () => {
     const line = await screen.findByText(/Organic social report/);
     expect(line.textContent).toBe("Organic social report: the posts on the brand's own profiles. Paid ad campaigns are not included.");
     expect(line.closest('[data-print="hide"]')).toBeNull();
+    expect(screen.queryByText(/was boosted|were boosted/)).toBeNull();
+  });
+
+  // 26 Nov 2026: a client may boost a post from its own ad account; Sprout flags it, so the report says so.
+  it("says how many posts were boosted and marks each boosted post", async () => {
+    const boostedPost = { url: "https://www.facebook.com/p/1", permalink: "https://www.facebook.com/p/1", platform: "FACEBOOK", network_type: "FACEBOOK", platform_display: "Facebook", text: "Game night deal", impressions: 1200, reactions: 40, comments: 3, shares: 2, engagement: 45, engagements: 45, posted_at: "2026-10-12T15:00:00Z", boosted: true };
+    f.report = reportRow({ ...ownTrends(), sprout_performance: { boosted_posts: 1, top_posts: [boostedPost], top_posts_by_platform: { Facebook: [boostedPost] } } });
+    mount(); await settle();
+    expect((await screen.findByText(/was boosted|were boosted/)).textContent).toBe("1 post was boosted; it is marked Boosted, and its figures may include paid reach.");
+    expect((await screen.findAllByText("Boosted")).length).toBeGreaterThan(0);
   });
 });
 

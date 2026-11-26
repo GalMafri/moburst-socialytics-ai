@@ -575,6 +575,10 @@ export function aggregateSprout(a: { pages: SproutPages; combined: Any; config: 
   const mapPost = (post: Any) => {
     // A post's lifetime figures are one reading each, not a sum of days: a count below zero reads as zero.
     const lifetime = (...keys: string[]) => floorAtZero(getMetric(post.metrics || {}, ...keys));
+    // A post the brand or the client paid to promote (Sprout's is_boosted, Facebook and TikTok): its counts may hold the paid
+    // reach, so it is marked. Its figures stay Sprout's totals: organic impressions beside engagements that include the boost
+    // would overstate its engagement rate.
+    const boosted = post.is_boosted === true || post.is_boosted === "true";
     const impressions = lifetime("lifetime.impressions", "impressions");
     const reactions = lifetime("lifetime.reactions", "reactions", "likes");
     const comments = lifetime("lifetime.comments_count", "comments_count", "comments", "lifetime.comments");
@@ -601,6 +605,7 @@ export function aggregateSprout(a: { pages: SproutPages; combined: Any; config: 
       engagement: lifetime("lifetime.engagements") || (reactions + comments + shares + linkClicks),
       metric_scope: "lifetime",
       posted_at: post.created_time || "",
+      ...(boosted ? { boosted: true } : {}),
     };
   };
   const allMappedPosts = postAnalyticsData.map(mapPost).filter((post) => post.url);
@@ -636,6 +641,7 @@ export function aggregateSprout(a: { pages: SproutPages; combined: Any; config: 
     top_posts: topPosts,
     top_posts_by_platform: topPostsByPlatform,
     top_posts_by_platform_impressions: topPostsByPlatformImpressions,
+    boosted_posts: allMappedPosts.filter((post) => post.boosted).length,
     reporting_period: {
       current_month: { start: config.current_month_start, end: config.current_month_end },
       previous_month: { start: config.previous_month_start, end: config.previous_month_end },
@@ -1315,6 +1321,8 @@ export function generateRunSummary(a: SummaryInput): Any {
       top_posts_by_platform: sproutData.top_posts_by_platform || {},
       // Added 12 Nov 2026; an aggregate made without it (an older run replayed) stores none and the page falls back to the engagement lists.
       ...(sproutData.top_posts_by_platform_impressions ? { top_posts_by_platform_impressions: sproutData.top_posts_by_platform_impressions } : {}),
+      // Added 26 Nov 2026: how many of the month's posts Sprout says were boosted. A report from before it stores none.
+      ...(typeof sproutData.boosted_posts === "number" ? { boosted_posts: sproutData.boosted_posts } : {}),
     },
     industry_trends: industry,
     ai_analysis: analysis,

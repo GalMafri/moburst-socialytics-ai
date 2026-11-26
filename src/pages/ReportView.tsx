@@ -138,6 +138,9 @@ function PillarEntries({ entries, variant }: { entries: string[]; variant: "seco
 
 /** What a report covers, said under its title. */
 const ORGANIC_LINE = "Organic social report: the posts on the brand's own profiles. Paid ad campaigns are not included.";
+/** Said when the month had boosted posts (Sprout's is_boosted, 26 Nov 2026): their figures may hold the paid reach. */
+export const boostedLine = (n: number) =>
+  `${n === 1 ? "1 post was" : `${n} posts were`} boosted; ${n === 1 ? "it is" : "they are"} marked Boosted, and ${n === 1 ? "its" : "their"} figures may include paid reach.`;
 
 export default function ReportView() {
   const { id, reportId } = useParams();
@@ -522,6 +525,7 @@ export default function ReportView() {
                   carries no ad-account data; whether a boosted post's figures hold its paid reach is not stated, so the
                   line claims no more than that. Printed with the report. */}
               <span className="basis-full">{ORGANIC_LINE}</span>
+              {Number(rd?.sprout_performance?.boosted_posts) > 0 && <span className="basis-full">{boostedLine(Number(rd.sprout_performance.boosted_posts))}</span>}
             </span>
           }
           actions={
@@ -878,7 +882,10 @@ function PostCard({ post, preview }: { post: any; preview?: PostPreview | null }
           />
           <div className="flex-1 min-w-0 space-y-2.5">
         <div className="flex items-center justify-between">
-          <PlatformBadge platform={post.network_type || post.platform} size="sm" />
+          <span className="flex items-center gap-2">
+            <PlatformBadge platform={post.network_type || post.platform} size="sm" />
+            {post.boosted && <Badge variant="secondary" title="Promoted with paid reach: its figures may include it">Boosted</Badge>}
+          </span>
           <span className="t-secondary">
             {formatDate(post.posted_at)}
           </span>

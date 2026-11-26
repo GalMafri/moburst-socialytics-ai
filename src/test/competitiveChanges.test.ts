@@ -105,6 +105,18 @@ describe("pickComparableReport", () => {
     // Order of arrival does not matter: the latest earlier period wins even when it was created last.
     expect(pickComparableReport(cur, [candidates[3], candidates[2]])).toBe(candidates[2]);
   });
+  // QA 26 Nov 2026: Bader Law's October report was compared with a one-week report (10 to 16 Sep) that starts later
+  // than September's, and showed -99.5% impressions and channels it had "moved onto".
+  it("compares a month with the month before it, never with a shorter report that starts later", () => {
+    const at = (start: string, end: string) => ({ report_data: { landscape: { id: "587615" }, period: { start, end } } });
+    const oct = at("2026-10-01", "2026-10-31");
+    const week = at("2026-09-10", "2026-09-16");
+    const sep = at("2026-09-01", "2026-09-30");
+    const rolling = at("2026-08-24", "2026-09-22");
+    expect(pickComparableReport(oct, [week, rolling, sep])).toBe(sep);
+    expect(pickComparableReport(oct, [week])).toBeNull();
+    expect(pickComparableReport(oct, [week, rolling])).toBe(rolling);
+  });
 });
 
 describe('feed source coverage', () => {
