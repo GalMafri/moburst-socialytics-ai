@@ -4,8 +4,9 @@
 // superpowers/specs/2026-11-03-strategy-v2-design.md, section 3, "Where
 // profiles come from"), filled from data so nobody has to: RivalIQ's record
 // of the client company (the tracking step's result) first, then the links on
-// the client's homepage (brand_read's site_profiles), one profile per
-// platform. The competitor_handles rules hold: a person's entry is never
+// the client's homepage (brand_read's site_profiles), then, when neither gave
+// any, a web search for the brand's profiles (the accounts step's
+// profile_search, source "search"), one profile per platform. The competitor_handles rules hold: a person's entry is never
 // overwritten, and a profile a person removed never comes back.
 
 import { canonicalProfileUrl } from "../competitive/extractSocialHandles.ts";
@@ -16,7 +17,10 @@ type Db = any;
 
 export const PROFILE_PLATFORMS = ["instagram", "facebook", "tiktok", "youtube", "x", "linkedin"] as const;
 
-export interface ProfileRow { platform: string; handle: string; url: string | null; source: "rivaliq" | "website" | "person" | "removed" }
+export interface ProfileRow { platform: string; handle: string; url: string | null; source: "rivaliq" | "website" | "search" | "person" | "removed" }
+
+/** A profile the web search found (competitive/detectHandles.ts findBrandProfiles). */
+export interface SearchedProfile { platform: string; handle: string; profile_url?: string | null }
 
 const clean = (h: unknown) => String(h ?? "").trim().replace(/^@/, "");
 
@@ -26,7 +30,7 @@ const clean = (h: unknown) => String(h ?? "").trim().replace(/^@/, "");
  * homepage links several profiles on takes the one named like the brand, or
  * none.
  */
-export function desiredProfiles(i: { rows: ProfileRow[]; rivaliq: Array<{ platform: string; handle: string; profile_url?: string | null }>; site: string[]; brand: string }): ProfileRow[] {
+export function desiredProfiles(i: { rows: ProfileRow[]; rivaliq: Array<{ platform: string; handle: string; profile_url?: string | null }>; site: string[]; brand: string; searched?: SearchedProfile[] }): ProfileRow[] {
   const out = new Map<string, ProfileRow>();
   for (const r of i.rows) if (r.source === "person" || r.source === "removed") out.set(r.platform, r);
   const brand = normName(i.brand).replace(/\s+/g, "");
@@ -46,7 +50,15 @@ export function desiredProfiles(i: { rows: ProfileRow[]; rivaliq: Array<{ platfo
     }
     const linked = [...byLower.values()];
     const handle = linked.length === 1 ? linked[0] : linked.find((h) => brand && h.toLowerCase().replace(/[^a-z0-9]/g, "").includes(brand));
-    if (handle) out.set(platform, { platform, handle, url: canonicalProfileUrl(platform, handle), source: "website" });
+    if (handle) {
+      out.set(platform, { platform, handle, url: canonicalProfileUrl(platform, handle), source: "website" });
+      continue;
+    }
+    const searched = (i.searched ?? []).find((h) => h.platform === platform && clean(h.handle));
+    if (searched) {
+      const h = clean(searched.handle);
+      out.set(platform, { platform, handle: h, url: searched.profile_url || canonicalProfileUrl(platform, h), source: "search" });
+    }
   }
   return PROFILE_PLATFORMS.filter((p) => out.has(p)).map((p) => out.get(p)!);
 }
@@ -62,7 +74,9 @@ export async function profileInputs(db: Db, client: { id: string; name: string }
   // The brand read's links (paid, read every 180 days) and the accounts step's (a free page fetch every run, so they hold a handle's own case).
   const listed = (v: unknown) => (Array.isArray(v) ? v.map(String) : []);
   const site = [...new Set([...listed(results.brand_read?.site_profiles), ...listed(results.accounts?.site_profiles)])];
-  return { rows: (data ?? []) as ProfileRow[], rivaliq: Array.isArray(rivaliq) ? rivaliq : [], site, brand: client.name };
+  const search = (results.accounts?.profile_search as { handles?: unknown } | null | undefined)?.handles;
+  const searched = Array.isArray(search) ? (search as SearchedProfile[]).filter((h) => h && typeof h.platform === "string" && typeof h.handle === "string") : [];
+  return { rows: (data ?? []) as ProfileRow[], rivaliq: Array.isArray(rivaliq) ? rivaliq : [], site, brand: client.name, searched };
 }
 
 /** Write what changed: only rows the lifecycle made, never a person's. */

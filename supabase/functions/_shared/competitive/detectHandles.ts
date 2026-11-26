@@ -107,6 +107,21 @@ export async function detectForSite(cost: CostContext, websiteUrl: string, brand
   };
 }
 
+/**
+ * A client's own public profiles when neither its homepage's links nor RivalIQ gave any (EPIC Studios, Faranak:
+ * Lital, 26 Nov 2026, "didn't we say we will be able to scrape these?"). With a website, the same reads as a
+ * competitor's (rendered homepage, contact and about pages, then the profile search); with none, the profile search
+ * by name alone. A search result counts only when its title names the brand, and a one-word name only on an exact
+ * account name (extractIndexedProfiles).
+ */
+export async function findBrandProfiles(cost: CostContext, brand: { name: string; website: string | null }): Promise<{ handles: DetectedHandle[]; ok: boolean }> {
+  if (brand.website && validWebsite(brand.website)) {
+    const found = await detectForSite(cost, brand.website, brand.name);
+    return { handles: found.handles, ok: found.readSucceeded || found.searchedIndex };
+  }
+  return brand.name.trim() ? await searchProfiles(cost, brand.name) : { handles: [], ok: false };
+}
+
 // deno-lint-ignore no-explicit-any
 type Db = any;
 

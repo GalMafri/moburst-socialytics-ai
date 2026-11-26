@@ -44,7 +44,7 @@ import { searchWebsite, searchWebsiteByName, statedWebsite, webReader } from "..
 import { fetchSiteHtml, LOGO_MARKS_RULE, logoFilesOnPage, logoOnPage, normalizeWebsite, ownMarksOnPage, ResearchError, researchBrand, standaloneSvg, type PageMark } from "../brand/research.ts";
 import { briefFromStrategyDoc, derivePillars, isGenericPillars, pageEvidence, PillarsError, type PillarClient, type PillarPost } from "../brand/pillars.ts";
 import { fetchSiteText, identifyCompetitors, IdentifyError } from "../competitive/identify.ts";
-import { detectCompetitorHandles } from "../competitive/detectHandles.ts";
+import { detectCompetitorHandles, findBrandProfiles } from "../competitive/detectHandles.ts";
 import { confirmDraftSet } from "../competitive/confirmSet.ts";
 import { advanceSetupOnServer, resetTracking, rivalIqApi, SetupError, syncTrackedHandles } from "../competitive/rivaliqSetupRun.ts";
 import { LANDSCAPE_MISSING } from "../competitive/landscapeCheck.ts";
@@ -111,6 +111,9 @@ export const MAX_SITE_LOGOS = 6;
 export interface StepBy { actor: Actor; executionId?: string | null }
 
 /** A step's paid calls: the client's, under the job that ran the step. Left out (a test), the schedule's. */
+/** How often a client with no profile from its site, RivalIQ or a person has its profiles searched for on the web. */
+export const PROFILE_SEARCH_DAYS = 30;
+
 export const stepCost = (client: ClientRow, feature: string, ctx?: { by?: StepBy }): CostContext =>
   costCtx({ clientId: String(client.id), feature, actor: ctx?.by?.actor ?? "schedule", executionId: ctx?.by?.executionId ?? null });
 
@@ -160,6 +163,7 @@ export const deps = {
   socialIO: () => liveSocialIO(),
   identifyCompetitors,
   detectCompetitorHandles,
+  findBrandProfiles,
   confirmDraftSet,
   rivalIqApi,
   advanceSetupOnServer,
@@ -1485,7 +1489,7 @@ export const STEPS: Record<string, StepDef> = {
       const twice = [...perNetwork].filter(([, n]) => n > 1).map(([n]) => n).sort();
       return `name:${normName(client.name)}|site:${site ?? ""}|links:${textHash(links.join(","))}|removed:${textHash(removed)}|own:${ONE_PER_NETWORK_RULE}${twice.length ? `|dup:${twice.join(",")}` : ""}`;
     },
-    async run(db, client, { rows }) {
+    async run(db, client, { rows, by }) {
       // An archived client is never looked at (run.ts). The step holds the same line whoever calls it: nothing is read, matched, parked or written.
       if (client.archived_at) return { status: "waiting", reason: "archived" };
       const customer = String(client.sprout_customer_id || defaultSproutCustomerId());
@@ -1549,8 +1553,26 @@ export const STEPS: Record<string, StepDef> = {
         if (insertError) throw new Error(`Could not assign the matched accounts: ${insertError.message}`);
       }
       // The client's public profiles follow the same links, so a stored handle written without its case is mended here, not by a paid read.
+      // When neither gives the client a profile and no person added one (EPIC Studios's homepage links none; Faranak has
+      // no website), its profiles are searched for on the web, at most once in PROFILE_SEARCH_DAYS (findBrandProfiles).
+      let profileSearch = ((rows.get("accounts")?.result as Record<string, unknown> | null | undefined)?.profile_search ?? null) as { searched_at?: string; handles?: unknown[] } | null;
       if (!textOnly) {
-        const pi = await profileInputs(db, { id: client.id, name: client.name }, { tracking: rows.get("tracking")?.result ?? null, brand_read: null, accounts: { site_profiles: links } });
+        const pi = await profileInputs(db, { id: client.id, name: client.name }, { tracking: rows.get("tracking")?.result ?? null, brand_read: null, accounts: { site_profiles: links, profile_search: profileSearch } });
+        const nothingElse = !pi.rivaliq.length && !pi.site.length && !pi.rows.some((r) => r.source === "person" || r.source === "rivaliq" || r.source === "website");
+        const searchedAt = profileSearch?.searched_at ? Date.parse(profileSearch.searched_at) : NaN;
+        if (nothingElse && !(deps.now().getTime() - searchedAt < PROFILE_SEARCH_DAYS * DAY)) {
+          try {
+            const found = await deps.findBrandProfiles(stepCost(client, "lifecycle.public_profiles", { by }), { name: client.name, website: client.website_url ? String(client.website_url) : null });
+            if (found.ok || found.handles.length) {
+              profileSearch = { searched_at: deps.now().toISOString(), handles: found.handles.map((h) => ({ platform: h.platform, handle: h.handle, profile_url: h.profile_url ?? null })) };
+              pi.searched = profileSearch.handles as typeof pi.searched;
+            } else {
+              console.warn(`accounts: the profile search for ${client.id} did not answer; it runs again next time`);
+            }
+          } catch (e) {
+            console.warn(`accounts: the profile search for ${client.id} failed:`, String(e));
+          }
+        }
         await syncProfiles(db, client.id, pi.rows, desiredProfiles(pi), deps.now());
       }
       // One own account per network: the client's rows as they are now, with what was just matched.
@@ -1607,6 +1629,8 @@ export const STEPS: Record<string, StepDef> = {
           profiles: profiles.length, list: textHash(profileListKey(profiles)),
           matched: matches.map((m) => ({ id: m.profile.id, network: m.profile.network_type, handle: m.profile.native_name, by: m.by })),
           assigned: mine.length, platforms, written, site_profiles: links,
+          // The web search for the client's own profiles, when nothing else gave one: when it ran and what it found.
+          ...(profileSearch ? { profile_search: profileSearch } : {}),
           // The display names Sprout's whole list writes with decorations (stars, emoji, a tagline): written plainly wherever copy is learned or written (text/displayName.ts).
           display_names: await listedDisplayNames(db, client, profiles, new Map([...assigned, ...matches.map((m) => [String(m.profile.id), [String(client.id)]] as [string, string[]])])),
           // Each network that has, or had, two own accounts: which one stays and why; where no exact fact decides and both stay; when an account was last parked.

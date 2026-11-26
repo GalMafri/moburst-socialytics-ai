@@ -74,6 +74,7 @@ import { putDesignInUse } from "./use.ts";
 import { type NoteDeps, type NoteLearned, learnDesignNote, noteLearnedOf, undoDesignNote } from "./note.ts";
 import { cleanNote } from "../_shared/notes/regenerateNote.ts";
 import { brandBookRules, brandGuideLines } from "../_shared/design/brandGuide.ts";
+import { strategyDocLook } from "./strategyDocLook.ts";
 import { designStrategyBlock } from "../_shared/strategy/prompt.ts";
 
 const corsHeaders = {
@@ -278,7 +279,7 @@ async function plan(admin: any, request: DesignRequest, settings: Settings): Pro
 }
 
 async function planNow(admin: any, request: DesignRequest, settings: Settings): Promise<void> {
-  const { data: client } = await admin.from("clients").select("name, brand_identity, brand_book_file_path, video_references, video_style, harvested_design_references").eq("id", request.client_id).maybeSingle();
+  const { data: client } = await admin.from("clients").select("name, brand_identity, brand_book_file_path, strategy_doc_file_path, strategy_doc_look, video_references, video_style, harvested_design_references").eq("id", request.client_id).maybeSingle();
   // A video is planned from the client's own videos (14 Oct: "make videos in a
   // similar style to their VIDEOS, not statics"). Until their style has been
   // read, the request waits; the video worker plans it when the style is in.
@@ -336,7 +337,9 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
   // What people who turned down this client's earlier designs asked for.
   const guidance = learningLines(await loadDesignLearnings(admin, request.client_id));
   // The brand book, which wins where the brand's look changed since its posts, and the strategy every design serves (Social AI sync, 18 Nov 2026).
-  const guide = brandGuideLines(brand, { brandBook: brandBookRules(client?.brand_identity, client?.brand_book_file_path), strategy: await designStrategyBlock(admin, request.client_id) });
+  // An uploaded strategy document's own look, read once per file (Lital, 26 Nov 2026).
+  const docLook = await strategyDocLook(admin, { id: request.client_id, strategy_doc_file_path: client?.strategy_doc_file_path, strategy_doc_look: client?.strategy_doc_look }, requestCost(request, "design.strategy_doc_look"));
+  const guide = brandGuideLines(brand, { brandBook: brandBookRules(client?.brand_identity, client?.brand_book_file_path), strategy: await designStrategyBlock(admin, request.client_id), strategyDocLook: docLook });
 
   if (!(await hasKey("anthropic"))) throw new Error("ANTHROPIC_API_KEY is not set.");
   const cost = requestCost(request, "design.plan");
