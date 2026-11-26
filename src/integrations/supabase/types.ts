@@ -4384,6 +4384,279 @@ export type Database = {
           },
         ]
       }
+      social_post_metrics: {
+        Row: {
+          comments: number | null
+          engagement: number | null
+          likes: number | null
+          post_id: string
+          read_at: string
+          read_id: string
+          shares: number | null
+          views: number | null
+        }
+        Insert: {
+          comments?: number | null
+          engagement?: number | null
+          likes?: number | null
+          post_id: string
+          read_at: string
+          read_id: string
+          shares?: number | null
+          views?: number | null
+        }
+        Update: {
+          comments?: number | null
+          engagement?: number | null
+          likes?: number | null
+          post_id?: string
+          read_at?: string
+          read_id?: string
+          shares?: number | null
+          views?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "social_post_metrics_post_id_fkey"
+            columns: ["post_id"]
+            isOneToOne: false
+            referencedRelation: "social_posts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      social_posts: {
+        Row: {
+          first_read_at: string
+          format: string
+          hashtags: string[]
+          id: string
+          last_read_at: string
+          media_url: string | null
+          paid: boolean | null
+          platform: string
+          post_key: string
+          profile_id: string
+          published_at: string
+          text: string
+          url: string | null
+        }
+        Insert: {
+          first_read_at?: string
+          format: string
+          hashtags?: string[]
+          id?: string
+          last_read_at?: string
+          media_url?: string | null
+          paid?: boolean | null
+          platform: string
+          post_key: string
+          profile_id: string
+          published_at: string
+          text?: string
+          url?: string | null
+        }
+        Update: {
+          first_read_at?: string
+          format?: string
+          hashtags?: string[]
+          id?: string
+          last_read_at?: string
+          media_url?: string | null
+          paid?: boolean | null
+          platform?: string
+          post_key?: string
+          profile_id?: string
+          published_at?: string
+          text?: string
+          url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "social_posts_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "social_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      social_profile_snapshots: {
+        Row: {
+          created_at: string
+          day: string
+          followers: number
+          profile_id: string
+          read_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          day: string
+          followers: number
+          profile_id: string
+          read_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          day?: string
+          followers?: number
+          profile_id?: string
+          read_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "social_profile_snapshots_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "social_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      social_profiles: {
+        Row: {
+          active: boolean
+          checked_at: string | null
+          client_id: string
+          competitor_id: string | null
+          confirmed: boolean | null
+          confirmed_at: string | null
+          confirmed_reason: string | null
+          created_at: string
+          display_name: string | null
+          followers: number | null
+          handle: string
+          handle_source: string
+          id: string
+          last_read_at: string | null
+          last_read_status: string | null
+          platform: string
+          updated_at: string
+          url: string
+        }
+        Insert: {
+          active?: boolean
+          checked_at?: string | null
+          client_id: string
+          competitor_id?: string | null
+          confirmed?: boolean | null
+          confirmed_at?: string | null
+          confirmed_reason?: string | null
+          created_at?: string
+          display_name?: string | null
+          followers?: number | null
+          handle: string
+          handle_source: string
+          id?: string
+          last_read_at?: string | null
+          last_read_status?: string | null
+          platform: string
+          updated_at?: string
+          url: string
+        }
+        Update: {
+          active?: boolean
+          checked_at?: string | null
+          client_id?: string
+          competitor_id?: string | null
+          confirmed?: boolean | null
+          confirmed_at?: string | null
+          confirmed_reason?: string | null
+          created_at?: string
+          display_name?: string | null
+          followers?: number | null
+          handle?: string
+          handle_source?: string
+          id?: string
+          last_read_at?: string | null
+          last_read_status?: string | null
+          platform?: string
+          updated_at?: string
+          url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "social_profiles_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "social_profiles_competitor_id_fkey"
+            columns: ["competitor_id"]
+            isOneToOne: false
+            referencedRelation: "competitors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      social_reads: {
+        Row: {
+          client_id: string
+          finished_at: string | null
+          followers: number | null
+          id: string
+          job_id: string | null
+          posts: number | null
+          profile_id: string
+          reason: string | null
+          runs: Json
+          started_at: string
+          status: string
+          usd: number | null
+          window_end: string | null
+          window_start: string | null
+        }
+        Insert: {
+          client_id: string
+          finished_at?: string | null
+          followers?: number | null
+          id?: string
+          job_id?: string | null
+          posts?: number | null
+          profile_id: string
+          reason?: string | null
+          runs?: Json
+          started_at?: string
+          status?: string
+          usd?: number | null
+          window_end?: string | null
+          window_start?: string | null
+        }
+        Update: {
+          client_id?: string
+          finished_at?: string | null
+          followers?: number | null
+          id?: string
+          job_id?: string | null
+          posts?: number | null
+          profile_id?: string
+          reason?: string | null
+          runs?: Json
+          started_at?: string
+          status?: string
+          usd?: number | null
+          window_end?: string | null
+          window_start?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "social_reads_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "social_reads_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "social_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sprout_brand_declines: {
         Row: {
           brand: string

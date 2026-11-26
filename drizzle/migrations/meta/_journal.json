@@ -141,6 +141,13 @@
       "when": 1795517480387,
       "tag": "0019_gos_usage_push_tables_and_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1795709727917,
+      "tag": "0020_social_reads",
+      "breakpoints": true
     }
   ]
 }
