@@ -2,7 +2,7 @@
 // What Settings is told about the Higgsfield link: found by trying the stored
 // token, not by whether one is stored.
 import { describe, expect, it, vi } from "vitest";
-import { fakeDb, type FakeDb } from "../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb, type FakeDb } from "../support/lifecycleFakeDb";
 import { handleAuthRequest, type AuthDeps } from "../../functions/_shared/higgsfield/oauth";
 
 // deno-lint-ignore no-explicit-any

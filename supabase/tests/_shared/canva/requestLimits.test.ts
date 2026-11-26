@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 import { claimJob, endOverdueRequests, renewJobLease, saveJobProgress } from "../../../functions/_shared/canva/jobs";
 import { jobRow } from "./jobRow";
 

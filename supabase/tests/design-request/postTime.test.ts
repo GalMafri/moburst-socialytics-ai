@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fakeDb } from "../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../support/lifecycleFakeDb";
 import { postTimeOf } from "../../functions/design-request/postTime";
 
 // A person's video request reads its post's time before anything is parked

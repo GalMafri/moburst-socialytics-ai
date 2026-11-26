@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 import { compareResults } from "../../../../functions/_shared/pipelines/compare";
 import { competitivePipeline } from "../../../../functions/_shared/pipelines/definitions/competitive";
 import { makeRegistry } from "../../../../functions/_shared/pipelines/registry";
-import { drivePipeline, pipelineDb, testClock } from "../../../../functions/_shared/pipelines/testDriver";
+import { drivePipeline, pipelineDb, testClock } from "../../../support/pipelineTestDriver";
 import { ANALYSIS_MODEL } from "../../../../functions/_shared/pipelines/competitive/analysis";
 import { ANALYSIS_SYSTEM_PROMPT } from "../../../../functions/_shared/pipelines/competitive/prompt";
 import { compareCompetitive, compareCompetitiveRun, competitiveFigures, shownCompetitiveReport, startCompetitiveReplay, startCompetitiveShadow } from "../../../../functions/_shared/pipelines/competitive/harness";

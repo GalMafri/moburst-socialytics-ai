@@ -34,7 +34,7 @@ import { referenceFingerprint } from "../brand-references/candidates.ts";
 import { choicesKey, LIBRARY_RULE } from "../brand-references/corpus.ts";
 import { brandPosts } from "../brand-references/posts.ts";
 import { StyleError } from "../brand-references/errors.ts";
-import { liveRefsIO, readChoices, refreshReferences } from "../brand-references/learnStyle.ts";
+import { learnBrandStyle, liveRefsIO, readChoices, refreshReferences } from "../brand-references/learnStyle.ts";
 import { defaultSproutCustomerId } from "../sprout/customer.ts";
 import { isStrategyOnly } from "../sprout/strategyOnly.ts";
 import { listCustomerGroups, listCustomerProfiles } from "../sprout/profiles.ts";
@@ -100,6 +100,8 @@ export const CLIENT_COLUMNS = [
   "design_references", "harvested_design_references", "voice_built_at:social_voice->>built_at", "posting_rhythm",
   // The day a new look began in the client's posts (design_refs): brand_read reads the site again for it.
   "look_since:design_style_synthesis->look_change->>since",
+  // Whether the look was learned from the posts (their rulebook's version) or from the brand book (design_refs, lookFromBook).
+  "brand_book_file_path", "look_at:design_style_synthesis->>synthesized_at", "look_version:design_style_synthesis->>reference_pipeline_version", "look_from:design_style_synthesis->>learned_from",
 ].join(", ");
 
 /** The most other logo files kept from a client's website (brand_read), and so the most the picture service is sent for one logo set. */
@@ -1062,6 +1064,30 @@ async function pickLogo(db: Db, client: ClientRow, ctx: StepContext, base: Recor
 /** How often tracking is asked again for a selection with a website that refused the visit (the weekly wait of policy.ts LONG_RETRY_MINUTES). */
 export const SITE_REFUSED_RECHECK_DAYS = LONG_RETRY_MINUTES / (24 * 60);
 
+/** What a look learned from the brand book was learned from: the book and the posts people uploaded. */
+const bookInputs = (client: ClientRow): string =>
+  `${str(client.brand_book_file_path)}|${(Array.isArray(client.design_references) ? client.design_references : []).filter((p: unknown) => typeof p === "string" && p).join(",")}`;
+
+/**
+ * A client with no posts to learn its look from (no social accounts, or fewer than 3 designed posts) and a brand
+ * book: the look is learned from the book and any uploaded posts (Social AI sync, 18 Nov 2026: a new client, or a
+ * rebrand, has its brand book before it has posts). Learned once per book; a look learned from the posts is never
+ * replaced. Null when there is no book or the posts already gave a look, so the step waits as before.
+ */
+async function lookFromBook(db: Db, client: ClientRow, previous: StepRow | null, by?: StepBy): Promise<StepOutcome | null> {
+  // Any look not learned from the book came from the posts (an older rulebook may carry no version) and stays.
+  if (!str(client.brand_book_file_path) || client.look_version || (client.look_at && client.look_from !== "brand_book")) return null;
+  const from = bookInputs(client);
+  if (client.look_from === "brand_book" && previous?.result?.learned_from === "brand_book" && previous.result.from === from) return { status: "done", result: previous.result };
+  try {
+    const out = await learnBrandStyle(db, String(client.id), { discover: false, by: by ?? { actor: "schedule" } });
+    return { status: "done", result: { learned_from: "brand_book", from, synthesized_at: out.synthesis?.synthesized_at ?? null, sources: out.synthesis?.source_count ?? null } };
+  } catch (e) {
+    if (!(e instanceof StyleError)) throw e;
+    return e.code === "no_sources" ? null : { status: "failed", error: e.message };
+  }
+}
+
 export const STEPS: Record<string, StepDef> = {
   // A website for a client that has none and that nobody set (spec:
   // docs/superpowers/specs/2026-11-02-sprout-auto-onboarding-design.md,
@@ -1729,7 +1755,8 @@ export const STEPS: Record<string, StepDef> = {
       const { data, error } = await db.from("sprout_profiles").select("sprout_profile_id").eq("client_id", client.id).eq("is_active", true);
       if (error) throw new Error(`Could not read the client's social accounts: ${error.message}`);
       const ids = (data ?? []).map((p: { sprout_profile_id: string }) => String(p.sprout_profile_id));
-      if (!ids.length) return null;
+      // No social accounts: a brand book is enough to learn the look from (lookFromBook).
+      if (!ids.length) return str(client.brand_book_file_path) ? `book:${bookInputs(client)}` : null;
       const uploads = Array.isArray(client.design_references) ? client.design_references.filter((p: unknown): p is string => typeof p === "string" && !!p) : [];
       const choices = await readChoices(db, client.id);
       const notNow = await notNowPlatforms(db, client.id);
@@ -1744,14 +1771,14 @@ export const STEPS: Record<string, StepDef> = {
         const out = await refreshReferences(db, String(client.id), deps.refsIO(), {
           by: by ?? { actor: "schedule" }, multiples, notNow: await notNowPlatforms(db, client.id), resume: previous?.result?.progress, failedBefore: previous?.status === "failed" ? previous.attempts : 0,
         });
-        if (out.kind === "no_accounts") return { status: "waiting", reason: "social_accounts" };
+        if (out.kind === "no_accounts") return (await lookFromBook(db, client, previous, by)) ?? { status: "waiting", reason: "social_accounts" };
         if (out.kind === "in_progress") return { status: "waiting", reason: "in_progress", recheckMinutes: 1, result: { reviewed: out.reviewed, left: out.left, progress: out.progress } };
-        if (out.kind === "too_few") return { status: "waiting", reason: "designed_posts", recheckDays: 7, result: { designed: out.designed, posts_read: out.posts_read, ...out.detail, progress: null } };
+        if (out.kind === "too_few") return (await lookFromBook(db, client, previous, by)) ?? { status: "waiting", reason: "designed_posts", recheckDays: 7, result: { designed: out.designed, posts_read: out.posts_read, ...out.detail, progress: null } };
         return { status: "done", result: out.result };
       } catch (e) {
         if (!(e instanceof StyleError)) throw e;
-        if (e.code === "no_accounts") return { status: "waiting", reason: "social_accounts" };
-        if (e.code === "too_few" || e.code === "no_sources") return { status: "waiting", reason: "designed_posts", recheckDays: 7 };
+        if (e.code === "no_accounts") return (await lookFromBook(db, client, previous, by)) ?? { status: "waiting", reason: "social_accounts" };
+        if (e.code === "too_few" || e.code === "no_sources") return (await lookFromBook(db, client, previous, by)) ?? { status: "waiting", reason: "designed_posts", recheckDays: 7 };
         if (e.code === "accounts_changed") return { status: "failed", error: e.message, soonMinutes: 5 };
         return { status: "failed", error: e.message };
       }

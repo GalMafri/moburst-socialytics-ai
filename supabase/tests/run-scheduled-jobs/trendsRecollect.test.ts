@@ -16,7 +16,7 @@ import { ApifyError, type ApifyClient } from "../../functions/_shared/apify/clie
 import { addCost, nextFault, recollectOf, TRENDS_PIPELINE, trendsPipeline, type TrendsDeps } from "../../functions/_shared/pipelines/definitions/trends";
 import { makeRegistry } from "../../functions/_shared/pipelines/registry";
 import { makePayloadStore } from "../../functions/_shared/pipelines/store";
-import { drivePipeline, pipelineDb, testClock } from "../../functions/_shared/pipelines/testDriver";
+import { drivePipeline, pipelineDb, testClock } from "../support/pipelineTestDriver";
 import { TREND_SOURCES } from "../../functions/_shared/trends/sources";
 import { themeKey, themesRequest, withoutDismissed } from "../../functions/_shared/trends/themes";
 import { TREND_PLATFORMS, type TrendPlatform } from "../../functions/_shared/trends/types";

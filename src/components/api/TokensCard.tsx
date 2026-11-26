@@ -169,8 +169,10 @@ function CreateTokenDialog({ open, onOpenChange, onUnconfirmed }: { open: boolea
     if (isTool && !toolScopes.length) { setLine("Choose what the tool key may do."); return; }
     setLine(null);
     setSending(true);
-    // The end of the day picked; none picked is the longest a key may last.
-    const expires = ends ? new Date(`${ends}T23:59:59`).toISOString() : null;
+    // The end of the day picked; none picked is the longest a key may last. A personal key ends no later than
+    // 90 days from now, as the server requires: the end of the picker's last day is later than that.
+    const endOfDay = ends ? new Date(`${ends}T23:59:59`).getTime() : null;
+    const expires = endOfDay === null ? null : new Date(isTool ? endOfDay : Math.min(endOfDay, Date.now() + LIFETIME_DAYS * 86_400_000)).toISOString();
     if (isTool) {
       const input = { name: name.trim(), scopes: KEY_SCOPES.map((s) => s.id).filter((s) => toolScopes.includes(s)), company_slugs: allCompanies ? [] : companies, expires_at: expires };
       // A new key each time, so it is sent again only when it never reached the server.

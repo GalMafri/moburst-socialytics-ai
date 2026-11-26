@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { nextLookAt, runLifecycle, runLifecycleStep, runStepNow } from "../../../functions/_shared/lifecycle/run";
 import { deps, STEPS } from "../../../functions/_shared/lifecycle/steps";
-import { fakeDb, writeClientRpc } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb, writeClientRpc } from "../../support/lifecycleFakeDb";
 import { rowAfter } from "../../../functions/_shared/lifecycle/policy";
 
 const original = { ...deps };

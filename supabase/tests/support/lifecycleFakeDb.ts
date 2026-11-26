@@ -1,4 +1,4 @@
-// supabase/functions/_shared/lifecycle/fakeDb.ts
+// supabase/tests/support/lifecycleFakeDb.ts (moved out of the deployed _shared folder on 26 Nov 2026: test code counted against every function's upload)
 //
 // An in-memory stand-in for the supabase-js calls the lifecycle makes, for
 // its tests: from(table) with select, eq (also on a JSON field such as

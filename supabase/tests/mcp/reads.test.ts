@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 import { scopeOf } from "../../functions/_shared/api/keys";
-import { eqs, fakeDb, op } from "../../functions/_shared/db.fake";
+import { eqs, fakeDb, op } from "../support/dbFake";
 import type { Person } from "../../functions/mcp/access";
 import { personReads, READ_TOOLS, runRead, sectionVersion, strategySections, type CalendarRow, type PersonReads, type StrategyRows } from "../../functions/mcp/reads";
 

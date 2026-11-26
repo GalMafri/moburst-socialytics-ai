@@ -1,7 +1,7 @@
 // QA 22 Nov 2026 (P47-01): a failed read of the client's Sprout profiles (or competitors, or rejected
 // suggestions) is dropped, and the run is sent as if the client had none.
 import { describe, expect, it } from "vitest";
-import { fakeDb } from "../../../functions/_shared/db.fake";
+import { fakeDb } from "../../support/dbFake";
 import { buildCompetitivePayload, buildSocialPayload } from "../../../functions/_shared/reports/payloads";
 
 const failing = (table: string) => fakeDb((call) => (call.table === table ? { error: { message: "timeout" } } : { data: [] })).db;

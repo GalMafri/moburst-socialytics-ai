@@ -5,7 +5,7 @@
 // moburst.com, the website of Moburst, another client.
 import { describe, expect, it } from "vitest";
 import { isParentPage, otherClientSites, parentClientFor, parentPageFor, sameSiteClient } from "../../../functions/_shared/lifecycle/parentPage";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 
 const KITCASTER = "https://www.moburst.com/services/organic/podcast-booking/";
 

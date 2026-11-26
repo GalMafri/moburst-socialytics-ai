@@ -3,7 +3,7 @@
 // each refresh leaves its result on the row for Settings, a sign-in returns to
 // the address it started from, and an unexpected failure never shows its cause.
 import { describe, expect, it, vi } from "vitest";
-import { fakeDb, type FakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb, type FakeDb } from "../../support/lifecycleFakeDb";
 import { AuthzError } from "../../../functions/_shared/auth/authz";
 import { accessTokenFor, handleAuthRequest, TokenRefused, UNEXPECTED_FAILURE, type AuthDeps } from "../../../functions/_shared/higgsfield/oauth";
 

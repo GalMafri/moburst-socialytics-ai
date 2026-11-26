@@ -6,7 +6,7 @@
 // follows calendar_request_revision's guard as written in
 // supabase/migrations/20261118140000_strategy_only_clients.sql:222-231.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { fakeDb, type FakeDb } from "../../../supabase/functions/_shared/lifecycle/fakeDb";
+import { fakeDb, type FakeDb } from "../support/lifecycleFakeDb";
 
 const g = globalThis as any;
 let db: FakeDb;

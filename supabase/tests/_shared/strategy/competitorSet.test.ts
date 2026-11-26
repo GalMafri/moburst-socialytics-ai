@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 import { latestCompetitorSet, selectedCompetitors } from "../../../functions/_shared/strategy/competitorSet";
 
 describe("the client's competitor set", () => {

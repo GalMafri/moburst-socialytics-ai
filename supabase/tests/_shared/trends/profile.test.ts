@@ -8,7 +8,7 @@ import { roomFor } from "../../../functions/_shared/anthropicReply";
 import { activeTerms, askTwice, hashtagsRequest, hashtagCounts, parseProfile, profileEvidence, profileProblems, profileRequest, syncLifecycleTerms, TREND_PROFILE_MODEL, writeTrendProfile, type ProfileEvidence, type ProfileIO } from "../../../functions/_shared/trends/profile";
 import type { TrendProfile } from "../../../functions/_shared/trends/types";
 import { deps, STEPS } from "../../../functions/_shared/lifecycle/steps";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 import type { StepRow } from "../../../functions/_shared/lifecycle/policy";
 
 const COST = { tool: "socialytics" as const, clientId: "c1", feature: "lifecycle.test", actor: "schedule" as const };

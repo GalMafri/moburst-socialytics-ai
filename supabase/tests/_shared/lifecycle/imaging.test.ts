@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 
 // logoPng stores every logo as its ink alone, 1,200 pixels at most on the long
 // side. The image library (a URL import under Deno) is a fake that holds an

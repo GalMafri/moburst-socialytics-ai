@@ -5,7 +5,7 @@
 // The hunt's repro let the provider ignore the abort and jumped the clock past the lease; in the real world the
 // call is now given up inside the lease, and a caller whose lease was taken over writes nothing over the other's.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 import { accessTokenFor, TOKEN_TIMEOUT_MS } from "../../../functions/_shared/higgsfield/oauth";
 
 const T0 = Date.parse("2026-11-20T10:00:00.000Z");

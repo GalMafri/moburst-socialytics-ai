@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fakeDb } from "../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../support/lifecycleFakeDb";
 import { AuthzError } from "../../functions/_shared/auth/authz";
 import { closedForStrategyOnly, STARTING_ACTIONS } from "../../functions/design-request/closed";
 import { designWaitingLine } from "../../functions/_shared/design/setup";

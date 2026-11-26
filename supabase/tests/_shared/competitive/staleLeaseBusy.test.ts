@@ -8,7 +8,7 @@
 // in_progress and looked again every 3 minutes, for good.
 import { describe, expect, it } from "vitest";
 import { advanceSetupOnServer, planFingerprint, setupPlan } from "../../../functions/_shared/competitive/rivaliqSetupRun";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 
 describe("P31-05 an expired lease left by a dead run, then a selection change", () => {
   it("lets a later run take the setup over instead of answering busy for good", async () => {

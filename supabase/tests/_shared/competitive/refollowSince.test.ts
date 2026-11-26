@@ -4,7 +4,7 @@
 // lifecycle (steps.ts:1974) waits 6 hours, not 5 minutes, before it looks at the fresh follow.
 import { describe, expect, it } from "vitest";
 import { advanceSetupOnServer, planFingerprint, setupPlan } from "../../../functions/_shared/competitive/rivaliqSetupRun";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 
 describe("P31-06 since after a re-follow", () => {
   it("is the time of the re-follow", async () => {

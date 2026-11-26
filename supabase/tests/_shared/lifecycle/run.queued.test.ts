@@ -19,7 +19,7 @@ vi.mock("../../../functions/_shared/brand-references/learnStyle.ts", async (impo
 
 import { runLifecycle, runLifecycleStep } from "../../../functions/_shared/lifecycle/run";
 import { deps, STEPS } from "../../../functions/_shared/lifecycle/steps";
-import { fakeDb, writeClientRpc } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb, writeClientRpc } from "../../support/lifecycleFakeDb";
 
 const original = { ...deps };
 afterEach(() => { Object.assign(deps, original); seen.length = 0; });

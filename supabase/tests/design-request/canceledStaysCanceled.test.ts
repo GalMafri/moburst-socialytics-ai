@@ -7,7 +7,7 @@
 // into "This video is filmed" again. Shown here through the replan action;
 // the cancel lands while the lease is being claimed.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { fakeDb, type FakeDb } from "../../../supabase/functions/_shared/lifecycle/fakeDb";
+import { fakeDb, type FakeDb } from "../support/lifecycleFakeDb";
 import { AuthzError } from "../../../supabase/functions/_shared/auth/authz";
 
 const g = globalThis as any;

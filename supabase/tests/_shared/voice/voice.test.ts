@@ -5,7 +5,7 @@ import type { OwnPost } from "../../../functions/_shared/calendar/evidence";
 
 const anthropic = vi.hoisted(() => vi.fn());
 vi.mock("../../../functions/_shared/anthropic.ts", () => ({ anthropicMessages: anthropic }));
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 import type { DatedPoint } from "../../../functions/_shared/notes/notes";
 
 const pref = (id: string, description: string, times = 1, at = "2026-10-13T00:00:00Z", type = "tone"): Preference =>

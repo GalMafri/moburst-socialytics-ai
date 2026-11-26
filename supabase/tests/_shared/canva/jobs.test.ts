@@ -33,7 +33,7 @@ vi.mock("../../../functions/_shared/render/resvg.ts", () => ({ svgToPng: vi.fn()
 vi.mock("../../../functions/_shared/design-system/logoAsset.ts", () => ({ cutLogo: vi.fn() }));
 vi.mock("../../../functions/_shared/anthropic.ts", () => ({ anthropicMessages: vi.fn() }));
 
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 import { placementFor } from "../../../functions/_shared/lifecycle/designSettings";
 import { type DesignRequest, type Settings, BUCKET, pngSize, settleRequest, startOption } from "../../../functions/_shared/canva/jobs";
 import { designPrompt, type GenerateInput } from "../../../functions/_shared/canva/brief";

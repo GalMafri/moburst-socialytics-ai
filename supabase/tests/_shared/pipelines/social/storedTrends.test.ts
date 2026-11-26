@@ -3,7 +3,7 @@
 // period, by the one rule every reader of a report uses
 // (trends/reportWeeks.ts), with only what a client may read.
 import { describe, expect, it } from "vitest";
-import { fakeDb } from "../../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../../support/lifecycleFakeDb";
 import { readStoredTrends, trendsForModel } from "../../../../functions/_shared/pipelines/social/storedTrends";
 
 // deno-lint-ignore no-explicit-any

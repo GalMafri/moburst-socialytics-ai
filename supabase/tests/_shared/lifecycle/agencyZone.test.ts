@@ -3,7 +3,7 @@
 // profile-pages-and-no-n8n-design.md, section E): the zone most of the
 // agency's clients have from a real source, for a client no source places.
 import { describe, expect, it } from "vitest";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 import { agencyZone, mostCommonZone } from "../../../functions/_shared/lifecycle/agencyZone";
 
 const NY = "America/New_York";

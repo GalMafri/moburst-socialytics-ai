@@ -3,7 +3,7 @@
 // share, and the sentences they say. The rule itself is the database's
 // (supabase/tests/migrations/strategyOnlyClients.test.ts).
 import { describe, expect, it } from "vitest";
-import { fakeDb, type FakeCall } from "../../../functions/_shared/db.fake";
+import { fakeDb, type FakeCall } from "../../support/dbFake";
 import {
   isStrategyOnly, STRATEGY_ONLY_JOB_REASON, STRATEGY_ONLY_OPENS, STRATEGY_ONLY_OPENS_STAFF, STRATEGY_ONLY_SHORT, STRATEGY_ONLY_SHORT_STAFF, strategyOnlyClients, strategyOnlyOpens, strategyOnlyShort, strategyOnlyLead, strategyOnlyRefusal, strategyOnlySentence,
 } from "../../../functions/_shared/sprout/strategyOnly";

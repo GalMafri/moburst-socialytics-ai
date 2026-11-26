@@ -15,7 +15,7 @@ import {
 } from "../../../functions/_shared/strategy/write";
 import type { StrategyPlatform } from "../../../functions/_shared/strategy/platforms";
 import type { PlatformFigures } from "../../../functions/_shared/strategy/basis";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 import { sectionLines } from "../../../functions/_shared/strategy/sections";
 
 const COST = { tool: "socialytics" as const, clientId: "c1", feature: "lifecycle.test", actor: "schedule" as const };

@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { SetupError, setupPlan } from "../../../functions/_shared/competitive/rivaliqSetupRun";
 import { publicCompanyUrl } from "../../../functions/_shared/competitive/rivaliqSetup";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 
 const KITCASTER = "https://www.moburst.com/services/organic/podcast-booking/";
 const tables = (client: { name: string; website_url: string }) => ({

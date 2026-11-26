@@ -8,7 +8,7 @@
 // a deck whose job ended or whose worker died on its last try is closed, by what the job says and never by the clock.
 import { describe, expect, it } from "vitest";
 import { closeAbandonedAll, closeStalledDecks, fetchLogo, LOGO_MAX_BYTES, runStrategyDeck, TEMPLATE_VERSION, type DeckJobDeps } from "../../../functions/_shared/strategy/deckJob";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 import { GoogleNotConnected } from "../../../functions/_shared/google/oauth";
 import type { GoogleApi } from "../../../functions/_shared/google/api";
 import type { ScheduledJob } from "../../../functions/_shared/scheduled-jobs/types";

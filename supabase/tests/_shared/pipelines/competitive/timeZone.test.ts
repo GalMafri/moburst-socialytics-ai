@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { competitivePipeline } from "../../../../functions/_shared/pipelines/definitions/competitive";
 import { makeRegistry } from "../../../../functions/_shared/pipelines/registry";
-import { drivePipeline, pipelineDb, testClock } from "../../../../functions/_shared/pipelines/testDriver";
+import { drivePipeline, pipelineDb, testClock } from "../../../support/pipelineTestDriver";
 import { startCompetitiveReplay } from "../../../../functions/_shared/pipelines/competitive/harness";
 
 const here = dirname(fileURLToPath(import.meta.url));

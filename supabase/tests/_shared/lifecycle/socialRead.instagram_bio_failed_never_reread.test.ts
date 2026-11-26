@@ -1,7 +1,7 @@
 // QA 22 Nov 2026 (P39-02): an Apify run for the Instagram bio that ended FAILED / TIMED-OUT is kept as a finished read: never asked again.
 import { describe, expect, it } from "vitest";
 import { runSocialRead, type SocialIO } from "../../../functions/_shared/lifecycle/socialRead";
-import { fakeDb, writeClientRpc } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb, writeClientRpc } from "../../support/lifecycleFakeDb";
 import type { StepRow } from "../../../functions/_shared/lifecycle/policy";
 
 const T0 = new Date("2026-11-08T10:00:00.000Z");

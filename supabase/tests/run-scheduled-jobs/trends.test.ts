@@ -3,7 +3,7 @@
 // week, and trends_v1 started on it in app mode. Clients without a trend
 // profile are skipped before anything is paid for.
 import { describe, expect, it } from "vitest";
-import { pipelineDb } from "../../functions/_shared/pipelines/testDriver";
+import { pipelineDb } from "../support/pipelineTestDriver";
 import { FILTER_CHECK_MAX_POSTS, filterCheckRequest, recollectEmptyWeeks, runTrendJob, startTrendReplay, startTrendWeek, weekStartOf } from "../../functions/run-scheduled-jobs/trends";
 import type { ScheduledJob } from "../../functions/_shared/scheduled-jobs/types";
 

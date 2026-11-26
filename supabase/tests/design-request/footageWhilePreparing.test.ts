@@ -7,7 +7,7 @@
 // answers the OPEN request (no footage) instead; the filming request is then
 // closed as "filmed". The clip is used by nothing.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { fakeDb, type FakeDb } from "../../../supabase/functions/_shared/lifecycle/fakeDb";
+import { fakeDb, type FakeDb } from "../support/lifecycleFakeDb";
 
 const g = globalThis as any;
 let db: FakeDb;

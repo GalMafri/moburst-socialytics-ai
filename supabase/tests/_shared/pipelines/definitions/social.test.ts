@@ -19,7 +19,7 @@ import { MOBURST, moburstPages, moburstRequest } from "../../../../fixtures/pipe
 import { makeRegistry } from "../../../../functions/_shared/pipelines/registry";
 import { startReportPipeline } from "../../../../functions/_shared/pipelines/shadow";
 import { makePayloadStore } from "../../../../functions/_shared/pipelines/store";
-import { drivePipeline, pipelineDb, testClock } from "../../../../functions/_shared/pipelines/testDriver";
+import { drivePipeline, pipelineDb, testClock } from "../../../support/pipelineTestDriver";
 import { compareSocial, compareSocialRun, startSocialReplay, startSocialShadow } from "../../../../functions/_shared/pipelines/social/harness";
 import { sproutRequests, type GammaClient, type SproutReader } from "../../../../functions/_shared/pipelines/social/providers";
 import { KEPT } from "../../../../functions/_shared/pipelines/social/replay";

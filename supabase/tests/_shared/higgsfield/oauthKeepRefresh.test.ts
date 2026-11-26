@@ -7,7 +7,7 @@
 // again. This is the outcome P53-09 set out to prevent.
 // Expected: the rotated pair is kept (or the failure is retried / reported).
 import { expect, it } from "vitest";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 import { accessTokenFor } from "../../../functions/_shared/higgsfield/oauth";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

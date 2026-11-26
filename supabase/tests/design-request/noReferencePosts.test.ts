@@ -6,7 +6,7 @@
 // ends at once; posts that are there but unreadable this time are planned
 // again as before (a passing storage hiccup).
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { fakeDb, type FakeDb } from "../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb, type FakeDb } from "../support/lifecycleFakeDb";
 import { AuthzError } from "../../functions/_shared/auth/authz";
 
 const g = globalThis as any;

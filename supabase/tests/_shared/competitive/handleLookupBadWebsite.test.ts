@@ -2,7 +2,7 @@
 // QA 22 Nov 2026 (P30): a competitor whose website has a typo (a space) leaves its profile
 // lookup "running" for good, and the next competitor is never looked up.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 import { detectCompetitorHandles } from "../../../functions/_shared/competitive/detectHandles";
 
 afterEach(() => vi.unstubAllGlobals());

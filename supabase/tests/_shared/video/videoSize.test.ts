@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { functionsDir } from "../../paths.ts";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 import { VERTICAL, checkVideoSize, isVertical, jobVideoFrame, videoFrameOf, videoShapeWords, videoSizeKey } from "../../../functions/_shared/video/videoSize";
 import { readVideoSize } from "../../../functions/_shared/video/videoSizeDb";
 import { CARD_SIZE, VIDEO_SIZE, captionsAss, composeScript, hookPlacement, videoLogoBox } from "../../../functions/_shared/video/compose";

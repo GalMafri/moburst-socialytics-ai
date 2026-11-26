@@ -4,7 +4,7 @@
 // words the same input as the try before it.
 import { describe, expect, it } from "vitest";
 import { MOBURST } from "../../../../fixtures/pipelines/social";
-import { fakeDb } from "../../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../../support/lifecycleFakeDb";
 import { readOnlyDb } from "../../../../functions/_shared/pipelines/store";
 import { runInsights } from "../../../../functions/_shared/pipelines/social/runInsights";
 import type { InsightsDeps } from "../../../../functions/_shared/reports/insights";

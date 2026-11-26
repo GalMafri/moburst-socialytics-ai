@@ -2,7 +2,7 @@
 // Live shape (Adaptive Sound Technologies, 22 Nov): status failed after 4 tries, result still says waiting_for rivaliq_full.
 import { afterEach, describe, expect, it } from "vitest";
 import { deps, STEPS } from "../../../functions/_shared/lifecycle/steps";
-import { fakeDb, writeClientRpc } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb, writeClientRpc } from "../../support/lifecycleFakeDb";
 import { rowAfter, type StepRow } from "../../../functions/_shared/lifecycle/policy";
 
 const original = { ...deps };

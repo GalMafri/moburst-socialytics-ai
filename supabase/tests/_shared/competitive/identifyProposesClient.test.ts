@@ -1,7 +1,7 @@
 // @vitest-environment node
 // QA 22 Nov 2026 (P30): Re-identify can save the client itself as one of its own competitors.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 
 const reply = vi.hoisted(() => ({ text: "" }));
 vi.mock("../../../functions/_shared/anthropic.ts", () => ({

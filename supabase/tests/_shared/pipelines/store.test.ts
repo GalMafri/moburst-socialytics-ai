@@ -4,7 +4,7 @@
 // app writers (none yet), starting runs, and the rule that a shadow run never
 // writes a table a screen reads.
 import { describe, expect, it } from "vitest";
-import { fakeDb, type FakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb, type FakeDb } from "../../support/lifecycleFakeDb";
 import type { ScheduledJob } from "../../../functions/_shared/scheduled-jobs/types";
 import { REGISTRY } from "../../../functions/_shared/pipelines/registry";
 import { runPipelineJob } from "../../../functions/_shared/pipelines/runner";

@@ -8,7 +8,7 @@ import { roomFor } from "../../../functions/_shared/anthropicReply";
 import { COVERAGE_FLOOR, coverageShort, lastKept, parseRewrite, rewriteRequest, TREND_REWRITE_MODEL, weeksAfter, withoutRemoved, type CoverageWeek } from "../../../functions/_shared/trends/coverage";
 import { MAX_SEARCHES } from "../../../functions/_shared/trends/sources";
 import { TREND_WRITERS } from "../../../functions/_shared/trends/writer";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 import type { PipelineRun } from "../../../functions/_shared/pipelines/types";
 
 const week = (week_start: string, tiktok: Record<string, unknown> | null, o: Partial<CoverageWeek> = {}): CoverageWeek => ({

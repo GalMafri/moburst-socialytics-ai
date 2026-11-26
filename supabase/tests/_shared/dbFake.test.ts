@@ -4,7 +4,7 @@
 // nonexistent builder method, which throws TypeError in supabase-js, or (b) a write read back
 // without .select(), which yields data null from PostgREST (return=minimal).
 import { describe, expect, it } from "vitest";
-import { fakeDb } from "../../functions/_shared/db.fake";
+import { fakeDb } from "../support/dbFake";
 
 describe("P31-07 db.fake.ts fidelity", () => {
   const { db } = fakeDb(() => ({ data: [{ id: "row" }] }));

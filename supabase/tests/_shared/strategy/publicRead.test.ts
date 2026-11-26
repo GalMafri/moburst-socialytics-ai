@@ -8,7 +8,7 @@
 // the read waits across runs and is reused for 7 days.
 import { describe, expect, it } from "vitest";
 import { comparableCompetitors, COMPETITOR_MIN_POSTS, feedPosts, figures, INSTAGRAM_LATEST, planTargets, READ_VERSION, PUBLIC_READERS, readInputs, stepRead, targetsKey, TIKTOK_MAX_PER_PROFILE, type PublicPost, type PublicReadState } from "../../../functions/_shared/strategy/publicRead";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 import type { ApifyClient, ApifyRun } from "../../../functions/_shared/apify/client";
 
 const NOW = new Date("2026-11-03T10:00:00.000Z");

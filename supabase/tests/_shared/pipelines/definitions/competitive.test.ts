@@ -14,7 +14,7 @@ import { competitiveFigures, shownCompetitiveReport } from "../../../../function
 import { RivalIqBusy } from "../../../../functions/_shared/pipelines/competitive/rivaliq";
 import { makeRegistry } from "../../../../functions/_shared/pipelines/registry";
 import { startPipelineRun } from "../../../../functions/_shared/pipelines/store";
-import { drivePipeline, pipelineDb, testClock } from "../../../../functions/_shared/pipelines/testDriver";
+import { drivePipeline, pipelineDb, testClock } from "../../../support/pipelineTestDriver";
 import { competitivePipeline, POST_WINDOW_SPACING_SECONDS, type CompetitiveDeps } from "../../../../functions/_shared/pipelines/definitions/competitive";
 import { FX, linkedInRows, owned, POSTS, snap } from "../../../../fixtures/pipelines/moburst";
 import { apifyWhenToken, viaTestMeter } from "../../../paid/testMeter";

@@ -5,7 +5,7 @@
 // complete-design.md, sections 1 to 3 and 5), on a client added from Sprout
 // with no website: Olo-shaped, a LinkedIn page and an Instagram account.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fakeDb, writeClientRpc } from "../../../supabase/functions/_shared/lifecycle/fakeDb";
+import { fakeDb, writeClientRpc } from "../../../supabase/tests/support/lifecycleFakeDb";
 import type { StepRow } from "../../../supabase/functions/_shared/lifecycle/policy";
 import type { LinkedInPage } from "../../../supabase/functions/_shared/apify/linkedinPage";
 import {

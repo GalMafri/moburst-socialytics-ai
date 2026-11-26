@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fakeDb } from "../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../support/lifecycleFakeDb";
 import { plannerLibrary } from "../../functions/design-request/library";
 
 // Pay The Pyper's library as the design_refs step keeps it, and its settings row's paths.

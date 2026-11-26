@@ -2,7 +2,7 @@
 // The onboarding_fields_check harness: which fields Sprout returns for one
 // client, read the way the social read asks, with nothing written.
 import { describe, expect, it } from "vitest";
-import { fakeDb } from "../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../support/lifecycleFakeDb";
 import { onboardingFieldsCheck } from "../../functions/run-scheduled-jobs/fieldsCheck";
 
 const NOW = new Date("2026-11-03T10:00:00.000Z");

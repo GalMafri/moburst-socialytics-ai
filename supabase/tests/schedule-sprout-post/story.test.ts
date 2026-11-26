@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fakeDb } from "../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../support/lifecycleFakeDb";
 import { STORY_NOT_SCHEDULABLE } from "../../functions/_shared/sprout/publishRules";
 import { storedStoryProblem } from "../../functions/schedule-sprout-post/story";
 

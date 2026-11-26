@@ -6,7 +6,7 @@ import { expect, it } from "vitest";
 import type { ApifyClient } from "../../../functions/_shared/apify/client";
 import { makeRegistry } from "../../../functions/_shared/pipelines/registry";
 import { startPipelineRun } from "../../../functions/_shared/pipelines/store";
-import { drivePipeline, pipelineDb, testClock } from "../../../functions/_shared/pipelines/testDriver";
+import { drivePipeline, pipelineDb, testClock } from "../../support/pipelineTestDriver";
 import { TREND_SOURCES } from "../../../functions/_shared/trends/sources";
 import { TREND_PLATFORMS, type TrendPlatform } from "../../../functions/_shared/trends/types";
 import { trendsPipeline } from "../../../functions/_shared/pipelines/definitions/trends";
