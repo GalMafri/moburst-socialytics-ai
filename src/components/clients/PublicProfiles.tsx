@@ -22,7 +22,7 @@ import { isRawProfileId, platformName } from "@/lib/display";
 import { sendQuietly, writeResendable } from "@/lib/quietSend";
 
 const PLATFORMS = ["instagram", "tiktok", "facebook", "linkedin", "youtube", "x"];
-const SOURCE: Record<string, string> = { rivaliq: "From competitor tracking", website: "From the website", person: "Added by the team" };
+const SOURCE: Record<string, string> = { rivaliq: "From competitor tracking", website: "From the website", search: "Found by a web search", person: "Added by the team" };
 
 interface Row { platform: string; handle: string; url: string | null; source: string }
 
@@ -84,9 +84,7 @@ export function PublicProfiles({ clientId }: { clientId: string }) {
             </li>
           ))}
         </ul>
-      ) : (
-        <p className="t-secondary">None are on file. They come from competitor tracking and the client's website.</p>
-      )}
+      ) : null}
       <div className="flex flex-wrap items-end gap-2">
         <div className="space-y-1.5">
           <Label htmlFor="public-profile-platform">Platform</Label>

@@ -3,7 +3,9 @@
 // What a design is planned from besides the client's posts (Social AI sync,
 // 18 Nov 2026, Sinéad): the brand book, which wins where the brand's look has
 // changed since its posts (a rebrand, like Bader Law's), and the client's
-// content strategy, kept as a lasting reference for every design.
+// content strategy, kept as a lasting reference for every design. An
+// uploaded strategy document's own look (design-request/strategyDocLook.ts) comes after the
+// brand book and before the posts.
 //
 // The brand book is read once, when it is uploaded in Client Setup
 // (extract-brand-from-file), into the client's brand identity. Those fields
@@ -41,13 +43,17 @@ export function brandBookRules(identity: unknown, brandBookPath: string | null |
   return lines.join("\n");
 }
 
-/** The planner's lines for the brand book and the strategy; "" when there is neither, so a plan reads as it always did. */
-export function brandGuideLines(brand: string, guide: { brandBook?: string | null; strategy?: string | null }): string {
+/** The planner's lines for the brand book, the strategy document's look and the strategy; "" when there is none, so a plan reads as it always did. */
+export function brandGuideLines(brand: string, guide: { brandBook?: string | null; strategy?: string | null; strategyDocLook?: string | null }): string {
   const book = String(guide.brandBook ?? "").trim();
   const strategy = String(guide.strategy ?? "").trim();
+  const docLook = String(guide.strategyDocLook ?? "").trim();
   return [
     book
       ? `${brand}'s brand book:\n${book}\nWhere the brand book and the posts differ, the brand has changed its look since those posts: every option's picture, colours and type follow the brand book, and keep the layout of the posts you chose.`
+      : "",
+    docLook
+      ? `How ${brand}'s strategy document says its posts should look:\n${docLook}\nEvery option follows this look where it differs from the posts${book ? "; where it differs from the brand book, the brand book wins" : ""}.`
       : "",
     strategy ? `${strategy}\nEvery option serves this strategy: it speaks to its audience, fits its positioning and shows nothing it says to avoid.` : "",
   ].filter(Boolean).join("\n");

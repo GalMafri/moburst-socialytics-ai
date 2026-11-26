@@ -37,9 +37,9 @@ describe("the client's public profiles", () => {
     expect(container.textContent).not.toMatch(/RivalIQ/);
   });
 
-  it("states what is on file for a client with none, with no vendor and no promise", async () => {
+  it("shows only the add form for a client with none, with no note about where profiles come from", async () => {
     const { container } = mount();
-    expect(await screen.findByText("None are on file. They come from competitor tracking and the client's website.")).toBeInTheDocument();
-    expect(container.textContent).not.toMatch(/RivalIQ|within a day/);
+    expect(await screen.findByLabelText("Platform")).toBeInTheDocument();
+    expect(container.textContent).not.toMatch(/RivalIQ|within a day|None are on file|They come from/);
   });
 });

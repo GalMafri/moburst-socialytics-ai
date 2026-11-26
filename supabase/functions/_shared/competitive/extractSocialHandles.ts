@@ -255,7 +255,8 @@ export function extractSocialHandles(html: string, brandName?: string): Detected
  * arbitrary links from search snippets: the result itself must be a profile,
  * its title must name the company, and conflicting handles stay unverified. */
 export function extractIndexedProfiles(results: Array<{ url?: string; title?: string }>, brandName: string): DetectedHandle[] {
-  const normalize = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  // Dotted initials read as one word, so "E.P.I.C. Studios" is "epic studios" (EPIC Studios, 26 Nov 2026).
+  const normalize = (s: string) => s.toLowerCase().replace(/(?<=(?:^|[^\p{L}])\p{L})\.(?=\p{L}(?:[^\p{L}]|$))/gu, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
   const brand = normalize(brandName.replace(/\s*\([^)]*\)/g, ''));
   if (!brand) return [];
   const groups = new Map<string, DetectedHandle[]>();
