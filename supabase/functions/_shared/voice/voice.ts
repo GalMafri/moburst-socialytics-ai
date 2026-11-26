@@ -359,6 +359,14 @@ export type MergeOp =
 /** "(tone, LinkedIn only)": a preference's type, and its platform when it holds for one. */
 const kindOf = (p: Preference) => `(${p.pattern_type}${p.platform ? `, ${p.platform} only` : ""})`;
 
+/**
+ * Most rewrite notes ask for a change to the one post being rewritten. A note is a lasting preference only when it
+ * says so itself (end-to-end test, 26 Nov 2026: a one-off "Shorter, and end with a question" became a rule for every
+ * post, and the team had to undo it by hand).
+ */
+export const ONE_OFF_COPY_NOTE =
+  "Most notes ask for a change to this one post. Treat the note as a lasting preference only when it says so itself: it says always, never, every post, from now on or in general, or it states a rule for the brand's copy. A note that only asks for this rewrite to be different (shorter, end with a question, more playful, mention the offer) is a one-off: do nothing for it. When unsure, do nothing.";
+
 export function mergePrompt(brand: string, current: Preference[], signal: MemorySignal): string {
   const list = current.length
     ? current.map((p) => `- [${p.id}] ${kindOf(p)} ${p.pattern_description}`).join("\n")
@@ -371,6 +379,8 @@ export function mergePrompt(brand: string, current: Preference[], signal: Memory
           `Before:\n${signal.before.slice(0, 3000)}`,
           `After (the rewrite that followed the note):\n${signal.after.slice(0, 3000)}`,
           "A note about this post's own topic, offer or date is a one-off: do nothing for that part.",
+          // End-to-end test, 26 Nov 2026: "Shorter, and end with a question", asked of one rewrite, was kept as a rule for every post.
+          ONE_OFF_COPY_NOTE,
           ...(signal.story ? ["This was a Story's message: one or two short sentences seen full screen, with no hashtags. Its length and its lack of hashtags are how Stories are written, never a preference for every post."] : []),
         ].join("\n\n")
       : `Someone on ${brand}'s side asked for a week of posts to be rewritten with this note:\n"${signal.note.slice(0, 2000)}"`;

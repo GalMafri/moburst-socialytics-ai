@@ -130,6 +130,14 @@ export async function recordFeedback(admin: any, it: FeedbackRow, verdict: "reje
 }
 
 /**
+ * Most design notes ask for a change to the one design being regenerated. A note teaches the design memory only when
+ * it says so itself (end-to-end test, 26 Nov 2026: "Make the lit app tile lime green instead of cyan" became a rule
+ * for every LinkedIn design, and the team had to undo it by hand).
+ */
+export const ONE_OFF_DESIGN_NOTE =
+  "Most notes ask for a change to this one design. Write a rule only when the note says so itself: it says always, never, every design, from now on or in general, or it states a rule for the brand's designs (for example: our logo always sits bottom right). A note that only asks for this design to be different (a colour, a background, an object, a layout) is a one-off: write no rule. When unsure, write no rule.";
+
+/**
  * A note left on a design's Regenerate: the rules it taught the brand's
  * design memory, [] when it is about this one post, or null when the learning
  * did not finish (nothing is written then, and the post shows no learned line).
@@ -142,7 +150,8 @@ export async function learnFromNote(admin: any, n: { clientId: string; platform?
     costCtx({ clientId: n.clientId, feature: "design.note", actor: "user", userId: n.userId }),
     "You decide whether a note someone left when asking for a new design says something lasting about the same client's designs. " +
       "When the note is about this one post (its topic, its words, its picture, its date), write no rule. " +
-      "When it says how the brand's designs should look or what they should never show, write 1 or 2 rules, general enough to apply beyond this one post. " +
+      ONE_OFF_DESIGN_NOTE + " " +
+      "When it does say how the brand's designs should look or what they should never show, write 1 or 2 rules, general enough to apply beyond this one post. " +
       RULE_FORMAT + " With no rule, reply {\"rules\":[]}.",
     `Someone asked for a new ${n.format || "post"} design for ${n.platform || "social"} with this note: "${note}".\n\nReply with the JSON only.`,
   );
