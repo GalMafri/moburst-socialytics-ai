@@ -39,6 +39,8 @@ export interface CopyPost {
   touched_at?: string | null;
   /** Its "Visual:" line; read so a revision that fails to save can put it back. */
   visual_direction?: string | null;
+  /** The planner's explanation of the post (the panel's "Idea:"); read so a revision that fails to save can put it back. */
+  rationale?: string | null;
   updated_at: string;
 }
 
@@ -139,7 +141,7 @@ async function writeRevision(w: CopyWrites, clientId: string, key: string, row: 
   } catch (e) {
     if (before) {
       try {
-        await w.updatePost(clientId, key, { copy: before.copy, hashtags: before.hashtags, cta: before.cta, ..."touched_at" in before ? { touched_at: before.touched_at ?? null } : {}, ..."visual_direction" in before ? { visual_direction: before.visual_direction ?? null } : {} });
+        await w.updatePost(clientId, key, { copy: before.copy, hashtags: before.hashtags, cta: before.cta, ..."touched_at" in before ? { touched_at: before.touched_at ?? null } : {}, ..."visual_direction" in before ? { visual_direction: before.visual_direction ?? null } : {}, ..."rationale" in before ? { rationale: before.rationale ?? null } : {} });
       } catch (back) {
         console.warn("[saveCopy] could not put the copy back after a failed revision:", back instanceof Error ? back.message : back);
       }
@@ -171,7 +173,9 @@ export async function saveCopy(w: CopyWrites, a: SaveCopy, memory?: CopyMemory):
     // The post's "Visual:" line is written too when the save carries one: the calendar and a design read it from the post,
     // and a regenerated post kept its old one (Social AI sync, 18 Nov 2026). A save without one leaves it as it is.
     const visual = typeof a.visualDirection === "string" ? a.visualDirection.trim().slice(0, VISUAL_MAX) : "";
-    const updatedAt = await w.updatePost(a.clientId, a.key, { copy, touched_at: a.now.toISOString(), ...(hashtags ? { hashtags } : {}), ...(a.cta ? { cta: String(a.cta) } : {}), ...(visual ? { visual_direction: visual } : {}) });
+    // A regeneration clears the planner's explanation of the post: it described the copy and picture that were replaced
+    // (end-to-end test, 26 Nov 2026: the panel's "Idea:" still described the old picture after Regenerate visual).
+    const updatedAt = await w.updatePost(a.clientId, a.key, { copy, touched_at: a.now.toISOString(), ...(hashtags ? { hashtags } : {}), ...(a.cta ? { cta: String(a.cta) } : {}), ...(visual ? { visual_direction: visual } : {}), ...(regeneration && before?.rationale ? { rationale: null } : {}) });
     if (!updatedAt && a.key.startsWith(CALENDAR_KEY_PREFIX)) return { ok: false, status: 404, error: "No post with that key in this client's calendar." };
     await writeRevision(w, a.clientId, a.key, {
       client_id: a.clientId, report_id: (a.reportId as string) || null, calendar_post_key: a.key,
@@ -244,7 +248,7 @@ type Db = any;
 export function copyWrites(db: Db): CopyWrites {
   return {
     async post(clientId, key) {
-      const { data } = await db.from("calendar_posts").select("copy, hashtags, cta, platform, format, touched_at, visual_direction, updated_at").eq("client_id", clientId).eq("post_key", key).maybeSingle();
+      const { data } = await db.from("calendar_posts").select("copy, hashtags, cta, platform, format, touched_at, visual_direction, rationale, updated_at").eq("client_id", clientId).eq("post_key", key).maybeSingle();
       return (data as CopyPost | null) ?? null;
     },
     async lastVersion(clientId, key) {

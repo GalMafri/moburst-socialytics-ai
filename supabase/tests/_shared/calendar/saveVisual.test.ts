@@ -41,6 +41,25 @@ describe("saving a post with its visual", () => {
     expect(post.visual_direction).toBe("A dim rink at night.");
   });
 
+  // End-to-end test, 26 Nov 2026: after Regenerate visual the panel's "Idea:" still described the old picture.
+  it("clears the planner's explanation on a regeneration, and puts it back when the revision cannot be written", async () => {
+    const post: Record<string, unknown> = { ...POST, rationale: "The visual mimics a chat answer." };
+    const ok: CopyWrites = { post: async () => ({ ...post }) as CopyPost, lastVersion: async () => 1, insertIteration: async () => {}, updatePost: async (_c, _k, fields) => { Object.assign(post, fields); return "t"; } };
+    await saveCopy(ok, { clientId: CLIENT, key: KEY, copy: "Captains pay last.", visualDirection: "A spotlight on one tile.", source: "regeneration", userId: "u", now: NOW });
+    expect(post.rationale).toBeNull();
+    const kept: Record<string, unknown> = { ...POST, rationale: "Why this post." };
+    const fails: CopyWrites = { post: async () => ({ ...kept }) as CopyPost, lastVersion: async () => 1, insertIteration: async () => { throw new Error("insert failed"); }, updatePost: async (_c, _k, fields) => { Object.assign(kept, fields); return "t"; } };
+    await expect(saveCopy(fails, { clientId: CLIENT, key: KEY, copy: "Captains pay last.", visualDirection: "A spotlight.", source: "regeneration", userId: "u", now: NOW })).rejects.toThrow("insert failed");
+    expect(kept.rationale).toBe("Why this post.");
+  });
+
+  it("keeps the explanation on a person's own edit", async () => {
+    const post: Record<string, unknown> = { ...POST, rationale: "Why this post." };
+    const w: CopyWrites = { post: async () => ({ ...post }) as CopyPost, lastVersion: async () => 1, insertIteration: async () => {}, updatePost: async (_c, _k, fields) => { Object.assign(post, fields); return "t"; } };
+    await saveCopy(w, { clientId: CLIENT, key: KEY, copy: "Captains always pay last.", source: "calendar", userId: "u", now: NOW });
+    expect(post.rationale).toBe("Why this post.");
+  });
+
   it("leaves the post's visual alone when the save carries none", async () => {
     const { w, updates } = writes();
     await saveCopy(w, { clientId: CLIENT, key: KEY, copy: "Captains always pay last.", source: "calendar", userId: "u", now: NOW });
