@@ -90,7 +90,7 @@ function requestCost(request: { id: string; client_id: string; requested_by?: st
   return costCtx({ clientId: request.client_id, feature, actor: "user", executionId: request.id, userId: request.requested_by ?? null });
 }
 /**
- * The team's Higgsfield account itself: its balance and a clip's price (get_cost), reads that spend nothing and
+ * The team's Higgsfield account itself: its balance and a clip's price (estimate_video_cost), reads that spend nothing and
  * serve every client's week at once.
  */
 const HIGGSFIELD_ACCOUNT = costCtx({ clientId: null, feature: "higgsfield.account", actor: "system" });
@@ -685,7 +685,7 @@ async function startWeekPost(admin: any, s: PassStart & { batchId: string; setti
 }
 
 /**
- * Higgsfield's live price for a video's one clip (get_cost: a read, nothing
+ * Higgsfield's live price for a video's one clip (estimate_video_cost: a read, nothing
  * is spent), or null when it could not be read. Failing to read it never
  * stops a press or a request: the price is then unknown.
  */

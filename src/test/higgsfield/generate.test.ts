@@ -238,25 +238,24 @@ describe("references and credits", () => {
   });
 
   it("preflights a cost without submitting anything", async () => {
-    const { caller, calls } = stub({ generate_image: { cost: { credits: 2, credits_exact: 2 } } });
+    // 26 Nov 2026: Higgsfield refuses get_cost on generate_image and generate_video; prices come from its estimate tools.
+    const { caller, calls } = stub({ estimate_image_cost: { cost: { credits: 2, credits_exact: 2 } } });
     expect(await costOf(caller, "image", { model: "nano_banana_pro", prompt: "p" })).toBe(2);
-    expect(calls[0].args.params.get_cost).toBe(true);
-    expect(calls[0].name).toBe("generate_image");
+    expect(calls[0].args.params).not.toHaveProperty("get_cost");
+    expect(calls[0].name).toBe("estimate_image_cost");
   });
 
   it("quotes a clip with exactly the settings it is submitted with, without submitting it", async () => {
     const req = { prompt: "p", aspect: "9:16", seconds: 8, resolution: "1080p" as const, model: "seedance_2_5", withAudio: true, referenceIds: ["ref-1"] };
-    const { caller, calls } = stub({ generate_video: { cost: { credits: 100, credits_exact: 99.5 } }, generate_video_batch: jobsReply });
+    const { caller, calls } = stub({ estimate_video_cost: { cost: { credits: 100, credits_exact: 99.5 } }, generate_video_batch: jobsReply });
     expect(await quoteVideo(caller, req)).toBe(99.5);
     await submitVideo(caller, req);
-    expect(calls.map((c) => c.name)).toEqual(["generate_video", "generate_video_batch"]);
-    const { get_cost, ...quoted } = calls[0].args.params;
-    expect(get_cost).toBe(true);
-    expect(quoted).toEqual(calls[1].args.requests[0].params);
+    expect(calls.map((c) => c.name)).toEqual(["estimate_video_cost", "generate_video_batch"]);
+    expect(calls[0].args.params).toEqual(calls[1].args.requests[0].params);
   });
 
   it("answers an unreadable quote as unknown", async () => {
-    const { caller } = stub({ generate_video: { cost: {} } });
+    const { caller } = stub({ estimate_video_cost: { cost: {} } });
     expect(await quoteVideo(caller, { prompt: "p", aspect: "9:16" })).toBeNull();
   });
 

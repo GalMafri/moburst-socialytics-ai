@@ -44,7 +44,7 @@ export interface WeekDeps {
   /** Higgsfield credits on the account, or null when unknown. A read: nothing is spent. */
   balance(): Promise<number | null>;
   /**
-   * Higgsfield's live price for a video's one clip (get_cost) in the aspect it
+   * Higgsfield's live price for a video's one clip (estimate_video_cost) in the aspect it
    * is made in (vertical when not given), or null when it could not be read.
    * A read: nothing is spent.
    */
