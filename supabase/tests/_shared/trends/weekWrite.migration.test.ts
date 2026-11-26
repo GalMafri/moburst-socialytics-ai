@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 
 const migrations = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "migrations");
 const migration = readFileSync(join(migrations, "20261117160000_trend_week_write.sql"), "utf8");

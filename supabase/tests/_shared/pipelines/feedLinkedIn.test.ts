@@ -7,7 +7,7 @@
 // posts and its job tries again, and each try runs the pipeline again. n8n is
 // never called on app.
 import { describe, expect, it, vi } from "vitest";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 import { linkedInSourcePipeline } from "../../../functions/_shared/pipelines/definitions/linkedinSource";
 import { feedLinkedInAnswer, LINKEDIN_INLINE_BUDGET_MS } from "../../../functions/_shared/pipelines/feedLinkedIn";
 import { InlineRunStopped } from "../../../functions/_shared/pipelines/inline";

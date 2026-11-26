@@ -5,7 +5,7 @@
 // people's versions where edited, capped, and "" for a client with none.
 import { describe, expect, it } from "vitest";
 import { STRATEGY_BLOCK_CHARS, strategyBlock, strategyPromptBlock } from "../../../functions/_shared/strategy/prompt";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 
 const stored = (over: Record<string, unknown> = {}) => ({
   client_id: "c1",

@@ -4,7 +4,7 @@
 // report writes, the coverage notes, the quality hold, the set lifecycle,
 // and the in-app pipeline's rule that writes only while the report runs.
 import { describe, expect, it } from "vitest";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 import { completedCompetitiveReport, handleCompetitiveWrite } from "../../../functions/_shared/competitive/reportWriter";
 
 const ATTEMPT = "2026-10-07T07:15:04.906Z";

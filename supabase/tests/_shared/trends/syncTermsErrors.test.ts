@@ -1,6 +1,6 @@
 // QA 22 Nov 2026 (P52-04): syncLifecycleTerms awaits its update and delete but never reads their error.
 import { describe, it, expect } from "vitest";
-import { fakeDb } from "../../../functions/_shared/db.fake";
+import { fakeDb } from "../../support/dbFake";
 import { syncLifecycleTerms } from "../../../functions/_shared/trends/profile";
 
 describe("P52-04 a profile rewrite whose old terms could not be taken away", () => {

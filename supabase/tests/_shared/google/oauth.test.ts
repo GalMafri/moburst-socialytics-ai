@@ -6,7 +6,7 @@
 // access token each time, never stored or shown in an error or a log.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { authorizeUrl, DECK_ACCOUNT, googleAccessToken, googleConfig, GoogleNotConnected, keepAlive, makePkce, redact, SCOPES, signedInEmail } from "../../../functions/_shared/google/oauth";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 
 const REFRESH = "1//0refresh-token-value-abcdef";
 const ACCESS = "ya29.a0access-token-value";

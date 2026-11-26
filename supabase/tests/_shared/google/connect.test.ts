@@ -4,7 +4,7 @@
 // ai@moburst.com is kept, and the status never carries a token.
 import { describe, expect, it } from "vitest";
 import { finishSignIn, googleStatus, PENDING_TTL_MS, pendingReturnOrigin, startSignIn } from "../../../functions/_shared/google/connect";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 
 const config = { clientId: "cid", clientSecret: "GOCSPX-secret-value" };
 const NOW = new Date("2026-11-03T10:00:00.000Z");

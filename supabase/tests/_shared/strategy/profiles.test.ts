@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { desiredProfiles, profilesKey, syncProfiles, type ProfileRow } from "../../../functions/_shared/strategy/profiles";
 import { siteProfileLinks } from "../../../functions/_shared/lifecycle/accounts";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 
 describe("the client's public profiles", () => {
   it("take RivalIQ's record first, then the homepage's one link per platform, or the one named like the brand", () => {

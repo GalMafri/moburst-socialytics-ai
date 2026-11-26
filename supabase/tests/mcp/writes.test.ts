@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from "vitest";
 import { scopeOf } from "../../functions/_shared/api/keys";
-import { eqs, fakeDb, op } from "../../functions/_shared/db.fake";
+import { eqs, fakeDb, op } from "../support/dbFake";
 import type { CopyPost, CopyWrites, IterationRow } from "../../functions/_shared/calendar/saveCopy";
 import type { NoteWrites, StoredNote, TypedNoteRow } from "../../functions/_shared/notes/add";
 import type { Person } from "../../functions/mcp/access";

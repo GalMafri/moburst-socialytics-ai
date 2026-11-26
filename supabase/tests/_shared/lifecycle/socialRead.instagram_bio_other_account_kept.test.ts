@@ -1,7 +1,7 @@
 // QA 22 Nov 2026 (P39-03): when the client's Instagram account changes and the bio read throws, the previous account's bio is kept as the client's.
 import { describe, expect, it } from "vitest";
 import { runSocialRead, type SocialIO } from "../../../functions/_shared/lifecycle/socialRead";
-import { fakeDb, writeClientRpc } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb, writeClientRpc } from "../../support/lifecycleFakeDb";
 import type { StepRow } from "../../../functions/_shared/lifecycle/policy";
 
 const client = { id: "c1", name: "Acme", website_url: null, field_sources: {}, timezone: "America/Denver", location: { source: "website", timezone: "America/Denver" }, logo_url: "https://x/logo.png" };

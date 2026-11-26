@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { briefFromStrategyDoc, checkPostIds, derivePillars, isGenericPillars, trimBrief, type PillarPost } from "../../../functions/_shared/brand/pillars";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 import { roomFor } from "../../../functions/_shared/anthropicReply";
 
 const asked = vi.hoisted(() => ({ bodies: [] as Array<Record<string, unknown>>, reply: "", stop: "end_turn" }));

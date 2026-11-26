@@ -6,7 +6,7 @@
 // never answered with one refresh and a retry: the paid render is lost and the
 // error says the team account "needs linking again".
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 import { renderImageWithHiggsfield } from "../../../functions/_shared/higgsfield/renderImage";
 import { useTestMeter } from "../../paid/testMeter";
 

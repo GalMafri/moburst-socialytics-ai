@@ -4,7 +4,7 @@ import { ModelBusy, ModelRefused } from "../../../functions/_shared/media/modelB
 import { runGenerate } from "../../../functions/_shared/design/modelSteps";
 import { heldWork } from "../../../functions/_shared/canva/hold";
 import { DESIGN_LIMITS } from "../../../functions/_shared/design/advance";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 import { deliveredSize } from "../../../functions/_shared/canva/finish";
 
 // A size the image model refuses never fails a design: the job is made as

@@ -10,7 +10,7 @@
 // queues that same feed job. RivalIQ, the LinkedIn workflow, Apify and Sprout
 // are stand-ins here: nothing leaves the test.
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 
 const SOURCES = [{ company_id: "2", name: "Peer", profile_url: "https://www.linkedin.com/company/peer" }];
 const LINKEDIN_ANSWER = { socialPosts: [{ companyId: "2", companyName: "Peer", message: "Hiring", postLink: "https://www.linkedin.com/posts/peer-1", publishedAt: "2026-11-03" }], additional_metrics: { "2": { coverage: "complete" } } };

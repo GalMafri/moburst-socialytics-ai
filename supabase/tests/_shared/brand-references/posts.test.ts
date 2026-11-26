@@ -5,7 +5,7 @@
 // reads fall back to the reviewed everyday posts.
 import { describe, expect, it } from "vitest";
 import { brandPosts } from "../../../functions/_shared/brand-references/posts";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 
 const review = (guid: string, day: string, over: Record<string, unknown> = {}) => ({
   client_id: "c1", source_post_id: guid, network: guid.startsWith("li") ? "LINKEDIN_COMPANY" : "INSTAGRAM", posted_at: `${day}T15:00:00Z`, verdict: "designed",

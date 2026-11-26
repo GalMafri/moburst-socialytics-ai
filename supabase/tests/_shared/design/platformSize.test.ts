@@ -4,7 +4,7 @@ import {
   checkSize, jobShape, pageFor, pagePlacement, plannerShape, shapeLabel, shapeWord, uploadSizeKey, uploadSizeKeys,
 } from "../../../functions/_shared/design/platformSize";
 import { readUploadSize } from "../../../functions/_shared/design/platformSizeDb";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 import { logoAreaRect } from "../../../functions/_shared/picture/geometry";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

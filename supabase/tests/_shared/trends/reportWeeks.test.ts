@@ -4,7 +4,7 @@
 // period, their live themes, and the kept posts they list, never one the
 // tripwire flagged.
 import { describe, expect, it } from "vitest";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 import { readReportTrendRows } from "../../../functions/_shared/trends/reportWeeks";
 import { readStoredTrends } from "../../../functions/_shared/pipelines/social/storedTrends";
 import { makeStore } from "../../../functions/_shared/socialytics-api/store";

@@ -5,7 +5,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
-import { eqs, fakeDb, op } from "../../../functions/_shared/db.fake";
+import { eqs, fakeDb, op } from "../../support/dbFake";
 import { addTextNote, noteHashText, noteTextHash, noteWrites, type NoteWrites, type StoredNote, type TypedNoteRow } from "../../../functions/_shared/notes/add";
 import { noteTitle } from "../../../functions/_shared/notes/notes";
 

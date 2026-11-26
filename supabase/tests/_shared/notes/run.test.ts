@@ -8,7 +8,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 const m = vi.hoisted(() => ({ anthropic: vi.fn() }));
 vi.mock("../../../functions/_shared/anthropic.ts", () => ({ anthropicMessages: m.anthropic }));
 
-import { fakeDb, type FakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb, type FakeDb } from "../../support/lifecycleFakeDb";
 import { runNotesRead, NOTE_READ_MAX_TRIES, type NotesJob } from "../../../functions/_shared/notes/run";
 import type { Parsers } from "../../../functions/_shared/notes/read";
 import { MEMORY_MODEL } from "../../../functions/_shared/voice/load";

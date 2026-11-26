@@ -3,7 +3,7 @@
 // a copy a later write never changes, and an or filter is applied, so a
 // claim's guard is tested (QA 22 Nov 2026, P38-3).
 import { describe, expect, it } from "vitest";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 
 describe("fakeDb", () => {
   it("returns a snapshot that a later update does not change", async () => {

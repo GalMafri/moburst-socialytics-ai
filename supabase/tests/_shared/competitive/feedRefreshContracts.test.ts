@@ -2,7 +2,7 @@
 // QA 22 Nov 2026 (P30): the competitor feed refresh (refreshFeed.ts). RivalIQ, Sprout and the
 // landscape read are stand-ins; nothing leaves the test.
 import { describe, expect, it, vi } from "vitest";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 
 const COMPANIES = [{ id: "1", name: "Bader Law", url: "https://baderlaw.com" }, { id: "2", name: "Peer Law", url: "https://peerlaw.com" }];
 const state = vi.hoisted(() => ({ rivalPosts: [] as unknown[], owned: null as unknown, body: null as unknown }));

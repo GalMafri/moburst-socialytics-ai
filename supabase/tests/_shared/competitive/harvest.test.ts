@@ -11,7 +11,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { harvestFile, harvestOwnCreative } from "../../../functions/_shared/competitive/refreshFeed";
 import { rulesLibrary } from "../../../functions/_shared/brand-references/corpus";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 
 const CLIENT = "0c1e0000-0000-4000-8000-000000000001";
 const COMPANY = "77";

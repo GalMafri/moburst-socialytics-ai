@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fakeDb, type FakeDb } from "../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb, type FakeDb } from "../support/lifecycleFakeDb";
 import { AuthzError } from "../../functions/_shared/auth/authz";
 import { type CreateDeps, createDesign } from "../../functions/design-request/create";
 

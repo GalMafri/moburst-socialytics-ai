@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { sendToSprout, type SendRequest } from "../../../supabase/functions/schedule-sprout-post/send";
 import { sentStore } from "../../../supabase/functions/schedule-sprout-post/store";
-import { fakeDb, type FakeCall } from "../../../supabase/functions/_shared/db.fake";
+import { fakeDb, type FakeCall } from "../support/dbFake";
 
 const g = globalThis as { Deno?: unknown };
 const KEY = "post:5f0c2a1e-7d3b-4c8e-9a61-2b4d8e9f0c17";

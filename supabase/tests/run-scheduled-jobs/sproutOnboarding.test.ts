@@ -3,7 +3,7 @@
 // sprout-auto-onboarding-design.md, sections 1 to 6 and 9), on a fake
 // database and fake Sprout and website answers: no network.
 import { describe, expect, it } from "vitest";
-import { fakeDb, type FakeDb } from "../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb, type FakeDb } from "../support/lifecycleFakeDb";
 import type { SproutProfile } from "../../functions/_shared/lifecycle/accounts";
 import type { SproutPost } from "../../functions/_shared/sprout/posts";
 import { runSproutOnboardingJob, sproutOnboarding, type OnboardingDeps } from "../../functions/run-scheduled-jobs/sproutOnboarding";

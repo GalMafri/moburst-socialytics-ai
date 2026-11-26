@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
-import { fakeDb } from "../../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../../support/lifecycleFakeDb";
 import { buildCompetitivePayload } from "../../../../functions/_shared/reports/payloads";
 import { FX, linkedInRows, owned, POSTS, snap } from "../../../../fixtures/pipelines/moburst";
 import { linkedInActorInput, mergeLinkedInPosts, prepareCompetitiveLinkedInSources, prepareSourceRequest, verifyLinkedInRows, linkedInSourceAnswer } from "../../../../functions/_shared/pipelines/linkedin/sources";

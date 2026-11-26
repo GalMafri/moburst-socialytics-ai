@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { strategyEvidence } from "../../../functions/_shared/strategy/write";
 import { newestFollowers } from "../../../functions/_shared/competitive/ownedSource";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 
 const NOW = new Date("2026-11-03T10:00:00.000Z");
 const row = (id: number, date: string, followers: number) => ({ dimensions: { customer_profile_id: id, "reporting_period.by(day)": date }, metrics: { "lifetime_snapshot.followers_count": followers } });

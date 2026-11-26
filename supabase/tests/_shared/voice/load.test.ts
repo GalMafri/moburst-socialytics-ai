@@ -2,7 +2,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { buildVoiceProfile, learnFromSignal, undoLearning } from "../../../functions/_shared/voice/load";
 import { VOICE_RULE } from "../../../functions/_shared/voice/voice";
 import type { OwnPost } from "../../../functions/_shared/calendar/evidence";
-import { fakeDb, type FakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb, type FakeDb } from "../../support/lifecycleFakeDb";
 
 // The preference memory learning from one signal, and a rewrite note's
 // learning taken back with Undo (notes on regenerate, 3 Nov 2026). The model

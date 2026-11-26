@@ -2,7 +2,7 @@
 // created before it, held or not; the report page and the run's payload use the newest
 // one that passed its checks. A recount of that one never reaches the monthly text.
 import { describe, expect, it } from "vitest";
-import { fakeDb } from "../../../functions/_shared/db.fake";
+import { fakeDb } from "../../support/dbFake";
 import { reportTextCheck } from "../../../functions/_shared/reports/correctText";
 import { competitiveReportQuality } from "../../../functions/_shared/competitive/reportEvidence";
 

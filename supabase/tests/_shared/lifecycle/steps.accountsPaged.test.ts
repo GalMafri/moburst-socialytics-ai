@@ -5,7 +5,7 @@
 // and a second account on its network added).
 import { afterEach, describe, expect, it } from "vitest";
 import { deps, STEPS } from "../../../functions/_shared/lifecycle/steps";
-import { fakeDb, writeClientRpc } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb, writeClientRpc } from "../../support/lifecycleFakeDb";
 import type { StepRow } from "../../../functions/_shared/lifecycle/policy";
 
 const original = { ...deps };

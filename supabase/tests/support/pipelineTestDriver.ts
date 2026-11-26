@@ -3,11 +3,11 @@
 // real step runner and the real stores, moving a fake clock to each step's
 // time. Nothing here is imported by a deployed function.
 
-import { fakeDb, type FakeDb } from "../lifecycle/fakeDb.ts";
-import type { Registry } from "./registry.ts";
-import { runPipelineJob } from "./runner.ts";
-import { makeRunStore, makeStepLog, makeStepServices } from "./store.ts";
-import type { JobOutcome, ScheduledJob } from "../scheduled-jobs/types.ts";
+import { fakeDb, type FakeDb } from "./lifecycleFakeDb.ts";
+import type { Registry } from "../../functions/_shared/pipelines/registry.ts";
+import { runPipelineJob } from "../../functions/_shared/pipelines/runner.ts";
+import { makeRunStore, makeStepLog, makeStepServices } from "../../functions/_shared/pipelines/store.ts";
+import type { JobOutcome, ScheduledJob } from "../../functions/_shared/scheduled-jobs/types.ts";
 
 // deno-lint-ignore no-explicit-any
 type Row = Record<string, any>;

@@ -7,7 +7,7 @@
 // supabase/tests/migrations/calendarStopPlanIntent.test.ts). The rpc below
 // follows that function's choice.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { fakeDb, type FakeDb } from "../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb, type FakeDb } from "../support/lifecycleFakeDb";
 
 const g = globalThis as any;
 let db: FakeDb;

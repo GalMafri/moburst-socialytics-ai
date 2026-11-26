@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { functionsDir } from "../../paths.ts";
 import { deps, STEPS } from "../../../functions/_shared/lifecycle/steps";
-import { fakeDb, writeClientRpc } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb, writeClientRpc } from "../../support/lifecycleFakeDb";
 import { decide, type StepRow } from "../../../functions/_shared/lifecycle/policy";
 
 const original = { ...deps };

@@ -5,7 +5,7 @@
 // with a profile that has no reading.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { collectOwnedFollowers, newestFollowers } from "../../../functions/_shared/competitive/ownedSource";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 
 const profiles = [
   { sprout_profile_id: 1, network_type: "instagram", profile_name: "Brand" },

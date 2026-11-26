@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fakeDb, type FakeDb } from "../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb, type FakeDb } from "../support/lifecycleFakeDb";
 import { AuthzError } from "../../functions/_shared/auth/authz";
 import { type NoteDeps, learnDesignNote, noteLearnedOf, undoDesignNote } from "../../functions/design-request/note";
 import { codeDir } from "../paths.ts";

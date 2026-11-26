@@ -3,7 +3,7 @@
 // in-app pipeline. n8n's path is update-report's as it was before the move;
 // the in-app path adds the attempt fence and the running-only rule.
 import { describe, expect, it } from "vitest";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 import { handleSocialWrite } from "../../../functions/_shared/reports/socialWriter";
 
 const CREATED = "2026-11-07T07:15:02.000Z";

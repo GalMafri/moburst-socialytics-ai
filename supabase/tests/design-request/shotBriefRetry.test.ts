@@ -6,7 +6,7 @@
 // the request and the filming sweep (close_filming) writes it again, a few
 // times at most.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { fakeDb, type FakeDb } from "../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb, type FakeDb } from "../support/lifecycleFakeDb";
 import { AuthzError } from "../../functions/_shared/auth/authz";
 
 const g = globalThis as any;

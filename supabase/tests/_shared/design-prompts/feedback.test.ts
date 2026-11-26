@@ -1,7 +1,7 @@
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { learnFromNote, recordFeedback } from "../../../functions/_shared/design-prompts/feedback";
 import { DESIGN_LEARNINGS_LIMIT, loadDesignLearnings } from "../../../functions/_shared/design-prompts/learnings";
-import { fakeDb, type FakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb, type FakeDb } from "../../support/lifecycleFakeDb";
 
 // What a client's design memory learns: from a design turned down with Not
 // right (its reasons teach, as before), and from a note left on Regenerate

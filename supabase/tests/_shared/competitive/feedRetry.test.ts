@@ -3,7 +3,7 @@
 // its LinkedIn posts: the job the daily enqueue makes, 10 minutes out, and
 // never a second one while the client has a feed refresh queued or running.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 import { FEED_RETRY_MINUTES, queueFeedRetry } from "../../../functions/_shared/competitive/feedRetry";
 
 const CLIENT = "d00ce604-2bcc-455a-9826-f80250db75cf";

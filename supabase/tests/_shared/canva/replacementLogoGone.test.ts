@@ -2,7 +2,7 @@
 // P29-07 (QA 22 Nov 2026): a replacement option that cannot be started because the client's logo file is
 // gone from storage threw on every settle, and the request stayed "preparing" until the 90-minute cut.
 import { expect, it } from "vitest";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 import { settleRequest } from "../../../functions/_shared/canva/jobs";
 
 const world = () => fakeDb({

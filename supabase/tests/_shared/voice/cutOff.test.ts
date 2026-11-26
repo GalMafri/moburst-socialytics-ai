@@ -6,7 +6,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { buildVoiceProfile, consolidateMemory, learnFromSignal } from "../../../functions/_shared/voice/load";
 import { roomFor } from "../../../functions/_shared/anthropicReply";
 import type { OwnPost } from "../../../functions/_shared/calendar/evidence";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 
 const anthropic = vi.hoisted(() => vi.fn());
 vi.mock("../../../functions/_shared/anthropic.ts", () => ({ anthropicMessages: anthropic }));

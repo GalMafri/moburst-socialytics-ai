@@ -7,7 +7,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 import { readEngine, requestedEngine, resolveEngine, type EngineRow } from "../../../functions/_shared/pipelines/engine";
 import { makeRegistry, REGISTRY } from "../../../functions/_shared/pipelines/registry";
 import { missingSecrets, PIPELINE_SECRETS } from "../../../functions/_shared/pipelines/secrets";

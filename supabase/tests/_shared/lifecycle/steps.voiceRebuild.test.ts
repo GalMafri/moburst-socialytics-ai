@@ -1,7 +1,7 @@
 // QA 22 Nov 2026 (P39-04): the voice rebuild asked for because an own account was parked fails; the voice step takes the failed job as made and never asks again.
 import { afterEach, describe, expect, it } from "vitest";
 import { deps, STEPS } from "../../../functions/_shared/lifecycle/steps";
-import { fakeDb, writeClientRpc } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb, writeClientRpc } from "../../support/lifecycleFakeDb";
 import { ONE_PER_NETWORK_RULE } from "../../../functions/_shared/lifecycle/accounts";
 import type { StepRow } from "../../../functions/_shared/lifecycle/policy";
 

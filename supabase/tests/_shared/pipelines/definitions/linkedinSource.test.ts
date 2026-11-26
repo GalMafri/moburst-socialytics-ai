@@ -9,7 +9,7 @@ import { compareResults } from "../../../../functions/_shared/pipelines/compare"
 import { makeRegistry } from "../../../../functions/_shared/pipelines/registry";
 import { shadowLinkedInSource } from "../../../../functions/_shared/pipelines/shadow";
 import { loadShadowPair } from "../../../../functions/_shared/pipelines/store";
-import { drivePipeline, pipelineDb, testClock } from "../../../../functions/_shared/pipelines/testDriver";
+import { drivePipeline, pipelineDb, testClock } from "../../../support/pipelineTestDriver";
 import { linkedInSourceAnswer, prepareSourceRequest, verifyLinkedInRows } from "../../../../functions/_shared/pipelines/linkedin/sources";
 import { fakeActor, linkedInRows, POSTS } from "../../../../fixtures/pipelines/moburst";
 import { linkedInSourcePipeline } from "../../../../functions/_shared/pipelines/definitions/linkedinSource";

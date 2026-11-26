@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 import type { Settings } from "../../../functions/_shared/canva/jobs";
 import { type FitLogo, settleLogo } from "../../../functions/_shared/design/logoFit";
 import { placementFor } from "../../../functions/_shared/lifecycle/designSettings";

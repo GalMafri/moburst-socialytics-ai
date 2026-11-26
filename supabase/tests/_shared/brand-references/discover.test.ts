@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Candidate } from "../../../functions/_shared/brand-references/candidates";
 import { captionHash, type Review } from "../../../functions/_shared/brand-references/corpus";
 import { type CheckIO, READ_CAP, reviewPosts, reviewReply, reviewRequest } from "../../../functions/_shared/brand-references/discover";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 
 afterEach(() => { vi.restoreAllMocks(); });
 

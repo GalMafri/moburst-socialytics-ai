@@ -713,6 +713,8 @@ export async function learnBrandStyle(db: Db, clientId: string, opts: { discover
   }
   synthesis.synthesized_at = new Date().toISOString();
   synthesis.source_count = sourceCount;
+  // Told apart from a rulebook learned from the posts (reference_pipeline_version), which always wins (lifecycle design_refs).
+  synthesis.learned_from = "brand_book";
   const { error: updateErr } = await db.from("clients").update({ design_style_synthesis: synthesis }).eq("id", clientId);
   if (updateErr) throw new StyleError("provider", "The learned style could not be saved. It will be tried again.");
   return { synthesis, refs: null, cached: false };

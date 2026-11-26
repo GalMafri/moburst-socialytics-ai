@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { deps, settled, siteKey, STEPS, weeksFor } from "../../../functions/_shared/lifecycle/steps";
-import { fakeDb, writeClientRpc } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb, writeClientRpc } from "../../support/lifecycleFakeDb";
 import { LOGO_READ_RULE } from "../../../functions/_shared/lifecycle/designSettings";
 import { decide, rowAfter, type StepRow } from "../../../functions/_shared/lifecycle/policy";
 import { NotInStorage, PictureError } from "../../../functions/_shared/picture/client";

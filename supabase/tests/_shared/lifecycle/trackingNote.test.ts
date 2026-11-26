@@ -7,7 +7,7 @@
 // within a minute of a release, with nobody asking.
 import { describe, expect, it } from "vitest";
 import { noteSchedulesTracking, READ_LIMIT, TRACKING_NOT_STARTED } from "../../../functions/_shared/lifecycle/trackingNote";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 import { NEEDS_TRACKING, trackedOnRecord } from "../../../functions/_shared/competitive/selectionTracking";
 
 const T = "2026-11-17T07:00:00.000Z";

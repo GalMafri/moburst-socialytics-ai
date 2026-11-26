@@ -7,7 +7,7 @@
 // has that new request closed as "filmed" at the next sweep, five days
 // before the post, though no new clip came.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { fakeDb, type FakeDb } from "../../../supabase/functions/_shared/lifecycle/fakeDb";
+import { fakeDb, type FakeDb } from "../support/lifecycleFakeDb";
 import { AuthzError } from "../../../supabase/functions/_shared/auth/authz";
 
 const g = globalThis as any;

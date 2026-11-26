@@ -4,7 +4,7 @@
 // whole switch in one transaction. No table is written from here, and an
 // answer that cannot be read is an error, never a start and never an exit.
 import { describe, expect, it } from "vitest";
-import { eqs, fakeDb, op } from "../../functions/_shared/db.fake.ts";
+import { eqs, fakeDb, op } from "../support/dbFake.ts";
 import { previewStore, readBegin, readEnd, readPreview } from "../../functions/role-preview/store.ts";
 
 const USER = "00000000-0000-4000-8000-0000000000a1";

@@ -5,7 +5,7 @@
 // nothing was followed (as a lost create is restarted). Actual: phase stays follow_requested.
 import { describe, expect, it } from "vitest";
 import { advanceSetupOnServer, planFingerprint, setupPlan } from "../../../functions/_shared/competitive/rivaliqSetupRun";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 
 const tables = () => ({
   competitor_sets: [{ id: "set", client_id: "c", status: "confirmed", rivaliq_landscape_id: null }],

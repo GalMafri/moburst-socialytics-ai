@@ -2,7 +2,7 @@
 // P29-06 (QA 22 Nov 2026): endOverdueRequests closed a request "no_progress" even when its design was
 // already done and only waiting to be handed to the post; the finished design never reached the post.
 import { expect, it } from "vitest";
-import { fakeDb } from "../../../functions/_shared/lifecycle/fakeDb";
+import { fakeDb } from "../../support/lifecycleFakeDb";
 import { endOverdueRequests } from "../../../functions/_shared/canva/jobs";
 
 const NOW = new Date("2026-11-20T12:00:00.000Z");
