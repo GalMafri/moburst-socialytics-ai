@@ -99,7 +99,7 @@ export async function handleHubSignIn(
     ...(result.access_token && result.refresh_token
       ? { access_token: result.access_token, refresh_token: result.refresh_token }
       : {}),
-    tool_role: resolution.role,
+    tool_role: result.role,
     user_id: result.user_id,
     debug: { ...debug, mapped_clients: result.mapped_clients },
   };

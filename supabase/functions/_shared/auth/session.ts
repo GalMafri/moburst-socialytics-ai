@@ -26,6 +26,12 @@
 //   - The role is written by one SQL function (set_user_role), and the client
 //     mapping by another (set_client_access), each one transaction, so there
 //     is no moment when the account has no role or no clients.
+//   - A sign-in never takes admin away (Lital, 26 Nov 2026: signing in through
+//     tools.moburst, which lists her as a regular user, removed the admin
+//     moburst.ai gives her). The two portals keep their own role lists, so an
+//     admin stays admin whichever portal is used; a portal can still make
+//     someone admin, and revokeAccess (the portal no longer grants the tool)
+//     still removes every role.
 //   - A magic link token is one per user, so two sign-ins at once can replace
 //     each other's token. A failed verify is retried with a fresh link.
 //   - Every failure leaves as a code from AUTH_ERROR_CODES. The detail is
@@ -84,6 +90,8 @@ export type SignInResult =
       refresh_token: string | null;
       user_id: string;
       mapped_clients: number;
+      /** The role the account holds now: the portal's, or admin when the account already was one. */
+      role: Exclude<ToolRole, null>;
     }
   | { ok: false; error: AuthErrorCode };
 
@@ -164,6 +172,22 @@ export async function clientsForCompany(admin: Admin, company: string): Promise<
   return ids.length ? ids : await linkHubCompany(admin, company);
 }
 
+/**
+ * The role a sign-in writes: the portal's, except that an account that is already admin stays admin. When the
+ * current roles cannot be read, the portal's role is written, as before.
+ */
+export async function roleToWrite(admin: Admin, userId: string, portalRole: Exclude<ToolRole, null>): Promise<Exclude<ToolRole, null>> {
+  if (portalRole === "admin") return portalRole;
+  const { data, error } = await admin.from("user_roles").select("role").eq("user_id", userId);
+  if (error) {
+    console.error("Role read error:", error);
+    return portalRole;
+  }
+  const isAdmin = ((data ?? []) as Array<{ role: string }>).some((r) => r.role === "admin");
+  if (isAdmin) console.log(`sign-in: kept admin for ${userId}; the portal said ${portalRole}`);
+  return isAdmin ? "admin" : portalRole;
+}
+
 /** Provision the shadow user for a verified portal person and mint a session for it. */
 export async function provisionAndSignIn(admin: Admin, person: PortalPerson, deps: SignInDeps): Promise<SignInResult> {
   try {
@@ -190,7 +214,8 @@ export async function provisionAndSignIn(admin: Admin, person: PortalPerson, dep
       return { ok: false, error: "provision_failed" };
     }
 
-    const { error: roleError } = await admin.rpc("set_user_role", { p_user_id: user.id, p_role: person.toolRole });
+    const role = await roleToWrite(admin, user.id, person.toolRole);
+    const { error: roleError } = await admin.rpc("set_user_role", { p_user_id: user.id, p_role: role });
     if (roleError) {
       console.error("Role write error:", roleError);
       return { ok: false, error: "provision_failed" };
@@ -199,7 +224,7 @@ export async function provisionAndSignIn(admin: Admin, person: PortalPerson, dep
     // The mapping is written to match the portal exactly: stale rows from an
     // earlier stint or portal go, wanted rows are kept, in one transaction.
     const clientIds =
-      person.source === "hub" && person.toolRole === "client" && person.company
+      person.source === "hub" && role === "client" && person.company
         ? await clientsForCompany(admin, person.company)
         : [];
     const { error: accessError } = await admin.rpc("set_client_access", { p_user_id: user.id, p_client_ids: clientIds });
@@ -214,7 +239,7 @@ export async function provisionAndSignIn(admin: Admin, person: PortalPerson, dep
     if (deps.presentedAccessToken) {
       const { data: presented } = await admin.auth.getUser(deps.presentedAccessToken);
       if (presented?.user?.id === user.id) {
-        return { ok: true, access_token: null, refresh_token: null, user_id: user.id, mapped_clients: mappedClients };
+        return { ok: true, access_token: null, refresh_token: null, user_id: user.id, mapped_clients: mappedClients, role };
       }
     }
 
@@ -243,6 +268,7 @@ export async function provisionAndSignIn(admin: Admin, person: PortalPerson, dep
       refresh_token: verified.session.refresh_token,
       user_id: user.id,
       mapped_clients: mappedClients,
+      role,
     };
   } catch (err) {
     console.error("Provision error:", err);
