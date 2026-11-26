@@ -65,3 +65,28 @@ export async function strategyPromptBlock(db: Db, clientId: string): Promise<str
   if (editsError) throw new Error(`Could not read the team's versions of the strategy: ${editsError.message}`);
   return strategyBlock(s, edits ?? []);
 }
+
+export const DESIGN_STRATEGY_CHARS = 1500;
+const DESIGN_SECTIONS = ["audience", "positioning", "avoid"];
+
+/**
+ * The part of the strategy a design is planned against (Social AI sync, 18 Nov
+ * 2026: the strategy as a lasting reference for designs): audience,
+ * positioning and what to avoid, with people's versions where they edited
+ * them. "" when the client has no strategy or it cannot be read, so a design
+ * is never held up by it.
+ */
+export async function designStrategyBlock(db: Db, clientId: string): Promise<string> {
+  try {
+    const { data: s, error } = await db.from("content_strategies").select("sections, written_at").eq("client_id", clientId).maybeSingle();
+    if (error || !s?.written_at) return "";
+    const { data: edits } = await db.from("content_strategy_edits").select("section_key, text, value").eq("client_id", clientId).in("section_key", DESIGN_SECTIONS);
+    const sections = Object.fromEntries(DESIGN_SECTIONS.map((k) => [k, s.sections?.[k]]).filter(([, v]) => v !== undefined));
+    const block = strategyBlock({ sections, platforms: [], pillars: [] }, edits ?? []);
+    // The heading alone: none of the three sections has words.
+    return block.includes("\n") ? capped(block, DESIGN_STRATEGY_CHARS) : "";
+  } catch (e) {
+    console.warn("[design] the strategy could not be read; the design is planned without it", e);
+    return "";
+  }
+}
