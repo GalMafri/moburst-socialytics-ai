@@ -213,11 +213,28 @@ function deps(db: FakeDb, over: Partial<AuthDeps> = {}): AuthDeps {
     requireStaff: async () => ({ isAdmin: async () => true }),
     fetch: vi.fn(async (url: string | URL | Request) => String(url).endsWith("/oauth/token")
       ? new Response(JSON.stringify({ access_token: "access-new", refresh_token: "refresh-new", expires_in: 3600, id_token: `h.${btoa(JSON.stringify({ email: "social-team@moburst.com" }))}.s` }), { status: 200 })
+      : String(url).endsWith("/oauth/register")
+      ? new Response(JSON.stringify({ client_id: "cid-registered" }), { status: 201 })
       : new Response("{}", { status: 404 })) as unknown as typeof fetch,
     ...over,
   };
 }
 const post = (body: Row, origin?: string) => new Request("https://x.supabase.co/functions/v1/higgsfield-auth", { method: "POST", headers: { "content-type": "application/json", ...(origin ? { origin } : {}) }, body: JSON.stringify(body) });
+
+// 26 Nov 2026: Higgsfield's estimate tools read the account's workspaces; a token without user:org:read was refused
+// ("GET /mcp/workspaces failed (403)"), so no video could be priced. A link registers anew and asks for it.
+describe("linking asks for the workspaces Higgsfield now reads", () => {
+  it("registers a client with user:org:read and asks for it, even when a client was registered before", async () => {
+    const db = world(null);
+    const d = deps(db);
+    const started = await (await handleAuthRequest(post({ action: "start" }), d)).json();
+    const url = new URL(started.authorize_url);
+    expect(url.searchParams.get("scope")).toBe("openid email offline_access user:org:read");
+    expect(url.searchParams.get("client_id")).toBe("cid-registered");
+    const registered = (d.fetch as unknown as { mock: { calls: Array<[string, RequestInit]> } }).mock.calls.find(([u]) => String(u).endsWith("/oauth/register"));
+    expect(JSON.parse(String(registered![1].body)).scope).toBe("openid email offline_access user:org:read");
+  });
+});
 
 describe("the way back from the sign-in", () => {
   async function startAndReturn(origin: string | undefined) {
