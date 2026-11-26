@@ -92,12 +92,12 @@ describe('a deck that could not be asked for', () => {
 });
 
 describe('Google Slides unavailable', () => {
-  it('says it is unavailable and that the PDF works, with no word to an admin', async () => {
+  it('shows no Slides button and no note while Google is not connected', async () => {
     f.google = { ready: false, connected: false };
     const { container } = mount();
-    expect(await screen.findByText('Google Slides is unavailable right now. The PDF works.')).toBeInTheDocument();
-    expect(container.textContent).not.toMatch(/admin|Settings|connect/i);
-    expect(screen.getByRole('button', { name: /Google Slides deck/ })).toBeDisabled();
+    await waitFor(() => expect(screen.getByRole('button', { name: /Export PDF/ })).toBeEnabled());
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Google Slides deck/ })).toBeNull());
+    expect(container.textContent).not.toMatch(/admin|Settings|connect|unavailable/i);
   });
 });
 

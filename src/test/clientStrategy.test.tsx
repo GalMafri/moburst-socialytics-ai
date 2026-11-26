@@ -314,12 +314,12 @@ describe('the exports', () => {
     expect(f.rpcs).toContainEqual({ name: 'strategy_deck_request', p_client: 'c1' });
   });
 
-  it('says plainly when Google is not connected yet, and the PDF still works', async () => {
+  it('shows no Slides button and no note when Google is not connected yet, and the PDF still works', async () => {
     f.google = { ready: false, connected: false, account_email: null, connected_at: null };
     mount();
     const actions = within(await screen.findByTestId('actions'));
-    expect(await actions.findByText('Google Slides is unavailable right now. The PDF works.')).toBeInTheDocument();
-    expect(actions.getByRole('button', { name: /Google Slides deck/ })).toBeDisabled();
+    await waitFor(() => expect(actions.queryByRole('button', { name: /Google Slides deck/ })).toBeNull());
+    expect(actions.queryByText(/unavailable/i)).toBeNull();
     expect(actions.getByRole('button', { name: /Export PDF/ })).toBeEnabled();
     // The strategy itself never asks anyone to connect anything.
     expect(screen.getByTestId('strategy-header')).not.toHaveTextContent(/connect/i);

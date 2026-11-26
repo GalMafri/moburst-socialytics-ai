@@ -50,10 +50,8 @@ export function CopyEditor({ post, clientId, reportId, brand, onCopySaved }: Pro
   // The post's "Visual:" line, which Regenerate now writes too (Social AI sync, 18 Nov 2026).
   const [displayVisual, setDisplayVisual] = useState<string>(post.visual_direction || "");
   const [isRegeneratingVisual, setIsRegeneratingVisual] = useState(false);
-  const [visualNotRegenerated, setVisualNotRegenerated] = useState(false);
   useEffect(() => {
     setDisplayVisual(post.visual_direction || "");
-    setVisualNotRegenerated(false);
   }, [post.visual_direction, post._calendarPostKey]);
   useEffect(() => {
     setDisplayCopy(initialCopy);
@@ -245,7 +243,6 @@ export function CopyEditor({ post, clientId, reportId, brand, onCopySaved }: Pro
   const handleRegenerateVisual = async () => {
     if (!clientId) return;
     setIsRegeneratingVisual(true);
-    setVisualNotRegenerated(false);
     try {
       const { data, error } = await sendQuietly(() => supabase.functions.invoke("regenerate-post-copy", {
         body: {
@@ -259,9 +256,9 @@ export function CopyEditor({ post, clientId, reportId, brand, onCopySaved }: Pro
       setDisplayVisual(visual);
       track("post_visual_regenerated", { client_id: clientId, platform: post.platform || null, ok: true });
     } catch {
-      // The post keeps its visual; the line says so.
+      // The post keeps its visual and the button comes back for another try, with no on-screen note (Lital, 26 Nov 2026).
       track("post_visual_regenerated", { client_id: clientId, platform: post.platform || null, ok: false });
-      setVisualNotRegenerated(true);
+      console.warn("[regenerate visual] no new visual came back");
     } finally {
       setIsRegeneratingVisual(false);
     }
@@ -385,7 +382,6 @@ export function CopyEditor({ post, clientId, reportId, brand, onCopySaved }: Pro
                 {isRegeneratingVisual ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5 mr-1" />}
                 {isRegeneratingVisual ? "Regenerating..." : "Regenerate visual"}
               </Button>
-              {visualNotRegenerated && <span role="status" className="t-secondary">The visual is not regenerated yet.</span>}
             </div>
           )}
           {post.rationale && (

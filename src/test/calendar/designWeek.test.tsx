@@ -129,23 +129,24 @@ describe('the band', () => {
     expect(f.invokes.find((i) => i.action === 'week_start').estimate).toEqual({ posts: 4, single: 2, story: 2, carousel: 0, video: 0, credits: 0, credits_per_clip: 100, minutes: 15 });
   });
 
-  it("says when video prices can't be read, presses for the other posts, and says the videos wait", async () => {
+  it("leaves videos it can't price out of the press quietly, with no note on screen", async () => {
     const { toast } = await import('sonner');
     f.preview = { client_name: 'Pay The Pyper', week_start: WEEK, counts: counts({ single: 2, video: 1 }), credits: null, credits_per_clip: null, price_unavailable: true, run_id: null, credits_used: null };
     f.started = { run: { id: 'run-new' }, added: ['a', 'b'], left_out_no_price: 1 };
     band();
     // The videos are not part of what this press designs: the count, the kinds and the minutes leave them out.
     expect(await screen.findByText('2 posts this week have no design yet: 2 designs. About 10 minutes.')).toBeInTheDocument();
-    expect(screen.getByText('Video prices are unavailable right now, so this run leaves the videos out. The other posts go ahead.')).toBeInTheDocument();
+    expect(screen.queryByText(/unavailable|left out/i)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Design 2 posts' }));
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Designing this week's posts", { description: 'The videos are left out of this run; the other posts are being designed.' }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Designing this week's posts", { description: 'Each post shows where it stands on its card.' }));
     expect(f.invokes.find((i) => i.action === 'week_start').estimate).toEqual({ posts: 2, single: 2, story: 0, carousel: 0, video: 0, credits: 0, credits_per_clip: null, minutes: 10 });
   });
 
   it("hides the button when the week's only posts are videos it cannot price", async () => {
     f.preview = { client_name: 'Pay The Pyper', week_start: WEEK, counts: counts({ video: 2 }), credits: null, credits_per_clip: null, price_unavailable: true, run_id: null, credits_used: null };
     band();
-    expect(await screen.findByText('Video prices are unavailable right now, so the videos are not designed yet.')).toBeInTheDocument();
+    await waitFor(() => expect(f.invokes.some((i) => i.action === 'week_preview')).toBe(true));
+    expect(screen.queryByText(/unavailable/i)).toBeNull();
     expect(screen.queryByRole('button', { name: /^Design / })).toBeNull();
     expect(screen.queryByText(/have no design yet|has no design yet/)).toBeNull();
     expect(screen.queryByText(/The other posts go ahead/)).toBeNull();

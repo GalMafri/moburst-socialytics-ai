@@ -5,9 +5,10 @@
  * Drive shared with whoever asks. The deck button says what is true: the
  * deck being made, the deck made on a date with Open, "Make a new deck" when
  * the strategy or a person's version changed since, a deck that failed with
- * a way to try again, or, while Google is not connected, that Google Slides
- * is unavailable right now. A request that does not get through is sent
- * again quietly, and said in words when it still does not.
+ * a way to try again. While Google is not connected there is no Slides
+ * button. A request that does not get through is sent again quietly; when it
+ * still does not, the button is back for another press. No on-screen notes
+ * about the tool's own state (Lital, 26 Nov 2026).
  */
 
 import { useState, type RefObject } from "react";
@@ -74,17 +75,14 @@ export function StrategyExports({ clientId, client, writtenAt, newestEdit, conte
   });
 
   const state = deckState({ connected: google.data ? google.data.connected : null, exports: exports.data ?? [], writtenAt, newestEdit });
-  // QA 22 Nov 2026: a request that still did not get through after the quiet resends says so in one line,
-  // until the next press, as the header above promises; before, the button came back with no word.
-  const [notAsked, setNotAsked] = useState(false);
+  // A request that still did not get through after the quiet resends leaves the button for another press, with no
+  // on-screen note (Lital, 26 Nov 2026); the reason goes to the console.
   const ask = async () => {
     setAsking(true);
-    setNotAsked(false);
     const { error } = await sendQuietly(() => supabase.rpc("strategy_deck_request", { p_client: clientId }), { again: writeResendable });
     if (error) console.warn("[strategy deck] not asked yet", error);
     await exports.refetch();
     setAsking(false);
-    setNotAsked(!!error);
   };
 
   return (
@@ -112,7 +110,8 @@ export function StrategyExports({ clientId, client, writtenAt, newestEdit, conte
           </>
         ) : (
           <>
-            <Button size="sm" onClick={() => void ask()} disabled={state.kind === "not_connected"}><Presentation /> Google Slides deck</Button>
+            {/* Google not connected: no Slides button and no note about it (Lital, 26 Nov 2026). The PDF works. */}
+            {state.kind !== "not_connected" && <Button size="sm" onClick={() => void ask()}><Presentation /> Google Slides deck</Button>}
             {state.kind === "not_connected" && state.url && (
               <a className="t-link inline-flex items-center gap-1" href={state.url} target="_blank" rel="noopener noreferrer">Open the deck {state.on} <ExternalLink className="h-3 w-3" aria-hidden /></a>
             )}
@@ -120,8 +119,6 @@ export function StrategyExports({ clientId, client, writtenAt, newestEdit, conte
         )}
       </div>
       {state.kind === "made" && <p className="t-label">Google Slides deck, {state.on}</p>}
-      {state.kind === "not_connected" && <p className="t-label">Google Slides is unavailable right now. The PDF works.</p>}
-      {notAsked && !asking && state.kind !== "making" && <p role="status" className="t-label">The deck is not asked for yet.</p>}
     </div>
   );
 }
