@@ -12,6 +12,9 @@ export interface FakeAdminOptions {
   failClientAccess?: boolean;
   /** How many magic link verifications fail before one succeeds. */
   otpFailures?: number;
+  /** The account's current roles in user_roles. */
+  roles?: string[];
+  failRoleRead?: boolean;
   /** access token -> user id, for admin.auth.getUser(token). */
   tokens?: Record<string, string>;
 }
@@ -34,7 +37,12 @@ export function fakeAdmin(opts: FakeAdminOptions = {}) {
     from: (table: string) => ({
       upsert: async (row: Row) => { if (table === "profiles") { calls.profiles.push(row); return { error: opts.failProfile ? { message: "duplicate key (secret detail)" } : null }; } return { error: null }; },
       update: (row: Row) => ({ eq: async (column: string, value: unknown) => { if (table === "profiles") { calls.profiles.push({ ...row, [column]: value }); return { error: opts.failProfile ? { message: "duplicate key (secret detail)" } : null }; } return { error: null }; } }),
-      select: () => ({ not: async () => ({ data: opts.clients ?? [], error: null }) }),
+      select: () => ({
+        not: async () => ({ data: opts.clients ?? [], error: null }),
+        eq: async () => (table === "user_roles"
+          ? (opts.failRoleRead ? { data: null, error: { message: "read failed" } } : { data: (opts.roles ?? []).map((role) => ({ role })), error: null })
+          : { data: [], error: null }),
+      }),
     }),
     rpc: async (name: string, args: Row) => {
       if (name === "set_client_access") { calls.clientAccess.push(args); return { error: opts.failClientAccess ? { message: "foreign key (secret detail)" } : null }; }

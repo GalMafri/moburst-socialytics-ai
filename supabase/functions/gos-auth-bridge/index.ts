@@ -139,13 +139,13 @@ Deno.serve(async (req) => {
     // never stops a sign-in.
     // Every sign-in links its companies by slug; only a client's organization
     // matches or names a client, so a staff sign-in never stamps "Moburst" on one.
-    await linkPortalCompanies(supabase, slugs, toolRole === "client" ? gosUser.organization ?? null : null);
+    await linkPortalCompanies(supabase, slugs, result.role === "client" ? gosUser.organization ?? null : null);
 
     if (!result.access_token || !result.refresh_token) return json({ error: "session_failed", debug: { tool_id: TOOL_ID } });
     return json({
       access_token: result.access_token,
       refresh_token: result.refresh_token,
-      tool_role: toolRole,
+      tool_role: result.role,
       user_id: result.user_id,
       debug: { tool_id: TOOL_ID, resolved_role: toolRole },
     });

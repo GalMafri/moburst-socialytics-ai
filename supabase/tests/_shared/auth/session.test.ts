@@ -61,7 +61,7 @@ describe("provisionAndSignIn", () => {
   it("reconciles without minting when the presented session is the same person's", async () => {
     const { admin, mint, calls } = fakeAdmin({ existing: { id: "u1", email: "owner@example.com", app_metadata: ROTATED }, tokens: { "tok-1": "u1" } });
     const result = await provisionAndSignIn(admin, person, { mint, presentedAccessToken: "tok-1" });
-    expect(result).toEqual({ ok: true, access_token: null, refresh_token: null, user_id: "u1", mapped_clients: 0 });
+    expect(result).toEqual({ ok: true, access_token: null, refresh_token: null, user_id: "u1", mapped_clients: 0, role: "moburst_user" });
     expect(calls.links).toHaveLength(0);
     expect(calls.otps).toHaveLength(0);
     // The role and the mapping are still written on every load.
@@ -93,6 +93,38 @@ describe("provisionAndSignIn", () => {
     const { admin, mint, calls } = fakeAdmin({ otpFailures: 9 });
     expect(await provisionAndSignIn(admin, person, { mint })).toEqual({ ok: false, error: "session_failed" });
     expect(calls.links).toHaveLength(3);
+  });
+
+  // Lital, 26 Nov 2026: a sign-in through tools.moburst, which lists her as a regular user, took away the admin moburst.ai gives her.
+  it("keeps an admin admin when the portal names a lower role, and answers with the role kept", async () => {
+    const { admin, mint, calls } = fakeAdmin({ existing: { id: "u1", email: "owner@example.com", app_metadata: ROTATED }, roles: ["admin"] });
+    const result = await provisionAndSignIn(admin, person, { mint });
+    expect(calls.roles).toEqual([{ p_user_id: "u1", p_role: "admin" }]);
+    expect(result).toMatchObject({ ok: true, role: "admin" });
+  });
+
+  it("gives no client mapping to an admin the portal calls a client", async () => {
+    const clients = [{ id: "c1", hub_company_name: "Acme" }];
+    const { admin, mint, calls } = fakeAdmin({ existing: { id: "u1", email: "owner@example.com", app_metadata: ROTATED }, roles: ["admin"], clients });
+    await provisionAndSignIn(admin, { ...person, toolRole: "client" }, { mint });
+    expect(calls.roles).toEqual([{ p_user_id: "u1", p_role: "admin" }]);
+    expect(calls.clientAccess).toEqual([{ p_user_id: "u1", p_client_ids: [] }]);
+  });
+
+  it("still writes the portal's role for someone who is not admin, and can make someone admin", async () => {
+    const staff = fakeAdmin({ existing: { id: "u1", email: "owner@example.com", app_metadata: ROTATED }, roles: ["moburst_user"] });
+    await provisionAndSignIn(staff.admin, { ...person, toolRole: "client" }, { mint: staff.mint });
+    expect(staff.calls.roles).toEqual([{ p_user_id: "u1", p_role: "client" }]);
+    const promoted = fakeAdmin({ existing: { id: "u1", email: "owner@example.com", app_metadata: ROTATED }, roles: ["moburst_user"] });
+    const result = await provisionAndSignIn(promoted.admin, { ...person, toolRole: "admin" }, { mint: promoted.mint });
+    expect(promoted.calls.roles).toEqual([{ p_user_id: "u1", p_role: "admin" }]);
+    expect(result).toMatchObject({ ok: true, role: "admin" });
+  });
+
+  it("writes the portal's role when the current roles cannot be read", async () => {
+    const { admin, mint, calls } = fakeAdmin({ existing: { id: "u1", email: "owner@example.com", app_metadata: ROTATED }, failRoleRead: true });
+    await provisionAndSignIn(admin, person, { mint });
+    expect(calls.roles).toEqual([{ p_user_id: "u1", p_role: "moburst_user" }]);
   });
 
   it("writes the company mapping in one call, so it is never empty between a delete and an insert", async () => {
